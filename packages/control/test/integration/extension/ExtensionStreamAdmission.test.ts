@@ -3,12 +3,12 @@ import test from "node:test";
 import { EXTENSION_API_VERSION, EXTENSION_MANIFEST_SCHEMA_VERSION, type ExtensionManifest } from "@portable-devshell/extension";
 import type { ControlStreamBinding } from "@portable-devshell/extension/control";
 import type { ControlPortContext, MessageStream } from "@portable-devshell/shared";
-import { ControlExtensionRouteService } from "../../packages/control/src/extension/api/point/control/Dispatch.ts";
-import { ExtensionHost } from "../../packages/control/src/extension/host/index.ts";
-import { ExtensionGeneration } from "../../packages/control/src/extension/registration/Generation.ts";
-import { ExtensionRegistrationSet } from "../../packages/control/src/extension/registration/Registration.ts";
-import { createControlExtensionPointRegistry } from "../../packages/control/src/extension/registration/Points.ts";
-import { deferred } from "../../packages/control/test/integration/extension/Round3Harness.ts";
+import { ControlExtensionRouteService } from "../../../src/extension/api/point/control/Dispatch.ts";
+import { ExtensionHost } from "../../../src/extension/host/index.ts";
+import { ExtensionGeneration } from "../../../src/extension/registration/Generation.ts";
+import { ExtensionRegistrationSet } from "../../../src/extension/registration/Registration.ts";
+import { createControlExtensionPointRegistry } from "../../../src/extension/registration/Points.ts";
+import { deferred } from "./Round3Harness.ts";
 
 test("BUG: Instance retirement must include streams awaiting real lazy Host activation", async () => {
     const loading = deferred();

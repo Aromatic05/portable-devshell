@@ -17,6 +17,7 @@ import {
 } from "@portable-devshell/extension/control";
 
 import type { ExtensionHost } from "../../../host/index.js";
+import type { ExtensionRegistrationLease } from "../../../Api.js";
 
 export class ControlExtensionRouteService {
     readonly #activeStreams = new Set<{
@@ -120,30 +121,47 @@ export class ControlExtensionRouteService {
         request: { payload?: JsonValue },
         context: ControlPortContext,
     ): Promise<void> {
-        const { extensionId, lease, registration } = await this.#extensions.acquireRegistration(streams.id, id);
         const controller = new AbortController();
-        // Re-loading the same immutable generation creates a new runtime with
-        // the same generation string. The lease's lifetime, not that string,
-        // must end long-lived subscriptions on retirement.
-        const signal = AbortSignal.any([context.signal, controller.signal, lease.retirementSignal]);
-        const checkGeneration = () => {
-            const current = this.#extensions.listDeclarations(streams.id).find((entry) => entry.id === id);
-            if (current?.extensionId !== extensionId || current.generation !== lease.generation)
-                controller.abort(new Error("Extension stream generation retired."));
-        };
-        const offChange = this.#extensions.onChange(checkGeneration);
-        checkGeneration();
+        let signal = AbortSignal.any([context.signal, controller.signal]);
+        let admitted!: () => void;
+        let rejectAdmission!: (error: unknown) => void;
+        const admission = new Promise<void>((resolve, reject) => {
+            admitted = resolve;
+            rejectAdmission = reject;
+        });
         const active = { instance: context.host, controller, done: Promise.resolve() };
+        // Pending lazy activation belongs to this admission too. Track it before
+        // calling the Host, and publish done before extension code can reenter.
         this.#activeStreams.add(active);
-        // Own the stream lifetime here; the host route lease only covers admission.
-        active.done = (async () => {
+        active.done = Promise.resolve().then(async () => {
+            let lease: ExtensionRegistrationLease["lease"] | undefined;
+            let offChange: (() => void) | undefined;
             try {
+                const acquired = await this.#acquireStreamRegistration(id, signal);
+                if (acquired === undefined) {
+                    await stream.close();
+                    return;
+                }
+                const { extensionId, registration } = acquired;
+                lease = acquired.lease;
+                // Same-hash reloads share content, but have different lifetimes.
+                signal = AbortSignal.any([signal, lease.retirementSignal]);
+                const checkGeneration = () => {
+                    const current = this.#extensions.listDeclarations(streams.id).find((entry) => entry.id === id);
+                    if (current?.extensionId !== extensionId || current.generation !== acquired.lease.generation)
+                        controller.abort(new Error("Extension stream generation retired."));
+                };
+                offChange = this.#extensions.onChange(checkGeneration);
+                checkGeneration();
                 signal.throwIfAborted();
                 if (typeof registration.binding !== "function")
                     throw new TypeError(`Control stream ${id} has an invalid binding.`);
-                await (registration.binding as ControlStreamBinding)(
+                const running = (registration.binding as ControlStreamBinding)(
                     {
-                        send: async (message) => await stream.send(message),
+                        send: async (message) => {
+                            signal.throwIfAborted();
+                            await stream.send(message);
+                        },
                         close: async (payload) => await stream.close(payload),
                     },
                     { ...(request.payload === undefined ? {} : { payload: request.payload }) },
@@ -156,17 +174,51 @@ export class ControlExtensionRouteService {
                         ...(context.subject === undefined ? {} : { subject: { ...context.subject } }),
                     },
                 );
+                admitted();
+                await running;
                 await stream.close();
             } catch (error) {
-                if (signal.aborted) await stream.close();
+                if (lease === undefined && !signal.aborted) rejectAdmission(error);
+                else if (signal.aborted) await stream.close();
                 else await stream.cancel(toRemoteErrorBody(error) ?? { message: String(error) });
             } finally {
-                offChange();
+                offChange?.();
                 this.#activeStreams.delete(active);
-                lease.release();
+                lease?.release();
+                admitted();
             }
-        })();
+        });
         void active.done.catch((error: unknown) => console.error("Extension stream cleanup failed.", error));
+        await admission;
+    }
+
+    #acquireStreamRegistration(
+        id: string,
+        signal: AbortSignal,
+    ): Promise<ExtensionRegistrationLease | undefined> {
+        return new Promise((resolve, reject) => {
+            const onAbort = () => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(undefined);
+            };
+            if (signal.aborted) resolve(undefined);
+            else signal.addEventListener("abort", onAbort, { once: true });
+            void this.#extensions.acquireRegistration(streams.id, id).then(
+                (acquired) => {
+                    signal.removeEventListener("abort", onAbort);
+                    if (signal.aborted) {
+                        acquired.lease.release();
+                        resolve(undefined);
+                    } else {
+                        resolve(acquired);
+                    }
+                },
+                (error: unknown) => {
+                    signal.removeEventListener("abort", onAbort);
+                    reject(error);
+                },
+            );
+        });
     }
 
     async #invoke(

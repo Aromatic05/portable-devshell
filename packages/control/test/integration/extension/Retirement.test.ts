@@ -16,17 +16,22 @@ import { ExtensionInstallService } from "../../../src/extension/install/index.ts
 import { createControlExtensionPointRegistry } from "../../../src/extension/registration/Points.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
+import { ExtensionChangeHub } from "../../../src/extension/manager/Change.ts";
 import { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import { createTestInstance } from "../../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { deferred } from "./Round3Harness.ts";
 
 // Real Instance admission and ToolCall runtime, with an instrumented Worker
 // boundary: session IDs and routed payloads make cross-Instance leaks observable.
-function worker(name: string) {
+function worker(name: string, onCall?: (name: string, input: unknown) => Promise<void>) {
     const opened: string[] = [];
     const released: string[] = [];
     const runtime = createToolCallRuntime({ resolveTarget: () => ({
-        dispatch: async (request) => ({ instance: name, input: request.value.payload }),
+        dispatch: async (request) => {
+            await onCall?.(name, request.value.payload);
+            return { instance: name, input: request.value.payload };
+        },
     }) });
     const instance = createTestInstance({
         supervision: { handshake: {
@@ -50,13 +55,14 @@ function worker(name: string) {
     return { instance, opened, released, runtime };
 }
 
-async function harness(t: test.TestContext, runtime?: InstanceRuntimeTransport) {
+async function harness(t: test.TestContext, runtime?: InstanceRuntimeTransport, onCall?: (name: string, input: unknown) => Promise<void>) {
     const root = await createTestTempDirectory("extension-retirement");
-    const alpha = worker("alpha");
-    const beta = worker("beta");
+    const alpha = worker("alpha", onCall);
+    const beta = worker("beta", onCall);
     const instances = new InstanceRegistry([alpha.instance, beta.instance]);
     const paths = new ExtensionPathLayout({ dataHome: join(root, "data"), homeDirectory: join(root, "home"), runtimeRoot: join(root, "runtime") });
     const host = new ExtensionHost({
+        changeHub: new ExtensionChangeHub(),
         registry: new ExtensionRegistryStore(paths.registryFile),
         loader: new ExtensionLoader({
             instances, paths, points: createControlExtensionPointRegistry(),
@@ -191,4 +197,67 @@ test("retiring an installed sandbox stream releases its subscription while a sen
     assert.deepEqual(h.host.listDeclarations("control.streams"), []);
     await assert.rejects(stat(h.paths.runtimeDirectory("probe", installed.selectedGeneration!)), { code: "ENOENT" });
     unblock();
+});
+
+test("same-hash sandbox reload pins a failing lifecycle callback and retires only its old worker sessions", { timeout: 10_000 }, async (t) => {
+    const entered = deferred();
+    const finish = deferred();
+    t.after(() => finish.resolve());
+    const h = await harness(t, undefined, async (name, input) => {
+        if ((input as { retirement?: boolean }).retirement === true) {
+            assert.equal(name, "alpha");
+            entered.resolve();
+            await finish.promise;
+        }
+    });
+    const body = `const sessions = {};
+export async function activate(context) {
+    for (const name of ['alpha', 'beta']) sessions[name] = await context.capabilities.workerExecute.openSession({ instance: name, workspace: '/' + name });
+    context.register({ id: 'mcp.tools' }, 'probe_read', async (input, invocation) => ({
+        structuredContent: await sessions[invocation.instance].callTool('file_read', input)
+    }));
+}
+export async function instanceGenerationRetired(event) {
+    await sessions[event.instance].callTool('file_read', { retirement: true });
+    throw new Error('notification failed after worker barrier');
+}`;
+    await h.installer.install(await source(h.root, "1.0.0", ["worker.execute"], {
+        "mcp.tools": [{ id: "probe_read", description: "Read", inputSchema: { type: "object" }, outputSchema: { type: "object" } }],
+    }, body));
+    const oldAlpha = h.alpha.opened.at(-1)!;
+    const oldBeta = h.beta.opened.at(-1)!;
+    const retirement = h.host.retireInstanceGeneration("alpha");
+    const rejected = assert.rejects(retirement, /failed to handle Instance generation retirement/u);
+    try {
+        await entered.promise;
+        await h.host.reload("probe");
+        const selected = await h.host.readPublicState((state) => state);
+        assert.equal((await h.host.list())[0]!.retired[0]!.inFlight, 1);
+        assert.equal(h.alpha.released.includes(oldAlpha), false);
+        assert.equal(h.beta.released.includes(oldBeta), false);
+        const newAlpha = h.alpha.opened.at(-1)!;
+        const newBeta = h.beta.opened.at(-1)!;
+        assert.notEqual(newAlpha, oldAlpha);
+        assert.notEqual(newBeta, oldBeta);
+        const mcp = new McpExtensionService(h.host);
+        const invoke = async (instance: string) => await mcp.callTool("probe_read", { path: instance }, {
+            callId: `fresh-${instance}`, instance, workspace: `/${instance}`,
+        });
+        assert.deepEqual((await invoke("beta")).structuredContent, { instance: "beta", input: { path: "beta" } });
+        finish.resolve();
+        await rejected;
+        await h.host.waitForDrain("probe");
+        assert.equal(h.alpha.released.includes(oldAlpha), true);
+        assert.equal(h.beta.released.includes(oldBeta), true);
+        assert.equal(h.alpha.released.includes(newAlpha), false);
+        assert.equal(h.beta.released.includes(newBeta), false);
+        assert.deepEqual((await invoke("alpha")).structuredContent, { instance: "alpha", input: { path: "alpha" } });
+        assert.deepEqual((await invoke("beta")).structuredContent, { instance: "beta", input: { path: "beta" } });
+        assert.deepEqual(await h.host.readPublicState((state) => state), selected);
+        assert.equal(h.alpha.instance.lifecycle.active, true);
+        assert.equal(h.beta.instance.lifecycle.active, true);
+    } finally {
+        finish.resolve();
+        await rejected;
+    }
 });

@@ -485,20 +485,22 @@ export class ExtensionHost {
     }
 
     async retireInstanceGeneration(instance: string): Promise<void> {
-        const failures: unknown[] = [];
-        await notifyInstanceGenerationRetired(this.#active, instance).catch((error) =>
-            failures.push(error),
-        );
-        await retireInstanceHostResources(this.#active, instance).catch((error) =>
-            failures.push(error),
-        );
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1) {
-            throw new AggregateError(
-                failures,
-                `Extension Instance generation retirement was incomplete for ${instance}.`,
+        await this.#withLifecycleGenerations(async (generations) => {
+            const failures: unknown[] = [];
+            await notifyInstanceGenerationRetired(generations, instance).catch((error) =>
+                failures.push(error),
             );
-        }
+            await retireInstanceHostResources(generations, instance).catch((error) =>
+                failures.push(error),
+            );
+            if (failures.length === 1) throw failures[0];
+            if (failures.length > 1) {
+                throw new AggregateError(
+                    failures,
+                    `Extension Instance generation retirement was incomplete for ${instance}.`,
+                );
+            }
+        });
     }
 
     async contextEnvironmentRetired(input: {
@@ -506,7 +508,26 @@ export class ExtensionHost {
         instance: string;
         reason: "disabled" | "expired";
     }): Promise<void> {
-        await notifyContextEnvironmentRetired(this.#active, input);
+        await this.#withLifecycleGenerations(async (generations) => {
+            await notifyContextEnvironmentRetired(generations, input);
+        });
+    }
+
+    async #withLifecycleGenerations(
+        operation: (generations: ReadonlyMap<string, ExtensionGeneration>) => Promise<void>,
+    ): Promise<void> {
+        // Snapshot and pin every concrete runtime before any callback can reenter
+        // Host mutation. A content hash does not identify a runtime after reload.
+        const generations = new Map(this.#active);
+        const leases: ExtensionGenerationLease[] = [];
+        try {
+            for (const generation of generations.values()) {
+                leases.push(generation.acquireLifecycleLease());
+            }
+            await operation(generations);
+        } finally {
+            for (const lease of leases) lease.release();
+        }
     }
 
     #notifyChange(): void {

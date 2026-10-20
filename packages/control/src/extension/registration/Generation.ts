@@ -95,6 +95,20 @@ export class ExtensionGeneration {
                 `Extension generation ${this.generation} is not active.`,
             );
         }
+        return this.#acquireLease();
+    }
+
+    /** Host lifecycle cleanup must also pin a faulted runtime awaiting recovery. */
+    acquireLifecycleLease(): ExtensionGenerationLease {
+        if (this.#state !== "active" && this.#state !== "faulted") {
+            throw new Error(
+                `Extension generation ${this.generation} cannot handle lifecycle events from ${this.#state}.`,
+            );
+        }
+        return this.#acquireLease();
+    }
+
+    #acquireLease(): ExtensionGenerationLease {
         this.#inFlight += 1;
         let released = false;
         return {

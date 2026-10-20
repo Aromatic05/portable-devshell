@@ -90,3 +90,25 @@ test("Extension generation surfaces disposal failures without double disposal", 
     await assert.rejects(generation.retire(), failure);
     assert.equal(disposeCount, 1);
 });
+
+test("faulted runtime lifecycle leases defer disposal without admitting new consumers", async () => {
+    let disposals = 0;
+    const generation = new ExtensionGeneration({
+        dispose: async () => { disposals++; }, generation: "faulted", manifest, registrations,
+    });
+    assert.throws(() => generation.acquireLifecycleLease(), /cannot handle lifecycle events from ready/u);
+    generation.activate();
+    generation.fault(new Error("sandbox fault"));
+    assert.throws(() => generation.acquire(), /not active/u);
+    const lease = generation.acquireLifecycleLease();
+    const retired = generation.retire();
+    assert.equal(generation.inFlight, 1);
+    assert.equal(disposals, 0);
+    assert.throws(() => generation.acquireLifecycleLease(), /cannot handle lifecycle events from draining/u);
+    lease.release();
+    lease.release();
+    await retired;
+    assert.equal(generation.inFlight, 0);
+    assert.equal(disposals, 1);
+    assert.throws(() => generation.acquireLifecycleLease(), /cannot handle lifecycle events from disposed/u);
+});

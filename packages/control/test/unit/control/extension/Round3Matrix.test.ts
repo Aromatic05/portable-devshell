@@ -13,6 +13,7 @@ import { WebExtensionPageService } from "../../../../src/server/web/extension/pa
 import { ToolCallExtensionBinding } from "../../../../src/extension/api/point/toolcall/index.ts";
 import { createCliNativeSandboxBinding, createCliModelSandboxBinding } from "../../../../src/extension/api/point/cli/Sandbox.ts";
 import type { ExtensionPointSandboxBridge } from "../../../../src/extension/registration/PointRegistry.ts";
+import type { ExtensionRegistrationLease } from "../../../../src/extension/Api.ts";
 
 function deferred<T = void>() {
     let resolve!: (value: T | PromiseLike<T>) => void;
@@ -367,4 +368,141 @@ test("round3 outbound rewrite that faults after starting is never replayed on a 
         assert.equal(dispatches, 1);
         assert.equal(releases, 1);
     } finally { runtime.close(); }
+});
+
+test("pending admission retirement closes promptly, releases a late old-runtime lease, and preserves fresh and unrelated streams", { timeout: 5000 }, async () => {
+    const acquiring = deferred();
+    const acquired = deferred<ExtensionRegistrationLease>();
+    const old = generation();
+    const fresh = generation();
+    const oldLease = old.acquire();
+    const listeners = new Set<() => void>();
+    const invocations: string[] = [];
+    let acquisitions = 0;
+    const binding: ControlStreamBinding = async (_stream, _request, invocation) => {
+        invocations.push(invocation.destination);
+        await new Promise<void>((resolve) => invocation.signal.addEventListener("abort", () => resolve(), { once: true }));
+    };
+    const registration = { binding, declaration: streamDeclaration, id: "watch", pointId: "control.streams" };
+    const service = new ControlExtensionRouteService({
+        listDeclarations: (pointId) => pointId === "control.streams" ? [{ ...registration, extensionId: "matrix", generation: "same-hash" }] : [],
+        onChange: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+        acquireRegistration: async () => {
+            acquisitions++;
+            if (acquisitions === 1) { acquiring.resolve(); return await acquired.promise; }
+            return { extensionId: "matrix", registration, lease: fresh.acquire() };
+        },
+    });
+    const handle = service.modules("instance")[0]!.streams![0]!.handle;
+    const pendingWire = wire();
+    const otherWire = wire();
+    const freshWire = wire();
+    const pending = handle(pendingWire.stream, { id: "old", name: "watch" }, context("a"));
+    try {
+        await acquiring.promise;
+        await handle(otherWire.stream, { id: "other", name: "watch" }, context("b"));
+        await service.retireInstance("a");
+        await pending;
+        assert.equal(pendingWire.closes(), 1);
+        assert.deepEqual(pendingWire.cancelled, []);
+        assert.equal(otherWire.closes(), 0);
+        assert.equal(fresh.inFlight, 1);
+        const retired = old.retire();
+        assert.equal(old.inFlight, 1);
+        acquired.resolve({ extensionId: "matrix", registration, lease: oldLease });
+        await retired;
+        assert.equal(old.inFlight, 0);
+        assert.equal(old.state, "disposed");
+        assert.equal(pendingWire.closes(), 1);
+        assert.deepEqual(invocations, ["b"]);
+        assert.equal(listeners.size, 1);
+        await handle(freshWire.stream, { id: "fresh", name: "watch" }, context("a"));
+        assert.deepEqual(invocations, ["b", "a"]);
+        await service.retireInstance("a");
+        assert.equal(freshWire.closes(), 1);
+        assert.equal(otherWire.closes(), 0);
+        assert.equal(fresh.inFlight, 1);
+        await service.retireInstance("b");
+        assert.equal(otherWire.closes(), 1);
+        assert.equal(fresh.inFlight, 0);
+        assert.equal(listeners.size, 0);
+    } finally {
+        acquired.resolve({ extensionId: "matrix", registration, lease: oldLease });
+        await pending;
+        await service.retireInstance("a");
+        await service.retireInstance("b");
+        await old.retire();
+        await fresh.retire();
+    }
+});
+
+test("retired pending admission consumes a late activation failure without cancelling the closed stream", { timeout: 5000 }, async () => {
+    const acquiring = deferred();
+    const acquired = deferred<never>();
+    const returned = deferred();
+    const service = new ControlExtensionRouteService({
+        listDeclarations: (pointId) => pointId === "control.streams" ? [{
+            declaration: streamDeclaration, extensionId: "matrix", generation: "same-hash", id: "watch", pointId,
+        }] : [],
+        onChange: () => { assert.fail("failed admission must not subscribe to changes"); },
+        acquireRegistration: async () => {
+            acquiring.resolve();
+            try { return await acquired.promise; }
+            finally { returned.resolve(); }
+        },
+    });
+    const transport = wire();
+    const pending = service.modules("instance")[0]!.streams![0]!.handle(transport.stream, { id: "old", name: "watch" }, context("a"));
+    await acquiring.promise;
+    await service.retireInstance("a");
+    await pending;
+    assert.equal(transport.closes(), 1);
+    acquired.reject(new Error("activation failed after retirement"));
+    await returned.promise;
+    await service.retireInstance("a");
+    assert.equal(transport.closes(), 1);
+    assert.deepEqual(transport.cancelled, []);
+});
+
+test("an active admission failure reaches its caller and removes the retirement entry", async () => {
+    const failure = new Error("activation unavailable");
+    const service = new ControlExtensionRouteService({
+        listDeclarations: (pointId) => pointId === "control.streams" ? [{ declaration: streamDeclaration, extensionId: "matrix", generation: "same-hash", id: "watch", pointId }] : [],
+        onChange: () => { assert.fail("activation failed"); },
+        acquireRegistration: async () => { throw failure; },
+    });
+    const transport = wire();
+    await assert.rejects(async () => await service.modules("instance")[0]!.streams![0]!.handle(transport.stream, { id: "failed", name: "watch" }, context("a")), failure);
+    await service.retireInstance("a");
+    assert.equal(transport.closes(), 0);
+    assert.deepEqual(transport.cancelled, []);
+});
+
+test("a callback cannot send another frame after retirement and releases its lease after failure", { timeout: 5000 }, async () => {
+    const entered = deferred();
+    const finish = deferred();
+    const host = streamHost(async (stream) => {
+        entered.resolve();
+        await finish.promise;
+        await stream.send({ name: "too-late" });
+    });
+    const transport = wire();
+    try {
+        await host.handle(transport.stream, { id: "old", name: "watch" }, context("a"));
+        await entered.promise;
+        const retiring = host.service.retireInstance("a");
+        assert.equal(host.runtime.inFlight, 1);
+        finish.resolve();
+        await retiring;
+        assert.deepEqual(transport.frames, []);
+        assert.equal(transport.closes(), 1);
+        assert.deepEqual(transport.cancelled, []);
+        assert.equal(host.releases(), 1);
+        assert.equal(host.runtime.inFlight, 0);
+        assert.equal(host.listeners.size, 0);
+    } finally {
+        finish.resolve();
+        await host.service.retireInstance("a");
+        await host.runtime.retire();
+    }
 });

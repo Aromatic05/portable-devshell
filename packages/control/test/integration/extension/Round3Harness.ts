@@ -3,6 +3,7 @@ import { ExtensionHost } from "../../../src/extension/host/index.ts";
 import { ExtensionGeneration } from "../../../src/extension/registration/Generation.ts";
 import { ExtensionRegistrationSet } from "../../../src/extension/registration/Registration.ts";
 import { createControlExtensionPointRegistry } from "../../../src/extension/registration/Points.ts";
+import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
 
 export function deferred() {
     let resolve!: () => void;
@@ -14,6 +15,7 @@ export function createRound3Host(options: {
     notify?: (runtime: number, instance: string) => Promise<void>;
     cleanup?: (runtime: number, instance: string) => Promise<void>;
     dispose?: (runtime: number) => Promise<void>;
+    contextRetired?: (runtime: number, event: ExtensionContextEnvironmentRetiredEvent) => Promise<void>;
 } = {}) {
     const manifest: ExtensionManifest = {
         activation: "lazy", apiVersion: EXTENSION_API_VERSION,
@@ -35,6 +37,7 @@ export function createRound3Host(options: {
                     generation: hash, manifest,
                     dispose: async () => { await options.dispose?.(number); disposed.push(number); },
                     instanceGenerationRetired: async ({ instance }) => { await options.notify?.(number, instance); },
+                    contextEnvironmentRetired: async (event) => { await options.contextRetired?.(number, event); },
                     retireInstanceHostResources: async (instance) => { await options.cleanup?.(number, instance); },
                     registrations: new ExtensionRegistrationSet([{ pointId: "cli.native-commands", id: "matrix",
                         declaration: { id: "matrix", title: "Matrix" }, binding: async () => ({ kind: "text", text: String(number) }) }]),

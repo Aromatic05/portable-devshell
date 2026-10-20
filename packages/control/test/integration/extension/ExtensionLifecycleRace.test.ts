@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRound3Host, deferred } from "../../packages/control/test/integration/extension/Round3Harness.ts";
+import { createRound3Host, deferred } from "./Round3Harness.ts";
 
 test("BUG: Instance retirement must clean the notified old runtime after a concurrent same-hash reload", async () => {
     const entered = deferred();
@@ -44,9 +44,12 @@ test("BUG: lifecycle callback must pin its runtime until completion during reloa
         const retirement = fixture.host.retireInstanceGeneration("instance-a");
         await entered.promise;
         await fixture.host.reload("matrix");
-        await fixture.host.waitForDrain("matrix");
+        assert.equal(fixture.runtimes[0]!.state, "draining");
+        assert.equal(fixture.runtimes[0]!.inFlight, 1);
+        assert.deepEqual(fixture.disposed, []);
         finish.resolve();
         await retirement;
+        await fixture.host.waitForDrain("matrix");
         assert.deepEqual(disposedBeforeFinish, [], "old Extension runtime was disposed while its lifecycle callback was still running");
     } finally { finish.resolve(); await fixture.host.stop(); }
 });
