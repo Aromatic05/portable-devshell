@@ -2571,6 +2571,89 @@ test("adopted container retirement after runtime reconstruction preserves an alr
     ]);
 });
 
+test("container transport replaces a worker channel after its provider process exits", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new ContainerExecution(new ContainerInstall({
+        container: createManagedContainerConfig(),
+        workerBinary: new WorkerBinary("/worker/bin"),
+        binary: "docker",
+        provider: "docker",
+        spawnFunction: recorder.spawn,
+    }));
+
+    const first = await transport.connectChannel({ instanceName: "channel-restart" });
+    recorder.children.at(-1)?.emit("exit", 9, null);
+    assert.equal(first.closed, true);
+    const second = await transport.connectChannel({ instanceName: "channel-restart" });
+
+    assert.notEqual(second, first);
+    assert.ok(recorder.calls.at(-1)?.args.includes("transport"));
+    second.close();
+});
+
+test("container channel closes its child when the caller closes the channel", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new ContainerExecution(new ContainerInstall({
+        container: createManagedContainerConfig(),
+        workerBinary: new WorkerBinary("/worker/bin"),
+        binary: "podman",
+        provider: "podman",
+        spawnFunction: recorder.spawn,
+    }));
+
+    const channel = await transport.connectChannel({ instanceName: "channel-cancel" });
+    channel.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(channel.closed, true);
+    assert.equal(recorder.children.at(-1)?.signalCode, "SIGTERM");
+});
+
+test("adopted container can be started and stopped repeatedly within one runtime", async () => {
+    let status = "exited";
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stdout: `${status}\n` });
+            return true;
+        }
+        if (call.args[0] === "start") status = "running";
+        if (call.args[0] === "stop") status = "exited";
+        return false;
+    });
+    const runtime = createContainerRuntime("docker", {
+        container: { mode: "existingStoppedContainer", containerName: "cycle", adoptLifecycle: true },
+        workerBinary: new WorkerBinary("/worker/bin"),
+        spawnFunction: recorder.spawn,
+    });
+
+    await runtime.runWorkerCommand("start", { instanceName: "cycle" });
+    await runtime.runWorkerCommand("stop", { instanceName: "cycle" });
+    await runtime.runWorkerCommand("start", { instanceName: "cycle" });
+
+    assert.deepEqual(recorder.calls.filter((call) => call.args[0] === "start").map((call) => call.args), [
+        ["start", "cycle"], ["start", "cycle"],
+    ]);
+    assert.equal(recorder.calls.filter((call) => call.args[0] === "stop").length, 1);
+});
+
+test("missing adopted container fails before worker execution", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { code: 1, stderr: "No such container" });
+            return true;
+        }
+        return false;
+    });
+    const runtime = createContainerRuntime("podman", {
+        container: { mode: "existingStoppedContainer", containerName: "gone", adoptLifecycle: true },
+        workerBinary: new WorkerBinary("/worker/bin"),
+        spawnFunction: recorder.spawn,
+    });
+
+    await assert.rejects(runtime.runWorkerCommand("start", { instanceName: "missing" }));
+    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["inspect"]);
+});
+
 test("rootless podman environment rejects storage and socket overrides before any provider command", async () => {
     const recorder = createSpawnRecorder();
     const transport = createContainerRuntime("podman", {
