@@ -8,6 +8,7 @@ import { isAbsolute, join, posix, relative, resolve } from "node:path";
 import {
     createTestspaceProcessEnvironment,
     resolveTestspaceRuntimeDirectory,
+    TESTSPACE_RUNTIME_UID_ENV,
 } from "./TestspaceRuntime.mjs";
 
 export const TESTSPACE_ISOLATION_ENV = "DEVSHELL_TESTSPACE_ISOLATION";
@@ -39,9 +40,16 @@ export function resolveTestspaceNamespaceDirectory(root, options = {}) {
 export function buildTestspaceExecutionEnvironment(root, token, options = {}) {
     const resolvedRoot = resolve(root);
     const homeDirectory = join(resolvedRoot, "home");
+    // The launching user's UID changes to 0 inside --map-root-user. Keep the
+    // outer identity stable for every Testspace command in that namespace.
+    const runtimeIdentity =
+        options.runtimeOptions?.userIdentity ??
+        (typeof process.getuid === "function"
+            ? String(process.getuid())
+            : (process.env.USERNAME ?? process.env.USER ?? "unknown"));
     const runtimeDirectory = resolveTestspaceRuntimeDirectory(
         resolvedRoot,
-        options.runtimeOptions,
+        { ...options.runtimeOptions, userIdentity: runtimeIdentity },
     );
     return {
         ...createTestspaceProcessEnvironment(
@@ -50,6 +58,7 @@ export function buildTestspaceExecutionEnvironment(root, token, options = {}) {
             options.baseEnvironment ?? process.env,
         ),
         PORTABLE_DEVSHELL_HOME: join(homeDirectory, ".devshell"),
+        [TESTSPACE_RUNTIME_UID_ENV]: runtimeIdentity,
         [TESTSPACE_ISOLATION_ENV]:
             options.isolation ??
             ((options.platform ?? process.platform) === "linux"

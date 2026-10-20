@@ -960,6 +960,35 @@ test("testspace lifecycle rejects direct or host-home execution", () => {
     );
 });
 
+test("Testspace launcher preserves its runtime UID across user namespace process identity changes", () => {
+    const root = "/tmp/testspace-stable-host-runtime-uid";
+    // An inner --map-root-user process sees uid=0 instead of the outer uid.
+    // Supply a deliberately distinct launcher identity to reproduce the
+    // cross-namespace situation without requiring userns support in CI.
+    const launcher = buildTestspaceExecutionEnvironment(root, "a".repeat(48), {
+        baseEnvironment: { PATH: process.env.PATH ?? "/usr/bin" },
+        isolation: LINUX_TESTSPACE_ISOLATION,
+        platform: "linux",
+        runtimeOptions: { userIdentity: "outer-uid-1000" },
+    });
+    assert.equal(launcher.DEVSHELL_TESTSPACE_RUNTIME_UID, "outer-uid-1000");
+    const result = spawnSync(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `import { resolveTestspaceRuntimeDirectory } from ${JSON.stringify(new URL("./testspace/TestspaceRuntime.mjs", import.meta.url).href)};
+         import { assertTestspaceLifecycleEnvironment } from ${JSON.stringify(new URL("./testspace/TestspaceNamespace.mjs", import.meta.url).href)};
+         const root = process.argv[1];
+         assertTestspaceLifecycleEnvironment(root, process.env);
+         process.stdout.write(resolveTestspaceRuntimeDirectory(root));`,
+        root,
+    ], {
+        encoding: "utf8",
+        env: launcher,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, launcher.XDG_RUNTIME_DIR);
+});
+
 test("testspace namespace state path is deterministic per user and root", () => {
     const first = resolveTestspaceNamespaceDirectory("/workspace/one", {
         temporaryDirectory: "/tmp",

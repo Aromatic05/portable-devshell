@@ -23,6 +23,7 @@ const toml = require("smol-toml");
 const { blake3 } = require("hash-wasm");
 const TESTSPACE_OWNER_FILE = ".portable-devshell-testspace-owner.json";
 const TESTSPACE_OWNER_KIND = "portable-devshell-testspace";
+export const TESTSPACE_RUNTIME_UID_ENV = "DEVSHELL_TESTSPACE_RUNTIME_UID";
 
 export function resolveTestspaceRoot(repositoryRoot, configuredRoot) {
     if (configuredRoot !== undefined && configuredRoot.trim().length === 0) {
@@ -112,9 +113,11 @@ export function resolveTestspaceRuntimeDirectory(root, options = {}) {
     const runtimeRoot = platform === "win32" ? temporaryDirectory : "/tmp";
     const joinPath = platform === "win32" ? win32.join : posix.join;
     const userIdentity =
-        typeof process.getuid === "function"
+        options.userIdentity ??
+        process.env[TESTSPACE_RUNTIME_UID_ENV] ??
+        (typeof process.getuid === "function"
             ? String(process.getuid())
-            : (process.env.USERNAME ?? process.env.USER ?? "unknown");
+            : (process.env.USERNAME ?? process.env.USER ?? "unknown"));
     const identity = createHash("sha256")
         .update(`${userIdentity}:${root}`)
         .digest("hex")
