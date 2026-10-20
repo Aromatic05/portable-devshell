@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -231,4 +232,44 @@ it("renders active Workspace Goals on the Todo page", () => {
     const goal = container.querySelector('[data-goal-id="goal-visible"]');
     expect(goal).not.toBeNull();
     expect(goal).toHaveAttribute("data-goal-status", "active");
+});
+
+it("refreshes visible Todo state when the domain publishes a newer revision", async () => {
+    const { domains } = renderTodos({
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        todo: {
+            items: [
+                { content: "Inspect", id: "inspect", status: "pending" },
+            ],
+            revision: 3,
+            summary: { completed: 0, currentItemId: "inspect", total: 1 },
+            taskId: "task-1",
+            title: "Initial task",
+        },
+    });
+
+    expect(screen.getByText("Initial task")).toBeInTheDocument();
+
+    act(() => {
+        domains.setTodo("alpha", {
+            items: [
+                { content: "Inspect", id: "inspect", status: "completed" },
+                { content: "Ship", id: "ship", status: "in_progress" },
+            ],
+            revision: 4,
+            summary: { completed: 1, currentItemId: "ship", total: 2 },
+            taskId: "task-1",
+            title: "Updated task",
+        });
+    });
+
+    expect(await screen.findByText("Updated task")).toBeInTheDocument();
+    expect(screen.queryByText("Initial task")).not.toBeInTheDocument();
+    expect(
+        screen.getByText(
+            (_, element) =>
+                element?.tagName === "STRONG" &&
+                element.textContent?.includes("1/2 complete") === true,
+        ),
+    ).toBeInTheDocument();
 });
