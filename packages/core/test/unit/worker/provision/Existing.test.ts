@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import test from "node:test";
 
+import { ContainerAdoptionStore, containerAdoptionOwner } from "../../../../src/instance/runtime/provision/container/Adoption.ts";
 import { existingFixture, existingId, replacementId } from "./ExistingHarness.ts";
 
 const mutations = (calls: Array<{ operation: string; args: readonly string[] }>) => calls.filter(({ args }) => args[0] !== "inspect");
@@ -255,4 +256,79 @@ test("Existing intentional stop keeps the old runtime fenced from another runtim
     await assert.rejects(stale.afterWorkerStop(), /generation changed/u);
     assert.equal(await current.isAvailable(), true);
     assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId], ["stop", existingId], ["start", existingId]]);
+});
+
+
+test("Existing separate SQLite databases cannot concurrently own one physical container start", async (t) => {
+    const f = await existingFixture(t);
+    const second = { ...f.adoption, databaseFile: `${f.root}/second.sqlite3`, owner: "second-instance" };
+    let releaseInspections!: () => void;
+    const bothInspected = new Promise<void>((resolve) => { releaseInspections = resolve; });
+    let inspections = 0;
+    f.intercept(async (operation) => {
+        if (operation !== "inspectContainerIdentity" || inspections >= 2) return;
+        inspections++;
+        if (inspections === 2) releaseInspections();
+        await bothInspected;
+    });
+    const outcomes = await Promise.allSettled([f.provision().ensureReady("start"), f.provision(second).ensureReady("start")]);
+    assert.equal(outcomes.filter(({ status }) => status === "fulfilled").length, 1);
+    assert.equal(outcomes.filter(({ status }) => status === "rejected").length, 1);
+    assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId]]);
+});
+
+test("Existing fresh uninspected retirement revokes adoption without stopping the external resource", async (t) => {
+    const f = await existingFixture(t, false);
+    await f.provision().ensureReady("start");
+    await f.provision().retire();
+    await assert.rejects(f.provision().isAvailable(), /already running/u);
+    assert.equal(f.state()?.status, "running");
+    assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId]]);
+});
+
+test("Existing temporary retirement start persists provenance so a fresh runtime can retry failed physical stop", async (t) => {
+    const f = await existingFixture(t);
+    const first = f.provision();
+    assert.equal(await first.prepareRuntimeRetire(), true);
+    f.fail("stopContainerAfterRetire");
+    await assert.rejects(first.finishRuntimeRetire(), /injected/u);
+    const resumed = f.provision();
+    assert.equal(await resumed.prepareRuntimeRetire(), true);
+    await resumed.finishRuntimeRetire();
+    assert.equal(f.state()?.status, "stopped");
+    assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId], ["stop", existingId], ["stop", existingId]]);
+});
+
+
+test("Existing revocation fences a second legacy database for the same still-running physical start", async (t) => {
+    const f = await existingFixture(t, false);
+    const first = f.provision();
+    await first.ensureReady("start");
+    const record = await new ContainerAdoptionStore(f.adoption.databaseFile).transaction(async (tx) => tx.read());
+    assert.ok(record);
+    const second = { ...f.adoption, databaseFile: `${f.root}/second.sqlite3`, owner: "second-instance" };
+    // Model the duplicated ownership records left by an older controller.
+    await new ContainerAdoptionStore(second.databaseFile).transaction(async (tx) => tx.write({
+        containerId: record.containerId, startedAt: record.startedAt, generation: "old-second-generation",
+        owner: containerAdoptionOwner([second.owner, f.operations.provider, f.operations.binary, f.config]),
+    }));
+    await first.retire();
+    await assert.rejects(f.provision(second).isAvailable(), /already running/u);
+    assert.equal(f.state()?.status, "running");
+    assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId]]);
+});
+
+
+test("Existing damaged stable-ID provenance cannot escape the resource lease directory during retirement", async (t) => {
+    const f = await existingFixture(t);
+    await f.provision().ensureReady("start");
+    const store = new ContainerAdoptionStore(f.adoption.databaseFile);
+    await store.transaction(async (tx) => {
+        const record = tx.read();
+        assert.ok(record);
+        tx.write({ ...record, containerId: "../escaped-resource" });
+    });
+    const before = f.calls.length;
+    await assert.rejects(f.provision().retire(), /Invalid container adoption provenance/u);
+    assert.equal(f.calls.length, before);
 });

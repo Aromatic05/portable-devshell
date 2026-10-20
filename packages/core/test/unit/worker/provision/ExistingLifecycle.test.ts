@@ -55,8 +55,10 @@ async function fixture(t: TestContext, provider: "docker" | "podman", adoptLifec
                 if (command === "start") workerStates.set(instance, "running");
                 if (command === "stop") workerStates.set(instance, "stopped");
                 if (command === "retire") {
-                    assert.equal(workerStates.get(instance), "stopped", "retirement requires native worker stop");
-                    workerStates.delete(instance);
+                    if (workerStates.get(instance) !== "stopped") {
+                        code = 31;
+                        stderr = "native retirement rejected stale daemon state";
+                    } else workerStates.delete(instance);
                 }
                 stdout = JSON.stringify(command === "status"
                     ? { state: workerStates.get(instance) ?? "stopped" }
@@ -72,7 +74,7 @@ async function fixture(t: TestContext, provider: "docker" | "podman", adoptLifec
         return child;
     };
     const create = WorkerRuntimeFactory.create;
-    t.mock.method(WorkerRuntimeFactory, "create", (options: Parameters<typeof create>[0]) => create({ ...options, spawnFunction: spawn }));
+    t.mock.method(WorkerRuntimeFactory, "create", (options: Parameters<typeof create>[0]) => create({ ...options, ...("adoption" in options ? { adoption: { ...options.adoption!, resourceDirectory: join(root, "resources") } } : {}), spawnFunction: spawn }));
     t.mock.method(WorkerInstallerRemote.prototype, "ensure", async () => "/worker/bin");
     const instance = normalizeConfigInstanceDraft({
         name: "adopted", provider,
@@ -89,11 +91,14 @@ async function fixture(t: TestContext, provider: "docker" | "podman", adoptLifec
     };
     return {
         instance, runtime, calls, workerStates, neighbor, adoption,
-        async seedPreviousOwner() {
+        async seedPreviousOwner(withEvidence = false) {
+            await new ContainerAdoptionStore(join(root, "resources", `${existingId}.sqlite3`)).transaction(async (tx) => tx.clear());
             return await adoption.transaction(async (transaction) => {
                 const record = transaction.read();
                 assert.ok(record);
-                const previous = { ...record, owner: containerAdoptionOwner([
+                const previous = { ...(withEvidence ? record : {
+                    containerId: record.containerId, startedAt: record.startedAt, generation: record.generation,
+                }), owner: containerAdoptionOwner([
                     containerAdoptionOwner(instance), provider, provider, instance.container,
                 ]) };
                 transaction.write(previous);
@@ -277,4 +282,85 @@ for (const provider of ["docker", "podman"] as const) {
             assert.equal(f.workerStates.get("neighbor"), "running");
         });
     }
+}
+
+
+for (const provider of ["docker", "podman"] as const) {
+    test(`${provider}: failed native stop during full retirement retains live adoption and permits reconstructed retry`, async (t) => {
+        const f = await fixture(t, provider);
+        const runtime = f.runtime();
+        await runtime.client.start();
+        const provenance = await f.adoption.transaction(async (tx) => tx.read());
+        const failure = t.mock.method(runtime.client, "stop", async () => ({ exitCode: 23, stdout: "", stderr: "transient stop failure", details: {} }));
+        await assert.rejects(runtime.retirement.retire(), /incomplete/u);
+        assert.deepEqual(await f.adoption.transaction(async (tx) => tx.read()), provenance);
+        assert.equal(f.workerStates.get("adopted"), "running");
+        failure.mock.restore();
+        assert.equal((await f.runtime().client.status()).exitCode, 0);
+        await f.runtime().retirement.retire();
+        assert.equal(f.workerStates.has("adopted"), false);
+        assert.equal(await f.adoption.transaction(async (tx) => tx.read()), undefined);
+    });
+
+    test(`${provider}: native retire failure retains adoption for retry`, async (t) => {
+        const f = await fixture(t, provider);
+        const runtime = f.runtime();
+        await runtime.client.start();
+        const failure = t.mock.method(runtime.client, "retireRuntime", async () => ({ exitCode: 29, stdout: "", stderr: "transient retire failure", details: {} }));
+        await assert.rejects(runtime.retirement.retire(), /incomplete/u);
+        assert.ok(await f.adoption.transaction(async (tx) => tx.read()));
+        failure.mock.restore();
+        await f.runtime().retirement.retire();
+        assert.equal(f.workerStates.has("adopted"), false);
+        assert.equal(await f.adoption.transaction(async (tx) => tx.read()), undefined);
+    });
+
+    test(`${provider}: fresh skipRuntime retirement revokes the predecessor adoption`, async (t) => {
+        const f = await fixture(t, provider);
+        await f.runtime().client.start();
+        await f.runtime().retirement.retire(true);
+        assert.equal(await f.adoption.transaction(async (tx) => tx.read()), undefined);
+        await assert.rejects(f.runtime().client.status(), /already running/u);
+        assert.equal(f.container().status, "running");
+        assert.equal(f.workerStates.get("neighbor"), "running");
+    });
+
+    test(`${provider}: stopped physical container native stale PID is stopped after temporary start before retirement`, async (t) => {
+        const f = await fixture(t, provider, true);
+        f.workerStates.set("adopted", "stale");
+        await f.runtime().retirement.retire();
+        assert.equal(f.workerStates.has("adopted"), false);
+        assert.equal(f.container().status, "stopped");
+        assert.deepEqual(f.calls.filter(({ args }) => args[0] === "exec").map(({ args }) => args[args.indexOf("/worker/bin") + 1]), ["stop", "retire"]);
+        assert.equal(f.workerStates.get("neighbor"), "running");
+    });
+}
+
+
+for (const provider of ["docker", "podman"] as const) {
+    test(`${provider}: persisted binding migrates old full-config owner after policy changes before the first read`, async (t) => {
+        const f = await fixture(t, provider);
+        await f.runtime().client.start();
+        const previous = await f.seedPreviousOwner(true);
+        const changed = f.runtime({ ...f.instance, approvalPolicy: { mode: "ask" } });
+        assert.deepEqual(JSON.parse((await changed.client.status()).stdout), { state: "running" });
+        const migrated = await f.adoption.transaction(async (tx) => tx.read());
+        assert.ok(migrated);
+        assert.notEqual(migrated.owner, previous.owner);
+        assert.equal(migrated.generation, previous.generation);
+        assert.equal(migrated.containerId, previous.containerId);
+        assert.equal(migrated.startedAt, previous.startedAt);
+        await changed.retirement.retire();
+        assert.equal(await f.adoption.transaction(async (tx) => tx.read()), undefined);
+        assert.equal(f.workerStates.get("neighbor"), "running");
+    });
+
+    test(`${provider}: opaque legacy full-config hash without binding evidence cannot authorize changed configuration`, async (t) => {
+        const f = await fixture(t, provider);
+        await f.runtime().client.start();
+        const previous = await f.seedPreviousOwner();
+        await assert.rejects(f.runtime({ ...f.instance, approvalPolicy: { mode: "ask" } }).client.status(), /already running/u);
+        assert.deepEqual(await f.adoption.transaction(async (tx) => tx.read()), previous);
+        assert.equal(f.container().status, "running");
+    });
 }

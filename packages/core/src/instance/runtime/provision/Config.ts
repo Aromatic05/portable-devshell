@@ -20,6 +20,7 @@ export interface WorkerInstanceConfigCommon {
     effectiveSecurityMode?: EffectiveSecurityMode;
     name: InstanceName;
     homeDirectory?: string;
+    preserveProviderOnRuntimeRetirementFailure?: boolean;
     env?: NodeJS.ProcessEnv;
     handshake?: Partial<WorkerHandshakeParams>;
 }

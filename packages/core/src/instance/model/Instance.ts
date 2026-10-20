@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import {
     asInstanceName,
+    ControlPathHome,
     createRemoteError,
     ProcessSubscriptionManager,
     runtimeErrorCodes,
@@ -452,6 +454,9 @@ export function toWorkerConfig(
     return {
         ...common,
         managementMode: "controllerManaged",
+        preserveProviderOnRuntimeRetirementFailure:
+            (instance.provider === "docker" || instance.provider === "podman") &&
+            instance.container.mode === "existingStoppedContainer",
         runtime: provider,
         transportConnection,
     };
@@ -463,6 +468,9 @@ function toRuntimeOptions(
 ): WorkerRuntimeFactoryOptions {
     const adoption = {
         databaseFile: new InstancePaths(asInstanceName(instance.name), homeDirectory).containerAdoptionDatabaseFile,
+        // The physical resource claim belongs to the Control Home, not the
+        // individual Instance or the process's disposable TMPDIR.
+        resourceDirectory: join(new ControlPathHome(homeDirectory).controlHomeDir, "container-adoption"),
         // The provision layer also binds this owner to provider, executable and
         // container configuration, and verifies the persisted ID/start identity.
         owner: containerAdoptionOwner({ name: instance.name, provider: instance.provider }),

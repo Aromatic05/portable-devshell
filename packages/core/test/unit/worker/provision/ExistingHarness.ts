@@ -17,7 +17,7 @@ export function existingInspect(status: string, id = existingId, started = start
 export async function existingFixture(t: TestContext, adoptLifecycle = true) {
     const root = await mkdtemp(join(tmpdir(), "existing-adoption-"));
     t.after(() => rm(root, { recursive: true, force: true }));
-    const adoption = { databaseFile: join(root, "adoption.sqlite3"), owner: "instance-alpha/config-1" };
+    const adoption = { databaseFile: join(root, "adoption.sqlite3"), resourceDirectory: join(root, "resources"), owner: "instance-alpha/config-1" };
     let container: { status: "running" | "stopped"; id: string; started: string } | undefined = { status: "stopped", id: existingId, started: startedAt };
     const calls: Array<{ operation: string; args: readonly string[] }> = [];
     let nextFault: { operation: string; afterEffect?: boolean } | undefined;

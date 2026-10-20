@@ -34,8 +34,8 @@ const [, container] = entry;
 if (operation === "inspect") {
     fs.writeSync(1, JSON.stringify([container]));
 } else if (operation === "start" || operation === "stop") {
+    if (operation === "start" && container.State.Status !== "running") container.State.StartedAt = new Date().toISOString();
     container.State.Status = operation === "start" ? "running" : "stopped";
-    if (operation === "start") container.State.StartedAt = new Date().toISOString();
     save("containers.json", containers);
 } else if (operation === "exec") {
     if (container.State.Status !== "running") fail("container stopped");
@@ -47,7 +47,7 @@ if (operation === "inspect") {
         fs.unlinkSync(replacementFile);
     }
     let cursor = 2;
-    const environment = { ...process.env, HOME: path.join(root, "container-home"), USERPROFILE: path.join(root, "container-home") };
+    const environment = { ...process.env, HOME: path.join(root, "container-home"), USERPROFILE: path.join(root, "container-home"), XDG_RUNTIME_DIR: path.join(root, "container-runtime") };
     for (const key of ["DEVSHELL_WORKER_INTERNAL_INSTANCE", "DEVSHELL_WORKER_INTERNAL_WORKSPACE", "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"]) delete environment[key];
     while (args[cursor] === "-e") cursor += 2;
     cursor++;

@@ -24,7 +24,10 @@ export class WorkerInstanceRetirement {
         const failures: unknown[] = [];
         if (!skipRuntimeRetirement)
             await this.retireRuntime().catch((error) => failures.push(error));
-        await this.retireProviderResources().catch((error) => failures.push(error));
+        // Revoking existing-container provenance after a native failure would
+        // destroy the authority needed to retry. Managed resources still clean up.
+        if (failures.length === 0 || !this.#config.preserveProviderOnRuntimeRetirementFailure)
+            await this.retireProviderResources().catch((error) => failures.push(error));
         if (failures.length > 0)
             throw new AggregateError(
                 failures,

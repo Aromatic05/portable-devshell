@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import {
     createRemoteError,
     runtimeErrorCodes,
@@ -31,6 +32,10 @@ export class ContainerProvisionExisting implements ContainerProvision {
     readonly #operations: ContainerProvisionOperations;
     readonly #store: ContainerAdoptionStore;
     readonly #owner: string;
+    readonly #instanceOwner: string;
+    readonly #binding: string;
+    readonly #resourceDirectory?: string;
+    readonly #memoryResource = new ContainerAdoptionStore();
     readonly #previousOwner?: string;
     readonly #expectedGeneration?: string;
     #generation?: string;
@@ -42,10 +47,13 @@ export class ContainerProvisionExisting implements ContainerProvision {
         this.#operations = options.operations;
         this.#store = new ContainerAdoptionStore(options.adoption?.databaseFile);
         const binding = [options.operations.provider, options.operations.binary, options.config];
-        this.#owner = containerAdoptionOwner([
-            options.adoption?.owner ?? randomUUID(),
-            ...binding,
-        ]);
+        this.#instanceOwner = options.adoption?.owner ?? randomUUID();
+        this.#binding = containerAdoptionOwner(binding);
+        this.#owner = containerAdoptionOwner([this.#instanceOwner, ...binding]);
+        this.#resourceDirectory = options.adoption?.resourceDirectory ??
+            (options.adoption?.databaseFile === undefined
+                ? undefined
+                : join(dirname(options.adoption.databaseFile), "container-resource-leases"));
         this.#previousOwner = options.adoption?.previousOwner === undefined ? undefined
             : containerAdoptionOwner([options.adoption.previousOwner, ...binding]);
         this.#expectedGeneration = options.adoption?.generation;
@@ -61,13 +69,7 @@ export class ContainerProvisionExisting implements ContainerProvision {
             }
             transaction.clear();
             const started = await this.#start(container, "startContainer");
-            this.#generation = this.#expectedGeneration ?? randomUUID();
-            transaction.write({
-                owner: this.#owner,
-                generation: this.#generation,
-                containerId: started.id,
-                startedAt: started.startedAt,
-            });
+            transaction.write(this.#adopt(started));
         });
     }
 
@@ -83,22 +85,28 @@ export class ContainerProvisionExisting implements ContainerProvision {
             if (container === undefined) return false;
             if (container.running) {
                 this.#requireAdopted(record);
+                if (record?.retiring) this.#startedForRuntimeRetire = container;
                 return true;
             }
             transaction.clear();
             this.#startedForRuntimeRetire = await this.#start(container, "startContainerForRetire");
+            transaction.write({ ...this.#adopt(this.#startedForRuntimeRetire), retiring: true });
             return true;
         });
     }
 
     async finishRuntimeRetire(): Promise<void> {
         if (this.#startedForRuntimeRetire === undefined) return;
-        await this.#withIdentity(async (container) => {
+        await this.#withIdentity(async (container, record, transaction) => {
             const started = this.#startedForRuntimeRetire;
             if (started === undefined) return;
             if (container === undefined || container.id !== started.id || container.startedAt !== started.startedAt)
                 throw this.#error("Container identity changed during runtime retirement.");
-            if (container.running) await this.#stop(container, "stopContainerAfterRetire");
+            if (container.running) {
+                this.#requireAdopted(record);
+                await this.#stop(container, "stopContainerAfterRetire");
+            }
+            transaction.clear();
             this.#startedForRuntimeRetire = undefined;
         });
     }
@@ -109,7 +117,7 @@ export class ContainerProvisionExisting implements ContainerProvision {
                 this.#requireAdopted(record);
                 // Worker stop leaves this start identity in use when the
                 // external container's lifecycle is not ours to stop.
-                if (!this.#config.adoptLifecycle) return;
+                if (!this.#config.adoptLifecycle || record?.retiring) return;
                 await this.#stop(container, "stopContainer");
             }
             transaction.clear();
@@ -119,10 +127,43 @@ export class ContainerProvisionExisting implements ContainerProvision {
     async retire(): Promise<void> {
         await this.#store.transaction(async (transaction) => {
             const record = transaction.read();
-            if (record?.owner === this.#owner && this.#generation !== undefined && record.generation === this.#generation)
-                transaction.clear();
+            if (record !== undefined && this.#owns(record) &&
+                (this.#generation === undefined || record.generation === this.#generation)) {
+                await this.#resource(record.containerId).transaction(async (lease) => {
+                    const claimed = lease.read();
+                    // Keep a resource fence for this still-running start, so a
+                    // duplicate legacy database cannot acquire revoked authority.
+                    if (claimed === undefined || this.#sameClaim(claimed, record))
+                        lease.write({ ...record, databaseFile: this.#store.identity, revoked: true });
+                    transaction.clear();
+                });
+            }
             this.#retired = true;
         });
+    }
+
+    #resource(containerId: string): ContainerAdoptionStore {
+        return this.#resourceDirectory === undefined ? this.#memoryResource
+            : new ContainerAdoptionStore(join(this.#resourceDirectory, `${containerId}.sqlite3`));
+    }
+
+    #owns(record: ContainerAdoptionRecord): boolean {
+        return record.owner === this.#owner || record.owner === this.#previousOwner ||
+            (record.binding === this.#binding && record.instanceOwner === this.#instanceOwner);
+    }
+
+    #sameClaim(lease: ContainerAdoptionRecord, record: ContainerAdoptionRecord): boolean {
+        return lease.databaseFile === this.#store.identity && lease.owner === record.owner &&
+            lease.generation === record.generation && lease.containerId === record.containerId && lease.startedAt === record.startedAt;
+    }
+
+    #adopt(container: ContainerIdentity): ContainerAdoptionRecord {
+        this.#generation = this.#expectedGeneration ?? randomUUID();
+        return {
+            owner: this.#owner, generation: this.#generation,
+            containerId: container.id, startedAt: container.startedAt,
+            binding: this.#binding, instanceOwner: this.#instanceOwner,
+        };
     }
 
     async #withIdentity<T>(operation: (
@@ -132,34 +173,90 @@ export class ContainerProvisionExisting implements ContainerProvision {
     ) => Promise<T>): Promise<T> {
         const result = await this.#store.transaction(async (transaction) => {
             if (this.#retired) return { error: this.#error("Container adoption generation is retired.") };
-            const container = await this.#inspect(this.#config.containerName);
-            let record = transaction.read();
-            if (record !== undefined && (record.owner === this.#owner || record.owner === this.#previousOwner)) {
-                if (this.#generation !== undefined && this.#generation !== record.generation)
-                    return { error: this.#error("Container adoption generation changed.") };
-                if (container === undefined || container.id !== record.containerId || !container.running || container.startedAt !== record.startedAt) {
-                    transaction.clear();
-                    record = undefined;
-                } else {
-                    this.#generation = record.generation;
-                    // Upgrade the old config-hash owner only after its binding
-                    // and the live start identity have both been verified.
-                    if (record.owner !== this.#owner) {
-                        record = { ...record, owner: this.#owner };
-                        transaction.write(record);
+            const persisted = transaction.read();
+            const inspected = persisted === undefined ? await this.#inspect(this.#config.containerName) : undefined;
+            if (persisted === undefined && inspected?.running)
+                return { error: this.#runningError() };
+            let id = persisted?.containerId ?? inspected?.id;
+            for (;;) {
+                const resource = id === undefined ? this.#memoryResource : this.#resource(id);
+                const locked = await resource.transaction(async (lease) => {
+                    // Inspect inside the physical resource lock. A configured name
+                    // can resolve to a new ID; release this lock before following it.
+                    const container = this.#resourceDirectory === undefined && persisted === undefined
+                        ? inspected : await this.#inspect(this.#config.containerName);
+                    if (container !== undefined && container.id !== id) {
+                        if (this.#startedForRuntimeRetire !== undefined)
+                            return { error: this.#error("Container identity changed during runtime retirement.") };
+                        if (persisted !== undefined && this.#owns(persisted)) {
+                            if (this.#generation !== undefined && this.#generation !== persisted.generation)
+                                return { error: this.#error("Container adoption generation changed.") };
+                            const claimed = lease.read();
+                            if (claimed !== undefined && this.#sameClaim(claimed, persisted)) lease.clear();
+                            transaction.clear();
+                        }
+                        if (container.running) return { error: this.#runningError() };
+                        return { resourceId: container.id };
                     }
+                    let record = persisted;
+                    let claimed = lease.read();
+                    const matchesStart = (candidate: ContainerAdoptionRecord) => container?.running === true &&
+                        container.id === candidate.containerId && container.startedAt === candidate.startedAt;
+                    if (claimed !== undefined && !matchesStart(claimed)) {
+                        lease.clear();
+                        claimed = undefined;
+                    }
+                    if (record !== undefined && this.#owns(record)) {
+                        if (this.#generation !== undefined && this.#generation !== record.generation)
+                            return { error: this.#error("Container adoption generation changed.") };
+                        if (!matchesStart(record)) {
+                            transaction.clear();
+                            record = undefined;
+                        } else if (claimed !== undefined && (claimed.revoked || !this.#sameClaim(claimed, record))) {
+                            transaction.clear();
+                            record = undefined;
+                        } else {
+                            this.#generation = record.generation;
+                            // Bare legacy records require the exact previous owner.
+                            // Changed full-config hashes require persisted binding evidence.
+                            if (record.owner !== this.#owner) {
+                                record = { ...record, owner: this.#owner, ...(record.binding === undefined ? {} : { binding: this.#binding, instanceOwner: this.#instanceOwner }) };
+                                transaction.write(record);
+                            }
+                            lease.write({ ...record, databaseFile: this.#store.identity });
+                        }
+                    } else {
+                        record = undefined;
+                    }
+                    if (container !== undefined) this.#operations.setContainerTarget?.(container.id);
+                    const changes: AdoptionTransaction = {
+                        read: () => transaction.read(),
+                        write: (value) => {
+                            // Commit the resource claim before the per-instance record.
+                            // A crash between commits cannot grant a second owner.
+                            transaction.write(value);
+                            lease.write({ ...value, databaseFile: this.#store.identity });
+                        },
+                        clear: () => {
+                            const value = transaction.read();
+                            const current = lease.read();
+                            if (value !== undefined && current !== undefined && this.#sameClaim(current, value)) lease.clear();
+                            transaction.clear();
+                        },
+                    };
+                    try {
+                        return { value: await operation(container, record, changes) };
+                    } catch (error) {
+                        // Preserve verified invalidations, and retain a live claim
+                        // when provider/native cleanup fails before completing.
+                        return { error };
+                    }
+                });
+                if ("resourceId" in locked) {
+                    id = locked.resourceId;
+                    continue;
                 }
-            } else {
-                record = undefined;
-            }
-            // Pin execution and lifecycle commands to the verified immutable ID.
-            if (container !== undefined) this.#operations.setContainerTarget?.(container.id);
-            try {
-                return { value: await operation(container, record, transaction) };
-            } catch (error) {
-                // Commit identity invalidation even when the requested operation
-                // refuses an unproven running container or a provider start fails.
-                return { error };
+                return locked;
             }
         });
         if ("error" in result) throw result.error;
@@ -168,7 +265,11 @@ export class ContainerProvisionExisting implements ContainerProvision {
 
     #requireAdopted(record: ContainerAdoptionRecord | undefined): void {
         if (record !== undefined) return;
-        throw this.#error(`Container ${this.#config.containerName} is already running. Running container attach is not a supported instance mode.`, { unsupportedMode: "runningContainer" });
+        throw this.#runningError();
+    }
+
+    #runningError() {
+        return this.#error(`Container ${this.#config.containerName} is already running. Running container attach is not a supported instance mode.`, { unsupportedMode: "runningContainer" });
     }
 
     async #start(container: ContainerIdentity, operation: string): Promise<ContainerIdentity> {

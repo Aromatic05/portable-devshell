@@ -9,6 +9,8 @@ export interface ContainerAdoptionIdentity {
     /** Previous config-hash owner, used only for verified in-place migration. */
     previousOwner?: string;
     generation?: string;
+    /** Shared across instance databases targeting the same provider resources. */
+    resourceDirectory?: string;
 }
 
 export interface ContainerAdoptionRecord {
@@ -16,6 +18,13 @@ export interface ContainerAdoptionRecord {
     generation: string;
     containerId: string;
     startedAt: string;
+    /** Persisted binding evidence permits migration without the old full config. */
+    binding?: string;
+    instanceOwner?: string;
+    databaseFile?: string;
+    retiring?: boolean;
+    /** Resource-level fence retained until this physical start ends. */
+    revoked?: boolean;
 }
 
 export interface AdoptionTransaction {
@@ -37,6 +46,8 @@ export class ContainerAdoptionStore {
         this.#file = file === undefined ? undefined : resolve(file);
         this.#key = this.#file ?? randomUUID();
     }
+
+    get identity(): string { return this.#key; }
 
     async transaction<T>(operation: (transaction: AdoptionTransaction) => Promise<T>): Promise<T> {
         const previous = pending.get(this.#key) ?? Promise.resolve();
@@ -60,7 +71,8 @@ export class ContainerAdoptionStore {
                     const row = db.prepare("SELECT record FROM adoption WHERE singleton = 1").get();
                     if (row === undefined) return undefined;
                     const record = JSON.parse(String(row.record)) as ContainerAdoptionRecord;
-                    if (![record.owner, record.generation, record.containerId, record.startedAt].every((value) => typeof value === "string" && value.length > 0))
+                    if (![record.owner, record.generation, record.containerId, record.startedAt].every((value) => typeof value === "string" && value.length > 0) ||
+                        !/^[a-f0-9]{64}$/iu.test(record.containerId))
                         throw new Error("Invalid container adoption provenance.");
                     return record;
                 },

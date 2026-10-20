@@ -6,6 +6,7 @@ import { createContainerWorkerEnvironment } from "../../../transport/endpoint/ch
 
 export class ContainerExecution implements WorkerRuntime {
     readonly #install: ContainerInstall;
+    #nativeStopPending = false;
 
     constructor(install: ContainerInstall) {
         this.#install = install;
@@ -52,12 +53,14 @@ export class ContainerExecution implements WorkerRuntime {
                     );
                 break;
             case "stop":
-                if (!(await this.#install.isAvailable()))
+                if (!(await this.#install.isAvailable())) {
+                    this.#nativeStopPending = true;
                     return this.#syntheticResult(
                         "stop",
                         options.instanceName,
                         JSON.stringify({ stopped: true }),
                     );
+                }
                 break;
             case "logs":
                 if (!(await this.#install.isAvailable()))
@@ -81,7 +84,13 @@ export class ContainerExecution implements WorkerRuntime {
 
         try {
             const executable = await this.#install.resolveExecutable();
+            if (preparedRuntimeRetire && this.#nativeStopPending) {
+                const stopped = await runWorkerCommand(this.#install.connection, executable, "stop", options);
+                if (stopped.exitCode !== 0) return stopped;
+                this.#nativeStopPending = false;
+            }
             const result = await runWorkerCommand(this.#install.connection, executable, command, options);
+            if (command === "stop" && result.exitCode === 0) this.#nativeStopPending = false;
             if (command === "stop" && result.exitCode === 0)
                 await this.#install.afterWorkerStop();
             return result;

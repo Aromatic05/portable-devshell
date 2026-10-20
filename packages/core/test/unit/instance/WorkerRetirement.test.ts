@@ -95,3 +95,31 @@ test("managed retirement stops before retiring and accepts already absent resour
     await retirement.retire();
     assert.deepEqual(calls, ["stop", "runtime", "provider", "stop", "runtime", "provider"]);
 });
+
+
+for (const failedCommand of ["stop", "runtime"]) {
+    test(`existing-container ${failedCommand} failure retains provider authority until a successful retry`, async () => {
+        const calls: string[] = [];
+        let failing = true;
+        const retirement = new WorkerInstanceRetirement({
+            config: { name: "retirement-test", preserveProviderOnRuntimeRetirementFailure: true } as never,
+            commandClient: {
+                async stop() {
+                    calls.push("stop");
+                    return { exitCode: failing && failedCommand === "stop" ? 23 : 0, details: {} };
+                },
+                async retireRuntime() {
+                    calls.push("runtime");
+                    return { exitCode: failing && failedCommand === "runtime" ? 29 : 0, details: {} };
+                },
+                async retireProviderResources() { calls.push("provider"); },
+            } as never,
+        });
+        await assert.rejects(retirement.retire(), /incomplete/u);
+        assert.deepEqual(calls, failedCommand === "stop" ? ["stop"] : ["stop", "runtime"]);
+        failing = false;
+        calls.length = 0;
+        await retirement.retire();
+        assert.deepEqual(calls, ["stop", "runtime", "provider"]);
+    });
+}
