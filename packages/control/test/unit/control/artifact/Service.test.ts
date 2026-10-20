@@ -214,6 +214,28 @@ class DirectTargetEndpoint extends MemoryArtifactEndpoint {
     }
 }
 
+class InvalidVerificationEndpoint extends MemoryArtifactEndpoint {
+    async finishArtifactReceive(receiveId: string) {
+        return {
+            blake3: "b".repeat(64),
+            bytes: this.received.get(receiveId)?.length ?? 0,
+            receiveId,
+            targetPath: "/target/payload.bin",
+        };
+    }
+}
+
+class InvalidChunkEndpoint extends MemoryArtifactEndpoint {
+    async readArtifactPayload(input: {
+        maxBytes: number;
+        offsetBytes: number;
+        payloadId: string;
+    }) {
+        const chunk = await super.readArtifactPayload(input);
+        return { ...chunk, offsetBytes: input.offsetBytes + 1 };
+    }
+}
+
 class DirectSourceEndpoint extends MemoryArtifactEndpoint {
     directPushCalls = 0;
     failDirect = false;
@@ -305,6 +327,70 @@ test("artifact transfer returns queued immediately and completes asynchronously"
     assert.ok(events.some((event) => event.type === "artifact.transferCompleted"));
     assert.equal(service.snapshot().lastSeq, events.length);
 });
+
+test("artifact transfer rejects a receiver hash mismatch and aborts the orphaned receive", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-hash-mismatch");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new MemoryArtifactEndpoint(Buffer.from("verified bytes"));
+    const target = new InvalidVerificationEndpoint(Buffer.alloc(0));
+    const service = new ArtifactService({
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir,
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const failed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failure?.code, "artifact.payloadInvalid");
+    assert.deepEqual(target.abortedReceives, ["receive-1"]);
+    assert.deepEqual(source.closedPayloads, ["payload-1"]);
+});
+
+test("artifact transfer rejects a chunk with a mismatched offset and rolls back the receive", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-invalid-chunk");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const source = new InvalidChunkEndpoint(Buffer.from("chunk data"));
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
+    const service = new ArtifactService({
+        chunkBytes: 3,
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
+        storageDir,
+    });
+    await service.initialize();
+
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const failed = await service.waitForTransfer(started.transfer.transferId);
+
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failure?.code, "artifact.payloadInvalid");
+    assert.deepEqual(target.abortedReceives, ["receive-1"]);
+    assert.deepEqual(source.closedPayloads, ["payload-1"]);
+});
+
 
 async function readArtifactEvents(
     service: ArtifactService,
