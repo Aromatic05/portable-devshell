@@ -48,3 +48,24 @@ TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/t
 
 For the Control/Worker restart, 262 revision stream and failed committed-delete cleanup retry, set a **brand-new** private Testspace root, start, run `pnpm testspace recovery-smoke`, and always call `pnpm testspace stop` even if it fails. This test currently observes `cleanupPending=true` and a persistent old-Generation debt after public retry. See `docs/development/beta-bug-findings.md`. Never run this restart smoke on shared `.testspace` or live production Control.
 
+
+## Fifth-round opt-in regressions
+
+The following tests are **deliberately red** until product behavior is repaired; run these individually. They are excluded from the normal package and Rust test discovery.
+
+```sh
+# Real Control Unix IPC + real Rust Worker stale PID across Control restart
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ControlCleanupRetryRound5.test.ts
+
+# Isolated native Worker retire and Cleanup Debt after process state becomes stale
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/WorkerRetireStalePidRound5.test.ts
+
+# Real TCP/OAuth concurrent refresh replay; one failed reuse does not revoke issued successor
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/McpRefreshConcurrentReplayRound5.test.ts
+
+# Two real React red regressions: foreign Context reentry claim and stale snapshot overwrite
+node packages/mcpapp/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/mcpapp-round5-repro.config.ts
+```
+
+For the isolated positive three-phase running-system retirement proof, start a *fresh* dedicated Testspace root, run `pnpm testspace retirement-smoke`, and always run `pnpm testspace stop` (even on failures). It verifies never-started deletion, explicitly stopped Worker deletion, and Control-restarted Worker stopped before deletion, with debt-free same-name recreation. This is not a permanent fix for the automatic cleanup retry RED.
+
