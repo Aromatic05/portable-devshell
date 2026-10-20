@@ -13,6 +13,7 @@ on:
                     - upgrade
                     - extension
                     - workflow
+                    - recovery
                     - windows-psmux
 
 permissions:
@@ -45,12 +46,12 @@ jobs:
               if: inputs.suite == 'upgrade'
               run: pnpm testspace upgrade-smoke
             - name: Build isolated Testspace runtime
-              if: inputs.suite == 'extension' || inputs.suite == 'workflow'
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery'
               run: |
                   pnpm build
                   pnpm test:prepare
             - name: Start isolated Control and Workers
-              if: inputs.suite == 'extension' || inputs.suite == 'workflow'
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery'
               run: pnpm testspace start --skip-build
             - name: Extension candidate failure and generation restoration
               if: inputs.suite == 'extension'
@@ -61,15 +62,21 @@ jobs:
                   pnpm testspace workflow-smoke
                   pnpm testspace approval-smoke
                   pnpm testspace mailing-smoke
+            - name: Restart, audit persistence and stream gap recovery
+              if: inputs.suite == 'recovery'
+              shell: bash
+              run: pnpm testspace recovery-smoke 2>&1 | tee "$RUNNER_TEMP/beta-matrix-recovery.log"
             - name: Stop isolated Testspace
-              if: always() && (inputs.suite == 'extension' || inputs.suite == 'workflow')
+              if: always() && (inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery')
               run: pnpm testspace stop
             - name: Upload isolated Testspace logs
               if: failure()
               uses: actions/upload-artifact@v7
               with:
                   name: beta-matrix-linux-${{ inputs.suite }}-${{ github.run_id }}
-                  path: ${{ env.DEVSHELL_TESTSPACE_ROOT }}/*.log
+                  path: |
+                      ${{ env.DEVSHELL_TESTSPACE_ROOT }}/*.log
+                      ${{ runner.temp }}/beta-matrix-recovery.log
                   if-no-files-found: ignore
 
     windows-psmux:

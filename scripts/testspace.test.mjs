@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
     buildTestspaceInstanceConfig,
@@ -1005,4 +1006,249 @@ test("testspace namespace state path is deterministic per user and root", () => 
     assert.equal(first, repeated);
     assert.notEqual(first, other);
     assert.match(first, /^\/tmp\/pds-testspace-ns-1000-[0-9a-f]{16}$/u);
+});
+
+test("recovery smoke parser and launch plan preserve the guarded runtime without rebuilding", () => {
+    assert.equal(resolveTestspaceCommand("recovery-smoke"), "recovery-smoke");
+    assert.deepEqual(resolveTestspaceInvocation(["recovery-smoke"]), {
+        command: "recovery-smoke", args: [],
+    });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["recovery-smoke"]), {
+        command: "recovery-smoke", prepare: false, runtimeArgv: ["recovery-smoke"],
+    });
+    assert.equal(resolveTestspaceCommand("recovery-smoke-typo"), "invalid");
+});
+
+test("recovery smoke refuses unguarded invocation before opening IPC or HTTP", async () => {
+    const { runTestspaceRecoverySmoke } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    await assert.rejects(runTestspaceRecoverySmoke({
+        endpoint: "http://127.0.0.1:1/never-contact", runtimeDirectory: "/never-open", workspace: "/never-write",
+    }), /guarded Testspace launcher/u);
+});
+
+test("recovery stream assertion rejects gap, close, wrong origin and duplicate or skipped revisions", async () => {
+    const { assertRecoveryEvent } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    assertRecoveryEvent({ kind: "event", event: { kind: "config", revision: 42 } }, 42);
+    for (const message of [
+        { kind: "gap", gap: { fromSeq: 42, nextSeq: 43, lastSeq: 45 } },
+        { kind: "closed" },
+        { kind: "event", event: { kind: "registry", revision: 42 } },
+        { kind: "event", event: { kind: "config", revision: 41 } },
+        { kind: "event", event: { kind: "config", revision: 43 } },
+    ]) assert.throws(() => assertRecoveryEvent(message, 42), { code: "ERR_ASSERTION" });
+});
+
+test("recovery audit comparison detects payload corruption, missing calls and duplicates independent of order", async () => {
+    const { assertRecoveryAudit } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    const before = [0, 7].map((exitCode) => ({
+        callId: `call-${exitCode}`, ctxId: "ctx-recovery", status: "completed", exitCode,
+        input: { command: `exit ${exitCode}` }, output: { stdout: `out-${exitCode}`, stderr: "err", exitCode },
+    }));
+    assertRecoveryAudit(before, [...structuredClone(before)].reverse());
+    assert.throws(() => assertRecoveryAudit(before, before.slice(0, 1)), { code: "ERR_ASSERTION" });
+    assert.throws(() => assertRecoveryAudit(before, [before[0], before[0]]), { code: "ERR_ASSERTION" });
+    const corrupted = structuredClone(before);
+    corrupted[1].output.stderr = "lost-stderr";
+    assert.throws(() => assertRecoveryAudit(before, corrupted), { code: "ERR_ASSERTION" });
+    const reassigned = structuredClone(before);
+    reassigned[1].ctxId = "other-context";
+    assert.throws(() => assertRecoveryAudit(before, reassigned), { code: "ERR_ASSERTION" });
+});
+
+test("recovery deadline propagates errors and bounds a stalled stream without cancelling product work", async () => {
+    const { recoveryDeadline } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    assert.equal(await recoveryDeadline(Promise.resolve("settled"), "completed read", 100), "settled");
+    const failure = new Error("original transport fault");
+    await assert.rejects(recoveryDeadline(Promise.reject(failure), "fault", 100), (error) => error === failure);
+    await assert.rejects(recoveryDeadline(new Promise(() => {}), "pending IPC read", 1), /timed out: pending IPC read/u);
+});
+
+// Real storage checks remain runnable when the workspace disallows listen().
+// Load current source, so this does not silently verify a stale dist build.
+async function recoveryAuditDatabase() {
+    const { tsImport } = await import("tsx/esm/api");
+    return (await tsImport("../packages/core/src/audit/database/index.ts", {
+        parentURL: import.meta.url, tsconfig: fileURLToPath(new URL("../tsconfig.test.json", import.meta.url)),
+    })).AuditDatabase;
+}
+
+function recoveryAuditRecords() {
+    return [0, 7].map((exitCode) => ({
+        callId: `recovery-call-${exitCode}`, ctxId: "recovery-context", instance: "recovery-local",
+        source: "mcp", toolName: "bash_run", status: "completed", exitCode,
+        startedAt: new Date().toISOString(), completedAt: new Date().toISOString(),
+        inputSummary: `exit ${exitCode}`, workspace: "/isolated/workspace",
+        input: { command: `printf '持久化'; exit ${exitCode}` },
+        output: { stdout: "持久化\n", stderr: "stderr survives\u0000too", exitCode },
+    }));
+}
+
+test("recovery real SQLite audit survives repeated close/reopen with exact call payloads and IDs", async (t) => {
+    const { assertRecoveryAudit } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    const AuditDatabase = await recoveryAuditDatabase();
+    const root = await mkdtemp(join(tmpdir(), "pds-recovery-audit-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const file = join(root, "audit.sqlite");
+    const options = { maxBytes: 16 * 1024 * 1024, retentionDays: 7 };
+    const records = recoveryAuditRecords();
+    const storeOptions = { timestamp: (record) => record.startedAt };
+    let database = new AuditDatabase(file, options);
+    t.after(() => database.close());
+    const store = database.toolCallStore(storeOptions);
+    for (const record of records) await store.append(record);
+    const query = { ctxId: "recovery-context", toolName: "bash_run", includeInput: true, includeOutput: true };
+    assertRecoveryAudit(records, store.readQuery(query));
+    await database.close();
+    for (let generation = 0; generation < 3; generation += 1) {
+        database = new AuditDatabase(file, options);
+        const recovered = database.toolCallStore(storeOptions);
+        assertRecoveryAudit(records, recovered.readQuery(query));
+        assert.equal(recovered.hasCall(records[0].callId), true);
+        assert.equal(recovered.hasCall(records[1].callId), true);
+        assert.deepEqual(recovered.readQuery({ ...query, ctxId: "unrelated-context" }), []);
+        await database.close();
+    }
+});
+
+test("recovery real SQLite close drains queued audit writes before another lifetime reads them", async (t) => {
+    const { assertRecoveryAudit } = await import("./testspace/TestspaceRecoverySmoke.mjs");
+    const AuditDatabase = await recoveryAuditDatabase();
+    const root = await mkdtemp(join(tmpdir(), "pds-recovery-drain-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const file = join(root, "audit.sqlite");
+    const options = { maxBytes: 16 * 1024 * 1024, retentionDays: 7 };
+    const storeOptions = { timestamp: (record) => record.startedAt };
+    const database = new AuditDatabase(file, options);
+    t.after(() => database.close());
+    const store = database.toolCallStore(storeOptions);
+    const records = recoveryAuditRecords();
+    const writes = records.map((record) => store.append(record));
+    // Closing immediately is the actual shutdown interleaving; no sleep or
+    // mocked flush acknowledgement can hide loss of a queued write.
+    await database.close();
+    await Promise.all(writes);
+    const reopened = new AuditDatabase(file, options);
+    t.after(() => reopened.close());
+    assertRecoveryAudit(records, reopened.toolCallStore(storeOptions).readQuery({ ctxId: "recovery-context" }));
+    await reopened.close();
+});
+
+test("recovery real instance history defines an exact 256 revision gap boundary and resume cursor", async () => {
+    const { InstanceChangeHub } = await import("../packages/control/src/instance/Change.ts");
+    const hub = new InstanceChangeHub();
+    for (let revision = 1; revision <= 256; revision += 1) hub.publish("config");
+    assert.equal(hub.replay(1).kind, "replay");
+    assert.equal(hub.replay(1).changes.length, 256);
+    hub.publish("config");
+    assert.deepEqual(hub.replay(1), { kind: "gap", gap: {
+        lastRevision: 257, oldestAvailableRevision: 2, requestedFromRevision: 1,
+    } });
+    assert.deepEqual(hub.replay(257), { kind: "replay", lastRevision: 257,
+        changes: [{ kind: "config", revision: 257 }] });
+    assert.deepEqual(hub.replay(258), { kind: "replay", lastRevision: 257, changes: [] });
+    hub.publish("config");
+    assert.deepEqual(hub.replay(258).changes, [{ kind: "config", revision: 258 }]);
+});
+
+test("recovery runtime dispatch requires running owned state and exposes the manual command", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const runtime = await readFile(new URL("./testspace.mjs", import.meta.url), "utf8");
+    const launcher = await readFile(new URL("./testspace-launcher.mjs", import.meta.url), "utf8");
+    assert.match(runtime, /import \{ runTestspaceRecoverySmoke \} from "\.\/testspace\/TestspaceRecoverySmoke\.mjs"/u);
+    assert.match(runtime, /case "recovery-smoke":\s+await recoverySmoke\(\);\s+break;/u);
+    assert.match(runtime, /async function recoverySmoke\(\) \{\s+const state = await requireRunningState\(\);\s+const result = await runTestspaceRecoverySmoke\(\{\s+endpoint: testspaceUrls\(state\)\.mcp,\s+runtimeDirectory: stateRuntimeDirectory\(state\),\s+workspace: paths\.workspace,/u);
+    assert.match(runtime, /Recovery:.*pnpm testspace recovery-smoke/u);
+    assert.match(runtime, /Usage: pnpm testspace \[start\|recovery-smoke\|/u);
+    assert.match(launcher, /ensureLinuxTestspaceNamespace\(root,/u);
+    assert.match(launcher, /runInsideTestspaceNamespace\(\s+namespace,\s+scriptPath,\s+runtimeArgv,/u);
+});
+
+test("recovery real Todo and SQLite event storage retain revision fencing across service lifetimes", async (t) => {
+    const { tsImport } = await import("tsx/esm/api");
+    const { TodoService } = await tsImport("../packages/core/src/task/todo/index.ts", {
+        parentURL: import.meta.url, tsconfig: fileURLToPath(new URL("../tsconfig.test.json", import.meta.url)),
+    });
+    const AuditDatabase = await recoveryAuditDatabase();
+    const root = await mkdtemp(join(tmpdir(), "pds-recovery-todo-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const { readFile } = await import("node:fs/promises");
+    const filePath = join(root, "todo.json");
+    const auditPath = join(root, "audit.sqlite");
+    const databaseOptions = { maxBytes: 16 * 1024 * 1024, retentionDays: 7 };
+    const eventOptions = { sequence: (event) => event.seq, timestamp: (event) => event.at };
+    let database = new AuditDatabase(auditPath, databaseOptions);
+    t.after(() => database.close());
+    let events = database.store("events", eventOptions);
+    let sequence = events.readHighWater();
+    const createService = () => new TodoService({
+        filePath, instanceName: "recovery-local",
+        appendEvent: (type, data) => events.append({
+            type, data, seq: ++sequence, at: new Date().toISOString(), instanceName: "recovery-local",
+        }),
+    });
+    const first = createService();
+    const created = await first.write({ revision: 0, title: "recover committed work",
+        todos: [{ id: "verify", content: "verify restart", status: "in_progress" }] }, "recovery-context");
+    assert.equal(created.revision, 1);
+    const committedFile = await readFile(filePath, "utf8");
+    const committedEvents = events.readAll();
+    assert.equal(committedEvents[0].type, "todo.created");
+    await database.close();
+    database = new AuditDatabase(auditPath, databaseOptions);
+    events = database.store("events", eventOptions);
+    sequence = events.readHighWater();
+    const recovered = createService();
+    assert.deepEqual(await recovered.read({ taskId: created.taskId }), created);
+    assert.deepEqual(events.readAll(), committedEvents);
+    await assert.rejects(recovered.write({ taskId: created.taskId, revision: 0,
+        title: created.title, todos: [{ id: "verify", content: "lost update", status: "pending" }] },
+    "recovery-context"), { code: "todo.revisionConflict" });
+    assert.equal(await readFile(filePath, "utf8"), committedFile);
+    assert.deepEqual(events.readAll(), committedEvents);
+    const updated = await recovered.write({ taskId: created.taskId, revision: created.revision,
+        title: created.title, todos: [{ id: "verify", content: "verify restart", status: "completed" }] },
+    "recovery-context");
+    assert.equal(updated.revision, 2);
+    assert.equal(updated.summary.completed, 1);
+    assert.ok(events.readHighWater() > committedEvents.at(-1).seq);
+    await database.close();
+    database = new AuditDatabase(auditPath, databaseOptions);
+    events = database.store("events", eventOptions);
+    assert.deepEqual(await createService().read({ taskId: created.taskId }), updated);
+    assert.equal(events.readAll().filter((event) => event.type === "todo.completed").length, 1);
+    await database.close();
+});
+
+test("recovery real audit runtime drains logs on shutdown and reopens compressed output with call isolation", async (t) => {
+    const { tsImport } = await import("tsx/esm/api");
+    const { createAuditRuntime } = await tsImport("../packages/core/src/audit/index.ts", {
+        parentURL: import.meta.url, tsconfig: fileURLToPath(new URL("../tsconfig.test.json", import.meta.url)),
+    });
+    const root = await mkdtemp(join(tmpdir(), "pds-recovery-runtime-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const options = { instanceName: "recovery-local", filePath: join(root, "audit.sqlite"),
+        eventBufferSize: 500, limits: { maxBytes: 16 * 1024 * 1024, retentionDays: 7 } };
+    let runtime = createAuditRuntime(options);
+    t.after(() => runtime.close());
+    const stdout = "持久化🌍\u0000".repeat(2048);
+    const stderr = "independent stderr\n".repeat(1024);
+    const context = { callId: "recovery-call", ctxId: "recovery-context", source: "mcp", toolName: "bash_run" };
+    const at = new Date().toISOString();
+    const stdoutWrite = runtime.api.logs.append("stdout", stdout, at, context);
+    const stderrWrite = runtime.api.logs.append("stderr", stderr, at, context);
+    // Production composition owns the log queue as well as SQLite's queue.
+    // Closing the runtime must drain both in the correct order.
+    await runtime.close();
+    const committed = await Promise.all([stdoutWrite, stderrWrite]);
+    assert.deepEqual(committed.map((entry) => entry.seq), [1, 2]);
+    runtime = createAuditRuntime(options);
+    assert.deepEqual(await runtime.api.logs.read({ callId: context.callId, ctxId: context.ctxId }), committed);
+    assert.deepEqual(await runtime.api.logs.read({ callId: context.callId, ctxId: "other-context" }), []);
+    assert.deepEqual(await runtime.api.logs.read({ callId: "other-call", ctxId: context.ctxId }), []);
+    const next = await runtime.api.logs.append("stdout", "after recovery", at, context);
+    assert.equal(next.seq, 3, "Log sequence high water must survive the runtime lifetime");
+    await runtime.close();
+    runtime = createAuditRuntime(options);
+    assert.deepEqual(await runtime.api.logs.read({ callId: context.callId, ctxId: context.ctxId }), [...committed, next]);
+    await runtime.close();
 });

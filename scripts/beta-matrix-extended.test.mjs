@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/beta-matrix-extended.yml", import.meta.url), "utf8");
-const suites = ["upgrade", "extension", "workflow", "windows-psmux"];
+const suites = ["upgrade", "extension", "workflow", "recovery", "windows-psmux"];
 
 test("extended beta verification is explicit, not a pull request gate", () => {
     assert.match(workflow, /workflow_dispatch:/u);
@@ -14,7 +14,7 @@ test("extended beta verification is explicit, not a pull request gate", () => {
 test("extended Testspace commands use private root and always attempt shutdown", () => {
     assert.match(workflow, /DEVSHELL_TESTSPACE_ROOT:\s*\$\{\{ runner\.temp \}\}\/beta-matrix-/u);
     for (const subcommand of [
-        "upgrade-smoke", "extension-smoke", "workflow-smoke", "approval-smoke", "mailing-smoke",
+        "upgrade-smoke", "extension-smoke", "workflow-smoke", "approval-smoke", "mailing-smoke", "recovery-smoke",
     ]) assert.ok(workflow.includes("pnpm testspace " + subcommand));
     assert.match(workflow, /pnpm testspace start --skip-build/u);
     assert.match(workflow, /if: always\(\).*inputs\.suite/u);
@@ -26,4 +26,26 @@ test("Windows PSMUX runtime contracts run natively on x64 and ARM64", () => {
     assert.match(workflow, /runner: windows-11-arm/u);
     assert.match(workflow, /cargo test --locked -p devshell-worker --test tmux_windows_contract/u);
     assert.match(workflow, /shell: pwsh/u);
+});
+
+test("recovery manual dispatch builds, starts and always stops the dedicated Testspace", () => {
+    assert.match(workflow, /options:[\s\S]*?\n\s+- recovery\n/u);
+    const step = (name) => {
+        const start = workflow.indexOf("            - name: " + name + "\n");
+        assert.notEqual(start, -1, `Missing workflow step: ${name}`);
+        const end = workflow.indexOf("            - name:", start + 1);
+        return workflow.slice(start, end === -1 ? workflow.length : end);
+    };
+    for (const name of ["Build isolated Testspace runtime", "Start isolated Control and Workers", "Stop isolated Testspace"])
+        assert.match(step(name), /inputs\.suite == 'recovery'/u);
+    assert.match(step("Build isolated Testspace runtime"), /pnpm build\n\s+pnpm test:prepare/u);
+    assert.match(step("Start isolated Control and Workers"), /pnpm testspace start --skip-build/u);
+    const recovery = step("Restart, audit persistence and stream gap recovery");
+    assert.match(recovery, /if: inputs\.suite == 'recovery'/u);
+    assert.match(recovery, /shell: bash/u);
+    assert.match(recovery, /pnpm testspace recovery-smoke 2>&1 \| tee "\$RUNNER_TEMP\/beta-matrix-recovery\.log"/u);
+    assert.match(step("Stop isolated Testspace"), /if: always\(\)/u);
+    assert.match(step("Stop isolated Testspace"), /pnpm testspace stop/u);
+    assert.match(step("Upload isolated Testspace logs"), /\$\{\{ runner\.temp \}\}\/beta-matrix-recovery\.log/u);
+    assert.ok(workflow.indexOf(recovery) < workflow.indexOf("            - name: Stop isolated Testspace"));
 });
