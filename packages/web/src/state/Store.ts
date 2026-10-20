@@ -7,7 +7,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { WebDomainSession } from "../app/domain/Session.js";
-import { WebOperationCoordinator } from "./Operation.js";
+import { approvalOperationKey, WebOperationCoordinator } from "./Operation.js";
 import { createInitialWebState, type WebState } from "./Model.js";
 import { errorMessage, withRequestTimeout } from "./Request.js";
 
@@ -47,6 +47,10 @@ export class WebStore {
 
     get state(): WebState {
         return this.#state;
+    }
+
+    operationFailure(operation: string): string | undefined {
+        return this.#operations.failure(operation);
     }
 
     readonly subscribe = (listener: () => void): (() => void) => {
@@ -194,7 +198,7 @@ export class WebStore {
     ): Promise<boolean> {
         const generation = this.#generation;
         return await this.#operations.run(
-            `approval:${approvalId}`,
+            approvalOperationKey(instance, approvalId),
             "Approval recorded.",
             generation,
             async () => {
@@ -431,21 +435,18 @@ export class WebStore {
     }
 
     async validateConfig(draft: ConfigDraft): Promise<boolean> {
-        try {
-            await withRequestTimeout(
-                this.domains.config.validate(draft),
-                this.#requestTimeoutMs,
-                "config.validate",
-            );
-            return true;
-        } catch (error) {
-            this.#set({
-                ...this.#state,
-                error: errorMessage(error),
-                notice: undefined,
-            });
-            return false;
-        }
+        return await this.#operations.run(
+            "config:validate",
+            "Configuration is valid.",
+            this.#generation,
+            async () => {
+                await withRequestTimeout(
+                    this.domains.config.validate(draft),
+                    this.#requestTimeoutMs,
+                    "config.validate",
+                );
+            },
+        );
     }
 
     async updateConfig(request: ConfigBatchUpdateRequest): Promise<boolean> {

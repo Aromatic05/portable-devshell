@@ -1,20 +1,20 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { Audit } from "../../src/view/page/activity/audit/Page.js";
+import { approvalOperationKey } from "../../src/state/Operation.js";
 import { WebStore } from "../../src/state/Store.js";
 import { WebTestDomains, withWebDomains } from "./DomainHarness.js";
 import { auditCall, deferred, setupAudit } from "./BetaMatrixHarness.js";
 import { round4Calls } from "./Round4Harness.js";
 
-// Registered only by the opt-in reproducer under var/agent-work, never by the
-// default suite. These assertions describe the desired product invariant.
+// Shared by the package regressions and the opt-in reproducer.
 export function registerRound4WebDefects() {
     it("H-W1: failed approval must display the exact backend error after a reentrant store update", async () => {
         const { domains, store } = setupAudit(); const pending = deferred<void>();
         vi.spyOn(domains.approval("alpha"), "decide").mockReturnValue(pending.promise);
         fireEvent.click(screen.getByRole("button", { name: "Approve" }));
         fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
-        await waitFor(() => expect(store.state.operations["approval:approval-alpha"]).toBe("pending"));
+        await waitFor(() => expect(store.state.operations[approvalOperationKey("alpha", "approval-alpha")]).toBe("pending"));
         await act(async () => pending.reject(new Error("Policy service refused approval-alpha at revision 42")));
         expect(store.state.error).toBe("Policy service refused approval-alpha at revision 42");
         expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(store.state.error!);

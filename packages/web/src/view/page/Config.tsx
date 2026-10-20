@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
     configInstanceChangedPaths,
     configInstanceRequiresRestart,
@@ -37,24 +37,44 @@ export function Config({
             : instances.some((entry) => entry.name === instance)
               ? instance
               : undefined;
-    const baseline = useMemo(
+    const serverBaseline = useMemo(
         () =>
             editableInstance(
                 instances.find((entry) => entry.name === selectedName),
             ),
         [instances, selectedName],
     );
-    const baselineText = useMemo(() => stringify(baseline), [baseline]);
-    const [draftText, setDraftText] = useState(baselineText);
+    const baselineText = useMemo(() => stringify(serverBaseline), [serverBaseline]);
+    const [editor, setEditor] = useState({ baselineText, text: baselineText });
+    const draftText = editor.text;
+    const baseline = useMemo(() => parseInstance(editor.baselineText).value, [editor.baselineText]);
+    function setDraftText(text: string): void {
+        setEditor((previous) => ({ ...previous, text }));
+    }
+    const [busy, setBusy] = useState(false);
+    const [restartRecovery, setRestartRecovery] = useState(false);
+    const epoch = useRef(0);
+    const working = useRef(false);
+    const storeState = useSyncExternalStore(store.subscribe, () => store.state, () => store.state);
     const [feedback, setFeedback] = useState<{
         kind: "error" | "success";
         text: string;
     }>();
 
     useEffect(() => {
-        setDraftText(baselineText);
+        epoch.current += 1;
+        working.current = false;
+        setBusy(false);
+        setRestartRecovery(false);
+        setEditor({ baselineText, text: baselineText });
         setFeedback(undefined);
-    }, [baselineText, selectedName]);
+        return () => { epoch.current += 1; };
+    }, [selectedName]);
+    useEffect(() => {
+        setEditor((previous) => previous.text === previous.baselineText
+            ? { baselineText, text: baselineText }
+            : previous);
+    }, [baselineText]);
 
     const parsed = useMemo(() => parseInstance(draftText), [draftText]);
     const changedPaths =
@@ -63,7 +83,7 @@ export function Config({
             : [];
     const dirty =
         parsed.value === undefined || baseline === undefined
-            ? draftText !== baselineText
+            ? draftText !== editor.baselineText
             : changedPaths.length > 0;
     const restartRequired =
         parsed.value !== undefined && baseline !== undefined
@@ -79,7 +99,8 @@ export function Config({
         snapshot?.daemonState === "running" || snapshot?.ready === true;
     const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
     const operationPending =
-        store.state.operations["config:update"] !== undefined;
+        busy || storeState.operations["config:update"] !== undefined ||
+        storeState.operations["config:validate"] !== undefined;
     const interactive =
         server.status === "online" && !disabled && !operationPending;
 
@@ -89,7 +110,7 @@ export function Config({
         setFeedback(undefined);
     }
 
-    async function validate(): Promise<boolean> {
+    async function validate(requestEpoch: number): Promise<boolean> {
         if (selectedName === undefined || parsed.value === undefined) {
             setFeedback({
                 kind: "error",
@@ -103,13 +124,14 @@ export function Config({
             parsed.value,
         );
         const succeeded = await store.validateConfig(draft);
+        if (requestEpoch !== epoch.current) return false;
         setFeedback(
             succeeded
                 ? { kind: "success", text: "Configuration is valid." }
                 : {
                       kind: "error",
                       text:
-                          store.state.error ??
+                          store.operationFailure("config:validate") ??
                           "Configuration validation failed.",
                   },
         );
@@ -117,71 +139,133 @@ export function Config({
     }
 
     async function save(restart: boolean): Promise<void> {
-        if (selectedName === undefined || parsed.value === undefined) return;
-        if (!(await validate())) return;
-        if (restart && selfManaged) {
-            setFeedback({
-                kind: "error",
-                text: `Instance ${selectedName} is self-managed; restart it on the remote machine.`,
-            });
-            return;
-        }
-        if (!restart && restartRequired && running) {
-            setFeedback({
-                kind: "error",
-                text: "These changes require a worker restart. Use Save & Restart or stop the instance first.",
-            });
-            return;
-        }
-        let stopped = false;
-        if (restart && running) {
-            if (!(await store.stop(selectedName))) {
+        if (!interactive || working.current || selectedName === undefined || parsed.value === undefined) return;
+        working.current = true;
+        setBusy(true);
+        const requestEpoch = epoch.current;
+        const current = () => requestEpoch === epoch.current;
+        try {
+            if (!(await validate(requestEpoch))) return;
+            if (restart && selfManaged) {
                 setFeedback({
                     kind: "error",
-                    text:
-                        store.state.error ?? `Could not stop ${selectedName}.`,
+                    text: `Instance ${selectedName} is self-managed; restart it on the remote machine.`,
                 });
                 return;
             }
-            stopped = true;
-        }
-        const succeeded = await store.updateConfig({
-            instance: {
-                instanceName: selectedName,
-                patch: instancePatch(parsed.value),
-            },
-        });
-        if (!succeeded) {
-            if (stopped) await store.start(selectedName);
-            setFeedback({
-                kind: "error",
-                text: store.state.error ?? "Configuration could not be saved.",
-            });
-            return;
-        }
-        if (stopped) {
-            if (!(await store.start(selectedName))) {
+            if (!restart && restartRequired && running) {
                 setFeedback({
                     kind: "error",
-                    text:
-                        store.state.error ??
-                        "Saved, but the worker could not be restarted.",
+                    text: "These changes require a worker restart. Use Save & Restart or stop the instance first.",
                 });
                 return;
             }
+            let stopped = false;
+            if (restart && running) {
+                if (!(await store.stop(selectedName))) {
+                    if (!current()) return;
+                    setFeedback({
+                        kind: "error",
+                        text:
+                            store.operationFailure(`stop:${selectedName}`) ?? `Could not stop ${selectedName}.`,
+                    });
+                    return;
+                }
+                stopped = true;
+            }
+            const succeeded = await store.updateConfig({
+                instance: {
+                    instanceName: selectedName,
+                    patch: instancePatch(parsed.value),
+                },
+            });
+            if (!succeeded) {
+                const failure = store.operationFailure("config:update") ?? "Configuration could not be saved.";
+                const restored = !stopped || await store.start(selectedName);
+                if (!current()) return;
+                setRestartRecovery(!restored);
+                setFeedback({
+                    kind: "error",
+                    text: restored ? failure : `${failure} Recovery start failed: ${store.operationFailure(`start:${selectedName}`)}`,
+                });
+                return;
+            }
+            if (current()) setEditor({ baselineText: draftText, text: draftText });
+            if (stopped) {
+                if (!(await store.start(selectedName))) {
+                    if (!current()) return;
+                    setRestartRecovery(true);
+                    setFeedback({
+                        kind: "error",
+                        text:
+                            `Configuration saved, but the worker could not be restarted: ${store.operationFailure(`start:${selectedName}`)}`,
+                    });
+                    return;
+                }
+            }
+            if (!current()) return;
+            if (stopped) setRestartRecovery(false);
+            setFeedback({
+                kind: "success",
+                text: stopped
+                    ? "Configuration saved and worker restarted."
+                    : "Configuration saved.",
+            });
+        } finally {
+            if (current()) {
+                working.current = false;
+                setBusy(false);
+            }
         }
-        const current = editableInstance(
-            configInstances(domains.config.state.view).find(
-                (entry) => entry.name === selectedName,
-            ),
-        );
-        setDraftText(stringify(current ?? parsed.value));
-        setFeedback({
-            kind: "success",
-            text: stopped
-                ? "Configuration saved and worker restarted."
-                : "Configuration saved.",
-        });
+    }
+
+    async function runValidation(): Promise<void> {
+        if (!interactive || working.current) return;
+        working.current = true;
+        setBusy(true);
+        const requestEpoch = epoch.current;
+        try { await validate(requestEpoch); }
+        finally {
+            if (requestEpoch === epoch.current) { working.current = false; setBusy(false); }
+        }
+    }
+
+    async function reload(): Promise<void> {
+        if (!interactive || working.current) return;
+        working.current = true;
+        setBusy(true);
+        const requestEpoch = epoch.current;
+        try {
+            await domains.config.refresh();
+            if (requestEpoch !== epoch.current) return;
+            const failure = domains.config.state.failure;
+            if (failure !== undefined) throw failure;
+            const next = editableInstance(configInstances(domains.config.state.view).find((entry) => entry.name === selectedName));
+            const text = stringify(next);
+            setEditor({ baselineText: text, text });
+            setFeedback({ kind: "success", text: "Reloaded from Control." });
+        } catch (error) {
+            if (requestEpoch === epoch.current) setFeedback({ kind: "error", text: readError(error) });
+        } finally {
+            if (requestEpoch === epoch.current) { working.current = false; setBusy(false); }
+        }
+    }
+
+    async function retryStart(): Promise<void> {
+        if (!interactive || working.current || selectedName === undefined) return;
+        working.current = true;
+        setBusy(true);
+        const requestEpoch = epoch.current;
+        try {
+            const succeeded = await store.start(selectedName);
+            if (requestEpoch !== epoch.current) return;
+            setRestartRecovery(!succeeded);
+            setFeedback(succeeded ? { kind: "success", text: "Worker restarted." } : {
+                kind: "error", text: store.operationFailure(`start:${selectedName}`) ?? `Could not start ${selectedName}.`,
+            });
+        } finally {
+            if (requestEpoch === epoch.current) { working.current = false; setBusy(false); }
+        }
     }
 
     if (selectedName === undefined) {
@@ -209,7 +293,7 @@ export function Config({
             <article className="config-editor-panel">
                 <div className="config-editor-summary">
                     <strong>{selectedName}</strong>
-                    <span>{dirty ? "Unsaved changes" : "Saved"}</span>
+                    <span>{operationPending ? "Working…" : dirty ? "Unsaved changes" : "Saved"}</span>
                     <span>
                         Apply:{" "}
                         {restartRequired
@@ -652,10 +736,11 @@ export function Config({
                     </p>
                 )}
                 <div className="actions">
+                    {restartRecovery ? <button disabled={!interactive} onClick={() => void retryStart()} type="button">Retry Start</button> : null}
                     <button
                         disabled={!interactive}
                         onClick={() => {
-                            setDraftText(baselineText);
+                            setEditor({ baselineText, text: baselineText });
                             setFeedback(undefined);
                         }}
                         type="button"
@@ -664,38 +749,14 @@ export function Config({
                     </button>
                     <button
                         disabled={!interactive}
-                        onClick={() =>
-                            void domains.config.refresh().then(() => {
-                                const failure = domains.config.state.failure;
-                                if (failure !== undefined) {
-                                    setFeedback({
-                                        kind: "error",
-                                        text: readError(failure),
-                                    });
-                                    return;
-                                }
-                                const next = editableInstance(
-                                    configInstances(
-                                        domains.config.state.view,
-                                    ).find(
-                                        (entry) =>
-                                            entry.name === selectedName,
-                                    ),
-                                );
-                                setDraftText(stringify(next));
-                                setFeedback({
-                                    kind: "success",
-                                    text: "Reloaded from Control.",
-                                });
-                            })
-                        }
+                        onClick={() => void reload()}
                         type="button"
                     >
                         Reload
                     </button>
                     <button
                         disabled={!interactive || parsed.value === undefined}
-                        onClick={() => void validate()}
+                        onClick={() => void runValidation()}
                         type="button"
                     >
                         Validate

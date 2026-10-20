@@ -9,6 +9,11 @@ export interface WebOperationAccess {
 
 export class WebOperationCoordinator {
     #controllers = new Map<string, AbortController>();
+    #failures = new Map<string, string>();
+
+    failure(operation: string): string | undefined {
+        return this.#failures.get(operation);
+    }
 
     constructor(
         private readonly access: WebOperationAccess,
@@ -29,6 +34,7 @@ export class WebOperationCoordinator {
             return false;
 
         const controller = new AbortController();
+        this.#failures.delete(operation);
         this.#controllers.set(operation, controller);
         this.access.setState({
             ...state,
@@ -66,9 +72,13 @@ export class WebOperationCoordinator {
     }
 
     cancelAll(error = new Error("Web operations were cancelled.")): void {
-        const controllers = [...this.#controllers.values()];
+        const controllers = [...this.#controllers];
         this.#controllers.clear();
-        for (const controller of controllers) controller.abort(error);
+        this.#failures.clear();
+        for (const [operation, controller] of controllers) {
+            this.#failures.set(operation, errorMessage(error));
+            controller.abort(error);
+        }
     }
 
     private complete(
@@ -76,9 +86,14 @@ export class WebOperationCoordinator {
         result: { error?: string; notice?: string },
     ): void {
         const state = this.access.getState();
+        if (result.error !== undefined) this.#failures.set(operation, result.error);
         const { [operation]: _completed, ...operations } = state.operations;
         this.access.setState({ ...state, ...result, operations });
     }
+}
+
+export function approvalOperationKey(instance: string, approvalId: string): string {
+    return `approval:${JSON.stringify([instance, approvalId])}`;
 }
 
 function abortPromise(signal: AbortSignal): {

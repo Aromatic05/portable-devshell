@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
     ApprovalRequest,
     ArtifactImageContent,
@@ -18,6 +18,7 @@ import { ConfirmationDialog } from "../../../../component/Confirm.js";
 
 export function ToolCallEntry({
     approval,
+    approvalPending = false,
     call,
     disabled = false,
     initiallyOpen = false,
@@ -29,6 +30,7 @@ export function ToolCallEntry({
     onRefresh,
 }: {
     approval?: ApprovalRequest;
+    approvalPending?: boolean;
     call: ToolCallRecord;
     disabled?: boolean;
     initiallyOpen?: boolean;
@@ -43,7 +45,8 @@ export function ToolCallEntry({
     onRefresh(): Promise<void>;
 }) {
     const [open, setOpen] = useState(initiallyOpen);
-    const [detail, setDetail] = useState<ToolCallRecord | undefined>();
+    const [detail, setDetail] = useState<{ source: ToolCallRecord; value: ToolCallRecord }>();
+    const detailEpoch = useRef(0);
     const [loading, setLoading] = useState(false);
     const [loadFailure, setLoadFailure] = useState<string>();
     const [approvalDecision, setApprovalDecision] = useState<
@@ -51,33 +54,46 @@ export function ToolCallEntry({
     >();
     const [approvalBusy, setApprovalBusy] = useState(false);
     const [approvalFailure, setApprovalFailure] = useState<string>();
+    const approvalEpoch = useRef(0);
+    const deciding = useRef(false);
+    const approvalKey = JSON.stringify([approval?.instance, approval?.approvalId]);
+    useEffect(() => {
+        approvalEpoch.current += 1;
+        deciding.current = false;
+        setApprovalBusy(false);
+        setApprovalDecision(undefined);
+        setApprovalFailure(undefined);
+        return () => { approvalEpoch.current += 1; };
+    }, [approvalKey]);
     useEffect(() => {
         if (initiallyOpen) setOpen(true);
     }, [initiallyOpen]);
-    const load = async (): Promise<void> => {
-        if (
-            detail !== undefined ||
-            loading ||
-            call.input !== undefined ||
-            call.output !== undefined
-        )
-            return;
-        setLoading(true);
+    const loadDetail = useRef(onLoadDetail);
+    loadDetail.current = onLoadDetail;
+    useEffect(() => {
+        const epoch = ++detailEpoch.current;
+        setDetail(undefined);
         setLoadFailure(undefined);
-        try {
-            setDetail(await onLoadDetail());
-        } catch (error) {
-            setLoadFailure(
-                errorMessage(error, "Tool Call detail could not be loaded."),
-            );
-        } finally {
+        setLoading(false);
+        if (!open || call.input !== undefined || call.output !== undefined) return;
+        setLoading(true);
+        void loadDetail.current().then((next) => {
+            if (epoch !== detailEpoch.current) return;
+            if (next?.instance === call.instance && next.callId === call.callId) setDetail({ source: call, value: next });
             setLoading(false);
-        }
+        }, (error: unknown) => {
+            if (epoch !== detailEpoch.current) return;
+            setLoadFailure(errorMessage(error, "Tool Call detail could not be loaded."));
+            setLoading(false);
+        });
+        return () => { detailEpoch.current += 1; };
+    }, [call, open]);
+    const currentDetail = detail?.source === call ? detail.value : undefined;
+    const visibleCall = {
+        ...call,
+        input: call.input === undefined ? currentDetail?.input : call.input,
+        output: call.output === undefined ? currentDetail?.output : call.output,
     };
-    const visibleCall =
-        call.input !== undefined || call.output !== undefined
-            ? call
-            : (detail ?? call);
     return (
         <li className="activity-record tool-call-record">
             <details open={open}>
@@ -86,7 +102,6 @@ export function ToolCallEntry({
                         event.preventDefault();
                         const next = !open;
                         setOpen(next);
-                        if (next) void load();
                     }}
                 >
                     <time dateTime={call.startedAt} title={call.startedAt}>
@@ -112,7 +127,7 @@ export function ToolCallEntry({
                         >
                             <button
                                 className="primary"
-                                disabled={disabled || approvalBusy}
+                                disabled={disabled || approvalBusy || approvalPending}
                                 onClick={() => {
                                     setApprovalFailure(undefined);
                                     setApprovalDecision("approve");
@@ -123,7 +138,7 @@ export function ToolCallEntry({
                             </button>
                             <button
                                 className="danger subtle"
-                                disabled={disabled || approvalBusy}
+                                disabled={disabled || approvalBusy || approvalPending}
                                 onClick={() => {
                                     setApprovalFailure(undefined);
                                     setApprovalDecision("deny");
@@ -156,7 +171,7 @@ export function ToolCallEntry({
                     actionLabel={
                         approvalDecision === "approve" ? "Approve" : "Deny"
                     }
-                    busy={approvalBusy}
+                    busy={approvalBusy || approvalPending}
                     description={`${approvalDecision === "approve" ? "Approve" : "Deny"} ${approval.toolName} on ${approval.instance}${approval.workspace === undefined ? "" : ` in ${approval.workspace}`}? ${approval.reason}`}
                     disabled={disabled}
                     error={approvalFailure}
@@ -166,20 +181,28 @@ export function ToolCallEntry({
                         setApprovalDecision(undefined);
                     }}
                     onConfirm={() => {
+                        if (deciding.current || approvalPending) return;
+                        deciding.current = true;
+                        const epoch = approvalEpoch.current;
                         const decision = approvalDecision;
                         setApprovalBusy(true);
                         setApprovalFailure(undefined);
                         void onDecideApproval(approval, decision)
-                            .then(() => setApprovalDecision(undefined))
-                            .catch((error: unknown) =>
+                            .then(() => { if (epoch === approvalEpoch.current) setApprovalDecision(undefined); })
+                            .catch((error: unknown) => {
+                                if (epoch !== approvalEpoch.current) return;
                                 setApprovalFailure(
                                     errorMessage(
                                         error,
                                         "Approval could not be recorded.",
                                     ),
-                                ),
-                            )
-                            .finally(() => setApprovalBusy(false));
+                                );
+                            })
+                            .finally(() => {
+                                if (epoch !== approvalEpoch.current) return;
+                                deciding.current = false;
+                                setApprovalBusy(false);
+                            });
                     }}
                     variant={
                         approvalDecision === "deny" ? "destructive" : "default"

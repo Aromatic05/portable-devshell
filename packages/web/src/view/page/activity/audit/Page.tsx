@@ -34,6 +34,7 @@ import {
     type ToolCallFilters as Filters,
 } from "./tool/Model.js";
 import type { WebStore } from "../../../../state/Store.js";
+import { approvalOperationKey } from "../../../../state/Operation.js";
 import { useNow } from "../../../Clock.js";
 
 const toolCallPageSize = 20;
@@ -125,7 +126,7 @@ export function Audit({
         () => [...new Set(scopedCalls.map((call) => call.toolName))].sort(),
         [scopedCalls],
     );
-    const selection = useMemo(() => {
+    const filteredSelection = useMemo(() => {
         if (route.view === "call") {
             const call = scopedCalls.find(
                 (candidate) => candidate.callId === route.callId,
@@ -139,10 +140,16 @@ export function Audit({
             scopedCalls,
             filters,
             now,
-            toolCallPage * toolCallPageSize,
-            toolCallPageSize,
+            0,
+            scopedCalls.length,
         );
-    }, [filters, now, route, scopedCalls, toolCallPage]);
+    }, [filters, now, route, scopedCalls]);
+    const currentPage = Math.min(toolCallPage, pageCount(filteredSelection.total, toolCallPageSize) - 1);
+    if (currentPage !== toolCallPage) setToolCallPage(currentPage);
+    const selection = route.view === "call" ? filteredSelection : {
+        total: filteredSelection.total,
+        items: filteredSelection.items.slice(currentPage * toolCallPageSize, (currentPage + 1) * toolCallPageSize),
+    };
     const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
     const interactive = server.status === "online" && !disabled;
     const countText =
@@ -275,8 +282,9 @@ export function Audit({
                                 route.view === "call" &&
                                 call.callId === route.callId
                             }
-                            key={`${call.instance}-${call.callId}`}
+                            key={JSON.stringify([call.instance, call.callId])}
                             now={now}
+                            operations={storeState.operations}
                             onDecideApproval={async (approval, decision) => {
                                 const succeeded = await store.decideTool(
                                     approval.instance,
@@ -285,7 +293,7 @@ export function Audit({
                                 );
                                 if (!succeeded) {
                                     throw new Error(
-                                        storeState.error ??
+                                        store.operationFailure(approvalOperationKey(approval.instance, approval.approvalId)) ??
                                             "Approval could not be recorded.",
                                     );
                                 }
@@ -324,6 +332,7 @@ function ToolCallActivity({
     domains,
     initiallyOpen,
     now,
+    operations,
     onDecideApproval,
     onLoadDetail,
     onLoadImage,
@@ -334,6 +343,7 @@ function ToolCallActivity({
     domains: WebDomainSession;
     initiallyOpen: boolean;
     now: number;
+    operations: Readonly<Record<string, "pending">>;
     onDecideApproval(
         approval: ApprovalRequest,
         decision: "approve" | "deny",
@@ -350,6 +360,7 @@ function ToolCallActivity({
     return (
         <ToolCallEntry
             approval={approval}
+            approvalPending={approval !== undefined && operations[approvalOperationKey(approval.instance, approval.approvalId)] === "pending"}
             call={call}
             disabled={disabled}
             initiallyOpen={initiallyOpen}
