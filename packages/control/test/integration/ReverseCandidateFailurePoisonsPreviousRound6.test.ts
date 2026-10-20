@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fixture, ping } from "../../packages/control/test/integration/ReverseNetworkRound6Fixture.ts";
+import { fixture, ping } from "./ReverseNetworkRound6Fixture.ts";
 
-// Standalone regression; intentionally excluded from package tests.
-// Run without MemorySocketBoundary.mjs for a real localhost TCP reproduction.
+// Default Control regression exercising real localhost WSS.
 test("RED: failed authenticated WSS candidate must leave predecessor RPC usable", { timeout: 8_000 }, async (t) => {
     const f = await fixture(t);
     const token = await f.enroll();

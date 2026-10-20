@@ -40,6 +40,7 @@ export interface WorkerOptions {
     firstSequence?: number;
     handshake?: () => Promise<void>;
     failHandshake?: boolean;
+    session?: Buffer;
 }
 
 // Real admission and disk commits; only an explicitly requested commit pause is injected.
@@ -148,14 +149,18 @@ async function send(socket: WebSocket, data: Uint8Array, fragment = false) {
 }
 
 function worker(base: string, token: string, generation: number, name: string, options: WorkerOptions) {
+    const socket = new WebSocket(`${base.replace("http:", "ws:")}/connect`, "devshell-worker-transport.v2", { headers: headers(token, generation, name) });
+    return workerSession(socket, name, options);
+}
+
+export function workerSession(socket: WebSocket, name: string, options: WorkerOptions = {}) {
     const ready = barrier();
     const methods: string[] = [];
     const errors: string[] = [];
     const acks: string[] = [];
-    const session = randomBytes(16);
+    const session = options.session ?? randomBytes(16);
     let sequence = (options.firstSequence ?? 1) - 1;
     const frames: Buffer[] = [];
-    const socket = new WebSocket(`${base.replace("http:", "ws:")}/connect`, "devshell-worker-transport.v2", { headers: headers(token, generation, name) });
     const channel = new ReverseNetworkRound6Channel(async (data) => {
         const frame = envelope(session, ++sequence, data);
         frames.push(frame);

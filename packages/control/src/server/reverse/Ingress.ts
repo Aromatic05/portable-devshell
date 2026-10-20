@@ -42,11 +42,6 @@ export class ReverseIngress {
     readonly #credentials: ReverseCredentials;
     #publicBaseUrl: string;
     #unregisterRoutes: Array<() => void> = [];
-    #acceptedWss = new WeakMap<ReverseConnectionIdentity["descriptor"], {
-        generation: number;
-        session: string;
-        acceptedThrough: bigint;
-    }>();
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
         noServer: true,
@@ -108,7 +103,6 @@ export class ReverseIngress {
     stop(): void {
         this.uninstall();
         this.#webSocketServer.close();
-        this.#acceptedWss = new WeakMap();
     }
 
     uninstall(): void {
@@ -161,37 +155,27 @@ export class ReverseIngress {
                 socket,
                 head,
                 (webSocket) => {
-                    let credentialReplacementAllowed = false;
+                    // Each physical channel owns a fresh FrameProtocol. Candidate
+                    // ACKs must never mutate the live predecessor's receive state.
+                    let accepted: { session: string; acceptedThrough: bigint } | undefined;
                     const channel = new WebServerChannel(
                         webSocket as never,
                         webSocket.protocol === "devshell-worker-transport.v2"
                             ? {
                                 reliableFrames: (session, seq) => {
-                                    const descriptor = authentication.identity.descriptor;
-                                    const generation = authentication.identity.generation;
-                                    const previous = this.#acceptedWss.get(descriptor);
-                                    if (previous !== undefined &&
-                                        generation < previous.generation &&
-                                        !credentialReplacementAllowed)
-                                        throw new Error("Stale reverse generation frame.");
-                                    if (previous !== undefined &&
-                                        previous.session === session) {
-                                        if (seq <= previous.acceptedThrough)
+                                    if (accepted !== undefined) {
+                                        if (accepted.session !== session)
+                                            throw new Error("Reverse WSS session changed on a live connection.");
+                                        if (seq <= accepted.acceptedThrough)
                                             return undefined;
-                                        if (seq !== previous.acceptedThrough + 1n)
+                                        if (seq !== accepted.acceptedThrough + 1n)
                                             throw new Error("Reverse WSS acknowledgement sequence gap.");
                                     } else if (seq !== 1n) {
-                                        // A new physical connection starts a new
-                                        // FrameProtocol and session at sequence one.
                                         throw new Error("Reverse WSS session must start at sequence one.");
                                     }
-                                    // Acknowledge only contiguous bytes actually
-                                    // accepted by the current FrameProtocol.
-                                    return () => this.#acceptedWss.set(descriptor, {
-                                        generation,
-                                        session,
-                                        acceptedThrough: seq,
-                                    });
+                                    // Commit only bytes accepted by this channel's
+                                    // FrameProtocol, preserving its contiguous ACK.
+                                    return () => { accepted = { session, acceptedThrough: seq }; };
                                 },
                             }
                             : {},
@@ -205,9 +189,6 @@ export class ReverseIngress {
                             authentication.identity.descriptor.config.name,
                             authentication.token,
                             async (credentialReplacement) => {
-                                // A new credential may legitimately restart the
-                                // Worker generation counter at a lower value.
-                                credentialReplacementAllowed = credentialReplacement;
                                 await this.#connections.activate(
                                     authentication.identity,
                                     "wss",
