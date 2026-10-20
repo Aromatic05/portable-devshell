@@ -39,7 +39,7 @@ export function round4Tui(overrides: Partial<TuiCommandDispatcherOptions> = {}) 
             body: `Delete ${instance}?`, confirmLabel: "Delete", confirmIntent });
         await dispatcher.dispatch({ type: "confirm.focus", button: "confirm" });
     };
-    return { domains, store, dispatcher, top, confirm, model };
+    return { domains, store, dispatcher, focusManager, top, confirm, model };
 }
 export async function renderRound4Overlay(harness: ReturnType<typeof round4Tui>) {
     const output = new PassThrough(); let captured = "";

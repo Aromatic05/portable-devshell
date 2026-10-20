@@ -305,6 +305,7 @@ export class TuiFocusManager {
                     this.#store.getState().interaction.overlays,
                 );
                 if (overlay?.kind === "confirmation") {
+                    if (overlay.busy === true) return;
                     this.#store.setFocusScope("confirm");
                     this.#store.replaceTopOverlay({
                         ...overlay,

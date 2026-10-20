@@ -70,6 +70,7 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay === undefined) return false;
+        if (overlay.kind === "confirmation") return this.#closeConfirmation();
         return this.#closeOverlay(overlay.kind);
     }
 
@@ -119,16 +120,17 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay?.kind !== "confirmation") return false;
+        if (overlay.busy === true) return true;
         if (overlay.selectedAction === "cancel")
             return this.#closeOverlay("confirmation");
-        if (overlay.busy === true) return true;
         const confirmIntent = overlay.confirmIntent;
         if (this.#dispatch === undefined) return false;
-        this.#store.replaceTopOverlay({
+        const operation: TuiConfirmationOverlay = {
             ...overlay,
             busy: true,
             error: undefined,
-        });
+        };
+        this.#store.replaceTopOverlay(operation);
         try {
             const succeeded = await this.#dispatch(confirmIntent);
             const actionChangedFocus =
@@ -136,7 +138,7 @@ export class TuiCommandDispatcherOverlay {
             const current = topTuiOverlay(
                 this.#store.getState().interaction.overlays,
             );
-            if (current?.kind !== "confirmation") return succeeded;
+            if (current !== operation) return succeeded;
             if (succeeded) {
                 const closed = actionChangedFocus
                     ? this.#closeConfirmationWithoutRestore()
@@ -156,7 +158,7 @@ export class TuiCommandDispatcherOverlay {
             const current = topTuiOverlay(
                 this.#store.getState().interaction.overlays,
             );
-            if (current?.kind === "confirmation") {
+            if (current === operation) {
                 this.#store.replaceTopOverlay({
                     ...current,
                     busy: false,

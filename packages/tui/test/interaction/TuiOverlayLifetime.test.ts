@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TuiKeyDispatcher } from "../../packages/tui/src/interaction/Input.ts";
-import { deferred, renderRound4Overlay, round4Tui } from "../../packages/tui/test/support/Round4Harness.ts";
+import { TuiKeyDispatcher } from "../../src/interaction/Input.ts";
+import { deferred, renderRound4Overlay, round4Tui } from "../support/Round4Harness.ts";
 
 async function pressEscape(harness: ReturnType<typeof round4Tui>) {
     const intents = new TuiKeyDispatcher().dispatch(harness.store.getState().interaction.focusScope,

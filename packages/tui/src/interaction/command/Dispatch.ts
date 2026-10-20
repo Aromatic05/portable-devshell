@@ -163,6 +163,14 @@ export class TuiCommandDispatcher {
     }
 
     async dispatch(intent: TuiUiIntent): Promise<boolean> {
+        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        if (
+            overlay?.kind === "confirmation" &&
+            overlay.busy === true &&
+            (intent.type === "focus.move" || intent.type === "focus.activate")
+        ) {
+            return true;
+        }
         const navigationResult = await this.#navigation.dispatch(intent);
         if (navigationResult !== undefined) {
             return navigationResult;
@@ -348,13 +356,11 @@ export class TuiCommandDispatcher {
                 );
                 return true;
             case "approval.confirmDeny":
-                await this.#options.onApprovalDecision(
+                return await this.#decideApproval(
                     intent.instance,
                     intent.approvalId,
                     "deny",
                 );
-                this.#audit.returnToPage();
-                return true;
             case "approval.back":
                 this.#audit.returnToPage();
                 return true;
@@ -433,6 +439,9 @@ export class TuiCommandDispatcher {
     }
 
     #cancel(): boolean {
+        if (topTuiOverlay(this.#store.getState().interaction.overlays)?.kind === "confirmation") {
+            return this.#navigation.cancelPassiveScope();
+        }
         const scope = this.#store.getState().interaction.focusScope;
         if (scope === "contextMessage") {
             this.#store.setEditor(undefined);
@@ -507,8 +516,11 @@ export class TuiCommandDispatcher {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<boolean> {
+        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
         await this.#options.onApprovalDecision(instance, approvalId, decision);
-        this.#audit.returnToPage();
+        if (topTuiOverlay(this.#store.getState().interaction.overlays) === overlay) {
+            this.#audit.returnToPage();
+        }
         return true;
     }
 
