@@ -1,4 +1,5 @@
 import {
+    useEffect,
     useMemo,
     useState,
     useSyncExternalStore,
@@ -21,6 +22,8 @@ import {
     type AuditScopeOption,
 } from "./tool/Filters.js";
 import { ToolCallEntry } from "./tool/Entry.js";
+import { approvalMatchesFilters, useApprovalSnapshots } from "./approval/Snapshots.js";
+import { ApprovalActions, ApprovalReview, type ApprovalReviewSelection } from "./approval/Review.js";
 import type { AuditScope, WebRoute } from "../../../../app/Route.js";
 import {
     useDomainSnapshot,
@@ -62,6 +65,18 @@ export function Audit({
         () => store.state,
         () => store.state,
     );
+    const approvalSnapshots = useApprovalSnapshots(domains, instancesState.instances, server.status === "online");
+    const allApprovals = approvalSnapshots.approvals;
+    const [review, setReview] = useState<ApprovalReviewSelection>();
+    const routeKey = JSON.stringify(route);
+    useEffect(() => { setReview(undefined); }, [routeKey]);
+    useEffect(() => {
+        if (review === undefined) return;
+        const selected = review.approval;
+        const replaced = allApprovals.some((approval) => approval.instance === selected.instance &&
+            approval.callId === selected.callId && approval.approvalId !== selected.approvalId);
+        if (replaced || !instancesState.instances.some(({ name }) => name === selected.instance)) setReview(undefined);
+    }, [allApprovals, instancesState.instances, review]);
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [contextStatus, setContextStatus] =
         useState<AuditContextStatusFilter>("active");
@@ -104,13 +119,14 @@ export function Audit({
             auditScopeOptions(
                 instancesState.instances,
                 contextState.contexts,
-                allCalls,
+                [...allCalls, ...allApprovals],
                 contextStatus,
                 now,
                 scope,
             ),
         [
             allCalls,
+            allApprovals,
             contextState.contexts,
             contextStatus,
             instancesState.instances,
@@ -122,10 +138,13 @@ export function Audit({
         () => calls.filter((call) => callMatchesScope(call, scope)),
         [calls, scope],
     );
-    const tools = useMemo(
-        () => [...new Set(scopedCalls.map((call) => call.toolName))].sort(),
-        [scopedCalls],
-    );
+    const scopedApprovals = allApprovals.filter((approval) => callMatchesScope(approval, scope) &&
+        callMatchesContextFilter(approval, scope, contextRecords, contextStatus, now) &&
+        (route.view !== "call" || approval.callId === route.callId));
+    const standaloneApprovals = scopedApprovals.filter((approval) =>
+        !allCalls.some((call) => call.instance === approval.instance && call.callId === approval.callId) &&
+        approvalMatchesFilters(approval, filters, now));
+    const tools = [...new Set([...scopedCalls, ...scopedApprovals].map((item) => item.toolName))].sort();
     const filteredSelection = useMemo(() => {
         if (route.view === "call") {
             const call = scopedCalls.find(
@@ -176,6 +195,7 @@ export function Audit({
     async function refreshAll(): Promise<void> {
         if (!interactive || refreshing) return;
         setRefreshing(true);
+        approvalSnapshots.retry();
         try {
             await store.refreshAudit();
         } finally {
@@ -239,6 +259,42 @@ export function Audit({
                     store={store}
                 />
             ) : null}
+            {approvalSnapshots.pending.some((instance) => scope.kind === "all" || scope.instance === instance) ? (
+                <p role="status">Loading pending approvals…</p>
+            ) : null}
+            {Object.entries(approvalSnapshots.failures).filter(([instance]) => scope.kind === "all" || scope.instance === instance).map(([instance, failure]) => (
+                <div key={instance}>
+                    <p className="error" role="alert">Could not load approvals for {instance}: {failure}</p>
+                    <button disabled={!interactive || approvalSnapshots.pending.length > 0} onClick={approvalSnapshots.retry} type="button">Retry approvals</button>
+                </div>
+            ))}
+            {standaloneApprovals.length === 0 ? null : (
+                <section aria-label="Pending approvals">
+                    <h3>Pending approvals</h3>
+                    <p className="hint">These requests are awaiting a decision before execution.</p>
+                    <ol className="feed activity-feed">
+                        {standaloneApprovals.map((approval) => (
+                            <li className="activity-record approval-record" key={approvalOperationKey(approval.instance, approval.approvalId)}>
+                                <article>
+                                    <h4>{approval.toolName} · {approval.instance}</h4>
+                                    <p>{approval.ctxId === undefined ? "No Context" : `ctx ${approval.ctxId}`} · {workspaceFolderName(approval.workspace)} · {approval.riskLevel} risk</p>
+                                    <p>{approval.reason}</p>
+                                    <pre>{approval.inputSummary}</pre>
+                                    <ApprovalActions approval={approval} disabled={!interactive}
+                                        pending={storeState.operations[approvalOperationKey(approval.instance, approval.approvalId)] === "pending"} onReview={setReview} />
+                                </article>
+                            </li>
+                        ))}
+                    </ol>
+                </section>
+            )}
+            {review === undefined ? null : (
+                <ApprovalReview key={approvalOperationKey(review.approval.instance, review.approval.approvalId)}
+                    selection={review} store={store} onClose={() => setReview(undefined)}
+                    available={allApprovals.some((approval) => approval.instance === review.approval.instance && approval.approvalId === review.approval.approvalId)}
+                    disabled={!interactive}
+                    pending={storeState.operations[approvalOperationKey(review.approval.instance, review.approval.approvalId)] === "pending"} />
+            )}
             <p aria-live="polite" className="hint">
                 {countText}
             </p>
@@ -285,19 +341,8 @@ export function Audit({
                             key={JSON.stringify([call.instance, call.callId])}
                             now={now}
                             operations={storeState.operations}
-                            onDecideApproval={async (approval, decision) => {
-                                const succeeded = await store.decideTool(
-                                    approval.instance,
-                                    approval.approvalId,
-                                    decision,
-                                );
-                                if (!succeeded) {
-                                    throw new Error(
-                                        store.operationFailure(approvalOperationKey(approval.instance, approval.approvalId)) ??
-                                            "Approval could not be recorded.",
-                                    );
-                                }
-                            }}
+                            approval={allApprovals.find((approval) => approval.instance === call.instance && approval.callId === call.callId)}
+                            onReviewApproval={setReview}
                             onLoadDetail={async () =>
                                 (
                                     await domains.toolCalls.readDetail(
@@ -333,7 +378,8 @@ function ToolCallActivity({
     initiallyOpen,
     now,
     operations,
-    onDecideApproval,
+    approval,
+    onReviewApproval,
     onLoadDetail,
     onLoadImage,
     onRefresh,
@@ -344,19 +390,13 @@ function ToolCallActivity({
     initiallyOpen: boolean;
     now: number;
     operations: Readonly<Record<string, "pending">>;
-    onDecideApproval(
-        approval: ApprovalRequest,
-        decision: "approve" | "deny",
-    ): Promise<void>;
+    approval?: ApprovalRequest;
+    onReviewApproval(selection: ApprovalReviewSelection): void;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onLoadImage(imageRef: string): Promise<ArtifactImageContent>;
     onRefresh(): Promise<void>;
 }) {
     const runtimeState = useDomainSnapshot(domains.runtime(call.instance));
-    const approvalState = useDomainSnapshot(domains.approval(call.instance));
-    const approval = approvalState.approvals.find(
-        (candidate) => candidate.callId === call.callId,
-    );
     return (
         <ToolCallEntry
             approval={approval}
@@ -366,7 +406,7 @@ function ToolCallActivity({
             initiallyOpen={initiallyOpen}
             logs={runtimeState.logs}
             now={now}
-            onDecideApproval={onDecideApproval}
+            onReviewApproval={onReviewApproval}
             onLoadDetail={onLoadDetail}
             onLoadImage={onLoadImage}
             onRefresh={onRefresh}

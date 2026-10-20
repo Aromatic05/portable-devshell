@@ -14,7 +14,7 @@ import {
     toolCallDuration,
 } from "./Model.js";
 import { toolCallResult } from "./Model.js";
-import { ConfirmationDialog } from "../../../../component/Confirm.js";
+import { ApprovalActions, type ApprovalReviewSelection } from "../approval/Review.js";
 
 export function ToolCallEntry({
     approval,
@@ -26,7 +26,7 @@ export function ToolCallEntry({
     now = Date.now(),
     onLoadImage,
     onLoadDetail,
-    onDecideApproval,
+    onReviewApproval,
     onRefresh,
 }: {
     approval?: ApprovalRequest;
@@ -38,10 +38,7 @@ export function ToolCallEntry({
     now?: number;
     onLoadImage(imageRef: string): Promise<ArtifactImageContent>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
-    onDecideApproval(
-        approval: ApprovalRequest,
-        decision: "approve" | "deny",
-    ): Promise<void>;
+    onReviewApproval(selection: ApprovalReviewSelection): void;
     onRefresh(): Promise<void>;
 }) {
     const [open, setOpen] = useState(initiallyOpen);
@@ -49,22 +46,6 @@ export function ToolCallEntry({
     const detailEpoch = useRef(0);
     const [loading, setLoading] = useState(false);
     const [loadFailure, setLoadFailure] = useState<string>();
-    const [approvalDecision, setApprovalDecision] = useState<
-        "approve" | "deny"
-    >();
-    const [approvalBusy, setApprovalBusy] = useState(false);
-    const [approvalFailure, setApprovalFailure] = useState<string>();
-    const approvalEpoch = useRef(0);
-    const deciding = useRef(false);
-    const approvalKey = JSON.stringify([approval?.instance, approval?.approvalId]);
-    useEffect(() => {
-        approvalEpoch.current += 1;
-        deciding.current = false;
-        setApprovalBusy(false);
-        setApprovalDecision(undefined);
-        setApprovalFailure(undefined);
-        return () => { approvalEpoch.current += 1; };
-    }, [approvalKey]);
     useEffect(() => {
         if (initiallyOpen) setOpen(true);
     }, [initiallyOpen]);
@@ -118,36 +99,8 @@ export function ToolCallEntry({
                         {call.status}
                     </span>
                     {approval === undefined ? null : (
-                        <span
-                            className="audit-approval-actions"
-                            onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                            }}
-                        >
-                            <button
-                                className="primary"
-                                disabled={disabled || approvalBusy || approvalPending}
-                                onClick={() => {
-                                    setApprovalFailure(undefined);
-                                    setApprovalDecision("approve");
-                                }}
-                                type="button"
-                            >
-                                Approve
-                            </button>
-                            <button
-                                className="danger subtle"
-                                disabled={disabled || approvalBusy || approvalPending}
-                                onClick={() => {
-                                    setApprovalFailure(undefined);
-                                    setApprovalDecision("deny");
-                                }}
-                                type="button"
-                            >
-                                Deny
-                            </button>
-                        </span>
+                        <ApprovalActions approval={approval} disabled={disabled}
+                            pending={approvalPending} onReview={onReviewApproval} />
                     )}
                 </summary>
                 {open && loading ? <p>Loading details…</p> : null}
@@ -166,49 +119,7 @@ export function ToolCallEntry({
                     />
                 ) : null}
             </details>
-            {approval === undefined || approvalDecision === undefined ? null : (
-                <ConfirmationDialog
-                    actionLabel={
-                        approvalDecision === "approve" ? "Approve" : "Deny"
-                    }
-                    busy={approvalBusy || approvalPending}
-                    description={`${approvalDecision === "approve" ? "Approve" : "Deny"} ${approval.toolName} on ${approval.instance}${approval.workspace === undefined ? "" : ` in ${approval.workspace}`}? ${approval.reason}`}
-                    disabled={disabled}
-                    error={approvalFailure}
-                    onCancel={() => {
-                        if (approvalBusy) return;
-                        setApprovalFailure(undefined);
-                        setApprovalDecision(undefined);
-                    }}
-                    onConfirm={() => {
-                        if (deciding.current || approvalPending) return;
-                        deciding.current = true;
-                        const epoch = approvalEpoch.current;
-                        const decision = approvalDecision;
-                        setApprovalBusy(true);
-                        setApprovalFailure(undefined);
-                        void onDecideApproval(approval, decision)
-                            .then(() => { if (epoch === approvalEpoch.current) setApprovalDecision(undefined); })
-                            .catch((error: unknown) => {
-                                if (epoch !== approvalEpoch.current) return;
-                                setApprovalFailure(
-                                    errorMessage(
-                                        error,
-                                        "Approval could not be recorded.",
-                                    ),
-                                );
-                            })
-                            .finally(() => {
-                                if (epoch !== approvalEpoch.current) return;
-                                deciding.current = false;
-                                setApprovalBusy(false);
-                            });
-                    }}
-                    variant={
-                        approvalDecision === "deny" ? "destructive" : "default"
-                    }
-                />
-            )}
+
         </li>
     );
 }

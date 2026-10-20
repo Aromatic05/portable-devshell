@@ -142,7 +142,17 @@ export class WebStore {
 
     async refreshAudit(): Promise<void> {
         if (this.#auditRefresh !== undefined) return this.#auditRefresh;
-        const refresh = this.#refreshAudit();
+        const generation = this.#generation;
+        const refresh = this.#refreshAudit().then(
+            () => {
+                if (this.#current(generation))
+                    this.#set({ ...this.#state, error: undefined });
+            },
+            (error: unknown) => {
+                if (this.#current(generation))
+                    this.#set({ ...this.#state, error: errorMessage(error), notice: undefined });
+            },
+        );
         this.#auditRefresh = refresh;
         try {
             await refresh;
