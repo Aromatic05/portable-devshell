@@ -338,3 +338,26 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | R514 | C24/L03 | 独占Testspace和真实Chromium CDP检查WebUI加载、在线状态与实例可见 | pnpm testspace web-smoke | 浏览器E2E | 实际通过：online和instanceVisible为true；未启用Audit Reload和实例Start/Stop |
 
 仍未验证：跨机SSH/Podman/Reverse弱网、Windows x64/ARM64原生psmux、真实ChatGPT Host MCP App（Approval/Wait/历史卡片）、跨Worker Artifact超长流、ENOSPC/断电持久化与直接删除正在运行Worker的自动补偿。这些不能因为本轮本地测试通过而消除。
+
+## 12. 第六轮测试矩阵：跨模块并发、弱网与故障恢复（2026-10-20）
+
+**红色复现独立运行，不得通过弱化预期混入默认全绿测试。** 测试层级严格区分真实Linux Worker、localhost TCP/HTTP/WS、受控文件系统故障注入、可执行Fake Provider CLI和真实浏览器。压力测试由systemd user cgroup限制内存、CPU和进程。
+
+| ID | 功能 | 断言/场景 | 证据入口 | 实际状态及边界 |
+|---|---|---|---|---|
+| R601 | C02/C25 | Config TOML multi-instance rename/fsync EIO + ENOSPC rollback; isolated process restart | control/test/unit/control/config/Round6ConfigDurability.test.ts | 10/10; real filesystem with injected I/O faults, not disk exhaustion |
+| R602 | C04/G05-G08 | SSH/container start, installer retry, corrupt upload, argv/env and cleanup | core/test/unit/worker/provision/Round6ProviderLifecycle.test.ts | 15/15; executable fake SSH/Podman CLI, not remote providers |
+| R603 | C07/C20 | Real side effects, review, cancellation and durable SQLite Audit | core/test/unit/tool/Round6AuditProvenance.test.ts + control/test/integration/server/transport/Round6ToolCallAudit.test.ts | 11/11 with real local files and SQLite/Control Target |
+| R604 | C20/L02 | Effect committed before adapter error, yet retryable remains true | test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts | Independent real-file/SQLite RED; expected exit 1 |
+| R605 | C07/C20 | Duplicate active callId rejected but overwrites original ctxId/requestId audit | test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts | Independent real-Control/SQLite RED; expected exit 1 |
+| R606 | C15-C18 | Concurrent terminal, max cursor, tmux postclose output, symlink/dir permissions, cancel/restart | crates/devshell-worker/tests/beta_round6_execution.rs | 10/10 native Linux Rust Worker IPC |
+| R607 | C23/C24 | TUI async focus and overlay ownership, preserved events, CLI Gap/reconnect cursor | tui/test/view/BetaMatrixRound6.test.ts + cli/test/transport/Round6Reconnect.test.ts | 10/10 Dispatcher and Shared Endpoint; not native remote TUI |
+| R608 | C05/L04 | WSS fragment/reliable frames, handshake 20s, SSE partial POST/ACK, queued candidates and credential generations | control/test/integration/ReverseNetworkRound6.test.ts + control/test/unit/control/reverse/ReverseNetworkRound6.test.ts | 14/14 REAL localhost TCP/WSS/SSE, Store |
+| R609 | C05/L04 | Failed newer WSS handshake poisons retained reliable session of older active Worker | test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts | Independent real WebSocket RED; stale generation / rpc.resultUncertain |
+| R610 | C06/G27 | 256 streams, 8MiB backpressure, 32MiB real Worker RPC + eight WSS/SSE gateway rounds + Rust Reverse carrier | pnpm stress:transport | cgroup-bounded; baseline 8/8 and Gateway 8/8, Exit 0 |
+| R611 | C24/L03 | Chromium Audit survives real page reload; real WebUI Worker stop/start | pnpm acceptance:web | REAL browser CDP, isolated HOME, Exit 0 |
+| R612 | C17/L05 | 190s tmux task; 180s detached handoff and successful final read | pnpm acceptance:tmux-handoff | real Worker; detachedAfterMs=180093, finalReadMs=10049, status 0 |
+| R613 | C25 | Opt-in manual browser/handoff CI with isolated AcceptanceFixture | scripts/beta-matrix-extended.test.mjs + .github/workflows/beta-matrix-extended.yml | Script check passed; GitHub Runner not invoked |
+| R614 | C05/G27 | Original stress checked token before credential commit; now waits protocol DSR2 ready | control/test/integration/ReverseConnectionGateway.test.ts | Retains strict stale-token rejection; 8/8 actual Gateway rounds after test fix |
+
+持续未实测的关键场景：真实远端SSH/Rootless Podman部署，Windows x64/ARM64的本轮原生psmux运行，真实ChatGPT Host里的MCP App，磁盘实际断电/ENOSPC和跨机Artifact传输；不能把上表的Fake CLI或本地WebView测试当成这些平台已通过的依据。

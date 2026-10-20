@@ -116,3 +116,15 @@ UI 专项的真实 ChatGPT Host、SSH/容器跨机和 Windows psmux 仍有待验
 
 本轮变更范围是**测试、故障复现与测试文档**，没有修改生产源码或安装运行实例。所有Known-Bugs均保持显式红测，不属于默认期望通过套件。
 
+
+## 7. 第六轮：新增三条已证实的缺陷及压力观测修正（2026-10-20）
+
+**R6-01 — 重复callId污染原调用审计身份。** 独立真实Control Target/SQLite/文件副作用用例中，第一调用的文件写入已完成但响应仍在途；第二次使用相同`callId`、不同`ctxId`与`requestId`调用，被调度器正确拒绝。然而持久化Audit保存的是第二调用的身份和`failed`状态，原调用完成记录消失，并发生`Active tool call ... was not found`。这会造成实际执行者的审计归属丢失。复现：`test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts`，实际退出1。重点调查`packages/core/src/toolcall/execution/ExecutionTarget.ts`记录分配先于Scheduler去重，以及`record/History.ts`的相同ID覆盖。
+
+**R6-02 — 已完成副作用的后置适配错误仍返回可重试。** 本地文件真实写入`committed`后，结果适配Hook抛错；SQLite正确记下`executionCompleted=true`、`failureStage=postExecution`及`failed`，但返回错误的`retryable=true`。若调用方按此标志重试，会有重复副作用风险。复现：`test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts`，真实文件/SQLite独立退出1。应区分尚未执行与执行后失败，而非一律封锁所有错误。
+
+**R6-03 — Reverse失败候选污染已认证前代可靠会话。** 真实localhost WebSocket中Generation 1握手并成功执行`worker.ping`；Generation 2候选的Worker握手按测试注入失败。旧代再次正常调用时Ingress拒绝其帧为`Stale reverse generation frame`，客户端报告`rpc.resultUncertain`。复现：`test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts`，真实TCP退出1。问题在候选未完成激活时即可改变由descriptor共享的可靠帧水位，候选失败没有恢复前代。应隔离候选Frame状态与已提交Owner。
+
+**R6-04 — Reverse Stress存在已修正的错误观测时序，不是上面R6-03的生产缺陷。** 原集成测试只等Instance snapshot`ready`就断言前代Token已经撤销；实际上`ReverseCredentialStore.withAuthenticatedToken`要在激活后提交持久化，再由Ingress发送`DSR2:ready`。受控cgroup压力初次运行第1轮复现提前观测；测试改为等待`DSR2:ready`，并**保留原旧Token必须拒绝的安全断言**。重跑8/8基础Frame/Worker场景、8/8 Reverse Gateway轮次及真实Rust Reverse载体通过。没有修改生产认证语义。
+
+**未定论**：Control Stream取消探针曾在受限子进程中等待超时，后续清理亦未正常结束；尚不能区分测试时序、收尾资源与实现缺陷，未列为已证实RED。本轮只修改测试/手动CI/文档。前轮已知的OAuth Refresh、Mailing、Context、审批等缺陷未因此自动修复。

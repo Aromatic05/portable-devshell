@@ -51,7 +51,7 @@ pnpm testspace exec -- <command...>
 
 **第四轮恢复专项（手动、独立 Testspace）：** `pnpm testspace recovery-smoke` 对真实 Control/Worker/MCP 进行 Stream Gap/Replay、262 次配置变更、Worker 与 Control 重启、Audit/日志/Todo 持久化及 Instance 删除重建验证。该专项会主动重启 Testspace Control，必须设置新的 `DEVSHELL_TESTSPACE_ROOT`，运行后执行 `pnpm testspace stop`。**当前 E2E 尚未全绿**：删除配置提交成功，但 Worker 退休失败后 `cleanupPending=true`，显式 `retryCleanupDebt` 仍留下旧代债务。保留失败断言，详见 [Bug 台账](beta-bug-findings.md)。普通 `smoke`、`test:packages` 通过不等于此场景通过。
 
-GitHub Actions 的 **beta-matrix-extended** 工作流提供可手动触发的专项矩阵：`upgrade`、`extension`、`workflow`、`windows-psmux`。前三项在独立 Testspace root 中执行，其中升级使用真实旧发行包和当前候选版本；Windows 专项在 x64/ARM64 原生 Runner 运行完整 psmux Rust 合约。此工作流只支持 `workflow_dispatch`，不自动加入普通 PR 门禁；脚本与工作流静态检查通过**不代表 GitHub Runner 上已经真实执行过**。
+GitHub Actions 的 **beta-matrix-extended** 工作流提供可手动触发的专项矩阵：`upgrade`、`extension`、`workflow`、`recovery`、`retirement`、`browser`、`handoff`、`windows-psmux`。Testspace 专项使用独立 Root；`browser`、`handoff` 调用 AcceptanceFixture，每次创建临时 HOME/Runtime/Worker 并在退出时清理，不重用共享 Testspace。Browser 通过真实 Chromium DevTools 验证持久化 Audit 在整页 Reload 后仍可见和 WebUI Instance Stop/Start；Handoff 用真实约 190 秒的 Bash/Tmux 调用观察 180 秒脱离后的最终结果。`recovery` 当前保留已知删除清理缺陷，仍应按失败看待。Windows 专项在 x64/ARM64 原生 Runner 运行 psmux Rust 合约。此工作流仅支持 `workflow_dispatch`，**不参与普通 PR 自动门禁**；Linux 本地通过并不意味着 GitHub Runner 或其他平台实际通过。
 
 MCP App Receipt 增长压力测试同样独立于常规单元测试，可显式运行 `pnpm --filter @portable-devshell/mcp test:stress`；它不能代替真实 ChatGPT Host 验收。
 
