@@ -8,6 +8,8 @@ import {
     inspectContextMigration,
     migrateContextState,
 } from "../../../../src/migration/Context.js";
+import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { runPersistenceProcess } from "../config/persistence/CrashProcess.ts";
 
 test("Context Registry v1 is preflighted without modification and migrated exactly once", async () => {
     const home = await mkdtemp(join(tmpdir(), "pds-context-migration-"));
@@ -49,6 +51,64 @@ test("Context Registry v1 is preflighted without modification and migrated exact
         await rm(home, { recursive: true, force: true });
     }
 });
+
+for (const published of [false, true]) {
+    test(`Context migration restart after crash ${published ? "after" : "before"} registry rename preserves records and is idempotent`, async (t) => {
+        const home = await createTestTempDirectory("context-migration-crash");
+        t.after(async () => await rm(home, { recursive: true, force: true }));
+        const file = join(home, ".devshell", "control", "contexts.json");
+        const contexts = ["first", "second"].map((name) => ({
+            ctxId: `ctx-${name}`,
+            principal: `principal-${name}`,
+            instance: "old-host",
+            workspace: "/workspace",
+            environments: [
+                { instance: "old-host", workspace: "/workspace" },
+                { instance: "other-host", workspace: "/other" },
+            ],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            lastAccessedAt: "2026-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            status: "active",
+        }));
+        await mkdir(dirname(file), { recursive: true });
+        const before = JSON.stringify({ contexts, version: 1 });
+        await writeFile(file, before);
+        const module = new URL("../../../../src/migration/Context.ts", import.meta.url).href;
+        runPersistenceProcess(`
+            import fs from 'node:fs/promises';
+            import { syncBuiltinESMExports } from 'node:module';
+            const { home, file, published } = JSON.parse(process.argv[1]);
+            const rename = fs.rename;
+            fs.rename = async (source, target) => {
+                if (target === file && !published) process.kill(process.pid, 'SIGKILL');
+                await rename(source, target);
+                if (target === file && published) process.kill(process.pid, 'SIGKILL');
+            };
+            syncBuiltinESMExports();
+            const { migrateContextState } = await import(${JSON.stringify(module)});
+            await migrateContextState(home);
+            throw new Error('crash stage was not reached');
+        `, { home, file, published }, true);
+        const interrupted = await readFile(file, "utf8");
+        assert.equal(JSON.parse(interrupted).version, published ? 2 : 1);
+        assert.equal(await inspectContextMigration(home).then((result) => result.required), !published);
+        assert.equal(runPersistenceProcess(`
+            const { migrateContextState } = await import(${JSON.stringify(module)});
+            process.stdout.write(JSON.stringify(await migrateContextState(JSON.parse(process.argv[1]))));
+        `, home), JSON.stringify(!published));
+        const migrated = await readFile(file, "utf8");
+        assert.deepEqual(JSON.parse(migrated), {
+            version: 2,
+            contexts: contexts.map(({ instance, workspace, ...record }) => record),
+        });
+        assert.equal(runPersistenceProcess(`
+            const { migrateContextState } = await import(${JSON.stringify(module)});
+            process.stdout.write(JSON.stringify(await migrateContextState(JSON.parse(process.argv[1]))));
+        `, home), "false");
+        assert.equal(await readFile(file, "utf8"), migrated);
+    });
+}
 
 test("Invalid Context v1 and unsupported schema versions are rejected before rewriting", async () => {
     const home = await mkdtemp(join(tmpdir(), "pds-context-migration-"));
