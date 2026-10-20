@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
     TODO_MAX_ARCHIVED,
     TODO_MAX_CHECKPOINT_BLOCKERS,
@@ -257,6 +258,11 @@ export class TodoState {
                 );
             }
             requireRevision(normalized.revision, 0);
+            if (active.some((entry) => entry.title === normalized.title)) {
+                throw invalidTodo(
+                    `active todo title ${normalized.title} already exists; include its taskId to update it`,
+                );
+            }
             next = this.#createState(normalized, ctxId);
             active.push(next);
             events.push(todoEvent("todo.created", next));
@@ -267,6 +273,15 @@ export class TodoState {
                 );
             }
             requireRevision(normalized.revision, previous.revision);
+            // An explicit checkpoint acknowledges progress and refreshes its time.
+            if (
+                normalized.checkpoint === undefined &&
+                previous.activeCtxId === ctxId &&
+                !isTerminal(previous) &&
+                isDeepStrictEqual(previous.items, normalized.todos)
+            ) {
+                return { document, events: [], taskId: previous.taskId };
+            }
             const updatedAt = this.#now();
             next = {
                 ...previous,

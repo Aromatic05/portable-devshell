@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { type JsonValue } from "@portable-devshell/shared";
@@ -117,6 +117,21 @@ test("Todo pipeline reaches CAS after repeated reads/writes, recovers conflicts,
     const records = await h.history.read({ ctxId: "ctx-todo" });
     assert.equal(records.filter((record) => record.toolName === "todo_write" && record.status === "completed").length, 5);
     assert.equal(records.filter((record) => record.error === "todo.revisionConflict").length, 5);
+    const beforeAcknowledgement = await readFile(filePath, "utf8");
+    const inode = (await stat(filePath)).ino;
+    const eventCount = events.length;
+    await comment.queue({ ctxId: "ctx-todo", text: "Acknowledge the unchanged plan" });
+    const acknowledged = await call("todo_write", plan("after-ban", 5, created.taskId)) as {
+        revision: number; comment: string[];
+    };
+    assert.equal(acknowledged.revision, 5);
+    assert.deepEqual(acknowledged.comment, ["Acknowledge the unchanged plan"]);
+    assert.equal(await readFile(filePath, "utf8"), beforeAcknowledgement);
+    assert.equal((await stat(filePath)).ino, inode);
+    assert.equal(events.length, eventCount);
+    assert.ok((await comment.pendingReport("ctx-todo")).replyCommentId);
+    await call("todo_report", { message: "Acknowledged; the plan remains current" });
+    assert.equal((await comment.pendingReport("ctx-todo")).replyCommentId, undefined);
     await comment.queue({ ctxId: "ctx-todo", text: "#stop" });
     await assert.rejects(call("todo_write", plan("stopped", 5, created.taskId)), { code: "core.toolCallRejected" });
     assert.equal((await todo.read({ taskId: created.taskId })).revision, 5);

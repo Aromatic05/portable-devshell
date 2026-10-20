@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile, stat } from "node:fs/promises";
 
 import { join } from "node:path";
 import test from "node:test";
@@ -217,13 +218,15 @@ test("TodoState persists checkpoints and task controls model re-entry without re
             ?.summary,
         "Core path is ready",
     );
+    assert.equal(updated.document, resumed.document);
+    assert.deepEqual(updated.events, []);
 
     const cancelled = state.control(
         updated.document,
         "task-fixed",
         "cancel",
         "ctx-2",
-        4,
+        3,
     );
     const archived = state.readResult(cancelled.document, {
         taskId: "task-fixed",
@@ -231,7 +234,7 @@ test("TodoState persists checkpoints and task controls model re-entry without re
     assert.equal(cancelled.document.active.length, 0);
     assert.equal(cancelled.document.archived.length, 1);
     assert.equal(archived.checkpoint?.summary, "Core path is ready");
-    assert.equal(archived.cancelledAt, "2026-08-19T01:04:00.000Z");
+    assert.equal(archived.cancelledAt, "2026-08-19T01:03:00.000Z");
     assert.deepEqual(archived.items, items);
 });
 
@@ -434,6 +437,198 @@ test("TodoStore persists and reloads normalized state independently", async () =
             .currentItemId,
         "write",
     );
+});
+
+test("TodoStore rejects duplicate active titles before writing and remains readable after restart", async () => {
+    const root = await createTestTempDirectory("todo-duplicate-title");
+    const filePath = join(root, "todo.json");
+    let sequence = 0;
+    const state = new TodoState("aromatic-pc", {
+        taskId: () => `task-${++sequence}`,
+    });
+    const store = new TodoStore({ filePath, instanceName: "aromatic-pc", state });
+    const firstInput = {
+        revision: 0,
+        title: "Duplicate active title",
+        todos: [{ content: "First work", id: "first", status: "pending" as const }],
+    };
+    const write = (input: Parameters<TodoState["transition"]>[1]) =>
+        store.transition((document) => {
+            const transition = state.transition(document, input, "ctx-1");
+            return { document: transition.document, result: transition };
+        });
+    const first = await write(firstInput);
+    const second = await write({
+        revision: 0,
+        title: "Distinct active title",
+        todos: [{ content: "Second work", id: "second", status: "pending" }],
+    });
+    assert.notEqual(first.taskId, second.taskId);
+    const before = store.read();
+    const bytes = await readFile(filePath, "utf8");
+    const inode = (await stat(filePath)).ino;
+
+    await assert.rejects(write({ ...firstInput, title: " Duplicate active title " }), {
+        code: "todo.invalid",
+        message: /active todo title.*already exists/u,
+    });
+    assert.equal(await readFile(filePath, "utf8"), bytes);
+    assert.equal((await stat(filePath)).ino, inode);
+    assert.deepEqual(store.read(), before);
+    const restarted = new TodoStore({
+        filePath,
+        instanceName: "aromatic-pc",
+        state: new TodoState("aromatic-pc"),
+    });
+    assert.deepEqual(restarted.read(), before);
+    assert.throws(
+        () => state.normalizeDocument({ ...before, active: [...before.active, before.active[0]] }),
+        /active todo titles must be unique/u,
+    );
+
+    await assert.rejects(write({ ...firstInput, taskId: first.taskId }), {
+        code: "todo.revisionConflict",
+    });
+    assert.equal(await readFile(filePath, "utf8"), bytes);
+    const updated = await write({
+        ...firstInput,
+        revision: 1,
+        taskId: first.taskId,
+        todos: [{ content: "Finished first work", id: "first", status: "completed" }],
+    });
+    assert.equal(updated.document.archived[0]?.revision, 2);
+    assert.equal(updated.document.active[0]?.taskId, second.taskId);
+    assert.equal(updated.document.active[0]?.revision, 1);
+    const replacement = await write(firstInput);
+    assert.notEqual(replacement.taskId, first.taskId);
+    assert.equal(replacement.document.archived[0]?.taskId, first.taskId);
+    assert.deepEqual(restarted.reload(), replacement.document);
+});
+
+test("TodoStore exact plan updates preserve revision 256, timestamps, events, and the atomic file", async () => {
+    const root = await createTestTempDirectory("todo-noop");
+    const filePath = join(root, "todo.json");
+    let now = "2026-08-19T01:00:00.000Z";
+    const state = new TodoState("aromatic-pc", {
+        now: () => now,
+        taskId: () => "task-fixed",
+    });
+    const store = new TodoStore({ filePath, instanceName: "aromatic-pc", state });
+    const input = {
+        revision: 0,
+        title: "Stable plan",
+        todos: [{ content: "Continue", id: "continue", status: "in_progress" as const }],
+    };
+    const created = state.transition(state.emptyDocument(), {
+        ...input,
+        checkpoint: { summary: "Ready", next: "Continue" },
+    }, "ctx-1");
+    const seeded = structuredClone(created.document);
+    seeded.active[0]!.revision = 256;
+    await store.write(seeded);
+    const before = store.read();
+    const bytes = await readFile(filePath, "utf8");
+    const inode = (await stat(filePath)).ino;
+    const update = { ...input, revision: 256, taskId: created.taskId };
+    now = "2026-08-19T01:01:00.000Z";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const transition = await store.transition((document) => {
+            const next = state.transition(document, structuredClone(update), "ctx-1");
+            assert.equal(next.document, document);
+            return { document: next.document, result: next };
+        });
+        assert.deepEqual(transition.events, []);
+        assert.equal(transition.document.active[0]?.revision, 256);
+        assert.deepEqual(store.read(), before);
+        assert.equal(await readFile(filePath, "utf8"), bytes);
+        assert.equal((await stat(filePath)).ino, inode);
+    }
+    assert.throws(() => state.transition(before, { ...update, revision: 255 }, "ctx-1"), {
+        code: "todo.revisionConflict",
+    });
+
+    const handoff = state.transition(before, update, "ctx-2");
+    assert.equal(handoff.document.active[0]?.activeCtxId, "ctx-2");
+    assert.equal(handoff.document.active[0]?.revision, 257);
+    assert.equal(handoff.document.active[0]?.updatedAt, now);
+    assert.deepEqual(handoff.document.active[0]?.checkpoint, before.active[0]?.checkpoint);
+    assert.deepEqual(handoff.events.map((event) => event.type), ["todo.updated"]);
+    now = "2026-08-19T01:02:00.000Z";
+    const acknowledged = state.transition(handoff.document, {
+        ...update,
+        revision: 257,
+        checkpoint: { summary: "Ready", next: "Continue" },
+    }, "ctx-2");
+    assert.equal(acknowledged.document.active[0]?.revision, 258);
+    assert.equal(acknowledged.document.active[0]?.checkpoint?.updatedAt, now);
+    assert.equal(acknowledged.document.active[0]?.updatedAt, now);
+    assert.deepEqual(acknowledged.events.map((event) => event.type), ["todo.updated"]);
+    const restarted = new TodoStore({ filePath, instanceName: "aromatic-pc", state });
+    assert.deepEqual(restarted.read(), before);
+});
+
+test("TodoState treats changes to any item field or plan order as meaningful", () => {
+    const state = new TodoState("aromatic-pc", {
+        now: () => "2026-08-19T01:00:00.000Z",
+        taskId: () => "task-fixed",
+    });
+    const first = { content: "Inspect", id: "inspect", status: "pending" as const };
+    const second = { content: "Verify", id: "verify", status: "pending" as const };
+    const created = state.transition(state.emptyDocument(), {
+        revision: 0,
+        title: "Meaningful changes",
+        todos: [first, second],
+    }, "ctx-1");
+    const changes = [
+        [{ ...first, content: "Inspect again" }, second],
+        [{ ...first, id: "inspect-again" }, second],
+        [{ ...first, detail: "Read the current state" }, second],
+        [{ ...first, status: "in_progress" as const }, second],
+        [second, first],
+    ];
+    for (const todos of changes) {
+        const updated = state.transition(created.document, {
+            revision: 1,
+            taskId: created.taskId,
+            title: "Meaningful changes",
+            todos,
+        }, "ctx-1");
+        assert.equal(updated.document.active[0]?.revision, 2);
+        assert.deepEqual(updated.document.active[0]?.items, todos);
+        assert.deepEqual(updated.events.map((event) => event.type), ["todo.updated"]);
+    }
+});
+
+test("TodoState exact payloads still claim unowned stored tasks and archive terminal active entries", () => {
+    const state = new TodoState("aromatic-pc", { taskId: () => "task-fixed" });
+    const input = {
+        revision: 0,
+        title: "Stored task",
+        todos: [{ content: "Continue", id: "continue", status: "pending" as const }],
+    };
+    const created = state.transition(state.emptyDocument(), input, "ctx-1");
+    const { activeCtxId: _activeCtxId, ...unowned } = created.document.active[0]!;
+    const stored = state.normalizeDocument({
+        active: [unowned], archived: [], version: 4,
+    });
+    const claimed = state.transition(stored, {
+        ...input, revision: 1, taskId: created.taskId,
+    }, "ctx-1");
+    assert.equal(claimed.document.active[0]?.activeCtxId, "ctx-1");
+    assert.equal(claimed.document.active[0]?.revision, 2);
+    assert.deepEqual(claimed.events.map((event) => event.type), ["todo.updated"]);
+
+    const todos = [{ content: "Continue", id: "continue", status: "completed" as const }];
+    const terminal = state.normalizeDocument({
+        ...created.document,
+        active: [{ ...created.document.active[0], items: todos }],
+    });
+    const archived = state.transition(terminal, {
+        ...input, revision: 1, taskId: created.taskId, todos,
+    }, "ctx-1");
+    assert.deepEqual(archived.document.active, []);
+    assert.equal(archived.document.archived[0]?.revision, 2);
+    assert.deepEqual(archived.events.map((event) => event.type), ["todo.updated", "todo.archived"]);
 });
 
 test("TodoStore rejects legacy document versions", async () => {
