@@ -1,0 +1,98 @@
+name: beta-matrix-extended
+
+# Opt-in integration tests: use an isolated Testspace root and native platform workers.
+# These suites do not run on every pull request.
+on:
+    workflow_dispatch:
+        inputs:
+            suite:
+                description: "Extended beta verification suite"
+                required: true
+                type: choice
+                options:
+                    - upgrade
+                    - extension
+                    - workflow
+                    - windows-psmux
+
+permissions:
+    contents: read
+
+jobs:
+    linux-testspace:
+        if: inputs.suite != 'windows-psmux'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 60
+        env:
+            DEVSHELL_TESTSPACE_ROOT: ${{ runner.temp }}/beta-matrix-${{ github.run_id }}-${{ github.run_attempt }}
+        steps:
+            - uses: actions/checkout@v5
+            - uses: pnpm/action-setup@v5
+              with:
+                  version: 10.13.1
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  cache: pnpm
+            - name: Install test dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y tmux fish zsh
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+                  pnpm install --frozen-lockfile
+            - name: Real release upgrade, migration and rollback
+              if: inputs.suite == 'upgrade'
+              run: pnpm testspace upgrade-smoke
+            - name: Build isolated Testspace runtime
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow'
+              run: |
+                  pnpm build
+                  pnpm test:prepare
+            - name: Start isolated Control and Workers
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow'
+              run: pnpm testspace start --skip-build
+            - name: Extension candidate failure and generation restoration
+              if: inputs.suite == 'extension'
+              run: pnpm testspace extension-smoke
+            - name: Workflow, Approval and Mailing integration
+              if: inputs.suite == 'workflow'
+              run: |
+                  pnpm testspace workflow-smoke
+                  pnpm testspace approval-smoke
+                  pnpm testspace mailing-smoke
+            - name: Stop isolated Testspace
+              if: always() && (inputs.suite == 'extension' || inputs.suite == 'workflow')
+              run: pnpm testspace stop
+            - name: Upload isolated Testspace logs
+              if: failure()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: beta-matrix-linux-${{ inputs.suite }}-${{ github.run_id }}
+                  path: ${{ env.DEVSHELL_TESTSPACE_ROOT }}/*.log
+                  if-no-files-found: ignore
+
+    windows-psmux:
+        if: inputs.suite == 'windows-psmux'
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: windows-2022
+                      name: x64
+                    - runner: windows-11-arm
+                      name: arm64
+        runs-on: ${{ matrix.runner }}
+        timeout-minutes: 40
+        steps:
+            - uses: actions/checkout@v5
+            - name: Install Rust toolchain
+              shell: pwsh
+              run: |
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+            - name: Verify native PowerShell backend
+              shell: pwsh
+              run: |
+                  Get-Command pwsh | Out-Null
+                  cargo test --locked -p devshell-worker --test tmux_windows_contract -- --nocapture
