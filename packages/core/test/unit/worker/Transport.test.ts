@@ -2428,6 +2428,166 @@ test("podman transport rejects already running existing stopped containers", asy
     );
 });
 
+test("dockerfile transport reuses an existing image without building or recreating its container", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        closeRecordedChild(child, { stdout: call.args[0] === "inspect" ? "running\n" : "" });
+        return true;
+    });
+    const transport = createContainerRuntime("docker", {
+        container: {
+            mode: "dockerfile",
+            containerName: "cached-container",
+            build: { context: "/project" },
+        },
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+
+    const result = await transport.runWorkerCommand("start", { instanceName: "cached" });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(recorder.calls.map(call => call.args), [
+        ["image", "inspect", "cached-container:latest"],
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "cached-container"],
+        ["exec", "-i", "cached-container", "/usr/local/bin/devshell-worker", "start", "--instance", "cached"],
+    ]);
+});
+
+test("dockerfile transport isolates a failed build and retries provisioning on the same runtime", async () => {
+    let buildAttempts = 0;
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "image") {
+            closeRecordedChild(child, { code: 1, stderr: "image missing" });
+            return true;
+        }
+        if (call.args[0] === "build") {
+            buildAttempts += 1;
+            closeRecordedChild(child, buildAttempts === 1
+                ? { code: 17, stderr: "registry temporarily unavailable" }
+                : {});
+            return true;
+        }
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { code: 1, stderr: "No such container" });
+            return true;
+        }
+        return false;
+    });
+    const transport = createContainerRuntime("docker", {
+        container: {
+            mode: "dockerfile",
+            containerName: "retry-container",
+            build: { context: "/project" },
+        },
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+
+    await assert.rejects(transport.runWorkerCommand("start", { instanceName: "retry" }), (error: unknown) => {
+        const failure = error as { code: string; details: { operation: string; exitCode: number; stderrTail: string } };
+        assert.equal(failure.code, runtimeErrorCodes.providerFailed);
+        assert.equal(failure.details.operation, "buildImage");
+        assert.equal(failure.details.exitCode, 17);
+        assert.equal(failure.details.stderrTail, "registry temporarily unavailable");
+        return true;
+    });
+    assert.deepEqual(recorder.calls.map(call => call.args[0]), ["image", "build"]);
+
+    assert.equal((await transport.runWorkerCommand("start", { instanceName: "retry" })).exitCode, 0);
+    assert.deepEqual(recorder.calls.map(call => call.args[0]), [
+        "image", "build", "image", "build", "inspect", "create", "start", "exec",
+    ]);
+});
+
+test("compose transport restores a temporarily started service after a failed worker retirement", async () => {
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args.includes("ps")) {
+            closeRecordedChild(child, { stdout: call.args.includes("-a") ? "stopped-service\n" : "" });
+            return true;
+        }
+        if (call.args.includes("exec")) {
+            closeRecordedChild(child, { code: 19, stderr: "worker retirement failed" });
+            return true;
+        }
+        return false;
+    });
+    const transport = createContainerRuntime("docker", {
+        container: { mode: "compose", compose: { file: "/project/compose.yaml", service: "workspace" } },
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+
+    const result = await transport.runWorkerCommand("retire", { instanceName: "compose-retry" });
+    assert.equal(result.exitCode, 19);
+    assert.equal(result.stderr, "worker retirement failed");
+    assert.deepEqual(recorder.calls.map(call => call.args.slice(3)), [
+        ["ps", "-q", "workspace"],
+        ["ps", "-a", "-q", "workspace"],
+        ["start", "workspace"],
+        ["exec", "-T", "workspace", "/usr/local/bin/devshell-worker", "retire", "--instance", "compose-retry"],
+        ["stop", "workspace"],
+    ]);
+});
+
+test("compose transport does not create a missing service during runtime retirement", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = createContainerRuntime("docker", {
+        container: { mode: "compose", compose: { file: "/project/compose.yaml", service: "workspace" } },
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+
+    const result = await transport.runWorkerCommand("retire", { instanceName: "missing" });
+    assert.deepEqual(JSON.parse(result.stdout), { retired: false });
+    assert.deepEqual(recorder.calls.map(call => call.args.slice(3)), [
+        ["ps", "-q", "workspace"], ["ps", "-a", "-q", "workspace"],
+    ]);
+});
+
+test("adopted container retirement after runtime reconstruction preserves an already running container", async () => {
+    let status = "exited";
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stdout: status + "\n" });
+            return true;
+        }
+        if (call.args[0] === "start") status = "running";
+        return false;
+    });
+    const options = {
+        container: { mode: "existingStoppedContainer" as const, containerName: "user-container", adoptLifecycle: true },
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    };
+    await createContainerRuntime("podman", options).runWorkerCommand("start", { instanceName: "adopted" });
+    recorder.calls.length = 0;
+
+    const restarted = createContainerRuntime("podman", options);
+    assert.equal((await restarted.runWorkerCommand("retire", { instanceName: "adopted" })).exitCode, 0);
+    await restarted.retireProviderResources();
+    assert.deepEqual(recorder.calls.map(call => call.args), [
+        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "user-container"],
+        ["exec", "-i", "user-container", "/usr/local/bin/devshell-worker", "retire", "--instance", "adopted"],
+    ]);
+});
+
+test("rootless podman environment rejects storage and socket overrides before any provider command", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = createContainerRuntime("podman", {
+        container: createManagedContainerConfig(),
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+    await assert.rejects(transport.runWorkerCommand("start", {
+        instanceName: "rootless",
+        env: { CONTAINERS_STORAGE_CONF: "/other/storage.conf", CONTAINER_HOST: "unix:///other/podman.sock", XDG_RUNTIME_DIR: "/other/run" },
+    }), {
+        code: runtimeErrorCodes.providerFailed,
+        details: { provider: "podman", environmentKeys: ["CONTAINERS_STORAGE_CONF", "CONTAINER_HOST", "XDG_RUNTIME_DIR"] },
+    });
+    assert.deepEqual(recorder.calls, []);
+});
+
 test(
     "local transport executes frozen devshell-worker lifecycle and Endpoint RPC",
     realWorkerTestOptions(workerBinaryPath),

@@ -6,6 +6,7 @@ import {
     chmod,
     mkdir,
     readFile,
+    readdir,
     readlink,
     rm,
     utimes,
@@ -168,6 +169,58 @@ test(
             process.env.PATH ?? "",
         ).ensure("devshell-worker");
         await assert.doesNotReject(access(currentGeneration));
+    },
+);
+
+test(
+    "WorkerInstallerRemote retries interrupted activation on the same installer without losing the active worker",
+    { skip: process.platform === "win32" ? "requires POSIX shell and symlinks" : false },
+    async (t) => {
+        const remoteHome = await createTestTempDirectory("remote-worker-interrupted-home");
+        const assets = await createTestTempDirectory("remote-worker-interrupted-assets");
+        t.after(async () => {
+            await rm(remoteHome, { recursive: true, force: true });
+            await rm(assets, { recursive: true, force: true });
+        });
+        const target = probeLocalWorkerTarget("test-remote");
+        const first = await writeAsset(assets, "worker-before-interruption", target);
+        const executable = await createInstaller(remoteHome, first, target, process.env.PATH ?? "").ensure("devshell-worker");
+        const previousTarget = await readlink(executable);
+        const realMv = spawnSync("sh", ["-c", "command -v mv"], { encoding: "utf8" }).stdout.trim();
+        assert.notEqual(realMv, "");
+        const fakeBin = join(remoteHome, "fake-bin");
+        await mkdir(fakeBin);
+        const fakeMv = join(fakeBin, "mv");
+        await writeFile(fakeMv, [
+            "#!/bin/sh",
+            'case "$*" in',
+            '  *.next.*) echo interrupted-activation >&2; kill -TERM "$PPID"; exit 143 ;;',
+            "esac",
+            `exec '${realMv.replaceAll("'", `'\\''`)}' "$@"`,
+            "",
+        ].join("\n"), { mode: 0o755 });
+        const next = await writeAsset(assets, "worker-after-interruption", target);
+        const installer = createInstaller(remoteHome, next, target, `${fakeBin}:${process.env.PATH ?? ""}`);
+
+        await assert.rejects(installer.ensure("devshell-worker"), (error: unknown) => {
+            assert.ok(error instanceof RemoteError);
+            assert.equal(error.code, runtimeErrorCodes.workerProvisionFailed);
+            assert.ok(error.cause instanceof Error);
+            assert.match(error.cause.message, /interrupted-activation/u);
+            return true;
+        });
+        assert.equal(await readlink(executable), previousTarget);
+        assert.equal(await readFile(executable, "utf8"), "worker-before-interruption");
+        const generation = join(remoteHome, ".devshell", "workers", target.key, next.sha256);
+        assert.equal(await readFile(join(generation, "devshell-worker"), "utf8"), "worker-after-interruption");
+        assert.deepEqual((await readdir(generation)).sort(), ["devshell-worker", "devshell-worker.sha256"]);
+        assert.deepEqual(await readdir(join(remoteHome, ".devshell", "bin")), ["devshell-worker"]);
+
+        await rm(fakeMv);
+        assert.equal(await installer.ensure("devshell-worker"), executable);
+        assert.equal(await readFile(executable, "utf8"), "worker-after-interruption");
+        assert.equal(await readlink(executable), `../workers/${target.key}/${next.sha256}/devshell-worker`);
+        assert.deepEqual(await readdir(join(remoteHome, ".devshell", "bin")), ["devshell-worker"]);
     },
 );
 
