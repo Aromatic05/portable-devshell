@@ -31,7 +31,7 @@
 | G Todo/Approval，E7-01/R4-03 | Todo多次正常访问直接进入Revision CAS；Approval关闭并发阻止晚到批准；原红测及11条独立回归通过，L03的Todo阶段已通过 | `c84131d7`、`0055a8b1` |
 | H MCP App/Web/TUI | Context Snapshot/Action晚到隔离、Web配置草稿和Audit状态隔离、TUI Busy Overlay身份；Web Audit在ToolCall尚未形成记录时独立显示待审批项，按Instance/Context隔离并保留页面级确认和错误恢复；Web包250/250、独立真实Chromium Approve/Deny测试和L03完整六条功能链全部通过 | `239b50cc`、`7f02803b`、`59fd2336`、`808e1d98` |
 
-**完整链状态**：L01/L04真实Reverse Worker创建、Enroll、断线恢复、退休、同名重建已通过并完成清理。L03在全新临时HOME、真实CLI/MCP/Rust Worker/Chromium下完整退出码为**0**，其六条链分别涵盖工具执行、Web失败RPC恢复、Todo Revision/CAS、执行前Web Approval、Stream Gap和Control重启后持久化一致性；审批副作用恰好一次、重载可恢复、清理完成。另有独立Chromium测试在**尚无ToolCall历史行**时完成Approve与Deny，均通过。以上并不表示TUI实机、真实Docker/Podman或Windows行为已经完成验收。
+**完整链状态**：L01/L04真实Reverse Worker创建、Enroll、断线恢复、退休、同名重建已通过并完成清理。L03在全新临时HOME、真实CLI/MCP/Rust Worker/Chromium下完整退出码为**0**，其六条链分别涵盖工具执行、Web失败RPC恢复、Todo Revision/CAS、执行前Web Approval、Stream Gap和Control重启后持久化一致性；审批副作用恰好一次、重载可恢复、清理完成。另有独立Chromium测试在**尚无ToolCall历史行**时完成Approve与Deny，均通过。2026-10-20的四链聚合 `node acceptance/run-chain-matrix.mjs --all` 已实测 **4/4通过、Exit 0、failures=[]**（L07、L05、L03、L01-L04）。以上并不表示TUI实机、真实Docker/Podman或Windows行为已经完成验收。
 
 ## A. 实际复现且仍待修复
 
