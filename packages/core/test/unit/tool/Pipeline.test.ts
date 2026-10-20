@@ -801,3 +801,44 @@ test("review denial is isolated from a later Context call through rewrite, execu
     assert.deepEqual(harness.audit, ["requested", "denied", "requested", "queued", "running", "completed"]);
     assert.deepEqual(harness.released, ["release", "release"]);
 });
+
+test("an outbound rewrite that turns a result into an error audits completed execution once", async () => {
+    const harness = createHarness("instance-a", {
+        rewrites: [async (input) => input.direction === "outbound" && input.value.kind === "result"
+            ? {
+                  ...input.value,
+                  kind: "error",
+                  payload: { error: { code: "tool.rewritten", message: "withheld", retryable: false } },
+              }
+            : input.value],
+    });
+
+    await assert.rejects(harness.runtime.api.call(
+        "instance-a", "file_edit", {}, context,
+    ), { code: "tool.rewritten" });
+
+    assert.equal(harness.invoked.length, 1);
+    assert.deepEqual(harness.audit, ["requested", "queued", "running", "failed"]);
+});
+
+test("a failed Context rewrite does not poison a later Context call", async () => {
+    const rewrites: string[] = [];
+    const harness = createHarness("instance-a", {
+        rewrites: [async (input) => {
+            if (input.direction === "inbound") {
+                const ctxId = input.value.context.ctxId;
+                rewrites.push(`in:${ctxId}`);
+                if (ctxId === "ctx-1") throw new Error("rewrite unavailable");
+            }
+            return input.value;
+        }],
+    });
+
+    await assert.rejects(harness.runtime.api.call("instance-a", "file_edit", {}, context), /rewrite unavailable/u);
+    assert.deepEqual(await harness.runtime.api.call(
+        "instance-a", "file_edit", {}, { ...context, ctxId: "ctx-2" },
+    ), { ok: true });
+    assert.deepEqual(rewrites, ["in:ctx-1", "in:ctx-2"]);
+    assert.equal(harness.invoked.length, 1);
+    assert.equal(harness.invoked[0]?.context.ctxId, "ctx-2");
+});

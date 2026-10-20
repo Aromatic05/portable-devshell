@@ -313,6 +313,26 @@ test("queued abort wins a concurrent decision without duplicate events", async (
     );
 });
 
+test("a decision arriving after cancellation cannot revive the approval", async (t) => {
+    const { service, events, store } = fixture();
+    t.after(() => service.close());
+    const controller = new AbortController();
+    const evaluation = await service.evaluate(input, controller.signal);
+    assert.ok(evaluation.decision === "ask");
+
+    controller.abort("request cancelled");
+    assert.equal((await evaluation.awaitDecision).status, "cancelled");
+    await assert.rejects(
+        service.decideApproval("approval-1", { decision: "approve", decidedBy: "web" }),
+        { code: runtimeErrorCodes.approvalAlreadyDecided },
+    );
+    assert.equal((await store.get("approval-1"))?.status, "cancelled");
+    assert.deepEqual(events.records.map(({ type }) => type), [
+        "approval.requested",
+        "approval.cancelled",
+    ]);
+});
+
 for (const mode of ["disabled", "allow", "deny"] as const) {
     test(`policy ${mode} creates neither requests nor events`, async (t) => {
         const { service, events, store } = fixture();
