@@ -8,9 +8,15 @@ const hostState = vi.hoisted(() => ({
     clients: [] as Array<{
         ontoolresult?: (value: unknown) => void;
         ontoolinput?: (value: { arguments: Record<string, unknown> }) => void;
+        onclose?: () => void;
+        onteardown?: () => Promise<unknown>;
     }>,
     calls: [] as Call[], sent: [] as unknown[], contexts: [] as unknown[], modes: [] as string[],
     invoke: undefined as undefined | ((call: Call) => Promise<unknown>),
+    contextResult: undefined as Promise<unknown> | undefined,
+    sendResult: undefined as Promise<{ isError?: boolean }> | undefined,
+    modeResult: undefined as Promise<{ mode: string }> | undefined,
+    teardownResult: undefined as Promise<void> | undefined,
     contextError: undefined as Error | undefined,
     sendError: undefined as Error | undefined,
     teardownError: undefined as Error | undefined,
@@ -29,11 +35,12 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         setupSizeChangedNotifications() { return () => { host.sizeStopped++; }; }
         async requestDisplayMode({ mode }: { mode: string }) {
             host.modes.push(mode);
-            return { mode: host.acceptFullscreen ? mode : "inline" };
+            return host.modeResult ? await host.modeResult : { mode: host.acceptFullscreen ? mode : "inline" };
         }
         async requestTeardown() {
             host.teardown++;
             if (host.teardownError) throw host.teardownError;
+            await host.teardownResult;
         }
         async callServerTool(call: Call) {
             host.calls.push(call);
@@ -42,12 +49,12 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         async updateModelContext(value: unknown) {
             host.contexts.push(value);
             if (host.contextError) throw host.contextError;
-            return {};
+            return host.contextResult ? await host.contextResult : {};
         }
         async sendMessage(value: unknown) {
             host.sent.push(value);
             if (host.sendError) throw host.sendError;
-            return {};
+            return host.sendResult ? await host.sendResult : {};
         }
     },
     applyDocumentTheme: vi.fn(), applyHostFonts: vi.fn(), applyHostStyleVariables: vi.fn(),
@@ -59,8 +66,9 @@ export let container: HTMLDivElement;
 let root: Root | undefined;
 export function deferred<T>() {
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>((yes) => { resolve = yes; });
-    return { promise, resolve };
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
 }
 export function capability(ctxId = "ctx-a", instance = "alpha") {
     return { ctxId, token: "round5-private-test-token", liveBaseUrl: `https://devshell.example/api/live/${instance}/workspace` };
@@ -104,6 +112,9 @@ export async function render(view: ReactNode) {
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     await act(async () => { root!.render(view); });
 }
+export async function rerender(view: ReactNode) {
+    await act(async () => { root!.render(view); });
+}
 export async function unmount() {
     await act(async () => { root!.unmount(); }); root = undefined; container.remove();
 }
@@ -122,6 +133,7 @@ export function actions() { return host.calls.filter((call) => call.name === "mc
 afterEach(async () => {
     await act(async () => { root?.unmount(); }); root = undefined; container?.remove();
     host.clients.length = 0; host.calls.length = 0; host.sent.length = 0; host.contexts.length = 0; host.modes.length = 0;
+    host.contextResult = undefined; host.sendResult = undefined; host.modeResult = undefined; host.teardownResult = undefined;
     host.invoke = undefined; host.contextError = undefined; host.sendError = undefined; host.teardownError = undefined;
     host.fullscreen = false; host.acceptFullscreen = true; host.closed = 0; host.sizeStopped = 0; host.teardown = 0;
     globalThis.fetch = originalFetch; Object.assign(window, { openai: originalOpenai });

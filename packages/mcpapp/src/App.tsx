@@ -30,6 +30,15 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     const [toolCallEnabled, setToolCallEnabled] = useToolCallDisplay();
     const [session, setSession] = useState<McpAppSession | undefined>(() => restoreMcpAppSession());
     const sessionRef = useRef(session);
+    const contextRef = useRef(session?.ctxId);
+    const sessionEpoch = useRef(0);
+    const [epoch, setEpoch] = useState(0);
+    const snapshotRef = useRef<McpAppSnapshot>();
+    const revisionRef = useRef(-1);
+    const actionRef = useRef<string>();
+    const errorOwnerRef = useRef<object | string | symbol>();
+    const closeRef = useRef<symbol>();
+    const displayRequestRef = useRef<symbol>();
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
     const [liveError, setLiveError] = useState<string>();
     const [actionError, setActionError] = useState<string>();
@@ -38,6 +47,48 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     const [closeRequested, setCloseRequested] = useState(false);
     const hostRef = useRef<ConnectedApp>();
     const deliveredRecovery = useRef(new Set<string>());
+    const recoveryAttempts = useRef(new Map<string, { epoch: number; cursor: number; active: boolean }>());
+
+    const clearSnapshot = () => {
+        snapshotRef.current = undefined;
+        setSnapshot(undefined);
+        setPendingAction(undefined);
+    };
+    const invalidateScope = () => {
+        sessionEpoch.current++;
+        setEpoch(sessionEpoch.current);
+        revisionRef.current = -1;
+        actionRef.current = undefined;
+        errorOwnerRef.current = undefined;
+        closeRef.current = undefined;
+        displayRequestRef.current = undefined;
+        clearSnapshot();
+        setBusyAction(undefined);
+        setCloseRequested(false);
+        setActionError(undefined);
+        setLiveError(undefined);
+    };
+    const replaceSession = (next: McpAppSession | undefined, nextContext = next?.ctxId) => {
+        const previous = sessionRef.current;
+        if (contextRef.current === nextContext && previous?.ctxId === next?.ctxId &&
+            previous?.token === next?.token && previous?.liveBaseUrl === next?.liveBaseUrl) return;
+        invalidateScope();
+        sessionRef.current = next;
+        contextRef.current = nextContext;
+        setCtxId(nextContext);
+        setSession(next);
+    };
+    const currentScope = (app: ConnectedApp | undefined, capability = session) =>
+        epoch === sessionEpoch.current && hostRef.current === app &&
+        sessionRef.current === capability && (!capability || contextRef.current === capability.ctxId);
+    const publishSnapshot = (app: ConnectedApp, capability: McpAppSession, next: McpAppSnapshot) => {
+        if (!currentScope(app, capability) || next.ctxId !== capability.ctxId || next.cursor < revisionRef.current) return;
+        if (next.cursor !== revisionRef.current) setPendingAction(undefined);
+        revisionRef.current = next.cursor;
+        snapshotRef.current = next;
+        setSnapshot(next);
+        setLiveError(undefined);
+    };
 
     useEffect(() => {
         let active = true;
@@ -45,12 +96,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             if (!active) return;
             const found = restoreMcpAppSession();
             if (!found) return;
-            if (sessionRef.current?.ctxId !== found.ctxId) setSnapshot(undefined);
-            sessionRef.current = found;
-            setCtxId(found.ctxId);
-            setSession((previous) => previous?.ctxId === found.ctxId &&
-                previous.token === found.token && previous.liveBaseUrl === found.liveBaseUrl
-                ? previous : found);
+            replaceSession(found);
         };
         window.addEventListener("openai:set_globals", refreshGlobals);
         refreshGlobals();
@@ -59,7 +105,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         let currentApp: ConnectedApp | undefined;
         const retry = () => {
             if (!active || reconnectTimer !== undefined) return;
-            setSnapshot(undefined);
+            invalidateScope();
+            hostRef.current = undefined;
             setStatus("disconnected");
             reconnectTimer = setTimeout(() => {
                 reconnectTimer = undefined;
@@ -74,6 +121,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         };
         const connect = () => {
             if (!active) return;
+            setEpoch(sessionEpoch.current);
             setStatus("connecting");
             const app = new App(
                 { name: "portable-devshell-" + view, version: __MCPAPP_VERSION__ },
@@ -83,57 +131,55 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             currentApp = app;
             hostRef.current = app;
             app.onhostcontextchanged = (context) => {
-                if (!active || currentApp !== app) return;
+                if (!active || currentApp !== app || hostRef.current !== app) return;
                 if (context.theme === "light" || context.theme === "dark")
                     applyDocumentTheme(context.theme);
                 if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
                 if (context.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
+                displayRequestRef.current = undefined;
                 const hostContext = app.getHostContext();
                 setDisplayMode(hostContext?.displayMode ?? "inline");
                 setFullscreenAvailable(hostContext?.availableDisplayModes?.includes("fullscreen") === true);
             };
             app.ontoolinput = (input) => {
-                if (!active || currentApp !== app) return;
+                if (!active || currentApp !== app || hostRef.current !== app) return;
                 const value = input.arguments as Record<string, unknown> | undefined;
                 if (typeof value?.ctxId === "string") {
-                    if (sessionRef.current && sessionRef.current.ctxId !== value.ctxId) {
-                        sessionRef.current = undefined;
-                        setSession(undefined);
-                        setSnapshot(undefined);
+                    if (contextRef.current !== value.ctxId) {
+                        replaceSession(undefined, value.ctxId);
                         clearMcpAppSession();
                     }
                     setCtxId(value.ctxId);
                 }
             };
             app.ontoolresult = (result) => {
-                if (!active || currentApp !== app) return;
+                if (!active || currentApp !== app || hostRef.current !== app) return;
                 const nextSession = readMcpAppSession(result);
                 if (nextSession) {
-                    sessionRef.current = nextSession;
-                    setCtxId(nextSession.ctxId);
-                    setSession(nextSession);
+                    replaceSession(nextSession);
                     saveMcpAppSession(nextSession);
                     return;
                 }
                 const content = result.structuredContent as Record<string, unknown> | undefined;
                 if (typeof content?.ctxId === "string") {
-                    if (sessionRef.current && sessionRef.current.ctxId !== content.ctxId) {
-                        sessionRef.current = undefined;
-                        setSession(undefined);
-                        setSnapshot(undefined);
+                    if (contextRef.current !== content.ctxId) {
+                        replaceSession(undefined, content.ctxId);
                         clearMcpAppSession();
                     }
                     setCtxId(content.ctxId);
                 }
             };
             // Host teardown is final for this view, not a connection error.
-            app.onclose = () => { if (currentApp === app) setStatus("disconnected"); };
-            app.onteardown = async () => {
-                if (currentApp === app) setStatus("disconnected");
-                return {};
+            const disconnect = () => {
+                if (!active || currentApp !== app || hostRef.current !== app) return;
+                invalidateScope();
+                hostRef.current = undefined;
+                setStatus("disconnected");
             };
+            app.onclose = disconnect;
+            app.onteardown = async () => { disconnect(); return {}; };
             void app.connect().then(() => {
-                if (!active || currentApp !== app) return;
+                if (!active || currentApp !== app || hostRef.current !== app) return;
                 const hostContext = app.getHostContext();
                 setDisplayMode(hostContext?.displayMode ?? "inline");
                 setFullscreenAvailable(hostContext?.availableDisplayModes?.includes("fullscreen") === true);
@@ -144,18 +190,19 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 // view may need Host-assisted bootstrap; ordinary ToolCall
                 // cards receive their capability in the original tool result.
                 if (view === "interaction" && sessionRef.current === undefined) {
+                    const bootstrapEpoch = sessionEpoch.current;
                     void app.callServerTool({ name: "mcpapp_open", arguments: {} }).then((result) => {
-                        if (!active || currentApp !== app) return;
+                        if (!active || currentApp !== app || hostRef.current !== app ||
+                            sessionEpoch.current !== bootstrapEpoch) return;
                         if (result.isError) throw new Error("MCP App Context is unavailable.");
                         const capability = readMcpAppSession(result);
                         if (capability === undefined)
                             throw new Error("MCP App bootstrap returned no private Live capability.");
-                        sessionRef.current = capability;
-                        setCtxId(capability.ctxId);
-                        setSession(capability);
+                        replaceSession(capability);
                         saveMcpAppSession(capability);
                     }).catch((error: unknown) => {
-                        if (active && currentApp === app)
+                        if (active && currentApp === app && hostRef.current === app &&
+                            sessionEpoch.current === bootstrapEpoch)
                             setLiveError(error instanceof Error ? error.message : "MCP App bootstrap failed.");
                     });
                 }
@@ -164,6 +211,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         connect();
         return () => {
             active = false;
+            sessionEpoch.current++;
             window.removeEventListener("openai:set_globals", refreshGlobals);
             if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
             stopSize?.();
@@ -176,59 +224,59 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         if (view !== "workspace" || status !== "connected" || session === undefined ||
             !fullscreenAvailable || displayMode === "fullscreen") return;
         const app = hostRef.current;
-        if (!app || fullscreenAttempted.current.has(session.ctxId) ||
+        if (!app || !currentScope(app) || fullscreenAttempted.current.has(session.ctxId) ||
             hasMcpAppFullscreenClaim(session.ctxId)) return;
         fullscreenAttempted.current.add(session.ctxId);
         saveMcpAppFullscreenClaim(session.ctxId);
         // Only explicitly presented Workspaces may request fullscreen.
         let active = true;
+        const operation = Symbol();
+        displayRequestRef.current = operation;
         void app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 }).then((result) => {
-            if (active && hostRef.current === app && result.mode === "fullscreen")
+            if (active && currentScope(app) && displayRequestRef.current === operation && result.mode === "fullscreen")
                 setDisplayMode("fullscreen");
         }).catch(() => {
             // The Host may refuse fullscreen; no automatic reopen loop.
         });
         return () => { active = false; };
-    }, [view, session, status, fullscreenAvailable, displayMode]);
+    }, [view, session, status, epoch, fullscreenAvailable, displayMode]);
 
     useEffect(() => {
         if (session === undefined || status !== "connected") return;
+        const app = hostRef.current;
+        if (!app || !currentScope(app)) return;
         const controller = new AbortController();
-        let current = true;
-        setSnapshot(undefined);
+        const current = () => !controller.signal.aborted && currentScope(app);
+        clearSnapshot();
         setLiveError(undefined);
         void (async () => {
-            let cursor = 0;
+            let cursor: number | undefined;
             let retries = 0;
-            while (!controller.signal.aborted && current) {
+            while (current()) {
                 try {
-                    if (cursor === 0) {
+                    if (cursor === undefined) {
                         const first = await readMcpAppSnapshot(session, controller.signal);
-                        if (!current) return;
-                        cursor = first.cursor;
-                        setSnapshot(first);
-                        setLiveError(undefined);
+                        if (!current()) return;
+                        publishSnapshot(app, session, first);
+                        cursor = Math.max(first.cursor, revisionRef.current);
                     }
                     const update = await watchMcpApp(session, cursor, controller.signal);
-                    if (!current) return;
-                    if (update.snapshot) setSnapshot((previous) =>
-                        previous === undefined || update.snapshot!.cursor >= previous.cursor
-                            ? update.snapshot : previous,
-                    );
-                    cursor = Math.max(cursor, update.cursor);
+                    if (!current()) return;
+                    if (update.snapshot) publishSnapshot(app, session, update.snapshot);
+                    cursor = Math.max(cursor, update.cursor, revisionRef.current);
                     retries = 0;
                 } catch (error) {
-                    if (controller.signal.aborted || !current) return;
+                    if (!current()) return;
                     const message = error instanceof Error ? error.message : "MCP App connection failed";
-                    setSnapshot(undefined);
-                    setLiveError(message);
+                    clearSnapshot();
                     if (message === "MCP App authorization expired") {
-                        sessionRef.current = undefined;
-                        setSession(undefined);
+                        replaceSession(undefined, contextRef.current);
                         clearMcpAppSession();
+                        setLiveError(message);
                         return;
                     }
-                    cursor = 0;
+                    setLiveError(message);
+                    cursor = undefined;
                     await new Promise<void>((resolve) => {
                         const delay = Math.min(1_000 * 2 ** Math.min(retries++, 4), 15_000);
                         const timer = setTimeout(resolve, delay);
@@ -237,13 +285,14 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 }
             }
         })();
-        return () => { current = false; controller.abort(); };
-    }, [session, status]);
+        return () => { controller.abort(); };
+    }, [session, status, epoch]);
 
     // The server chooses recovery eligibility and persists the claim. React
     // only hands that intent to the MCP Host; it does not run a local scheduler.
     useEffect(() => {
-        if (view !== "workspace" || status !== "connected" || !snapshot || !session) return;
+        if (view !== "workspace" || status !== "connected" || !snapshot || !session ||
+            snapshot !== snapshotRef.current || snapshot.ctxId !== session.ctxId) return;
         const directive = snapshot.reentry?.directives?.find((item) =>
             item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
         const schedule = snapshot.reentry?.schedule;
@@ -252,16 +301,25 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             sourceId: schedule.sourceId,
         } : undefined);
         if (!recovery?.sourceId) return;
-        const key = `${session.ctxId}:${recovery.id ?? `automatic:${recovery.sourceId}:${schedule?.readyAt ?? ""}`}`;
-        if (deliveredRecovery.current.has(key)) return;
+        const identity = recoveryIdentity(snapshot);
+        const key = JSON.stringify([session.liveBaseUrl, session.ctxId, identity]);
+        const previous = recoveryAttempts.current.get(key);
+        if (deliveredRecovery.current.has(key) || (previous?.epoch === epoch &&
+            (previous.active || previous.cursor >= snapshot.cursor))) return;
         const app = hostRef.current;
-        if (!app) return;
-        deliveredRecovery.current.add(key);
+        if (!app || !currentScope(app)) return;
+        const operation = { epoch, cursor: snapshot.cursor, active: true };
+        recoveryAttempts.current.set(key, operation);
+        if (!actionRef.current && !closeRef.current) {
+            if (errorOwnerRef.current === previous) setActionError(undefined);
+            errorOwnerRef.current = operation;
+        }
         const claimId = `mcpapp-${crypto.randomUUID()}`;
         const base = { ctxId: session.ctxId, claimId,
             intent: recovery.intent, sourceId: recovery.sourceId,
             ...(recovery.id === undefined ? {} : { directiveId: recovery.id }) };
-        const current = () => sessionRef.current?.ctxId === session.ctxId && hostRef.current === app;
+        const current = () => currentScope(app) && recoveryAttempts.current.get(key) === operation &&
+            recoveryIdentity(snapshotRef.current) === identity;
         const invoke = async (payload: Record<string, unknown>) => {
             const result = await app.callServerTool({ name: "mcpapp_reentry", arguments: { ...base, ...payload } });
             if (result.isError) throw new Error("Workspace recovery was rejected.");
@@ -270,6 +328,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         void (async () => {
             let claimed = false;
             let attempted = false;
+            let attemptUncertain = false;
             let outcome: "accepted" | "rejected" | "uncertain" = "uncertain";
             try {
                 const claim = await invoke({ action: "claim", intent: recovery.intent, sourceId: recovery.sourceId });
@@ -284,41 +343,55 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     throw new Error("Workspace recovery delivery is unavailable.");
                 await app.updateModelContext(delivery.modelContext as Parameters<ConnectedApp["updateModelContext"]>[0]);
                 if (!current()) return;
+                // Once attempt is requested, an ambiguous transport result must
+                // not cause this iframe to replay a potentially delivered intent.
+                deliveredRecovery.current.add(key);
+                attemptUncertain = true;
                 const attempt = await invoke({ action: "attempt" });
-                if (attempt.attempted !== true || !current()) return;
-                attempted = true;
+                attemptUncertain = false;
+                attempted = attempt.attempted === true;
+                if (!attempted && attempt.duplicate !== true) deliveredRecovery.current.delete(key);
+                if (!attempted || !current()) return;
                 const sent = await app.sendMessage({
                     role: "user", content: [{ type: "text", text: delivery.message }],
                 });
                 outcome = sent?.isError ? "rejected" : "accepted";
             } catch (error) {
-                if (current()) setActionError(error instanceof Error ? error.message : "Workspace recovery failed.");
+                if (current() && errorOwnerRef.current === operation)
+                    setActionError(error instanceof Error ? error.message : "Workspace recovery failed.");
             } finally {
                 if (claimed) {
                     try {
-                        if (attempted) await invoke({ action: "report", outcome });
+                        if (attempted || attemptUncertain) await invoke({ action: "report", outcome });
                         else await invoke({ action: "release" });
                     } catch {
                         // An uncertain send cannot be replayed blindly.
                     }
                 }
-                if (current()) {
-                    try { setSnapshot(await readMcpAppSnapshot(session, new AbortController().signal)); }
-                    catch { /* Watch reconnects from authoritative state. */ }
+                operation.active = false;
+                if (currentScope(app) && recoveryAttempts.current.get(key) === operation) {
+                    try {
+                        const updated = await readMcpAppSnapshot(session, new AbortController().signal);
+                        if (recoveryAttempts.current.get(key) === operation) publishSnapshot(app, session, updated);
+                    } catch { /* Watch reconnects from authoritative state. */ }
                 }
             }
         })();
-    }, [snapshot, session, status, view]);
+    }, [snapshot, session, status, view, epoch]);
 
     const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => {
         const app = hostRef.current;
-        const current = sessionRef.current;
-        if (!app || !current || busyAction) return;
-        const key = `${item.id}:${action.id}`;
+        if (!app || !session || !currentScope(app) || !snapshot ||
+            snapshot !== snapshotRef.current || actionRef.current) return;
+        const key = actionKey(epoch, snapshot.cursor, item, action);
         if (action.confirmation && pendingAction !== key) {
             setPendingAction(key);
             return;
         }
+        const operation = crypto.randomUUID();
+        const current = () => currentScope(app) && actionRef.current === operation;
+        actionRef.current = operation;
+        errorOwnerRef.current = operation;
         setPendingAction(undefined);
         setActionError(undefined);
         setBusyAction(key);
@@ -326,40 +399,44 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             const result = await app.callServerTool({
                 name: "mcpapp_action",
                 arguments: {
-                    ctxId: current.ctxId,
+                    ctxId: session.ctxId,
                     itemId: item.id,
                     actionId: action.id,
-                    requestId: crypto.randomUUID(),
+                    requestId: operation,
                     ...(action.expectedRevision === undefined ? {} : { expectedRevision: action.expectedRevision }),
                 },
             });
+            if (!current()) return;
             if (result.isError) throw new Error("Workspace action was rejected.");
             const value = result.structuredContent as { status?: string } | undefined;
-            if (sessionRef.current?.ctxId !== current.ctxId) return;
-            const updated = await readMcpAppSnapshot(current, new AbortController().signal);
-            if (sessionRef.current?.ctxId === current.ctxId) {
-                setSnapshot(updated);
-                if (value?.status === "stale")
-                    setActionError("The previous action may have changed state; review the latest status before retrying.");
-            }
+            const updated = await readMcpAppSnapshot(session, new AbortController().signal);
+            if (!current()) return;
+            publishSnapshot(app, session, updated);
+            if (value?.status === "stale" && errorOwnerRef.current === operation)
+                setActionError("The previous action may have changed state; review the latest status before retrying.");
         } catch (error) {
-            if (sessionRef.current?.ctxId === current.ctxId)
+            if (current() && errorOwnerRef.current === operation)
                 setActionError(error instanceof Error ? error.message : "Workspace action failed.");
         } finally {
-            setBusyAction(undefined);
+            if (current()) {
+                actionRef.current = undefined;
+                setBusyAction(undefined);
+            }
         }
     };
 
     const requestFullscreen = async () => {
         const app = hostRef.current;
-        if (view !== "workspace" || !app || !fullscreenAvailable) return;
+        if (view !== "workspace" || !app || !currentScope(app) || !fullscreenAvailable) return;
+        const operation = Symbol();
+        displayRequestRef.current = operation;
         if (session) {
             fullscreenAttempted.current.add(session.ctxId);
             saveMcpAppFullscreenClaim(session.ctxId);
         }
         try {
             const result = await app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 });
-            if (hostRef.current === app && result?.mode === "fullscreen") setDisplayMode("fullscreen");
+            if (currentScope(app) && displayRequestRef.current === operation && result?.mode === "fullscreen") setDisplayMode("fullscreen");
         } catch {
             // A Host may decline the requested presentation mode.
         }
@@ -367,7 +444,10 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
 
     const closeWorkspace = async () => {
         const app = hostRef.current;
-        if (view !== "workspace" || !app || closeRequested) return;
+        if (view !== "workspace" || !app || !currentScope(app) || closeRef.current) return;
+        const operation = Symbol();
+        closeRef.current = operation;
+        errorOwnerRef.current = operation;
         if (session) saveMcpAppFullscreenClaim(session.ctxId);
         setCloseRequested(true);
         setActionError(undefined);
@@ -375,8 +455,11 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             // App.close() only closes the transport. The Host owns the window.
             await app.requestTeardown();
         } catch (error) {
+            if (!currentScope(app) || closeRef.current !== operation) return;
+            closeRef.current = undefined;
             setCloseRequested(false);
-            setActionError(error instanceof Error ? error.message : "Could not close Workspace.");
+            if (errorOwnerRef.current === operation)
+                setActionError(error instanceof Error ? error.message : "Could not close Workspace.");
         }
     };
 
@@ -408,7 +491,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     {snapshot ? <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
                         {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
-                            onAction={act} pendingAction={pendingAction} busyAction={busyAction}
+                            onAction={act} epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />}
                         {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
                         {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
@@ -419,7 +502,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     <WorkspaceDashboard snapshot={snapshot} session={session}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" ? undefined : act}
-                            pendingAction={pendingAction} busyAction={busyAction}
+                            epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />} />
                 </> : <div className="workspace-landing">
                     <h1>{ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>
@@ -435,9 +518,11 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     );
 }
 
-function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel }: {
+function WorkspaceItem({ item, kind, onAction, epoch = 0, cursor = 0, pendingAction, busyAction, cancel }: {
     item: McpAppItem;
     kind: string;
+    epoch?: number;
+    cursor?: number;
     onAction?: (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => void;
     pendingAction?: string;
     busyAction?: string;
@@ -452,7 +537,7 @@ function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel
         {item.progress && <p>{item.progress.current} / {item.progress.total}</p>}
         {item.actions && item.actions.length > 0 && onAction && <div className="workspace-actions">
             {item.actions.map((action) => {
-                const key = `${item.id}:${action.id}`;
+                const key = actionKey(epoch, cursor, item, action);
                 return <span key={key}>
                     <button type="button" disabled={busyAction !== undefined} onClick={() => onAction(item, action)}>
                         {pendingAction === key ? `Confirm ${action.label}` : busyAction === key ? "Applying…" : action.label}
@@ -462,4 +547,17 @@ function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel
             })}
         </div>}
     </section>;
+}
+
+function actionKey(epoch: number, cursor: number, item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) {
+    return JSON.stringify([epoch, cursor, item.id, action]);
+}
+
+function recoveryIdentity(snapshot: McpAppSnapshot | undefined) {
+    const directive = snapshot?.reentry?.directives?.find((item) =>
+        item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
+    const schedule = snapshot?.reentry?.schedule;
+    if (directive) return JSON.stringify([directive.id, directive.intent, directive.sourceId]);
+    if (schedule) return JSON.stringify([undefined, "automatic", schedule.sourceId, schedule.readyAt]);
+    return undefined;
 }
