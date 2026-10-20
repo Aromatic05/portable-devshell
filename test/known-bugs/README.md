@@ -69,3 +69,28 @@ node packages/mcpapp/node_modules/vitest/vitest.mjs run --config test/known-bugs
 
 For the isolated positive three-phase running-system retirement proof, start a *fresh* dedicated Testspace root, run `pnpm testspace retirement-smoke`, and always run `pnpm testspace stop` (even on failures). It verifies never-started deletion, explicitly stopped Worker deletion, and Control-restarted Worker stopped before deletion, with debt-free same-name recreation. This is not a permanent fix for the automatic cleanup retry RED.
 
+
+## Sixth-round standalone regressions
+
+All three failures below were reproduced on the normal Linux host using real local filesystem, SQLite and/or TCP. They **must not be included in default green package discovery** until the implementation is corrected without changing the original invariant.
+
+```sh
+# An already executed side effect must not be advertised as safely retryable
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts
+
+# A rejected duplicate callId must not take the original caller's durable audit identity
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts
+
+# A failed WSS replacement must not poison the retained predecessor's reliable RPC session
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts
+```
+
+Real positive acceptance programs:
+
+```sh
+pnpm acceptance:web             # Chromium Audit survives reload and WebUI Stop/Start
+pnpm acceptance:tmux-handoff   # real 190-second task, 180-second detached handoff
+pnpm stress:transport         # cgroup-bounded 32 MiB Artifact + eight Reverse cycles
+```
+
+The positive stress program now synchronizes the existing old-token-revocation assertion on the protocol's DSR2 ready/credential-commit event rather than the earlier Instance snapshot-ready boundary. This does not address the failed-candidate WSS session contamination regression.
