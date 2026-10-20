@@ -216,3 +216,61 @@ test("RESET releases a backpressured write and pending read without closing the 
     assert.equal(opener.closed, false);
     assert.equal(acceptor.closed, false);
 });
+
+test("receive window backpressure releases the next write when the peer consumes data", async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "window-release", 1);
+    await local.write(Uint8Array.of(1));
+    let released = false;
+    const secondWrite = local.write(Uint8Array.of(2)).then(() => { released = true; });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(released, false);
+    assert.deepEqual(await remote.read(), Uint8Array.of(1));
+    await secondWrite;
+    assert.deepEqual(await remote.read(), Uint8Array.of(2));
+});
+
+test("pending readers receive consecutive DATA in wire order", async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "reader-order", 8);
+    const first = remote.read();
+    const second = remote.read();
+
+    await local.write(Uint8Array.of(0x31, 0x32));
+
+    assert.deepEqual(await first, Uint8Array.of(0x31, 0x32));
+    await local.write(Uint8Array.of(0x33));
+    assert.deepEqual(await second, Uint8Array.of(0x33));
+});
+
+test("FIN resolves all pending readers after queued DATA", async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "fin-pending-readers", 8);
+    await local.write(Uint8Array.of(7));
+    const first = remote.read();
+    const second = remote.read();
+    await local.finish();
+
+    assert.deepEqual(await first, Uint8Array.of(7));
+    assert.equal(await second, undefined);
+});
+
+test("reset rejects an already pending read with its remote error", async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "pending-reset", 8);
+    const pending = remote.read();
+    const rejected = assert.rejects(pending, (error: unknown) => {
+        assert.ok(error instanceof FrameResetError);
+        assert.equal(error.resetCode, frameResetCodes.cancelled);
+        assert.equal(error.message, "reader cancelled");
+        return true;
+    });
+
+    await local.reset(frameResetCodes.cancelled, "reader cancelled");
+    await rejected;
+});
