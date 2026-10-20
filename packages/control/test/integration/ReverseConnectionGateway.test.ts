@@ -154,7 +154,15 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
                 errors: restarted.errors,
             }),
         );
-        assert.ok(restarted.acks.length > 0);
+        // Instance snapshot readiness becomes visible at the activation step,
+        // *before* credential rollover is atomically committed. The explicit
+        // DSR2:ready WSS frame is sent only after the predecessor is revoked.
+        // Do not turn a valid in-flight predecessor token into a flaky failure.
+        await waitUntil(
+            () => restarted.acks.includes("ready"),
+            () => JSON.stringify({ acks: restarted.acks, methods: restarted.methods,
+                snapshot: instance.supervision.snapshot() }),
+        );
         assert.equal(await credentialStore.authenticate("reverse-test", rotated.deviceToken), false);
         connections.disconnect("reverse-test");
         await restarted.closed;
