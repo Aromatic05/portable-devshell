@@ -28,6 +28,8 @@ They use temporary home directories and real Rust/Control IPC. They must not be 
 | TUI H | `packages/tui/test/interaction/{TuiOverlayLifetime,Overlay}.test.ts` |
 | MCP App/Web H | MCP App `AppRaces.test.tsx`, Web Config/Audit state tests and component RED files below |
 
+The second, independent 2026-10-20 review also found and fixed additional causal gaps. The normal package matrix now includes `packages/control/test/unit/control/config/persistence/CommitDurability.test.ts` (post-commit fsync and after-effect unlink), `packages/core/test/unit/worker/provision/ExistingLifecycle.test.ts` (full Container Stop/Retire, hot update, legacy owner migration), `packages/core/test/unit/task/state/Todo.test.ts` (duplicate-title on-disk replay and unchanged updates), `extensions/comment/test/unit/MailingMigration.test.ts` (v1 missing metadata, v3 receipt reconciliation, and atomic v3-source into v1/v2-target upgrades) and `packages/mcp/test/integration/OAuthJwks.test.ts` plus `packages/mcp/test/unit/auth/OAuthJwks.test.ts` (atomic first-start JWKS agreement, SIGKILL recovery and disposable cleanup failure). See the BF-01 to BF-08 table in `docs/development/beta-bug-findings.md`. These do not establish real Podman/Docker or Windows integration.
+
 Run the applicable packages through `pnpm test:packages`. For historical bug details see `docs/development/beta-bug-findings.md`.
 
 ## Opt-in rendered UI reproductions

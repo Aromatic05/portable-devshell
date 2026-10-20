@@ -31,6 +31,23 @@
 | G Todo/Approval，E7-01/R4-03 | Todo多次正常访问直接进入Revision CAS；Approval关闭并发阻止晚到批准；原红测及11条独立回归通过，L03的Todo阶段已通过 | `c84131d7`、`0055a8b1` |
 | H MCP App/Web/TUI | Context Snapshot/Action晚到隔离、Web配置草稿和Audit状态隔离、TUI Busy Overlay身份；Web Audit在ToolCall尚未形成记录时独立显示待审批项，按Instance/Context隔离并保留页面级确认和错误恢复；Web包250/250、独立真实Chromium Approve/Deny测试和L03完整六条功能链全部通过 | `239b50cc`、`7f02803b`、`59fd2336`、`808e1d98` |
 
+## 补充反向复核与修复（2026-10-20）
+
+此前A–H默认测试及四条完整Acceptance链通过后，针对原始断点反向检查极端I/O、旧数据库升级和未覆盖生命周期配置。以下是**新确认并已按scope提交**的修复，不是对既有四链结论的直接外推。
+
+| ID/等级 | 原始遗漏的可复现故障 | 当前修复及证据 | 提交 |
+|---|---|---|---|
+| BF-01 / P1 | Config提交标记已删除但最后fsync/EIO，持久代与ConfigEngine内存代不同；rm执行了删除副作用才报错也有相同风险 | 将确认可见但耐久性未证实的提交独立报告并发布到内存/Runtime，保留回滚备份和警告；对仍存在或被替换的marker维持恢复优先级。新增 `CommitDurability.test.ts`，真实宿主Config/Editor 68/68 | `c31ee6ba` |
+| BF-02 / P1 | Existing Container `adoptLifecycle=false`：Worker Stop之后错误清除接管记录，保留运行的容器后续Status/Stop/Retire都被拒绝 | Worker-only停止保留有效稳定ID/StartedAt接管证据，完整Stop→Retire后释放；换代或外部重启仍拒绝 | `e4fac326` |
+| BF-03 / P1 | 改 `approvalPolicy` 等非Worker配置无须重建Worker，却导致完整Instance配置哈希Owner变化、运行Container无法恢复 | Owner改由稳定实例/提供方与目标资源绑定组成；旧Beta全配置Owner仅在ID、启动身份和Generation严格匹配后在原SQLite事务内升级。真实宿主Container 107/107，含隔离进程、Docker/Podman命令Fixture | `e4fac326` |
+| BF-04 / P1 | Todo无`taskId`的重复活动标题可成功写盘，但重启后`normalizeDocument`拒绝整个文档 | 持久化前拒绝重复活动标题并保留旧文件及Revision CAS；真实`TodoStore`重启仍可读取 | `97b178de` |
+| BF-05 / P2 | v3旧Message库合并至已存在目标库时复制消息但漏了`mailing_notifications`，重放后重复推送；源v3目标仍为v1/v2时原修复会因启动先合并后Schema升级而阻断 | 同一事务自动将旧目标升级为v3、合并消息、收据、ACK和迁移marker，冲突时表、索引、版本号、数据全部回滚；默认`MailingMigration.test.ts`覆盖真实SQLite，Comment 205/205 | `f50a0209`、`8fbeb5aa` |
+| BF-06 / P2 | v1 Message源库无`conversation_metadata`时，Schema正常升级可兼容，但Legacy合并拒绝 | Legacy支持v1 metadata可选、按同一事务补齐后迁移；源库保持原样 | `f50a0209` |
+| BF-07 / P2 | 两个OAuth Provider在同一空目录同时首次初始化，各自发布JWKS，持久文件只保留后写者的签名密钥 | 先同步完整私钥临时文件，使用不覆盖hard-link原子发布；竞争者重新读取唯一canonical密钥；SIGKILL、双进程、异常清理回归 | `c8bfa70b` |
+| BF-08 / P2 | 相同Context反复提交无变化的Todo内容，Revision、事件和文件写入无限增长 | CAS核对后对无Checkpoint、完全相同Items和同Context的幂等更新返回原状态；Context接管、Checkpoint、完成归档仍需真实更新。宿主Todo 20/20、Comment 205/205 | `97b178de` |
+
+这些验证全部使用隔离临时HOME、SQLite、模拟容器CLI或真实localhost接口，未接入已有生产实例。**尚未实测真实Docker/Podman容器引擎、Windows的JWKS hard-link/ACL和磁盘实际掉电。**原始RED及首次链失败证据在下文保留，不能再当作当前HEAD的失败。
+
 **完整链状态**：L01/L04真实Reverse Worker创建、Enroll、断线恢复、退休、同名重建已通过并完成清理。L03在全新临时HOME、真实CLI/MCP/Rust Worker/Chromium下完整退出码为**0**，其六条链分别涵盖工具执行、Web失败RPC恢复、Todo Revision/CAS、执行前Web Approval、Stream Gap和Control重启后持久化一致性；审批副作用恰好一次、重载可恢复、清理完成。另有独立Chromium测试在**尚无ToolCall历史行**时完成Approve与Deny，均通过。2026-10-20的四链聚合 `node acceptance/run-chain-matrix.mjs --all` 已实测 **4/4通过、Exit 0、failures=[]**（L07、L05、L03、L01-L04）。以上并不表示TUI实机、真实Docker/Podman或Windows行为已经完成验收。
 
 ## A. 实际复现且仍待修复
