@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { round4Target, barrier } from "../../packages/core/test/unit/tool/Round4Harness.ts";
-import { ApprovalService } from "../../packages/core/src/approval/execution/Service.ts";
-import { InstanceApprovalStore } from "../../packages/core/src/approval/Store.ts";
+import { round4Target, barrier } from "../tool/Round4Harness.ts";
+import { ApprovalService } from "../../../src/approval/execution/Service.ts";
+import { InstanceApprovalStore } from "../../../src/approval/Store.ts";
 
 test("ApprovalService close during pending persistence cannot publish a new live approval after close", async (t) => {
     const h = await round4Target(); t.after(() => h.close());

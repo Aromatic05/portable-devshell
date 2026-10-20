@@ -78,6 +78,7 @@ export class ApprovalService implements ApprovalApi {
     #policy: ApprovalPolicy;
     #operation: Promise<void> = Promise.resolve();
     #ready?: Promise<void>;
+    #closed = false;
 
     constructor(options: ApprovalServiceOptions) {
         this.#instance = options.instanceName;
@@ -94,11 +95,16 @@ export class ApprovalService implements ApprovalApi {
     }
 
     close(): void {
+        this.#closed = true;
         for (const pending of this.#pending.values()) {
             clearTimeout(pending.timeout);
             pending.removeAbortListener?.();
             pending.resolve({
-                error: cancelled(this.#instance, pending.request.toolName),
+                error: cancelled(
+                    this.#instance,
+                    pending.request.toolName,
+                    "approval service closed",
+                ),
                 status: "cancelled",
             });
         }
@@ -109,8 +115,20 @@ export class ApprovalService implements ApprovalApi {
         input: ApprovalEvaluationInput,
         signal?: AbortSignal,
     ): Promise<ApprovalEvaluation> {
+        if (this.#closed) {
+            return {
+                decision: "deny",
+                error: cancelled(this.#instance, input.toolName, "approval service closed"),
+            };
+        }
         await this.#ensureReady();
         return this.#exclusive(async () => {
+            if (this.#closed) {
+                return {
+                    decision: "deny",
+                    error: cancelled(this.#instance, input.toolName, "approval service closed"),
+                };
+            }
             const outcome = policyDecision(
                 this.#policy,
                 input.source,
@@ -150,6 +168,25 @@ export class ApprovalService implements ApprovalApi {
             };
             await this.#store.append(request);
 
+            if (this.#closed) {
+                const terminal = await this.#cancel(
+                    request.approvalId,
+                    "approval service closed",
+                );
+                return {
+                    decision: "ask",
+                    request: terminal,
+                    awaitDecision: Promise.resolve({
+                        error: cancelled(
+                            this.#instance,
+                            request.toolName,
+                            "approval service closed",
+                        ),
+                        status: "cancelled",
+                    }),
+                };
+            }
+
             let resolve!: (value: ApprovalResolution) => void;
             const awaitDecision = new Promise<ApprovalResolution>((done) => {
                 resolve = done;
@@ -178,6 +215,9 @@ export class ApprovalService implements ApprovalApi {
                     });
             }
             await this.#events.append("approval.requested", eventData(request));
+            if (this.#closed) {
+                await this.#cancel(request.approvalId, "approval service closed");
+            }
             return { decision: "ask", request, awaitDecision };
         });
     }
@@ -217,6 +257,12 @@ export class ApprovalService implements ApprovalApi {
                 pending?.request ?? (await this.#store.get(approvalId));
             if (request === undefined)
                 throw notFound(this.#instance, approvalId);
+            if (
+                this.#closed &&
+                (request.status === "pending" || request.status === "cancelled")
+            ) {
+                return this.#cancel(approvalId, "approval service closed");
+            }
             if (request.status !== "pending") {
                 throw createRemoteError({
                     code: runtimeErrorCodes.approvalAlreadyDecided,
@@ -249,7 +295,7 @@ export class ApprovalService implements ApprovalApi {
                 status: input.decision === "approve" ? "approved" : "denied",
                 terminalAt: decision.decidedAt,
             };
-            await this.#complete(
+            const completed = await this.#complete(
                 updated,
                 input.decision === "approve"
                     ? { decision, status: "approved" }
@@ -260,7 +306,7 @@ export class ApprovalService implements ApprovalApi {
                       },
             );
             await this.#pruneTerminal();
-            return updated;
+            return completed;
         });
     }
 
@@ -416,22 +462,41 @@ export class ApprovalService implements ApprovalApi {
         request: ApprovalRequest,
         resolution: ApprovalResolution,
         reason?: string,
-    ): Promise<void> {
+    ): Promise<ApprovalRequest> {
         await this.#store.append(request);
+        // close() is synchronous and can run while a store write is suspended.
+        // Fence its acknowledgement before publishing or granting the decision.
+        // A write already committed by the store is terminalized as cancellation.
+        if (
+            this.#closed &&
+            (resolution.status === "approved" || resolution.status === "denied")
+        ) {
+            request = {
+                ...request,
+                status: "cancelled",
+                terminalAt: new Date(this.#now()).toISOString(),
+            };
+            delete request.decision;
+            reason = "approval service closed";
+            resolution = {
+                error: cancelled(this.#instance, request.toolName, reason),
+                status: "cancelled",
+            };
+            await this.#store.append(request);
+        }
         const pending = this.#pending.get(request.approvalId);
         if (pending !== undefined) {
             clearTimeout(pending.timeout);
             pending.removeAbortListener?.();
             this.#pending.delete(request.approvalId);
         }
-        try {
-            await this.#events.append(
-                `approval.${resolution.status}`,
-                eventData(request, request.decision, reason),
-            );
-        } finally {
-            pending?.resolve(resolution);
-        }
+        // The durable transition owns resolution, independently of event I/O.
+        pending?.resolve(resolution);
+        await this.#events.append(
+            `approval.${resolution.status}`,
+            eventData(request, request.decision, reason),
+        );
+        return request;
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
