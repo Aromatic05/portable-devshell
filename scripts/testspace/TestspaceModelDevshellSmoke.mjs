@@ -71,6 +71,42 @@ export async function runTestspaceModelDevshellSmoke({
         assertExit(instanceList, 0, "model devshell instance list");
         const handle = parseRemoteHandle(instanceList.stdout, remoteInstance);
 
+        const modelCatalog = await runBash(client, ctxId, "devshell --help");
+        assertExit(modelCatalog, 0, "model devshell command catalog");
+        for (const command of [
+            "artifact", "instance", "memory", "mcp", "recall", "secret", "skill",
+        ]) {
+            if (!String(modelCatalog.stdout ?? "").split("\n").some((line) =>
+                line.trim().split(/\s+/u)[0] === command)) {
+                throw new Error(`model devshell catalog is missing ${command}: ${JSON.stringify(modelCatalog)}`);
+            }
+        }
+
+        // Exercise the real Model CLI command handlers through MCP bash_run
+        // and the running Worker, not their native CLI equivalents or --help.
+        const memories = await runModelJson(client, ctxId, "devshell memory list");
+        if (!Array.isArray(memories.memories)) {
+            throw new Error(`model memory list did not query the workspace: ${JSON.stringify(memories)}`);
+        }
+        const profiles = await runModelJson(client, ctxId, "devshell mcp list");
+        if (!Array.isArray(profiles)) {
+            throw new Error(`model mcp list did not return the Extension profile catalog: ${JSON.stringify(profiles)}`);
+        }
+        const skills = await runModelJson(client, ctxId, "devshell skill list");
+        if (!Array.isArray(skills.skills) || !Array.isArray(skills.warnings)) {
+            throw new Error(`model skill list did not query the Worker workspace: ${JSON.stringify(skills)}`);
+        }
+        const secrets = await runModelJson(
+            client,
+            ctxId,
+            "devshell secret scan . --glob '*.devshell-secret-smoke-absent' --limit 1",
+        );
+        if (!Array.isArray(secrets.findings) ||
+            typeof secrets.truncated !== "boolean" ||
+            typeof secrets.truncatedFiles !== "number") {
+            throw new Error(`model secret scan did not execute against the Worker: ${JSON.stringify(secrets)}`);
+        }
+
         const recallHelp = await runBash(client, ctxId, "devshell recall --help");
         assertExit(recallHelp, 0, "model devshell recall help");
         if (!String(recallHelp.stdout ?? "").includes("devshell recall")) {
@@ -211,6 +247,7 @@ export async function runTestspaceModelDevshellSmoke({
             environRemoteMask: true,
             instance,
             instanceStatusExitCode: instanceStatus.exitCode,
+            modelCommandReadOnly: ["memory", "mcp", "secret", "skill"],
             recallExitCode: recallHelp.exitCode,
             remoteInstance,
             toolCount: names.size,
@@ -231,6 +268,18 @@ async function runBash(client, ctxId, command, instance) {
         name: "bash_run",
     });
     return result.structuredContent ?? {};
+}
+
+async function runModelJson(client, ctxId, command) {
+    const response = await runBash(client, ctxId, command);
+    assertExit(response, 0, `model ${command}`);
+    try {
+        return JSON.parse(String(response.stdout ?? ""));
+    } catch (error) {
+        throw new Error(`model ${command} did not return JSON: ${JSON.stringify(response)}`, {
+            cause: error,
+        });
+    }
 }
 
 function assertRemoteSchema(schema) {
