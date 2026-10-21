@@ -36,6 +36,7 @@ export const BUILTIN_EXTENSION_IDS = new Set([
     "access",
     "artifact",
     "comment",
+    "direnv",
     "instance",
     "mcp",
     "recall",

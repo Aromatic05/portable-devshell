@@ -17,6 +17,7 @@ import {
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
 import { controlErrorCodes, type InstanceRuntimeTransport } from "@portable-devshell/shared";
+import { direnvExtensionDirectory } from "../../../../../../../extensions/direnv/src/index.ts";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/artifact/Archive.ts";
@@ -159,6 +160,30 @@ async function invokeCliRegistration(
         lease.release();
     }
 }
+
+test("bundled Direnv installs through the real Control builtin lifecycle", async (t) => {
+    const h = await harness(t);
+    const source = direnvExtensionDirectory();
+    await assert.rejects(h.service.install(source), /reserved for a builtin Extension/u);
+    const installed = await h.service.installBuiltin("direnv", source);
+    assert.equal(installed.id, "direnv");
+    assert.equal(installed.enabled, true);
+    assert.ok(installed.selectedGeneration);
+    const { lease, registration } = await h.host.acquireRegistration(
+        "execution.environment",
+        "direnv",
+    );
+    try {
+        assert.deepEqual(registration.binding, {
+            name: "direnv",
+            version: 1,
+            executable: "direnv",
+            args: ["export", "json"],
+        });
+    } finally {
+        lease.release();
+    }
+});
 
 test("Extension install materializes, validates, and selects an immutable generation without keeping it active", async (t) => {
     const h = await harness(t);
