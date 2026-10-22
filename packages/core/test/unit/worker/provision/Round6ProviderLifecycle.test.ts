@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir, readlink } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readFile, readdir, readlink, realpath } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { RemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
@@ -254,7 +254,11 @@ test("Round6 SSH: corrupted upload cleans partial files and shared enroll retry 
     assert.deepEqual(await readdir(join(f.root, "remote-home", ".devshell", "bin")), []);
     assert.equal((await f.calls()).filter((call) => call.args.join(" ").includes("tmp_binary_path=")).length, 1);
     const paths = await Promise.all(Array.from({ length: 4 }, () => installer.ensure("devshell-worker")));
-    assert.deepEqual(paths, [alias, alias, alias, alias]);
+    // The remote shell returns its physical path. On macOS /var is a symlink
+    // to /private/var, so compare the canonical parent without following the
+    // installed worker alias to its generation target.
+    const resolvedAlias = join(await realpath(dirname(alias)), "devshell-worker");
+    assert.deepEqual(paths, [resolvedAlias, resolvedAlias, resolvedAlias, resolvedAlias]);
     assert.equal(await readlink(alias), `../workers/${target.key}/${sha256}/devshell-worker`);
     assert.deepEqual(await readFile(alias), await readFile(f.worker));
     assert.deepEqual(await readdir(join(f.root, "remote-home", ".devshell", "workers", target.key, sha256)), ["devshell-worker", "devshell-worker.sha256"]);
