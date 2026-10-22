@@ -310,7 +310,7 @@ function Get-WorkerAssetName([string]$Target) {
     return "devshell-worker-$Target"
 }
 
-function Install-Worker([string]$Target, [string]$Temporary, [string]$DevshellHome) {
+function Prepare-Worker([string]$Target, [string]$Temporary, [string]$DevshellHome) {
     $asset = Get-WorkerAssetName $Target
     $source = Join-Path $Temporary $asset
     $sha = ((Get-Content -LiteralPath "$source.sha256" -TotalCount 1) -split '\s+')[0].Trim().ToLowerInvariant()
@@ -318,9 +318,22 @@ function Install-Worker([string]$Target, [string]$Temporary, [string]$DevshellHo
     $workerDirectory = Join-Path $DevshellHome "workers\$Target\$sha"
     $workerBinDirectory = Join-Path $DevshellHome "bin"
     New-Item -ItemType Directory -Force -Path $workerDirectory, $workerBinDirectory | Out-Null
-    Copy-Item -Force -LiteralPath $source -Destination (Join-Path $workerDirectory $binaryName)
+    $workerBinary = Join-Path $workerDirectory $binaryName
+    if (-not (Test-Path -LiteralPath $workerBinary -PathType Leaf)) {
+        Copy-Item -Force -LiteralPath $source -Destination $workerBinary
+    }
+    Assert-Sha256 $workerBinary "$source.sha256"
     Set-Content -NoNewline -Encoding ASCII -LiteralPath (Join-Path $workerDirectory "$binaryName.sha256") -Value "$sha`n"
-    Copy-Item -Force -LiteralPath $source -Destination (Join-Path $workerBinDirectory $asset)
+    Copy-Item -Force -LiteralPath $source -Destination (Join-Path $workerBinDirectory "$asset.install-$PID")
+}
+
+function Activate-Worker([string]$Target, [string]$DevshellHome) {
+    $asset = Get-WorkerAssetName $Target
+    $workerBinDirectory = Join-Path $DevshellHome "bin"
+    $active = Join-Path $workerBinDirectory $asset
+    $prepared = Join-Path $workerBinDirectory "$asset.install-$PID"
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $active
+    Move-Item -LiteralPath $prepared -Destination $active
 }
 
 function Restore-WorkerAliases([string[]]$Targets, [string]$DevshellHome, [string]$BackupDirectory) {
@@ -416,6 +429,9 @@ Write-InstallDetail "预装 Worker：$($targets -join ', ')"
 Write-InstallDetail "其他平台将在首次连接时按需下载"
 
 New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+$preparedCurrentDirectory = ""
+$preparedWorkerAliases = @()
+$preparedDefaultWorker = ""
 try {
     $appAsset = "portable-devshell-app-$hostTarget.tar.gz"
     Write-InstallStep "下载应用包（$hostTarget）"
@@ -462,12 +478,13 @@ try {
     $backupDirectory = Join-Path $installRoot ".backup-$version-$PID"
     $currentDirectory = Join-Path $installRoot "current"
     $currentBackupDirectory = Join-Path $installRoot ".current-backup-$PID"
+    $preparedCurrentDirectory = Join-Path $installRoot ".prepared-current-$version-$PID"
     $workerBackupDirectory = Join-Path $devshellHome ".install-worker-backup-$PID"
     $commandPath = Join-Path $binDirectory "devshell.cmd"
     $previousVersionPresent = Test-Path -LiteralPath $versionDirectory
     $previousCurrentPresent = Test-Path -LiteralPath $currentDirectory
     New-Item -ItemType Directory -Force -Path $installRoot, $versionsDirectory, $binDirectory, $devshellHome | Out-Null
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory, $workerBackupDirectory
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDirectory, $backupDirectory, $currentBackupDirectory, $workerBackupDirectory, $preparedCurrentDirectory
     Copy-Item -Recurse -Force -LiteralPath $appDirectory -Destination $stagingDirectory
     $cliRelativePath = Get-ApplicationCliRelativePath $stagingDirectory
     $stagingCli = Join-Path $stagingDirectory $cliRelativePath
@@ -489,6 +506,16 @@ try {
         if ($migrationRequired) { Write-InstallDetail "候选版本需要 persistent migration" }
         if (-not [bool]$preflight.rollback.feasible) { Write-InstallDetail "Compatibility preflight：提交 persistent migration 后不可自动降级" }
     }
+
+    # All application and Worker bytes are copied while the old Control is still serving.
+    Copy-Item -Recurse -Force -LiteralPath $stagingDirectory -Destination $preparedCurrentDirectory
+    foreach ($target in $targets) {
+        Write-InstallDetail "预安装 $target Worker"
+        $preparedWorkerAliases += Join-Path $devshellHome "bin\$(Get-WorkerAssetName $target).install-$PID"
+        Prepare-Worker $target $temporary $devshellHome
+    }
+    $preparedDefaultWorker = Join-Path $devshellHome "bin\devshell-worker.exe.install-$PID"
+    Copy-Item -Force -LiteralPath (Join-Path $temporary (Get-WorkerAssetName $hostTarget)) -Destination $preparedDefaultWorker
 
     Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
@@ -531,16 +558,17 @@ try {
     try {
         Stop-InstalledControl $currentCli $devshellHome
         foreach ($target in $targets) {
-            Write-InstallDetail "安装 $target Worker"
-            Install-Worker $target $temporary $devshellHome
+            Write-InstallDetail "激活 $target Worker"
+            Activate-Worker $target $devshellHome
         }
-        $hostAsset = Get-WorkerAssetName $hostTarget
-        Copy-Item -Force -LiteralPath (Join-Path $devshellHome "bin\$hostAsset") -Destination (Join-Path $devshellHome "bin\devshell-worker.exe")
+        $defaultWorker = Join-Path $devshellHome "bin\devshell-worker.exe"
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $defaultWorker
+        Move-Item -LiteralPath $preparedDefaultWorker -Destination $defaultWorker
 
         if (Test-Path -LiteralPath $versionDirectory) { Move-Item -Force $versionDirectory $backupDirectory }
         if (Test-Path -LiteralPath $currentDirectory) { Move-Item -Force $currentDirectory $currentBackupDirectory }
         Move-Item -Force $stagingDirectory $versionDirectory
-        Copy-Item -Recurse -Force -LiteralPath $versionDirectory -Destination $currentDirectory
+        Move-Item -LiteralPath $preparedCurrentDirectory -Destination $currentDirectory
         $cliPath = Join-Path $currentDirectory $cliRelativePath
         Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
 
@@ -628,5 +656,14 @@ try {
         Write-Host "PATH 尚未包含 $binDirectory，请将它加入用户 PATH 后重新打开终端。"
     }
 } finally {
+    if ($preparedCurrentDirectory) {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $preparedCurrentDirectory
+    }
+    foreach ($preparedAlias in $preparedWorkerAliases) {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $preparedAlias
+    }
+    if ($preparedDefaultWorker) {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $preparedDefaultWorker
+    }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $temporary
 }

@@ -162,7 +162,6 @@ try {
         preparedWorkers[target.key] = await prepareWorkerRemoteFirst(target);
     }
 
-    beginStep("停止旧版本并切换安装");
     const previousActivation = await captureApplicationActivation();
     const currentCli = await tryReadPackageBinPath(currentLink, "devshell");
     const frozenCurrentCli =
@@ -205,9 +204,37 @@ try {
         );
     }
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
+    const installedWorkers = {};
+    for (const target of targets) {
+        installedWorkers[target.key] = await installPreparedWorker(
+            target,
+            preparedWorkers[target.key],
+        );
+    }
+    if (process.platform === "win32") {
+        await copyFile(
+            installedWorkers[hostTarget].path,
+            resolve(devshellHome, "bin", `devshell-worker.exe.install-${process.pid}`),
+        );
+    }
+    await writeFile(
+        resolve(stagingDirectory, "portable-devshell-install.json"),
+        `${JSON.stringify(
+            {
+                releaseTag,
+                version,
+                workerReleaseDirectoryUrl: `${releaseBaseUrl}/${releaseTag}`,
+                workers: installedWorkers,
+            },
+            null,
+            2,
+        )}\n`,
+        { mode: 0o600 },
+    );
     const previousWorkerActivation = await backupHostWorkerActivation(
         workerBackupDirectory,
     );
+    beginStep("停止旧版本并切换安装");
     let previousVersionBackedUp = false;
     let candidateVersionMoved = false;
     let applicationActivationAttempted = false;
@@ -218,29 +245,14 @@ try {
             frozenCurrentCli,
             activatedApplicationDirectory,
         );
-        const installedWorkers = {};
         workerTransactionStarted = true;
         for (const target of targets) {
-            installedWorkers[target.key] = await installPreparedWorker(
+            await activatePreparedWorker(
                 target,
-                preparedWorkers[target.key],
+                installedWorkers[target.key],
             );
         }
         await activateHostWorker();
-        await writeFile(
-            resolve(stagingDirectory, "portable-devshell-install.json"),
-            `${JSON.stringify(
-                {
-                    releaseTag,
-                    version,
-                    workerReleaseDirectoryUrl: `${releaseBaseUrl}/${releaseTag}`,
-                    workers: installedWorkers,
-                },
-                null,
-                2,
-            )}\n`,
-            { mode: 0o600 },
-        );
 
         if (await pathExists(versionDirectory)) {
             await rename(versionDirectory, backupDirectory);
@@ -356,6 +368,13 @@ try {
     await rm(deployDirectory, { force: true, recursive: true });
     await rm(stagingDirectory, { force: true, recursive: true });
     throw error;
+} finally {
+    if (process.platform === "win32") {
+        for (const target of targets) {
+            await rm(resolve(devshellHome, "bin", `${workerAssetName(target)}.install-${process.pid}`), { force: true });
+        }
+        await rm(resolve(devshellHome, "bin", `devshell-worker.exe.install-${process.pid}`), { force: true });
+    }
 }
 
 async function prepareWorkerRemoteFirst(target) {
@@ -477,19 +496,28 @@ async function installWorkerBytes(target, payload, expectedSha, source) {
         await rename(temporarySha, shaPath);
     }
 
-    const workerBinDirectory = resolve(devshellHome, "bin");
-    await mkdir(workerBinDirectory, { mode: 0o700, recursive: true });
-    const activePath = resolve(workerBinDirectory, assetName);
     if (process.platform === "win32") {
-        await copyFile(binaryPath, activePath);
-    } else {
-        await replaceSymlink(
-            activePath,
-            `../workers/${target.key}/${sha256}/${binaryName}`,
-        );
+        const workerBinDirectory = resolve(devshellHome, "bin");
+        await mkdir(workerBinDirectory, { mode: 0o700, recursive: true });
+        await copyFile(binaryPath, resolve(workerBinDirectory, `${assetName}.install-${process.pid}`));
     }
 
     return { path: binaryPath, sha256, source };
+}
+
+async function activatePreparedWorker(target, installed) {
+    const workerBinDirectory = resolve(devshellHome, "bin");
+    await mkdir(workerBinDirectory, { mode: 0o700, recursive: true });
+    const activePath = resolve(workerBinDirectory, workerAssetName(target));
+    if (process.platform === "win32") {
+        await rm(activePath, { force: true });
+        await rename(`${activePath}.install-${process.pid}`, activePath);
+    } else {
+        await replaceSymlink(
+            activePath,
+            `../workers/${target.key}/${installed.sha256}/${workerBinaryName(target)}`,
+        );
+    }
 }
 
 async function backupHostWorkerActivation(backupDirectory) {
@@ -571,10 +599,9 @@ async function activateHostWorker() {
     const hostTarget = resolveHostTarget();
     const workerBinDirectory = resolve(devshellHome, "bin");
     if (process.platform === "win32") {
-        await copyFile(
-            resolve(workerBinDirectory, workerAssetName({ key: hostTarget })),
-            resolve(workerBinDirectory, "devshell-worker.exe"),
-        );
+        const activePath = resolve(workerBinDirectory, "devshell-worker.exe");
+        await rm(activePath, { force: true });
+        await rename(`${activePath}.install-${process.pid}`, activePath);
     } else {
         await replaceSymlink(
             resolve(workerBinDirectory, "devshell-worker"),

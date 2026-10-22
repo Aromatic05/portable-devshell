@@ -216,6 +216,18 @@ test(
         const devshellHome = resolve(root, "devshell-home");
         const calls = resolve(root, "calls.log");
         const applicationVersion = "9.8.7-runtime-restore";
+        const hostTarget = preinstalledTargets()[0];
+        const hostAsset = `devshell-worker-${hostTarget}`;
+        const expectedWorkerSha = createHash("sha256")
+            .update(`fake worker ${hostTarget}\n`)
+            .digest("hex");
+        const preparedWorker = resolve(
+            devshellHome,
+            "workers",
+            hostTarget,
+            expectedWorkerSha,
+            "devshell-worker",
+        );
         const oldVersionDirectory = resolve(
             installRoot,
             "versions",
@@ -230,6 +242,9 @@ test(
             });
             await mkdir(release, { recursive: true });
             await mkdir(home, { recursive: true });
+            await mkdir(resolve(devshellHome, "bin"), { recursive: true });
+            await writeFile(resolve(devshellHome, "bin", hostAsset), "old-worker-alias\n");
+            await writeFile(resolve(devshellHome, "bin", "devshell-worker"), "old-default-alias\n");
 
             const packageManifest = (packageVersion) =>
                 `${JSON.stringify(
@@ -258,9 +273,14 @@ test(
                 oldCli,
                 [
                     "#!/usr/bin/env node",
-                    "import { appendFileSync, readFileSync, rmSync } from 'node:fs';",
+                    "import { appendFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';",
+                    "import { resolve } from 'node:path';",
                     `const calls = ${JSON.stringify(calls)};`,
                     `const pidFile = ${JSON.stringify(resolve(devshellHome, "control", "control.pid"))};`,
+                    `const workerPath = ${JSON.stringify(preparedWorker)};`,
+                    `const devshellHome = ${JSON.stringify(devshellHome)};`,
+                    `const installRoot = ${JSON.stringify(installRoot)};`,
+                    `const hostAsset = ${JSON.stringify(hostAsset)};`,
                     "const command = process.argv[2] ?? 'status';",
                     "const pid = Number.parseInt(readFileSync(pidFile, 'utf8').trim(), 10);",
                     "if (command === 'status') process.stdout.write(`control: running\\npid: ${pid}\\n`);",
@@ -271,7 +291,11 @@ test(
                     "  { name: 'stopped-local', snapshot: { daemonState: 'stopped' } },",
                     "  { name: 'reverse-node', snapshot: { daemonState: 'running', reverse: { connected: true } } }",
                     "] }));",
-                    "else if (command === 'stop') { process.kill(pid, 'SIGTERM'); rmSync(pidFile, { force: true }); appendFileSync(calls, 'old:stop\\n'); }",
+                    "else if (command === 'stop') {",
+                    "  const backupReady = readdirSync(installRoot).filter(name => name.startsWith('.worker-activation-backup-')).some(name => existsSync(resolve(installRoot, name, hostAsset)) && existsSync(resolve(installRoot, name, 'devshell-worker')));",
+                    "  appendFileSync(calls, `old:prepared:${existsSync(workerPath)}:${backupReady}\\n`);",
+                    "  process.kill(pid, 'SIGTERM'); rmSync(pidFile, { force: true }); appendFileSync(calls, 'old:stop\\n');",
+                    "}",
                     "else process.exit(2);",
                     "",
                 ].join("\n"),
@@ -352,6 +376,7 @@ test(
             assert.deepEqual(
                 (await readFile(calls, "utf8")).trim().split("\n"),
                 [
+                    "old:prepared:true:true",
                     "old:stop",
                     "new:start",
                     "new:instance:ready-local",
@@ -366,6 +391,19 @@ test(
         }
     },
 );
+
+test("Unix release installer stages workers and backs up aliases before shutdown, then atomically switches links", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.sh"), "utf8");
+    const workerPreparation = source.indexOf('    prepare_worker "$target"');
+    const backupPreparation = source.indexOf("\nbackup_worker_aliases\n", workerPreparation);
+    const shutdown = source.indexOf('if ! stop_installed_control "$current_cli"; then', backupPreparation);
+    const activation = source.indexOf('replace_symlink "versions/$version" "$current_link"', shutdown);
+    assert.ok(workerPreparation >= 0 && backupPreparation > workerPreparation);
+    assert.ok(shutdown > backupPreparation, "Worker preparation and aliases backup must precede shutdown");
+    assert.ok(activation > shutdown, "Application activation follows shutdown");
+    assert.match(source, /renameSync\(process\.argv\[1\], process\.argv\[2\]\)/u);
+    assert.doesNotMatch(source.slice(activation, source.indexOf('step "验证安装结果"', activation)), /rm -f "\$command_link"/u);
+});
 
 test(
     "Unix release installer rejects an application that cannot start before activation",
@@ -1104,8 +1142,8 @@ test(
                     "instance:stale-local",
                 ],
             );
-            const workerBackups = (await readdir(devshellHome)).filter((name) =>
-                name.startsWith(".install-worker-backup-"),
+            const workerBackups = (await readdir(installRoot)).filter((name) =>
+                name.startsWith(".worker-activation-backup-"),
             );
             assert.equal(workerBackups.length, 0);
         } finally {
@@ -1204,8 +1242,8 @@ test(
             ]);
             assert.ok(runtimeEvents.slice(5).includes("stop"));
             assert.ok(runtimeEvents.slice(5).includes("start"));
-            const workerBackups = (await readdir(devshellHome)).filter((name) =>
-                name.startsWith(".install-worker-backup-"),
+            const workerBackups = (await readdir(installRoot)).filter((name) =>
+                name.startsWith(".worker-activation-backup-"),
             );
             assert.equal(workerBackups.length, 0);
         } finally {
@@ -1247,6 +1285,18 @@ test("Windows release installer prepares rollback state before entering Control 
         shutdown > transaction,
         "Control shutdown must execute inside the rollback scope",
     );
+});
+
+test("Windows release installer stages all application and Worker copies before shutdown", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
+    const preparedApp = source.indexOf("Copy-Item -Recurse -Force -LiteralPath $stagingDirectory -Destination $preparedCurrentDirectory");
+    const preparedWorker = source.indexOf("Prepare-Worker $target $temporary $devshellHome");
+    const shutdown = source.indexOf("Stop-InstalledControl $currentCli $devshellHome", preparedWorker);
+    const activateApp = source.indexOf("Move-Item -LiteralPath $preparedCurrentDirectory -Destination $currentDirectory", shutdown);
+    assert.ok(preparedApp >= 0 && preparedWorker > preparedApp);
+    assert.ok(shutdown > preparedWorker, "Worker files and prepared application must precede shutdown");
+    assert.ok(activateApp > shutdown, "The prepared application is renamed after shutdown");
+    assert.doesNotMatch(source.slice(shutdown, activateApp), /Copy-Item -Recurse/u);
 });
 
 async function verifyTransactionalRollback(windows) {

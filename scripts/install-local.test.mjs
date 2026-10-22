@@ -21,6 +21,18 @@ import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const CURRENT_DEVELOPMENT_VERSION = "1.0.0-beta.2"; // version-state:current-development
 
+test("install-local prepares Worker payloads and rollback aliases before Control shutdown", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-local.mjs"), "utf8");
+    const prepare = source.indexOf("installedWorkers[target.key] = await installPreparedWorker(");
+    const backup = source.indexOf("const previousWorkerActivation = await backupHostWorkerActivation(", prepare);
+    const shutdown = source.indexOf("await stopInstalledControl(", backup);
+    const activation = source.indexOf("await activatePreparedWorker(", shutdown);
+    assert.ok(prepare >= 0 && backup > prepare);
+    assert.ok(shutdown > backup, "Worker contents and activation backup must precede shutdown");
+    assert.ok(activation > shutdown, "Only Worker alias activation belongs in the shutdown window");
+    assert.match(source, /await rename\(`\$\{activePath\}\.install-\$\{process\.pid\}`, activePath\)/u);
+});
+
 test(
     "install-local rejects stale activation before stopping or changing active Worker aliases",
     async () => {

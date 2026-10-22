@@ -349,7 +349,19 @@ stop_installed_control() {
     cleanup_control_runtime "$pid_file"
 }
 
-install_worker() {
+replace_symlink() {
+    link_target=$1
+    link_path=$2
+    temporary_link="$link_path.install-$$"
+    rm -f "$temporary_link"
+    ln -s "$link_target" "$temporary_link" || return 1
+    if ! node -e 'require("node:fs").renameSync(process.argv[1], process.argv[2])' "$temporary_link" "$link_path"; then
+        rm -f "$temporary_link"
+        return 1
+    fi
+}
+
+prepare_worker() {
     target=$1
     case "$target" in
         windows-*) asset="devshell-worker-$target.exe"; binary_name="devshell-worker.exe" ;;
@@ -359,10 +371,24 @@ install_worker() {
     worker_directory="$devshell_home/workers/$target/$sha"
 
     mkdir -p -m 700 "$worker_directory"
-    install -m 755 "$temporary/$asset" "$worker_directory/$binary_name"
-    printf '%s\n' "$sha" > "$worker_directory/$binary_name.sha256"
-    chmod 600 "$worker_directory/$binary_name.sha256"
-    ln -sfn "../workers/$target/$sha/$binary_name" "$worker_bin_directory/$asset"
+    if [ ! -f "$worker_directory/$binary_name" ]; then
+        install -m 755 "$temporary/$asset" "$worker_directory/$binary_name.install-$$"
+        mv -f "$worker_directory/$binary_name.install-$$" "$worker_directory/$binary_name"
+    fi
+    verify_sha256 "$worker_directory/$binary_name" "$temporary/$asset.sha256"
+    printf '%s\n' "$sha" > "$worker_directory/$binary_name.sha256.install-$$"
+    chmod 600 "$worker_directory/$binary_name.sha256.install-$$"
+    mv -f "$worker_directory/$binary_name.sha256.install-$$" "$worker_directory/$binary_name.sha256"
+}
+
+activate_worker() {
+    target=$1
+    case "$target" in
+        windows-*) asset="devshell-worker-$target.exe"; binary_name="devshell-worker.exe" ;;
+        *) asset="devshell-worker-$target"; binary_name="devshell-worker" ;;
+    esac
+    sha=$(read_sha "$temporary/$asset.sha256")
+    replace_symlink "../workers/$target/$sha/$binary_name" "$worker_bin_directory/$asset"
 }
 
 backup_worker_aliases() {
@@ -424,14 +450,14 @@ rollback_application() {
         rm -rf "$version_directory" || rollback_app_failed=1
     fi
     if [ -n "${previous_current_target:-}" ]; then
-        ln -sfn "$previous_current_target" "$current_link" || rollback_app_failed=1
+        replace_symlink "$previous_current_target" "$current_link" || rollback_app_failed=1
     else
         rm -f "$current_link" || rollback_app_failed=1
     fi
     if ! rm -f "$command_link"; then
         rollback_app_failed=1
     elif [ "${previous_command_kind:-missing}" = symlink ]; then
-        ln -s "$previous_command_target" "$command_link" || rollback_app_failed=1
+        replace_symlink "$previous_command_target" "$command_link" || rollback_app_failed=1
     elif [ "${previous_command_kind:-missing}" = file ]; then
         cp -p "$previous_command_backup" "$command_link" || rollback_app_failed=1
     fi
@@ -562,7 +588,7 @@ backup_directory="$install_root/.backup-$version-$$"
 current_link="$install_root/current"
 command_link="$bin_directory/devshell"
 worker_bin_directory="$devshell_home/bin"
-worker_backup_directory="$devshell_home/.install-worker-backup-$$"
+worker_backup_directory="$install_root/.worker-activation-backup-$$"
 persistent_backup_directory="$install_root/.persistent-backup-$version-$$"
 extension_data_directory="$data_home/portable-devshell/extension-data"
 persistent_backup_ready=0
@@ -649,6 +675,9 @@ cleanup_installation() {
     elif [ -d "$persistent_backup_directory" ]; then
         echo "持久状态快照已保留：$persistent_backup_directory" >&2
     fi
+    if [ "$worker_transaction_active" -eq 0 ] && [ "$rollback_blocked" -eq 0 ]; then
+        rm -rf "$worker_backup_directory"
+    fi
     rm -rf "$temporary"
     exit "$status"
 }
@@ -694,6 +723,29 @@ if [ "$candidate_preflight" -eq 1 ]; then
     fi
 fi
 
+for target in $targets; do
+    detail "预安装 $target Worker"
+    prepare_worker "$target"
+done
+backup_worker_aliases
+previous_current_target=
+previous_command_kind=missing
+previous_command_target=
+previous_command_backup="$temporary/devshell-command-backup"
+if [ -L "$current_link" ]; then
+    previous_current_target=$(readlink "$current_link")
+fi
+if [ -L "$command_link" ]; then
+    previous_command_kind=symlink
+    previous_command_target=$(readlink "$command_link")
+elif [ -f "$command_link" ]; then
+    previous_command_kind=file
+    cp -p "$command_link" "$previous_command_backup"
+elif [ -e "$command_link" ]; then
+    echo "现有 devshell 命令不是普通文件或符号链接：$command_link" >&2
+    exit 1
+fi
+
 step "停止旧版本并切换安装"
 current_cli=
 activated_application_directory=
@@ -734,31 +786,12 @@ if [ -n "$current_cli" ] || [ "$migration_required" -eq 1 ]; then
     fi
 fi
 
-backup_worker_aliases
 worker_transaction_active=1
 for target in $targets; do
-    detail "安装 $target Worker"
-    install_worker "$target"
+    detail "激活 $target Worker"
+    activate_worker "$target"
 done
-ln -sfn "devshell-worker-$host_target" "$worker_bin_directory/devshell-worker"
-
-previous_current_target=
-previous_command_kind=missing
-previous_command_target=
-previous_command_backup="$temporary/devshell-command-backup"
-if [ -L "$current_link" ]; then
-    previous_current_target=$(readlink "$current_link")
-fi
-if [ -L "$command_link" ]; then
-    previous_command_kind=symlink
-    previous_command_target=$(readlink "$command_link")
-elif [ -f "$command_link" ]; then
-    previous_command_kind=file
-    cp -p "$command_link" "$previous_command_backup"
-elif [ -e "$command_link" ]; then
-    echo "现有 devshell 命令不是普通文件或符号链接：$command_link" >&2
-    exit 1
-fi
+replace_symlink "devshell-worker-$host_target" "$worker_bin_directory/devshell-worker"
 application_transaction_active=1
 if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     mv "$version_directory" "$backup_directory"
@@ -768,8 +801,7 @@ if ! mv "$staging_directory" "$version_directory"; then
     rollback_installation
     exit 1
 fi
-rm -f "$command_link"
-if ! ln -sfn "versions/$version" "$current_link" || ! ln -s "$current_link/$cli_relative_path" "$command_link"; then
+if ! replace_symlink "versions/$version" "$current_link" || ! replace_symlink "$current_link/$cli_relative_path" "$command_link"; then
     echo "无法激活新版本，正在恢复原安装。" >&2
     rollback_installation
     exit 1
