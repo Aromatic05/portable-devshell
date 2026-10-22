@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
-import { toWorkerConfig } from "../../../../src/instance/model/Instance.ts";
+import { Instance, toWorkerConfig } from "../../../../src/instance/model/Instance.ts";
 import { ReverseProvision } from "../../../../src/instance/runtime/provision/install/provider/Reverse.ts";
 
 test("execution configuration reaches daemon startup through provider env", () => {
@@ -38,6 +38,33 @@ test("unset execution configuration does not set the daemon startup env", () => 
     const worker = toWorkerConfig(instance, undefined, "/tmp/plain-worker");
 
     assert.equal(worker.env?.DEVSHELL_WORKER_EXECUTION_CONFIG, undefined);
+});
+
+test("Instance resolves automatic environments when no execution config was set", async () => {
+    let compile: (() => Promise<string | undefined>) | undefined;
+    const instance = new Instance({
+        commandClient: {
+            setExecutionConfigResolver(resolve: () => Promise<string | undefined>) {
+                compile = resolve;
+            },
+        },
+        config: { name: "plain-worker" },
+        eventLog: {},
+        state: {},
+        subscriptions: {},
+        worker: {},
+    } as never);
+    let selection: unknown;
+    instance.setExecutionConfigResolver(async (config) => {
+        selection = config;
+        return { environment: [{ order: 1, name: "direnv", content: {} }] };
+    });
+    assert.ok(compile);
+    assert.deepEqual(selection, undefined);
+    assert.deepEqual(JSON.parse((await compile())!), {
+        environment: [{ order: 1, name: "direnv", content: {} }],
+    });
+    assert.deepEqual(selection, {});
 });
 
 test("reverse instances do not claim controller startup propagation", () => {

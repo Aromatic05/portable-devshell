@@ -154,4 +154,16 @@ test("execution provider declarations and descriptors validate and cross the san
         const recreated = points.createSandboxBinding(pointId, descriptor, context, { invokeBinding: async () => undefined });
         assert.deepEqual(recreated, binding);
     }
+    assert.deepEqual(
+        points.parseDeclaration("execution.environment", { id: "direnv", automatic: true }, "direnv"),
+        { id: "direnv", automatic: true },
+    );
+    assert.throws(
+        () => points.parseDeclaration("execution.environment", { id: "direnv", automatic: "yes" }, "direnv"),
+        /automatic must be a boolean/u,
+    );
+    assert.throws(
+        () => points.parseDeclaration("execution.sandbox", { id: "sandbox", automatic: true }, "example"),
+        /unknown field/u,
+    );
 });

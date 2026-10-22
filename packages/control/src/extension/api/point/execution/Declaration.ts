@@ -11,11 +11,16 @@ function createDefinition(pointId: string): ExtensionPointDefinition {
         createSandboxBinding: (descriptor: ExtensionJsonValue, context: ExtensionPointValidationContext, bridge: ExtensionPointSandboxBridge) => createExecutionSandboxBinding(descriptor, context, bridge, pointId),
         id: pointId,
         parseDeclaration(value: ExtensionPointDeclaration) {
-            const unknown = Object.keys(value).find((key) => key !== "id");
+            const unknown = Object.keys(value).find((key) => key !== "id" && !(pointId === environment.id && key === "automatic"));
             if (unknown !== undefined) throw new TypeError(`${pointId} declaration has unknown field ${unknown}.`);
             if (typeof value.id !== "string" || !/^[a-z][a-z0-9-]*$/u.test(value.id))
                 throw new TypeError(`${pointId} declaration id must be a lowercase provider name.`);
-            return Object.freeze({ id: value.id });
+            if (pointId === environment.id && value.automatic !== undefined && typeof value.automatic !== "boolean")
+                throw new TypeError(`${pointId} declaration automatic must be a boolean.`);
+            return Object.freeze({
+                id: value.id,
+                ...(pointId === environment.id && value.automatic !== undefined ? { automatic: value.automatic } : {}),
+            });
         },
         validateBinding(binding: unknown, context: ExtensionPointValidationContext) {
             validateExecutionBinding(binding, context, pointId);

@@ -273,7 +273,7 @@ phase = "process"
 - `name` 必须匹配 `^[a-z][a-z0-9-]*$`；`content` 是 provider-owned JSON，必须提供且不能是空字符串，具体结构由 provider 校验。
 - 两者 `phase` 都可省略，Worker 默认 `process`；`daemon` 用于启动 Worker daemon 的环境/包装，`process` 用于工具子进程。daemon phase 不随每次工具 cwd 重新求值；Windows 当前拒绝需要 daemon-phase provider 的启动。
 
-`variables` 环境和 `bubblewrap` sandbox 是 Core primitive；其他名字必须解析到 enabled Extension 的 `execution.environment` / `execution.sandbox` registration。Control 在 Worker start 时编译 driver snapshot，目标 Worker 执行求值，Control 不执行 provider 的环境脚本。随包 Direnv 注册 environment driver（运行目标主机 `direnv export json`），不是 Core 内置环境特殊分支。
+`variables` 环境和 `bubblewrap` sandbox 是 Core primitive；其他名字必须解析到 enabled Extension 的 `execution.environment` / `execution.sandbox` registration。Control 在 Worker start 时编译 driver snapshot，目标 Worker 执行求值，Control 不执行 provider 的环境脚本。环境 Extension 可在 manifest 中声明 `automatic: true`，启用后便自动参与工具进程环境准备，无需逐个 Instance 配置；显式环境项仍可覆盖同名自动项。随包 Direnv 即采用此方式：启用 Extension 后，Worker 对工具工作目录运行 `direnv export json`，无需在 Instance 的 `execution.environment` 中重复指定 Direnv。现有 Worker 的 driver snapshot 在下次启动时更新。
 
 ## SSH 实例
 

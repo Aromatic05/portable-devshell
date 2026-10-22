@@ -234,8 +234,10 @@ export class Instance {
         resolver: (config: ControlExecutionConfig) => Promise<ControlExecutionConfig>,
     ): void {
         this.#commandClient?.setExecutionConfigResolver(async () => {
-            if (this.#executionConfig === undefined) return undefined;
-            return JSON.stringify(await resolver(structuredClone(this.#executionConfig)));
+            const resolved = await resolver(structuredClone(this.#executionConfig ?? {}));
+            if ((resolved.environment?.length ?? 0) === 0 && resolved.sandbox === undefined)
+                return undefined;
+            return JSON.stringify(resolved);
         });
     }
 

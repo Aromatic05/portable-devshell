@@ -15,8 +15,8 @@ type CompiledSelection = ExecutionSelection & { driver?: ExecutionDriverDescript
  * target Worker; Control receives only executable metadata and configuration.
  */
 export async function resolveExecutionDrivers(
-    extensions: Pick<ExtensionRuntime, "acquireRegistration">,
-    config: ControlExecutionConfig,
+    extensions: Pick<ExtensionRuntime, "acquireRegistration" | "listDeclarations">,
+    config: ControlExecutionConfig = {},
 ): Promise<ControlExecutionConfig> {
     const environmentSelections: CompiledSelection[] = [];
     for (const hook of config.environment ?? []) {
@@ -32,6 +32,38 @@ export async function resolveExecutionDrivers(
         });
     }
 
+    // An enabled Extension can provide a default environment hook. An explicit
+    // Instance entry for the same provider overrides that default, but no
+    // Instance configuration is required to use an automatic provider.
+    const usedOrders = new Set(environmentSelections.map(({ order }) => order));
+    const selectedNames = new Set(environmentSelections.map(({ name }) => name));
+    for (const declaration of extensions.listDeclarations(environment.id)) {
+        if (declaration.declaration.automatic !== true || selectedNames.has(declaration.id)) continue;
+        const order = nextAutomaticOrder(usedOrders);
+        if (order === undefined) {
+            console.warn(`Automatic execution environment ${declaration.id} skipped: no free order.`);
+            continue;
+        }
+        try {
+            const driver = await resolveDriver(extensions, environment.id, declaration.id);
+            environmentSelections.push({
+                order,
+                name: declaration.id,
+                content: {},
+                phase: "process",
+                driver,
+            });
+            selectedNames.add(declaration.id);
+            usedOrders.add(order);
+        } catch (error) {
+            // Automatic providers are optional: failure must not prevent an
+            // otherwise healthy Worker from starting.
+            console.warn(`Automatic execution environment ${declaration.id} unavailable:`, error);
+        }
+    }
+    if (environmentSelections.length > (config.environment?.length ?? 0))
+        environmentSelections.sort((left, right) => left.order - right.order);
+
     const selectedSandbox = config.sandbox;
     const sandboxSelection = selectedSandbox === undefined
         ? undefined
@@ -42,13 +74,22 @@ export async function resolveExecutionDrivers(
                 : await resolveDriver(extensions, sandbox.id, selectedSandbox.name),
         };
     return {
-        ...(config.environment === undefined
+        ...(config.environment === undefined && environmentSelections.length === 0
             ? {}
             : { environment: environmentSelections }),
         ...(sandboxSelection === undefined
             ? {}
             : { sandbox: sandboxSelection }),
     };
+}
+
+function nextAutomaticOrder(used: ReadonlySet<number>): number | undefined {
+    const afterExplicit = Math.max(0, ...used) + 1;
+    if (afterExplicit <= 999) return afterExplicit;
+    for (let order = 999; order >= 1; order--) {
+        if (!used.has(order)) return order;
+    }
+    return undefined;
 }
 
 async function resolveDriver(

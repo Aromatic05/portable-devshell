@@ -7,6 +7,8 @@ export interface ExecutionDriverDescriptor extends Record<string, import("../Ext
 
 export interface ExecutionProviderDeclaration extends ExtensionPointDeclaration {
     readonly id: string;
+    /** Apply this environment provider when the Extension is enabled, without an Instance selection. */
+    readonly automatic?: boolean;
 }
 
 /** Static Worker driver descriptions are transported as JSON; Control never executes their scripts. */

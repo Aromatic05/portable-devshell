@@ -20,6 +20,7 @@ import { controlErrorCodes, type InstanceRuntimeTransport } from "@portable-devs
 import { direnvExtensionDirectory } from "../../../../../../../extensions/direnv/src/index.ts";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
+import { resolveExecutionDrivers } from "../../../../../src/extension/api/point/execution/index.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/artifact/Archive.ts";
 import { ExtensionHost } from "../../../../../src/extension/host/index.ts";
 import { ExtensionControlService } from "../../../../../src/extension/manager/index.ts";
@@ -183,6 +184,21 @@ test("bundled Direnv installs through the real Control builtin lifecycle", async
     } finally {
         lease.release();
     }
+    const compiled = await resolveExecutionDrivers(h.host);
+    assert.deepEqual(compiled.environment, [{
+        order: 1,
+        name: "direnv",
+        content: {},
+        phase: "process",
+        driver: {
+            name: "direnv",
+            version: 1,
+            executable: "direnv",
+            args: ["export", "json"],
+        },
+    }]);
+    await h.host.disable("direnv");
+    assert.deepEqual(await resolveExecutionDrivers(h.host), {});
 });
 
 test("Extension install materializes, validates, and selects an immutable generation without keeping it active", async (t) => {

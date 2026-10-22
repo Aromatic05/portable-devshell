@@ -7,5 +7,5 @@
     "version": "0.1.0",
     "entry": "index.ts",
     "capabilities": [],
-    "extensions": { "execution.environment": [{ "id": "direnv" }] }
+    "extensions": { "execution.environment": [{ "id": "direnv", "automatic": true }] }
 }
