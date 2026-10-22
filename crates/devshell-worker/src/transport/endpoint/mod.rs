@@ -576,11 +576,24 @@ fn dispatch_rpc(
         } => {
             let router = Arc::clone(&context.router);
             let events = events.clone();
+            let port = dest.port.clone();
+            // Admission must follow the incoming Envelope order, not thread
+            // scheduling order. Otherwise an immediate tool.call.cancel can
+            // run before the preceding ToolCall has registered its permit.
+            let prepared_tool = if port == "tool" && !router.is_control_method(&method) {
+                let request = tool_request(id.clone(), method.clone(), message.clone());
+                Some(router.acquire_tool_permit(&request).map(|permit| (request, permit)))
+            } else {
+                None
+            };
             thread::spawn(move || {
-                let port = dest.port.clone();
                 let reply_source = dest;
                 let reply_dest = source;
-                let response = route_rpc(&router, &port, id, method, message);
+                let response = match prepared_tool {
+                    Some(Ok((request, permit))) => router.dispatch_tool(request, permit),
+                    Some(Err(error)) => RpcResponse::failure(id, error),
+                    None => route_rpc(&router, &port, id, method, message),
+                };
                 let packet = rpc_response(response);
                 let _ = events.send(EndpointEvent::Outbound(Envelope {
                     source: reply_source,
@@ -629,17 +642,22 @@ fn route_rpc(
             WorkerRpcError::new("rpc.methodNotFound", "Tool method not found."),
         );
     }
+    let request = tool_request(id.clone(), method, message);
+    match router.acquire_tool_permit(&request) {
+        Ok(permit) => router.dispatch_tool(request, permit),
+        Err(error) => RpcResponse::failure(id, error),
+    }
+}
+
+fn tool_request(id: String, method: String, message: Option<Value>) -> RpcRequest {
     let mut body = packet::message_object(message);
     let params = body.remove("input").unwrap_or(Value::Null);
     let context = body
         .remove("context")
         .and_then(|value| serde_json::from_value::<RpcRequestContext>(value).ok());
-    let mut request = RpcRequest::request(id.clone(), method, params);
+    let mut request = RpcRequest::request(id, method, params);
     request.context = context;
-    match router.acquire_tool_permit(&request) {
-        Ok(permit) => router.dispatch_tool(request, permit),
-        Err(error) => RpcResponse::failure(id, error),
-    }
+    request
 }
 
 fn control_port(method: &str) -> &'static str {
