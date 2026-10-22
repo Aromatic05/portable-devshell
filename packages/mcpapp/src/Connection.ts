@@ -40,7 +40,7 @@ export interface McpAppSnapshot {
     reentry?: {
         pending?: boolean;
         schedule?: { readyAt: string; intent: "automatic"; sourceId?: string };
-        directives?: Array<{ kind: "reentry"; id?: string; intent: "goal-resume" | "goal-retry" | "automatic" | "task-resume"; sourceId?: string }>;
+        directives?: Array<{ kind: "reentry"; id?: string; intent: "goal-resume" | "goal-retry" | "automatic"; sourceId?: string }>;
     };
 }
 

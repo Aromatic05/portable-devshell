@@ -1032,7 +1032,7 @@ async function ensureWorkspace(directory, role) {
         "",
         `This is the isolated ${role} worker workspace.`,
         "It may be modified by the testspace GPT-style connector simulator.",
-        "All generated tool calls are limited to harmless reads, short shell output, Todo updates and short tmux tasks.",
+        "All generated tool calls are limited to harmless reads, short shell output, Goal updates and short tmux tasks.",
         "",
     ].join("\n");
     await writeFile(join(directory, "README.md"), readme, "utf8");

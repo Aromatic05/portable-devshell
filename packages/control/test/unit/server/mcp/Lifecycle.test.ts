@@ -23,7 +23,7 @@ test('MCP App reconciles terminated Contexts on startup and revokes leases on di
     await old.initialize();
     const activeToken = await old.leases.issue('demo', active.ctxId);
     const disabledToken = await old.leases.issue('demo', disabled.ctxId);
-    await old.actions.prepareOnce(disabled.ctxId, 'demo', { actionId: 'disabled-receipt', itemId: 'task-one', instance: 'demo', operation: 'task-pause', targetId: 'task-one' });
+    await old.actions.prepareOnce(disabled.ctxId, 'demo', { actionId: 'disabled-receipt', itemId: 'task-one', instance: 'demo', operation: 'goal-pause', targetId: 'task-one' });
     await registry.disable(disabled.ctxId);
 
     const changes: Array<{ ctxIds: readonly string[]; terminalCtxIds?: readonly string[] }> = [];

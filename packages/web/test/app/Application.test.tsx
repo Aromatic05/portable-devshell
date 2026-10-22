@@ -44,8 +44,7 @@ function operationalOverview(
         alerts: [],
         controller: { pid: 1, uptimeSeconds: 1 },
         counts: {
-            activeTodos: 0,
-            failedCalls24h: 0,
+                        failedCalls24h: 0,
             instancesAttention: 0,
             instancesCritical: 0,
             instancesReady: 1,
@@ -55,7 +54,6 @@ function operationalOverview(
         generatedAt: "2026-09-14T10:00:02Z",
         health: "healthy",
         instances: [],
-        todos: [],
         ...overrides,
     };
 }
@@ -740,8 +738,7 @@ describe("application chrome", () => {
         domains.setOverview(
             operationalOverview({
                 counts: {
-                    activeTodos: 0,
-                    failedCalls24h: 0,
+                                        failedCalls24h: 0,
                     instancesAttention: 2,
                     instancesCritical: 1,
                     instancesReady: 0,
@@ -915,7 +912,7 @@ function RouteProbe() {
     return (
         <>
             <output>{webRouteHref(route)}</output>
-            <button onClick={() => navigate(pageRoute("todos"))}>Todos</button>
+            <button onClick={() => navigate(pageRoute("goals"))}>Goals</button>
         </>
     );
 }
@@ -994,9 +991,9 @@ describe("hash routing", () => {
         render(<RouteProbe />);
         expect(screen.getByText("#/instances")).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Todos" }));
-        expect(window.location.hash).toBe("#/todos");
-        expect(screen.getByText("#/todos")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Goals" }));
+        expect(window.location.hash).toBe("#/goals");
+        expect(screen.getByText("#/goals")).toBeInTheDocument();
 
         window.location.hash = "#/audit/context/demo/ctx-a";
         fireEvent(window, new HashChangeEvent("hashchange"));

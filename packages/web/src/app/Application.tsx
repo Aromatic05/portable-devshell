@@ -14,7 +14,7 @@ import { Audit } from "../view/page/activity/audit/Page.js";
 import { Instances } from "../view/page/Instances.js";
 import { Messages } from "../view/page/activity/messages/Page.js";
 import { Overview } from "../view/page/Overview.js";
-import { Todos } from "../view/page/Todos.js";
+import { Goals } from "../view/page/Goals.js";
 import { ExtensionPage } from "../view/page/Extension.js";
 
 export function Application({
@@ -106,7 +106,6 @@ function ApplicationBody({
                 ? 0
                 : overview.counts.instancesAttention +
                   overview.counts.instancesCritical,
-        todos: overview?.counts.activeTodos ?? 0,
     };
     const failures: Record<string, string> = {};
     if (config.failure !== undefined) failures.config = config.failure.message;
@@ -214,11 +213,8 @@ function ApplicationBody({
                         store={store}
                     />
                 ) : null}
-                {route.page === "todos" ? (
-                    <Todos
-                        disabled={interactionDisabled}
-                        store={store}
-                    />
+                {route.page === "goals" ? (
+                    <Goals />
                 ) : null}
             </main>
         </div>
@@ -239,7 +235,7 @@ const pageLabels: Record<WebRoute["page"], string> = {
     instances: "Instances",
     messages: "Messages",
     overview: "Overview",
-    todos: "Todos",
+    goals: "Goals",
 };
 
 function routeSubtitle(

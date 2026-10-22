@@ -59,7 +59,6 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
             uptimeSeconds: 3_720,
         },
         counts: {
-            activeTodos: 1,
             failedCalls24h: 1,
             instancesAttention: 0,
             instancesCritical: 1,
@@ -106,18 +105,6 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
                 },
             },
         ],
-        todos: [
-            {
-                completed: 1,
-                currentItem: "Restore worker connection",
-                instance: asInstanceName("alpha"),
-                revision: 2,
-                status: "blocked",
-                taskId: "task-1",
-                title: "Recover remote worker",
-                total: 3,
-            },
-        ],
     };
 
     test("overview projects system meters and an instance table without expandable boxes", () => {
@@ -150,7 +137,6 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
                 focused: instance.focused,
                 id: instance.id,
                 runtime: instance.runtime,
-                todos: instance.todos,
                 tone: instance.tone,
             })),
             [
@@ -159,7 +145,6 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
                     focused: true,
                     id: "overview-instance:alpha",
                     runtime: "failed",
-                    todos: 1,
                     tone: "danger",
                 },
             ],

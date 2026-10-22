@@ -6,9 +6,6 @@ import type {
     GoalManageInput,
     GoalRecord,
     GoalSnapshot,
-    GoalStep,
-    GoalStepInput,
-    GoalStepStatus,
 } from "@portable-devshell/shared";
 
 export const GOAL_EXECUTION_LEASE_MS = 60 * 1_000;
@@ -16,10 +13,7 @@ export const GOAL_MAX_CONTINUATIONS = 0;
 const GOAL_CONTINUATION_CLAIM_TTL_MS = 5 * 60 * 1_000;
 const GOAL_CONTINUATION_RETRY_MS = 5 * 60 * 1_000;
 const MAX_TERMINAL_GOALS = 256;
-const GOAL_MAX_STEPS = 100;
 const GOAL_OBJECTIVE_LIMIT = 4_000;
-const GOAL_STEP_ID_LIMIT = 128;
-const GOAL_STEP_TEXT_LIMIT = 2_000;
 const GOAL_NOTE_LIMIT = 2_000;
 
 export interface GoalDocument {
@@ -217,17 +211,6 @@ export class GoalState {
                 };
                 break;
             case "finish":
-                if (
-                    current.steps.some(
-                        (step) =>
-                            step.status === "pending" ||
-                            step.status === "active",
-                    )
-                ) {
-                    throw new Error(
-                        "Workspace Goal cannot finish until every step is completed or skipped.",
-                    );
-                }
                 next = {
                     ...clearContinuation(current),
                     continuationCount: 0,
@@ -384,7 +367,6 @@ export class GoalState {
             const eligible =
                 input.userInitiated === true
                     ? current.status === "active" &&
-                      hasActionableStep(current.steps) &&
                       !state.continuationPending
                     : state.continuationDue;
             if (input.available === false || !eligible) {
@@ -547,7 +529,6 @@ export class GoalState {
             );
         }
         const now = this.#now();
-        const steps = normalizeSteps(input.steps, true);
         const next: GoalRecord = {
             continuationCount: 0,
             continuationPending: false,
@@ -565,8 +546,7 @@ export class GoalState {
             progressEpoch: 0,
             revision: 1,
             stagnationStreak: 0,
-            status: allStepsTerminal(steps) ? "completed" : "active",
-            steps,
+            status: "active",
             updatedAt: now,
             ...(input.workspace === undefined
                 ? {}
@@ -599,53 +579,15 @@ function updateGoal(
     now: string,
 ): GoalRecord {
     const settled = settleAttemptedReentry(current, now);
-    let steps = current.steps.map((step) => ({ ...step }));
-    if (input.steps !== undefined) steps = normalizeSteps(input.steps, true);
-    if (input.stepId !== undefined) {
-        const stepId = requiredText(input.stepId, "stepId", GOAL_STEP_ID_LIMIT);
-        const index = steps.findIndex((step) => step.id === stepId);
-        if (index === -1)
-            throw new Error(`Workspace Goal step ${stepId} was not found.`);
-        const previous = steps[index]!;
-        steps[index] = {
-            ...previous,
-            ...(input.status === undefined
-                ? {}
-                : { status: normalizeStepStatus(input.status) }),
-            ...(input.text === undefined
-                ? {}
-                : {
-                      text: requiredText(
-                          input.text,
-                          "text",
-                          GOAL_STEP_TEXT_LIMIT,
-                      ),
-                  }),
-            ...(input.note === undefined
-                ? {}
-                : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
-        };
-        assertSingleActive(steps);
-    }
-    if (
-        input.steps === undefined &&
-        input.stepId === undefined &&
-        input.objective === undefined &&
-        input.note === undefined
-    ) {
-        throw new Error(
-            "workspace_goal update requires objective, steps, stepId, or note.",
-        );
+    if (input.objective === undefined && input.note === undefined) {
+        throw new Error("Workspace Goal update requires objective or note.");
     }
     const nextObjective =
         input.objective === undefined
             ? current.objective
             : requiredText(input.objective, "objective", GOAL_OBJECTIVE_LIMIT);
-    const autoCompleted = allStepsTerminal(steps);
-    const progressed =
-        autoCompleted ||
-        nextObjective !== current.objective ||
-        goalStepsProgressed(current.steps, steps);
+    const progressed = nextObjective !== current.objective ||
+        (input.note !== undefined && input.note !== current.note);
     const base = clearContinuation(settled);
     return {
         ...base,
@@ -666,8 +608,6 @@ function updateGoal(
             : { note: requiredText(input.note, "note", GOAL_NOTE_LIMIT) }),
         objective: nextObjective,
         revision: current.revision + 1,
-        status: autoCompleted ? "completed" : current.status,
-        steps,
         updatedAt: now,
         ...(current.workspace === undefined && input.workspace !== undefined
             ? { workspace: input.workspace }
@@ -675,111 +615,11 @@ function updateGoal(
     };
 }
 
-function goalStepsProgressed(previous: GoalStep[], next: GoalStep[]): boolean {
-    if (previous.length !== next.length) return true;
-    return previous.some((step, index) => {
-        const candidate = next[index];
-        return (
-            candidate === undefined ||
-            candidate.id !== step.id ||
-            candidate.status !== step.status ||
-            candidate.text !== step.text
-        );
-    });
-}
-
-function hasActionableStep(steps: GoalStep[]): boolean {
-    return steps.some(
-        (step) => step.status === "active" || step.status === "pending",
-    );
-}
-
-function allStepsTerminal(steps: GoalStep[]): boolean {
-    return steps.length > 0 && !hasActionableStep(steps);
-}
-
-function normalizeSteps(
-    value: GoalStepInput[] | undefined,
-    requireNonEmpty: boolean,
-): GoalStep[] {
-    if (!Array.isArray(value)) throw new Error("steps must be an array.");
-    if (requireNonEmpty && value.length === 0)
-        throw new Error("steps must contain at least one step.");
-    if (value.length > GOAL_MAX_STEPS)
-        throw new Error(`steps may contain at most ${GOAL_MAX_STEPS} entries.`);
-    const ids = new Set<string>();
-    const steps = value.map((entry, index) => {
-        if (!isRecord(entry))
-            throw new Error(`steps[${index}] must be an object.`);
-        const id = requiredText(
-            entry.id,
-            `steps[${index}].id`,
-            GOAL_STEP_ID_LIMIT,
-        );
-        if (ids.has(id))
-            throw new Error(`Workspace Goal step id must be unique: ${id}.`);
-        ids.add(id);
-        return {
-            id,
-            ...(entry.note === undefined
-                ? {}
-                : {
-                      note: requiredText(
-                          entry.note,
-                          `steps[${index}].note`,
-                          GOAL_NOTE_LIMIT,
-                      ),
-                  }),
-            status:
-                entry.status === undefined
-                    ? "pending"
-                    : normalizeStepStatus(entry.status),
-            text: requiredText(
-                entry.text,
-                `steps[${index}].text`,
-                GOAL_STEP_TEXT_LIMIT,
-            ),
-        };
-    });
-    assertSingleActive(steps);
-    return steps;
-}
-
-function assertSingleActive(steps: GoalStep[]): void {
-    if (steps.filter((step) => step.status === "active").length > 1) {
-        throw new Error("Workspace Goal may have at most one active step.");
-    }
-}
-
-function normalizeStepStatus(value: unknown): GoalStepStatus {
-    if (
-        value === "pending" ||
-        value === "active" ||
-        value === "completed" ||
-        value === "skipped"
-    )
-        return value;
-    throw new Error(
-        "Goal step status must be pending, active, completed, or skipped.",
-    );
-}
-
 function normalizeStoredGoal(value: unknown): GoalRecord {
     if (!isRecord(value)) throw new Error("goal state must be an object");
     if (Object.hasOwn(value, "lastContinuationAt"))
         throw new Error("goal state contains unsupported lastContinuationAt");
-    if (
-        !Array.isArray(value.steps) ||
-        value.steps.some(
-            (step) => !isRecord(step) || step.status === undefined,
-        )
-    ) {
-        throw new Error("stored goal steps must include a status");
-    }
-    const steps = normalizeSteps(value.steps as GoalStepInput[], true);
     const storedStatus = normalizeGoalStatus(value.status);
-    if (storedStatus === "active" && allStepsTerminal(steps))
-        throw new Error("active goal must contain a non-terminal step");
     const record: GoalRecord = {
         continuationCount: nonNegativeInteger(
             value.continuationCount,
@@ -822,7 +662,6 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         revision: positiveInteger(value.revision, "revision"),
         stagnationStreak: optionalNonNegativeInteger(value.stagnationStreak),
         status: storedStatus,
-        steps,
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
         ...(typeof value.workspace === "string" && value.workspace.length > 0
             ? { workspace: value.workspace }
@@ -912,7 +751,6 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
             : { continuationMessageId: record.continuationMessageId }),
         continuationDue:
             record.status === "active" &&
-            hasActionableStep(record.steps) &&
             progressedSinceReentry &&
             !claimFresh &&
             retryReady &&
@@ -940,7 +778,6 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
         objective: record.objective,
         revision: record.revision,
         status: record.status,
-        steps: record.steps.map((step) => ({ ...step })),
         updatedAt: record.updatedAt,
         ...(record.workspace === undefined
             ? {}

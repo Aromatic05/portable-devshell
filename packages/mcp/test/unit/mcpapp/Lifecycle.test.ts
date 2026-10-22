@@ -7,7 +7,7 @@ test("terminal Context cleanup retries failed Receipt revocation without Control
     await app.initialize();
     const token = await app.leases.issue("demo", "ctx-retired");
     await app.actions.prepareOnce("ctx-retired", "demo", {
-        actionId: "receipt-retired", itemId: "task-one", instance: "demo", operation: "task-pause", targetId: "task-one",
+        actionId: "receipt-retired", itemId: "task-one", instance: "demo", operation: "goal-pause", targetId: "task-one",
     });
     const originalRevoke = app.actions.revokeContext.bind(app.actions);
     let attempts = 0;

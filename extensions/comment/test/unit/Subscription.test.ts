@@ -15,13 +15,13 @@ test("message subscription preserves seed, report projection, gap cursor, and ca
             assert.equal(watch.signal, controller.signal);
             assert.equal(typeof watch.onSeed, "function");
             await watch.onSeed!({
-                events: [event(1, "log.appended"), event(2, "context.message.queued"), event(3, "toolCall.completed", { toolName: "todo_report" })],
+                events: [event(1, "log.appended"), event(2, "context.message.queued"), event(3, "toolCall.completed", { toolName: "progress_report" })],
                 lastSeq: 3,
             });
             await watch.onEvent(event(4, "toolCall.completed", { toolName: "bash_run" }));
             await watch.onEvent(event(5, "context.message.delivered"));
             await watch.onGap!({ lastSeq: 12, nextSeq: 10 });
-            await watch.onEvent(event(10, "toolCall.completed", { toolName: "todo_report" }));
+            await watch.onEvent(event(10, "toolCall.completed", { toolName: "progress_report" }));
             controller.abort();
             assert.equal(watch.signal.aborted, true);
         },
@@ -30,10 +30,10 @@ test("message subscription preserves seed, report projection, gap cursor, and ca
         { payload: { fromSeq: 1 } },
         { destination: "dev", peer: "cli", requestId: "request", signal: controller.signal });
     assert.deepEqual(messages, [
-        { name: "seed", payload: { events: [event(2, "context.message.queued"), event(3, "message.changed", { toolName: "todo_report" })], lastSeq: 3 } },
+        { name: "seed", payload: { events: [event(2, "context.message.queued"), event(3, "message.changed", { toolName: "progress_report" })], lastSeq: 3 } },
         { name: "event", payload: event(5, "context.message.delivered"), seq: 5 },
         { name: "gap", payload: { instance: "dev", latestSeq: 12, oldestAvailableSeq: 10, requestedFromSeq: 6 }, seq: 12 },
-        { name: "event", payload: event(10, "message.changed", { toolName: "todo_report" }), seq: 10 },
+        { name: "event", payload: event(10, "message.changed", { toolName: "progress_report" }), seq: 10 },
     ]);
 });
 

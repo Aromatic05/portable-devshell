@@ -4,7 +4,6 @@ import type {
     OperationalOverviewActivity,
     OperationalOverviewAlert,
     OperationalOverviewSystem,
-    OperationalOverviewTodo,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -43,35 +42,6 @@ export function createSnapshotAlerts(
         ];
     }
     return [];
-}
-
-export function createTodoAlerts(
-    instance: OperationalOverviewTodo["instance"],
-    todos: readonly OperationalOverviewTodo[],
-): OperationalOverviewAlert[] {
-    return todos.flatMap((todo) => {
-        if (todo.status !== "blocked" && todo.status !== "failed") {
-            return [];
-        }
-        return [
-            {
-                detail:
-                    todo.currentItem ??
-                    `${todo.completed}/${todo.total} items completed.`,
-                id: `todo.${todo.status}:${instance}:${todo.taskId}`,
-                instance,
-                kind:
-                    todo.status === "failed"
-                        ? ("todo.failed" as const)
-                        : ("todo.blocked" as const),
-                severity:
-                    todo.status === "failed"
-                        ? ("critical" as const)
-                        : ("attention" as const),
-                title: `${todo.status === "failed" ? "Failed" : "Blocked"} task: ${todo.title}`,
-            },
-        ];
-    });
 }
 
 export function createRecentFailureAlert(

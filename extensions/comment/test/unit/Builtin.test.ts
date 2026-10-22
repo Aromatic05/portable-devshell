@@ -20,8 +20,7 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
         { hook: "500-toolcall-gate", id: "toolcall-gate" },
     ]);
     assert.deepEqual(manifest.extensions?.["toolcall.rewrite"], [
-        { hook: "500-todo-access", id: "todo-access" },
-        { hook: "501-todo-invalid", id: "todo-invalid" },
+        { hook: "501-memory-auto", id: "memory-auto" },
         { hook: "502-tool-advice", id: "tool-advice" },
         { hook: "510-comment-delivery", id: "comment-delivery" },
         { hook: "520-mailing-trigger", id: "mailing-trigger" },
@@ -82,15 +81,14 @@ test("Comment Extension activates from observe and event-publish capabilities wi
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 15);
+    assert.equal(registrations.length, 14);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
             { id: "toolcall-gate", pointId: "toolcall.review" },
-            { id: "todo-access", pointId: "toolcall.rewrite" },
             { id: "comment-delivery", pointId: "toolcall.rewrite" },
             { id: "tool-advice", pointId: "toolcall.rewrite" },
-            { id: "todo-invalid", pointId: "toolcall.rewrite" },
+            { id: "memory-auto", pointId: "toolcall.rewrite" },
             { id: "mailing-trigger", pointId: "toolcall.rewrite" },
             { id: "memory", pointId: "cli.model-commands" },
             { id: "memory", pointId: "cli.native-commands" },
@@ -103,7 +101,7 @@ test("Comment Extension activates from observe and event-publish capabilities wi
                 id: "message-update-preferences",
                 pointId: "control.routes",
             },
-            { id: "todo_report", pointId: "mcp.tools" },
+            { id: "progress_report", pointId: "mcp.tools" },
         ],
     );
     assert.equal(typeof registrations[0]?.binding, "function");

@@ -68,7 +68,7 @@ export async function deliverMcpAppReentry(
             } else {
                 if (typeof directiveId !== "string" || receipt === undefined || receipt.attemptStarted ||
                     !["applied", "claiming", "attempting"].includes(receipt.status) ||
-                    (intent !== "goal-resume" && intent !== "goal-retry" && intent !== "task-resume"))
+                    (intent !== "goal-resume" && intent !== "goal-retry"))
                     return { claimed: false };
                 if (receipt.status === "applied") {
                     if (await ports.actions.beginDelivery(directiveId, owner) === undefined)
@@ -101,10 +101,8 @@ export async function deliverMcpAppReentry(
                     ...value,
                     delivery: {
                         message: intent === "automatic"
-                            ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
-                            : intent === "task-resume"
-                                ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
-                                : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
+                            ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue toward the objective using its bound Memory.`
+                            : `The user resumed the workspace Goal: ${title}. Review the latest state and continue toward the objective using its bound Memory.`,
                         modelContext: snapshot.modelContext as unknown as JsonValue,
                     },
                 };

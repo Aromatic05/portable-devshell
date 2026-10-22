@@ -1355,7 +1355,7 @@ import {
                 "connections",
                 "messages",
                 "audit",
-                "todo",
+                "goals",
                 "help",
                 "terminal",
             ] as const;

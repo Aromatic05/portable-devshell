@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type { ExtensionWorkerExecuteCapability } from "@portable-devshell/extension/worker";
 import { mailMarker, parseOutbox, renderBounce, renderInbox, renderIndex, taskName, type Mail } from "./Protocol.js";
@@ -122,6 +123,7 @@ export class MailingService {
     readonly #onError: (error: unknown) => void;
     readonly #locks = new Map<string, Promise<void>>();
     readonly #scopes = new Map<string, MailingTarget>();
+    readonly #autoChecked = new Map<string, MemorySelection>();
     readonly #timer: ReturnType<typeof setInterval>;
     #closed = false;
 
@@ -148,6 +150,7 @@ export class MailingService {
         clearInterval(this.#timer);
         await Promise.allSettled([...this.#locks.values()]);
         this.#scopes.clear();
+        this.#autoChecked.clear();
     }
 
     async retireInstance(instance: string): Promise<void> {
@@ -182,6 +185,38 @@ export class MailingService {
         }));
     }
 
+    /** First normal MCP ToolCall after environ_info: bind one persistent Memory
+     * when the agent has not explicitly initialized or inherited one.
+     */
+    async ensureBound(input: MemoryContext): Promise<MemorySelection> {
+        const key = `${input.instance}\0${input.workspace}\0${input.ctxId}`;
+        const cached = this.#autoChecked.get(key);
+        if (cached !== undefined) return cached;
+        return await this.#exclusive(input, async (files) => {
+            const state = parseState(await files.read(STATE_FILE));
+            const existing = Object.keys(state.bindings).find((name) => state.bindings[name] === input.ctxId);
+            if (existing !== undefined) {
+                const selected = this.#selection(input, existing);
+                this.#autoChecked.set(key, selected);
+                this.#remember(input);
+                return selected;
+            }
+            const active = await this.#activeContexts(input);
+            if (!active.has(input.ctxId)) throw new Error("Automatic Memory binding requires an active Context");
+            const names = new Set(await files.listTasks());
+            let name: string;
+            do { name = `auto-${randomBytes(6).toString("hex")}`; } while (names.has(name));
+            await files.create(`${ROOT}/${name}/INDEX.md`, `# ${name}\n`);
+            state.bindings[name] = input.ctxId;
+            await this.#save(files, state);
+            const selected = this.#selection(input, name);
+            this.#autoChecked.set(key, selected);
+            this.#remember(input);
+            await this.#dispatch(files, input, state, active);
+            return selected;
+        });
+    }
+
     async init(input: MemoryContext, name: string): Promise<MemorySelection> {
         return await this.#bind(input, taskName(name), "init");
     }
@@ -212,6 +247,13 @@ export class MailingService {
             this.#remember(input);
             await this.#dispatch(files, input, state, active);
             const selected = this.#selection(input, name);
+            const ownerKey = `${input.instance}\0${input.workspace}\0${input.ctxId}`;
+            // An explicit inherit can transfer a live Memory. Do not leave a
+            // previous Context with a stale fast-path cache for the same name.
+            for (const [key, cached] of this.#autoChecked) {
+                if (cached.name === name && key !== ownerKey) this.#autoChecked.delete(key);
+            }
+            this.#autoChecked.set(ownerKey, selected);
             const oldMail = await files.read(`${ROOT}/${name}/mailbox.md`);
             if (oldMail !== undefined && oldMail.trim().length > 0) {
                 // dispatch may have advanced the durable journal; do not overwrite it.
@@ -234,6 +276,7 @@ export class MailingService {
             const task = Object.keys(state.bindings).find((key) => state.bindings[key] === input.ctxId);
             if (task === undefined) return {};
             delete state.bindings[task];
+            this.#autoChecked.delete(`${input.instance}\0${input.workspace}\0${input.ctxId}`);
             await this.#save(files, state);
             return { released: task };
         });

@@ -87,7 +87,7 @@ test("Concurrent reviews preserve the Push budget across restart and a real repo
 
     const reloaded = new CommentService({ instanceName: "alpha", store, appendEvent: async () => {} });
     assert.deepEqual(await reloaded.reviewToolCall("ctx-b", "file_read"), { kind: "allow" });
-    assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "todo_report"), { kind: "allow" });
+    assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "progress_report"), { kind: "allow" });
     assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "push", commentId: push.id, comment: push.text, toolCallBudget: 5,
     });

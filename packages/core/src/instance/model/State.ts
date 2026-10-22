@@ -20,9 +20,9 @@ import type { AuditRuntime } from "../../audit/Api.js";
 import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import {
-    installTodoTools,
     installWaitToolCallRewrite,
-    todoToolDefinitions,
+    installWorkspaceGoalTool,
+    workspaceGoalDefinition,
 } from "../../task/Public.js";
 import { mcpAppActionDefinition, mcpAppReentryDefinition, mcpAppOpenDefinition } from "../mcpapp/Definition.js";
 import { installMcpAppOpen } from "../mcpapp/Open.js";
@@ -110,7 +110,7 @@ export class InstanceState {
         this.terminal = createTerminalRuntime(dependencies.terminal);
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
-            [...todoToolDefinitions(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],
+            [workspaceGoalDefinition(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],
         );
         this.toolCalls = createToolCallRuntime({
             resolveTarget: (target) => {
@@ -135,7 +135,7 @@ export class InstanceState {
                 this.toolCalls.hooks,
                 this.approval.api,
             ),
-            installTodoTools(this.toolCalls.hooks, this.task.api),
+            installWorkspaceGoalTool(this.toolCalls.hooks, this.task.api.goal),
             installMcpAppAction(this.toolCalls.hooks, {
                 approval: this.approval.api,
                 task: this.task.api,

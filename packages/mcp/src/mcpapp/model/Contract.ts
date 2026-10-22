@@ -79,7 +79,7 @@ export type McpAppActionEffect = McpAppReentryDirective;
 
 export interface McpAppReentryDirective {
     kind: "reentry";
-    intent: "automatic" | "goal-resume" | "goal-retry" | "task-resume";
+    intent: "automatic" | "goal-resume" | "goal-retry";
     sourceId?: string;
     id?: string;
 }
@@ -98,7 +98,6 @@ export interface McpAppReentryView {
 }
 
 export type McpAppActionOperation =
-    | "task-pause" | "task-resume" | "task-cancel"
     | "approval-approve" | "approval-deny"
     | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop";
 

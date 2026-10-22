@@ -100,11 +100,6 @@ export class TuiDomainReader {
         return viewModel.state;
     }
 
-    todo(instance: string) {
-        const viewModel = this.domains.todo(instance);
-        this.#attachSource(viewModel);
-        return viewModel.state;
-    }
 
     dispose(): void {
         for (const detach of this.#detach) detach();

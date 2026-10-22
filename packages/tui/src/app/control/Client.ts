@@ -14,7 +14,6 @@ import {
     OverviewViewModel,
     ProcessViewModel,
     ServerSession,
-    TodoViewModel,
     ToolCallViewModel,
     connectControlChannel,
     createApprovalTransport,
@@ -80,7 +79,6 @@ export class TuiDomainSession {
     readonly #approvals = new Map<string, ApprovalViewModel>();
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
-    readonly #todos = new Map<string, TodoViewModel>();
 
     constructor(options: TuiClientOptions = {}) {
         const endpoint = new Endpoint({
@@ -151,17 +149,6 @@ export class TuiDomainSession {
         return viewModel;
     }
 
-    todo(instance: string): TodoViewModel {
-        let viewModel = this.#todos.get(instance);
-        if (viewModel === undefined) {
-            viewModel = new TodoViewModel(
-                createTaskTransport(this.#endpoint, instance),
-            );
-            this.#todos.set(instance, viewModel);
-        }
-        return viewModel;
-    }
-
     terminalTransport(instance: string): TerminalTransport {
         return createTerminalTransport(this.#endpoint, instance);
     }
@@ -179,8 +166,6 @@ export class TuiDomainSession {
         this.#runtimes.delete(instance);
         this.#approvals.get(instance)?.close();
         this.#approvals.delete(instance);
-        this.#todos.get(instance)?.close();
-        this.#todos.delete(instance);
         this.goals.release(instance);
         this.toolCalls.release(instance);
     }
@@ -219,10 +204,8 @@ export class TuiDomainSession {
     close(): void {
         for (const viewModel of this.#runtimes.values()) viewModel.close();
         for (const viewModel of this.#approvals.values()) viewModel.close();
-        for (const viewModel of this.#todos.values()) viewModel.close();
         this.#runtimes.clear();
         this.#approvals.clear();
-        this.#todos.clear();
         this.goals.close();
         this.toolCalls.close();
         this.messages.close();

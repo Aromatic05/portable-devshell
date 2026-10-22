@@ -140,14 +140,6 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 .tc-tree summary { cursor: pointer; font-weight: 600; }
 .tc-tree summary::marker { font-size: 8px; }
 .tc-tree-file { opacity: .85; }
-.tc-todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.tc-todo-list li { display: flex; align-items: start; gap: 9px; border-radius: 6px; padding: 7px; background: color-mix(in srgb,currentColor 3%,transparent); font-size: 11px; }
-.tc-todo-list li p { max-width: unset; margin: 3px 0 0; font-size: 10px; text-align: left; }
-.tc-todo-list li[data-state="completed"] > div > span { opacity: .65; }
-.tc-todo-icon { width: 17px; text-align: center; font-weight: 700; color: #8b98a4; }
-.tc-todo-list li[data-state="completed"] .tc-todo-icon { color: #16875d; }
-.tc-todo-list li[data-state="failed"] .tc-todo-icon, .tc-todo-list li[data-state="blocked"] .tc-todo-icon { color: #c4514b; }
-.tc-todo-list li[data-state="in_progress"] .tc-todo-icon { color: #b68a3b; }
 .tc-progress { height: 5px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb,currentColor 12%,transparent); }
 .tc-progress span { display: block; height: 100%; background: #16875d; }
 .tc-task-status { border: 1px solid color-mix(in srgb,currentColor 14%,transparent); border-radius: 5px; font: 10px ui-monospace,monospace; padding: 3px 6px; }

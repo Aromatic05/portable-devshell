@@ -271,7 +271,6 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             alerts: [],
             controller: { pid: 1, uptimeSeconds: 1 },
             counts: {
-                activeTodos: 0,
                 failedCalls24h: 0,
                 instancesAttention: 0,
                 instancesCritical: 0,
@@ -282,7 +281,6 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             generatedAt: "2026-07-31T00:00:00.000Z",
             health: "healthy",
             instances: [],
-            todos: [],
         };
     }
 

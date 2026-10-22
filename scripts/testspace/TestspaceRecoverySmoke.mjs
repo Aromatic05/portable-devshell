@@ -153,7 +153,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
                 resumed.close();
             }
         });
-        log("enable dedicated Worker; record real MCP shell results and durable Todo");
+        log("enable dedicated Worker; record real MCP shell results and durable Goal");
         await instances((transport) => transport.enableInstance(name));
         await startWorker();
         await connectMcp();
@@ -168,12 +168,18 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
             assert.equal(result.stdout, `${marker}-${exitCode}`);
             assert.equal(result.stderr, `${marker}-stderr`);
         }
-        const todo = await call("todo_write", { ctxId, revision: 0, title: marker,
-            todos: [{ id: "persist", content: "survive Worker and Control restart", status: "in_progress" }] });
-        const readTodo = () => control((shared, connection) =>
-            shared.createTaskTransport(connection, name).getTodo({ taskId: todo.taskId }));
-        const beforeTodo = (await readTodo()).todo;
-        assert.equal(beforeTodo.taskId, todo.taskId);
+        const objective = `Verify durable Goal and audit recovery ${marker}`;
+        const startedGoal = await call("workspace_goal", { ctxId, action: "start", objective });
+        assert.equal(startedGoal.goal.status, "active");
+        const updatedGoal = await call("workspace_goal", { ctxId, action: "update",
+            expectedGoalId: startedGoal.goal.goalId, expectedRevision: startedGoal.goal.revision,
+            note: "Verify durable state and audit across Worker and Control restart." });
+        assert.ok(updatedGoal.goal.revision > startedGoal.goal.revision);
+        const readGoal = () => control((shared, connection) =>
+            shared.createTaskTransport(connection, name).getGoal(ctxId));
+        const beforeGoal = (await readGoal()).goal;
+        assert.deepEqual(beforeGoal, updatedGoal.goal);
+        assert.equal(beforeGoal.objective, objective);
         const query = { ctxId, toolName: "bash_run", includeInput: true, includeOutput: true, limit: 100 };
         const readAudit = () => control((shared, connection) => shared.createToolTransport(connection, name).listCalls(query));
         const beforeAudit = await readAudit();
@@ -210,7 +216,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         });
         assertRecoveryAudit(beforeAudit, await readAudit());
         assert.deepEqual(await readLogs(), beforeLogs, "Recovery lost or changed audited shell output");
-        assert.deepEqual((await readTodo()).todo, beforeTodo);
+        assert.deepEqual((await readGoal()).goal, beforeGoal);
         await connectMcp();
         assert.equal(typeof (await call("environ_info", { workspace })).ctxId, "string");
         await client.close();
@@ -234,7 +240,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         await startWorker();
         assertRecoveryAudit(beforeAudit, await readAudit());
         assert.deepEqual(await readLogs(), beforeLogs, "Recovery lost or changed audited shell output");
-        assert.deepEqual((await readTodo()).todo, beforeTodo);
+        assert.deepEqual((await readGoal()).goal, beforeGoal);
         assert.match(await readFile(configPath, "utf8"), /RECOVERY_REVISION = "recovered"/u);
         await connectMcp();
         const freshContext = await call("environ_info", { workspace });
@@ -243,7 +249,6 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         assert.equal(after.stdout, `${marker}-after`);
         await client.close();
         client = undefined;
-        await control((shared, connection) => shared.createTaskTransport(connection, name).deleteTodo(todo.taskId));
         log("delete, verify cleanup debt and config removal, then reuse the same name");
         const deletion = await instances((transport) => transport.deleteInstance(name));
         log("committed delete outcome: " + JSON.stringify(deletion));
@@ -268,7 +273,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         assert.equal((await instances((transport) => transport.listCleanupDebts())).some((debt) => debt.instance === name), false);
         return { instance: name, configCommits: 262, replayedRevisions: 3, gapRecovered: true,
             cancelledReadSettled: true, workerRestart: true, controlRestart: true,
-            persistedAuditCalls: beforeAudit.length, persistedLogEntries: beforeLogs.length, persistedTodo: true, freshMcpExecution: true, nameReused: true };
+            persistedAuditCalls: beforeAudit.length, persistedLogEntries: beforeLogs.length, persistedGoal: true, freshMcpExecution: true, nameReused: true };
     } finally {
         try {
             if (client) await client.close();

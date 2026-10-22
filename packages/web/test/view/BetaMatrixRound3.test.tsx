@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { expect, it, vi } from "vitest";
 import { Instances } from "../../src/view/page/Instances.js";
 import { withWebDomains } from "../support/DomainHarness.js";
-import { deferred, setupAudit, setupConfig, setupTodos, todo } from "../support/BetaMatrixHarness.js";
+import { deferred, setupAudit, setupConfig } from "../support/BetaMatrixHarness.js";
 
 function restartChange() {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Log retention days" }),
@@ -48,49 +48,8 @@ it("round3: restart failure after persistence reports the failure without claimi
     expect(screen.queryByText("Configuration saved and worker restarted.")).not.toBeInTheDocument();
 });
 
-it("round3: a Todo replacement cannot retarget an already reviewed delete confirmation", async () => {
-    const { domains } = setupTodos();
-    const removeAlpha = vi.spyOn(domains.todo("alpha"), "delete");
-    const removeBeta = vi.spyOn(domains.todo("beta"), "delete");
-    fireEvent.click(within(screen.getByText("Alpha project").closest("article")!).getByRole("button", { name: "Delete project" }));
-    act(() => domains.setTodo("alpha", todo("replacement-task", 1, "Replacement project")));
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("Alpha project (same-task)");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(removeAlpha).toHaveBeenCalledExactlyOnceWith("same-task"));
-    expect(removeBeta).not.toHaveBeenCalled();
-    expect(screen.getByText("Replacement project")).toBeInTheDocument();
-});
 
-it("round3: disconnect while Todo confirmation is open blocks mutation and reconnect restores the same target", async () => {
-    const { domains } = setupTodos();
-    const remove = vi.spyOn(domains.todo("beta"), "delete");
-    fireEvent.click(within(screen.getByText("Beta project").closest("article")!).getByRole("button", { name: "Delete project" }));
-    act(() => domains.server.patch({ status: "offline" }));
-    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(confirm);
-    expect(remove).not.toHaveBeenCalled();
-    act(() => domains.server.patch({ status: "online" }));
-    fireEvent.click(confirm);
-    await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith("same-task"));
-});
 
-it("round3: pending Todo delete blocks repeated clicks, Escape and backdrop cancellation", async () => {
-    const { domains } = setupTodos();
-    const pending = deferred<void>();
-    const remove = vi.spyOn(domains.todo("alpha"), "delete").mockReturnValue(pending.promise);
-    fireEvent.click(within(screen.getByText("Alpha project").closest("article")!).getByRole("button", { name: "Delete project" }));
-    const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Deleting…" }));
-    fireEvent.keyDown(dialog, { key: "Escape" });
-    fireEvent.mouseDown(dialog.parentElement!);
-    expect(dialog).toHaveAttribute("aria-busy", "true");
-    await waitFor(() => expect(remove).toHaveBeenCalledOnce());
-    await act(async () => pending.resolve());
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-});
 
 it("round3: Audit approval remains actionable without a Context registry entry and serializes the pending decision", async () => {
     const { domains } = setupAudit();

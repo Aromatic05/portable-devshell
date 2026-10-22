@@ -10,114 +10,35 @@ test("GoalState detects an abandoned active Goal after one minute", () => {
     assert.equal(GOAL_EXECUTION_LEASE_MS, 60_000);
 });
 
-test("GoalState completes atomically when the final step becomes terminal", () => {
+test("GoalState holds a final objective until explicit finish and accepts legacy persisted steps", () => {
     let now = Date.parse("2026-08-20T12:00:00.000Z");
     let ids = 0;
-    const state = new GoalState({
-        goalId: () => `goal-${++ids}`,
-        now: () => new Date(now).toISOString(),
-    });
-
-    let transition = state.manage(
-        state.emptyDocument(),
-        {
-            action: "start",
-            objective: "Ship Workspace Goal mode",
-            steps: [
-                {
-                    id: "implement",
-                    status: "active",
-                    text: "Implement Goal runtime",
-                },
-                { id: "verify", text: "Verify Workspace behavior" },
-            ],
-        },
-        "ctx-goal",
-    );
-    let document = transition.document;
-    assert.equal(transition.result?.goalId, "goal-1");
-    assert.equal(transition.result?.status, "active");
-
+    const state = new GoalState({ goalId: () => `goal-${++ids}`, now: () => new Date(now).toISOString() });
+    const initial = state.manage(state.emptyDocument(), {
+        action: "start", objective: "Ship Workspace Goal mode",
+    }, "ctx-goal");
+    assert.equal(initial.result?.goalId, "goal-1");
+    assert.equal(initial.result?.status, "active");
+    assert.equal("steps" in (initial.result ?? {}), false);
     now += 1_000;
-    document = state.manage(
-        document,
-        {
-            action: "update",
-            status: "completed",
-            stepId: "implement",
-        },
-        "ctx-goal",
-    ).document;
-    now += 1_000;
-    document = state.manage(
-        document,
-        {
-            action: "update",
-            status: "active",
-            stepId: "verify",
-        },
-        "ctx-goal",
-    ).document;
-    now += 1_000;
-    transition = state.manage(
-        document,
-        {
-            action: "update",
-            status: "completed",
-            stepId: "verify",
-        },
-        "ctx-goal",
-    );
-    document = transition.document;
-    assert.equal(transition.result?.status, "completed");
-    assert.equal(transition.result?.continuationDue, false);
-    assert.throws(
-        () => state.manage(document, { action: "finish" }, "ctx-goal"),
-        /already completed/u,
-    );
-
-    now += 1_000;
-    transition = state.manage(
-        document,
-        {
-            action: "start",
-            objective: "Second goal",
-            steps: [{ id: "work", text: "Do the work" }],
-        },
-        "ctx-goal",
-    );
-    document = transition.document;
-    assert.equal(transition.result?.goalId, "goal-2");
-    transition = state.manage(document, { action: "stop" }, "ctx-goal");
-    assert.equal(transition.result?.status, "stopped");
-});
-
-test("GoalState rejects active goals that contain only terminal steps", () => {
-    const state = new GoalState({ now: () => "2026-08-20T12:00:00.000Z" });
-    assert.throws(
-        () => state.normalizeDocument({
-            goals: [
-                {
-                    continuationCount: 2,
-                    continuationPending: false,
-                    createdAt: "2026-08-20T11:00:00.000Z",
-                    createdByCtxId: "ctx-legacy",
-                    goalId: "goal-legacy",
-                    lastAgentActivityAt: "2026-08-20T11:01:00.000Z",
-                    lastProgressAt: "2026-08-20T11:01:00.000Z",
-                    noActionStreak: 2,
-                    objective: "Legacy terminal Goal",
-                    revision: 7,
-                    stagnationStreak: 1,
-                    status: "active",
-                    steps: [{ id: "done", status: "completed", text: "Done" }],
-                    updatedAt: "2026-08-20T11:01:00.000Z",
-                },
-            ],
-            version: 1,
-        }),
-        /active goal must contain a non-terminal step/u,
-    );
+    const updated = state.manage(initial.document, {
+        action: "update", note: "Changes recorded in persistent Memory",
+    }, "ctx-goal");
+    assert.equal(updated.result?.status, "active");
+    const legacy = state.normalizeDocument({ version: 1, goals: [{
+        ...updated.document.goals[0], steps: [
+            { id: "work", text: "Old plan", status: "completed" },
+        ],
+    }] });
+    assert.equal(state.read(legacy, "ctx-goal")?.status, "active");
+    assert.equal("steps" in legacy.goals[0]!, false);
+    const finished = state.manage(legacy, { action: "finish" }, "ctx-goal");
+    assert.equal(finished.result?.status, "completed");
+    assert.equal(finished.result?.continuationDue, false);
+    assert.throws(() => state.manage(finished.document, { action: "finish" }, "ctx-goal"), /already completed/u);
+    const next = state.manage(finished.document, { action: "start", objective: "Second goal" }, "ctx-goal");
+    assert.equal(next.result?.goalId, "goal-2");
+    assert.equal(state.manage(next.document, { action: "stop" }, "ctx-goal").result?.status, "stopped");
 });
 
 test("GoalState continuation claims are validated against agent activity and count only dispatched attempts", () => {
@@ -131,7 +52,7 @@ test("GoalState continuation claims are validated against agent activity and cou
         {
             action: "start",
             objective: "Continue autonomously",
-            steps: [{ id: "work", status: "active", text: "Keep working" }],
+
         },
         "ctx-goal",
     ).document;
@@ -228,8 +149,7 @@ test("GoalState continuation claims are validated against agent activity and cou
         document,
         {
             action: "update",
-            stepId: "work",
-            text: "Keep working after durable progress",
+            note: "Keep working after durable progress",
         },
         "ctx-goal",
     ).document;
@@ -284,7 +204,7 @@ test("GoalState retires an attempted continuation without stopping or progressin
         {
             action: "start",
             objective: "Keep Goal durable",
-            steps: [{ id: "work", status: "active", text: "Keep working" }],
+
         },
         "ctx-goal",
     ).document;
@@ -346,7 +266,7 @@ test("GoalState user-initiated resume uses the durable continuation fence withou
         {
             action: "start",
             objective: "Resume immediately",
-            steps: [{ id: "work", status: "active", text: "Continue" }],
+
         },
         "ctx-goal",
     ).document;
@@ -405,7 +325,7 @@ test("GoalState continuation claim is fenced by stable goal identity", () => {
         {
             action: "start",
             objective: "Current Goal",
-            steps: [{ id: "work", status: "active", text: "Work" }],
+
         },
         "ctx-goal",
     );
@@ -443,7 +363,7 @@ test("GoalState separates agent activity from durable Goal progress", () => {
         {
             action: "start",
             objective: "Track real progress",
-            steps: [{ id: "work", status: "active", text: "Work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -483,13 +403,13 @@ test("GoalState separates agent activity from durable Goal progress", () => {
         { action: "update", note: "Status only" },
         "ctx-goal",
     ).document;
-    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 1);
-    assert.equal(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
+    assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
+    assert.notEqual(state.read(document, "ctx-goal")?.lastProgressAt, progressAt);
 
     now += 1_000;
     document = state.manage(
         document,
-        { action: "update", status: "completed", stepId: "work" },
+        { action: "update", note: "Meaningful work completed" },
         "ctx-goal",
     ).document;
     assert.equal(state.read(document, "ctx-goal")?.continuationCount, 0);
@@ -510,7 +430,7 @@ test("GoalState observation-only activity does not extend the execution lease", 
         {
             action: "start",
             objective: "Do real work",
-            steps: [{ id: "work", status: "active", text: "Modify something" }],
+
         },
         "ctx-goal",
     ).document;
@@ -533,7 +453,7 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
         {
             action: "start",
             objective: "Track evidence",
-            steps: [{ id: "work", status: "active", text: "Do work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -602,7 +522,7 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     now += 1_000;
     document = state.manage(
         document,
-        { action: "update", status: "completed", stepId: "work" },
+        { action: "update", note: "Meaningful work completed" },
         "ctx-goal",
     ).document;
     snapshot = state.read(document, "ctx-goal")!;
@@ -622,7 +542,7 @@ test("GoalState records an external wait wake as re-entry without faking Agent a
         {
             action: "start",
             objective: "Resume after wait",
-            steps: [{ id: "work", status: "active", text: "Use wait result" }],
+
         },
         "ctx-goal",
     ).document;
@@ -659,7 +579,7 @@ test("GoalState re-arms from progress epoch even when progress and re-entry shar
         {
             action: "start",
             objective: "Track causal progress",
-            steps: [{ id: "work", status: "active", text: "Do work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -688,8 +608,7 @@ test("GoalState re-arms from progress epoch even when progress and re-entry shar
         document,
         {
             action: "update",
-            stepId: "work",
-            text: "Do work with real progress",
+            note: "Do work with real progress",
         },
         "ctx-goal",
     ).document;
@@ -711,7 +630,7 @@ test("GoalState user pause fences continuation until an explicit user resume", (
         {
             action: "start",
             objective: "Pause safely",
-            steps: [{ id: "work", status: "active", text: "Do work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -748,7 +667,7 @@ test("GoalState fences stale Workspace UI actions by goal id and revision", () =
         {
             action: "start",
             objective: "Protected goal",
-            steps: [{ id: "work", text: "Work" }],
+
         },
         "ctx-goal",
     );
@@ -794,7 +713,7 @@ test("GoalState clears ambiguous delivery after definitive Host rejection or obs
         {
             action: "start",
             objective: "Continue safely",
-            steps: [{ id: "work", status: "active", text: "Work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -851,7 +770,7 @@ test("GoalState treats Agent activity after dispatch attempt as accepted deliver
         {
             action: "start",
             objective: "Settle a fast accepted wake",
-            steps: [{ id: "work", status: "active", text: "Work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -892,7 +811,7 @@ test("GoalState accepted receipt covers only the progress epoch visible to that 
         {
             action: "start",
             objective: "Keep later progress visible",
-            steps: [{ id: "work", status: "active", text: "Initial work" }],
+
         },
         "ctx-goal",
     ).document;
@@ -900,8 +819,7 @@ test("GoalState accepted receipt covers only the progress epoch visible to that 
         document,
         {
             action: "update",
-            stepId: "work",
-            text: "New progress after the old delivery was prepared",
+            note: "New progress after the old delivery was prepared",
         },
         "ctx-goal",
     ).document;
@@ -927,7 +845,7 @@ test("GoalState never exhausts an actionable Goal solely because wake attempts a
         {
             action: "start",
             objective: "Finalize explicitly",
-            steps: [{ id: "done", status: "active", text: "Done" }],
+
         },
         "ctx-goal",
     );
@@ -953,7 +871,7 @@ test("GoalState bounds terminal history without removing live Goals", () => {
             {
                 action: "start",
                 objective: ctxId,
-                steps: [{ id: "work", text: "Work" }],
+
             },
             ctxId,
         ).document;
@@ -966,7 +884,7 @@ test("GoalState bounds terminal history without removing live Goals", () => {
         {
             action: "start",
             objective: "live",
-            steps: [{ id: "work", text: "Work" }],
+
         },
         "ctx-live",
     ).document;

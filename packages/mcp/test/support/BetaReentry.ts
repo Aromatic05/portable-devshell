@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { createToolCallRuntime, type JsonValue } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { GoalService } from "../../../core/src/task/goal/index.ts";
-import { TodoService } from "../../../core/src/task/todo/index.ts";
 import { mcpAppReentryDefinition } from "../../../core/src/instance/mcpapp/Definition.ts";
 import { installMcpAppReentry } from "../../../core/src/instance/mcpapp/Reentry.ts";
 import { McpEndpoint } from "../../src/endpoint/Endpoint.ts";
@@ -24,11 +23,10 @@ export async function betaReentry() {
         return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
     } }) });
     const goal = new GoalService({ appendEvent: async () => undefined, filePath: join(directory, "goals.json"), instanceName: "local" });
-    const todo = new TodoService({ appendEvent: async () => undefined, filePath: join(directory, "todo.json"), instanceName: "local" });
-    const uninstall = installMcpAppReentry(native.hooks, { goal, todo } as never);
+    const uninstall = installMcpAppReentry(native.hooks, { goal } as never);
     const context = await contexts.registry.create({ principal: "owner", environments: [{ instance: "local", workspace: "/repo" }] });
     const started = await goal.manage(context.ctxId, {
-        action: "start", workspace: "/repo", objective: "Round three recovery", steps: [{ id: "work", text: "Complete work" }],
+        action: "start", workspace: "/repo", objective: "Round three recovery",
     });
     assert.ok(started);
     const filePath = join(directory, "actions.json");
@@ -50,7 +48,7 @@ export async function betaReentry() {
     });
     const base = { ctxId: context.ctxId, directiveId, intent: "goal-resume", sourceId: started.goalId, claimId: "round3-owner-claim" };
     const call = (input: Record<string, JsonValue>, principal = "owner", target = endpoint()) => target.callTool("mcpapp_reentry", { ...base, ...input }, { principal });
-    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal, native, todo,
+    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal, native,
         executions: () => executions, failClaim: (value: boolean) => { failClaim = value; },
         async close() { uninstall(); native.close(); await contexts.close(); },
     };

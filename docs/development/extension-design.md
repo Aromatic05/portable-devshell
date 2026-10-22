@@ -1057,7 +1057,7 @@ provenance
 
 ## 12. MCP Domain
 
-> 当前实现：`@portable-devshell/extension/mcp` 已 export `tools`（point `mcp.tools`）。静态 declaration 提供输入/输出 schema、metadata，runtime binding 执行工具，Comment 的 `todo_report` 为实际用例；catalog 随 Extension declaration 更新。它与 `cli.model-commands` 的 shell shim 和 instance model allowlist 独立。以下“不进入第一版”的论述只记录原始范围和尚未实现的 resources/prompts 提案，不描述当前 tools 支持范围。
+> 当前实现：`@portable-devshell/extension/mcp` 已 export `tools`（point `mcp.tools`）。静态 declaration 提供输入/输出 schema、metadata，runtime binding 执行工具，Comment 的 `progress_report` 为实际用例；catalog 随 Extension declaration 更新。它与 `cli.model-commands` 的 shell shim 和 instance model allowlist 独立。以下“不进入第一版”的论述只记录原始范围和尚未实现的 resources/prompts 提案，不描述当前 tools 支持范围。
 
 MCP 是协议/Host domain，不应该成为“所有可调用功能”的垃圾桶。
 

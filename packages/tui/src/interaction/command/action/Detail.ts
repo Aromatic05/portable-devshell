@@ -254,29 +254,6 @@ export class TuiCommandDispatcherDetail {
         }
 
         if (
-            state.ui.selectedPage === "todo" &&
-            state.ui.selectedInstance !== undefined &&
-            button === "delete-project"
-        ) {
-            const taskId = todoTaskIdFromBox(boxId);
-            if (taskId === undefined) return false;
-            const instance = state.ui.selectedInstance;
-            const todo = this.#projection.domains.todo(instance).todo;
-            const title =
-                todo?.taskId === taskId
-                    ? todo.title
-                    : todo?.tasks?.find((task) => task.taskId === taskId)
-                          ?.title;
-            return await this.#dispatch({
-                body: `Delete Todo project ${title ?? taskId} (${taskId}) from instance ${instance}? This permanently removes the project and its history.`,
-                confirmIntent: { instance, taskId, type: "todo.delete" },
-                confirmLabel: "Delete",
-                title: "Confirm Todo Project Deletion",
-                type: "overlay.openConfirm",
-            });
-        }
-
-        if (
             state.ui.selectedPage === "connections" &&
             button === "restart-control"
         ) {
@@ -390,7 +367,7 @@ export class TuiCommandDispatcherDetail {
         if (
             button === "clear-filter" &&
             (state.ui.selectedPage === "instances" ||
-                state.ui.selectedPage === "todo" ||
+                state.ui.selectedPage === "goals" ||
                 state.ui.selectedPage === "config" ||
                 state.ui.selectedPage === "audit")
         ) {
@@ -492,11 +469,5 @@ export class TuiCommandDispatcherDetail {
 function ctxIdFromBox(boxId: string | undefined): string | undefined {
     if (boxId === undefined) return undefined;
     const prefix = "audit-context:";
-    return boxId.startsWith(prefix) ? boxId.slice(prefix.length) : undefined;
-}
-
-function todoTaskIdFromBox(boxId: string | undefined): string | undefined {
-    if (boxId === undefined) return undefined;
-    const prefix = "todo-summary:";
     return boxId.startsWith(prefix) ? boxId.slice(prefix.length) : undefined;
 }

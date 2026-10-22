@@ -83,9 +83,6 @@ export class OperationalOverviewService implements OperationalOverviewRuntime {
         const instances = collections
             .map((collection) => collection.instance)
             .sort((left, right) => left.name.localeCompare(right.name));
-        const todos = collections
-            .flatMap((collection) => collection.todos)
-            .sort((left, right) => left.title.localeCompare(right.title));
         const activity = collections
             .flatMap((collection) => collection.activity)
             .sort((left, right) =>
@@ -111,7 +108,6 @@ export class OperationalOverviewService implements OperationalOverviewRuntime {
                 uptimeSeconds: Math.max(0, Math.floor(this.#uptimeSeconds())),
             },
             counts: {
-                activeTodos: todos.length,
                 failedCalls24h: collections.reduce(
                     (total, collection) => total + collection.failedCalls24h,
                     0,
@@ -131,7 +127,6 @@ export class OperationalOverviewService implements OperationalOverviewRuntime {
             generatedAt: now.toISOString(),
             health: readOperationalHealth(alerts),
             instances,
-            todos,
         };
     }
 

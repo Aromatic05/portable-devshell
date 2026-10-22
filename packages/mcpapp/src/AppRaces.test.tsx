@@ -39,7 +39,7 @@ test.each(["claim", "validate", "context", "attempt"] as const)(
         expect(host.contexts).toHaveLength(phase === "context" || phase === "attempt" ? 1 : 0);
         expect(container.textContent).toContain("Goal ctx-b");
         expect(container.querySelector('[role="alert"]')).toBeNull();
-        expect(button("Resume Todo").disabled).toBe(false);
+        expect(button("Resume Goal").disabled).toBe(false);
         expect(host.calls.at(-1)!.arguments.outcome).toBe(phase === "attempt" ? "uncertain" : undefined);
     },
 );
@@ -76,7 +76,7 @@ test("a watch that removes a directive during Host context write releases it bef
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
     await act(async () => context.resolve({}));
     expect(phases()).toEqual(["claim", "validate", "release"]);
-    expect(host.sent).toEqual([]); expect(button("Resume Todo").disabled).toBe(false);
+    expect(host.sent).toEqual([]); expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("a higher watch revision retaining the directive preserves its legitimate Host delivery", async () => {
@@ -131,42 +131,42 @@ test.each(["token", "liveBaseUrl"] as const)("same Context %s replacement invali
         if (!url.pathname.endsWith("/snapshot")) return hold(init?.signal);
         reads.push(url.href); const state = snapshot(); state.presentation.work[0]!.title = label; return response(state);
     });
-    await render(<AppView />); await authorize(); await click("Resume Todo");
+    await render(<AppView />); await authorize(); await click("Resume Goal");
     const replacement = { ...capability(), [field]: field === "token"
         ? "replacement-private-test-token" : capability("ctx-a", "beta").liveBaseUrl };
     label = "Replacement session";
     await act(async () => host.clients.at(-1)!.ontoolresult!({ _meta: { "portable-devshell/mcpapp": replacement } }));
-    expect(button("Resume Todo").disabled).toBe(false); await click("Resume Todo");
+    expect(button("Resume Goal").disabled).toBe(false); await click("Resume Goal");
     await act(async () => oldAction.reject(new Error("obsolete action failure")));
     expect(button("Applying…").disabled).toBe(true); expect(actions()).toHaveLength(2);
     expect(reads).toHaveLength(2); expect(container.querySelector('[role="alert"]')).toBeNull();
     await act(async () => newAction.resolve(result({ status: "applied" })));
     expect(reads).toHaveLength(3); expect(container.textContent).toContain("Replacement session");
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("A to B to A cannot let the original A action finish or unlock the new A action", async () => {
     const oldAction = deferred<unknown>(); const newAction = deferred<unknown>(); let calls = 0;
     host.invoke = async () => ++calls === 1 ? oldAction.promise : newAction.promise;
     serveContexts();
-    await render(<AppView />); await authorize(); await click("Resume Todo");
-    await authorize("ctx-b", "beta"); await authorize(); await click("Resume Todo");
+    await render(<AppView />); await authorize(); await click("Resume Goal");
+    await authorize("ctx-b", "beta"); await authorize(); await click("Resume Goal");
     await act(async () => oldAction.resolve(result({ status: "stale" })));
     expect(button("Applying…").disabled).toBe(true); expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/snapshot"))).toHaveLength(3);
     await act(async () => newAction.resolve(result({ status: "applied" })));
-    expect(button("Resume Todo").disabled).toBe(false); expect(actions()).toHaveLength(2);
+    expect(button("Resume Goal").disabled).toBe(false); expect(actions()).toHaveLength(2);
 });
 
 test("two immediate non-confirming clicks dispatch one operation and failure permits a fresh retry", async () => {
     const action = deferred<unknown>(); host.invoke = async () => action.promise; serveSnapshot(snapshot());
     await render(<AppView />); await authorize();
-    await act(async () => { button("Resume Todo").click(); button("Resume Todo").click(); });
+    await act(async () => { button("Resume Goal").click(); button("Resume Goal").click(); });
     expect(actions()).toHaveLength(1);
     await act(async () => action.resolve({ isError: true }));
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("Workspace action was rejected.");
-    expect(button("Resume Todo").disabled).toBe(false);
-    host.invoke = async () => result({ status: "applied" }); await click("Resume Todo");
+    expect(button("Resume Goal").disabled).toBe(false);
+    host.invoke = async () => result({ status: "applied" }); await click("Resume Goal");
     expect(actions()).toHaveLength(2); expect(actions()[1]!.arguments.requestId).not.toBe(actions()[0]!.arguments.requestId);
     expect(container.querySelector('[role="alert"]')).toBeNull();
 });
@@ -202,11 +202,11 @@ test("an action refresh awaiting the response body is revalidated after Context 
         }
         return response(snapshot(ctxId));
     });
-    await render(<AppView />); await authorize(); await click("Resume Todo"); expect(readsA).toBe(2);
+    await render(<AppView />); await authorize(); await click("Resume Goal"); expect(readsA).toBe(2);
     await authorize("ctx-b", "beta");
     await act(async () => body.resolve(snapshot("ctx-a", "alpha", 99)));
     expect(container.textContent).toContain("Goal ctx-b"); expect(container.textContent).not.toContain("Goal ctx-a");
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("watch retry retains its revision floor when an action refresh overtook the original watch cursor", async () => {
@@ -222,7 +222,7 @@ test("watch retry retains its revision floor when an action refresh overtook the
         watches++;
         return watches === 1 ? watch.promise : watches === 2 ? recoveryWatch.promise : hold(init?.signal);
     });
-    await render(<AppView />); await authorize(); await click("Resume Todo");
+    await render(<AppView />); await authorize(); await click("Resume Goal");
     expect(container.textContent).toContain("Revision 20 work");
     await act(async () => watch.reject(new Error("watch interrupted")));
     expect(container.textContent).toContain("watch interrupted");
@@ -231,13 +231,13 @@ test("watch retry retains its revision floor when an action refresh overtook the
     expect(container.textContent).not.toContain("Revision 11 work");
     const latest = snapshot("ctx-a", "alpha", 21); latest.presentation.work[0]!.title = "Revision 21 work";
     await act(async () => recoveryWatch.resolve(response({ changed: true, cursor: 21, snapshot: latest })));
-    expect(container.textContent).toContain("Revision 21 work"); expect(button("Resume Todo").disabled).toBe(false);
+    expect(container.textContent).toContain("Revision 21 work"); expect(button("Resume Goal").disabled).toBe(false);
     expect(container.textContent).not.toContain("watch interrupted");
 });
 
 test.each(["close", "teardown", "unmount"] as const)("Host %s invalidates pending work before its late completion", async (event) => {
     const action = deferred<unknown>(); host.invoke = async () => action.promise; serveSnapshot(snapshot());
-    await render(<AppView />); await authorize(); await click("Resume Todo");
+    await render(<AppView />); await authorize(); await click("Resume Goal");
     await act(async () => {
         if (event === "close") host.clients.at(-1)!.onclose!();
         if (event === "teardown") await host.clients.at(-1)!.onteardown!();
@@ -342,7 +342,7 @@ test("an uncertain attempt reports the original operation and never blindly repl
     state = recovery(snapshot("ctx-a", "alpha", 12));
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("a superseded recovery error cannot overwrite a newer explicit action error", async () => {
@@ -351,12 +351,12 @@ test("a superseded recovery error cannot overwrite a newer explicit action error
         if (call.name === "mcpapp_action") throw new Error("explicit action failed");
         return call.arguments.action === "claim" ? claim() : result({ valid: true });
     };
-    serveSnapshot(recovery()); await render(<AppView />); await authorize(); await click("Resume Todo");
+    serveSnapshot(recovery()); await render(<AppView />); await authorize(); await click("Resume Goal");
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("explicit action failed");
     await act(async () => context.reject(new Error("obsolete recovery context failure")));
     expect(phases()).toEqual(["claim", "validate", "release"]);
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("explicit action failed");
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("old watch authorization failure in the same turn as replacement cannot revoke the new session", async () => {
@@ -373,7 +373,7 @@ test("old watch authorization failure in the same turn as replacement cannot rev
     });
     expect(container.textContent).toContain("Goal ctx-b");
     expect(container.textContent).not.toContain("authorization expired");
-    await click("Resume Todo"); expect(actions()[0]!.arguments.ctxId).toBe("ctx-b");
+    await click("Resume Goal"); expect(actions()[0]!.arguments.ctxId).toBe("ctx-b");
 });
 
 test("Close remains available while a Context is announced but its private capability is pending", async () => {

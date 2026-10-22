@@ -40,20 +40,6 @@ test("round4: Delete approval stays pinned to reviewed instance while selected i
     assert.equal(harness.store.getState().ui.selectedInstance, "beta");
 });
 
-test("round4: failing Todo delete retains exact failure and a subsequent retry closes confirmation", async () => {
-    const calls: unknown[] = [];
-    const attempts = [async () => { throw new Error("Task task-a locked at revision 7"); }, async () => undefined];
-    const harness = round4Tui({ onTodoDelete: async (...args) => {
-        calls.push(args); const attempt = attempts.shift(); assert.ok(attempt); await attempt();
-    } });
-    await harness.confirm("alpha", { type: "todo.delete", instance: "alpha", taskId: "task-a" });
-    await harness.dispatcher.dispatch({ type: "confirm.accept" });
-    assert.match(await renderRound4Overlay(harness), /Task task-a locked at revision 7/u);
-    await harness.dispatcher.dispatch({ type: "confirm.accept" });
-    assert.deepEqual(calls, [["alpha", "task-a"], ["alpha", "task-a"]]);
-    assert.equal(harness.top(), undefined);
-});
-
 test("round4: rendered approval decision failure leaves review available after registry refresh", async () => {
     const pending = deferred<void>(); const entered = deferred<void>();
     const harness = round4Tui({ onApprovalDecision: async () => { entered.resolve(); await pending.promise; } });
@@ -95,10 +81,10 @@ test("round4: rendered TUI Goal consumes durable authoritative revisions from fr
     try {
         const harness = round4Tui();
         Object.assign(harness.domains.domains, { goals });
-        harness.store.setSelectedPage("todo");
+        harness.store.setSelectedPage("goals");
         await peer.put("alpha", "goals", { goals: [round4Goal(7)], lastSeq: 0 });
         await goals.load("alpha");
-        const box = harness.model().boxes.find((candidate) => candidate.id === "todo-goal:goal-alpha");
+        const box = harness.model().boxes.find((candidate) => candidate.id === "goal:goal-alpha");
         assert.ok(box); harness.store.toggleExpanded(box.expandedKey);
         assert.match(await renderRound4Screen(harness), /Revision.*7/u);
         const changed = new Promise<void>((resolve) => {
@@ -111,7 +97,7 @@ test("round4: rendered TUI Goal consumes durable authoritative revisions from fr
             { instanceName: "alpha", seq: 1, type: "goal.updated", at: "2026-10-20T00:01:00Z" });
         await changed;
         const text = await renderRound4Screen(harness);
-        assert.match(text, /Revision.*8/u); assert.match(text, /completed/u); assert.match(text, /1\/1 steps/u);
+        assert.match(text, /Revision.*8/u); assert.match(text, /completed/u); assert.doesNotMatch(text, /steps/u);
         assert.equal(harness.model().boxes.find((candidate) => candidate.id === box.id)?.disabled, undefined);
     } finally { goals.close(); await peer.close(); await rm(directory, { recursive: true, force: true }); }
 });
@@ -137,7 +123,7 @@ test("round4: late alpha Goal refresh does not replace selected beta authoritati
         await peer.put("alpha", "goals", { goals: [round4Goal(9)], lastSeq: 1 });
         await peer.put("beta", "goals", { goals: [{ ...round4Goal(12), objective: "Review beta checkpoint" }], lastSeq: 0 });
         const harness = round4Tui(); Object.assign(harness.domains.domains, { goals });
-        harness.store.setSelectedPage("todo");
+        harness.store.setSelectedPage("goals");
         const alpha = goals.load("alpha"); await entered.promise;
         harness.store.setSelectedInstance("beta"); await goals.load("beta");
         assert.match(await renderRound4Screen(harness), /Review beta checkpoint/u);

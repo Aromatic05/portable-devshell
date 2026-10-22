@@ -280,9 +280,9 @@ test("Extension manifest validates Extension Point identities while preserving p
     assert.equal(
         parseExtensionManifest({
             ...base,
-            extensions: { "mcp.tools": [{ id: "todo_report" }] },
+            extensions: { "mcp.tools": [{ id: "progress_report" }] },
         }).extensions["mcp.tools"]?.[0]?.id,
-        "todo_report",
+        "progress_report",
     );
     assert.throws(
         () =>

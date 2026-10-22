@@ -56,9 +56,9 @@
         ],
         "mcp.tools": [
             {
-                "id": "todo_report",
+                "id": "progress_report",
                 "activity": "observation",
-                "description": "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
+                "description": "Send a user-visible message without ending the turn or modifying Goal or Memory state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
                 "title": "Message user",
                 "readOnlyHint": false,
                 "destructiveHint": false,
@@ -101,12 +101,8 @@
         ],
         "toolcall.rewrite": [
             {
-                "hook": "500-todo-access",
-                "id": "todo-access"
-            },
-            {
-                "hook": "501-todo-invalid",
-                "id": "todo-invalid"
+                "hook": "501-memory-auto",
+                "id": "memory-auto"
             },
             {
                 "hook": "502-tool-advice",

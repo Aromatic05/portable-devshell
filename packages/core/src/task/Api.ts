@@ -1,32 +1,13 @@
 import type { InstanceName, ToolCallContext } from "@portable-devshell/shared";
 import type {
-    ActiveTodoSummary,
     GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
     JsonValue,
-    TodoReadInput,
-    TodoReadResult,
-    TodoTaskControlAction,
-    TodoWriteInput,
     WaitDetachInput,
     WaitRecord,
 } from "@portable-devshell/shared";
-
-export interface TodoApi {
-    cancelAll(): Promise<void>;
-    control(
-        taskId: string,
-        action: TodoTaskControlAction,
-        ctxId: string,
-        expectedRevision?: number,
-    ): Promise<TodoReadResult>;
-    delete(taskId: string): Promise<void>;
-    read(input?: TodoReadInput): Promise<TodoReadResult>;
-    summaries(): ActiveTodoSummary[];
-    write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
-}
 
 export interface GoalApi {
     continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
@@ -45,13 +26,11 @@ export interface WaitApi {
 
 export interface TaskApi {
     readonly goal: GoalApi;
-    readonly todo: TodoApi;
     readonly wait: WaitApi;
 }
 
 export interface TaskPaths {
     goalsFile: string;
-    todoFile: string;
     waitsFile: string;
 }
 

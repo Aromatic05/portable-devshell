@@ -234,8 +234,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const hydrationGate = deferred<void>();
         const hydrationStarted = deferred<void>();
         const server = createServer(socketPath, worker, () => 7, {
-            onTodoRead: () => hydrationStarted.resolve(),
-            todoReadGate: hydrationGate.promise,
+            onGoalsRead: () => hydrationStarted.resolve(),
+            goalsReadGate: hydrationGate.promise,
         });
         const domains = createTuiDomainSession({ socketPath });
         const session = new TuiControlSession({ domains });
@@ -262,7 +262,12 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         hydrationGate.resolve();
         await hydration;
-        assert.notEqual(session.domains.todo("alpha").state.todo, undefined);
+        assert.equal(hydrated, true);
+        assert.deepEqual(session.domains.goals.state.instances.alpha?.goals, []);
+        assert.equal(
+            session.domains.goals.state.instances.alpha?.lastSeq,
+            worker.snapshot().lastSeq,
+        );
     });
 
     test("TuiControlSession refreshes worker home metadata after RPC reconnect", async (t) => {
@@ -761,9 +766,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         options: {
             messageHistoryEntries?: () => MessageEntry[];
             contextRecords?: () => ContextRecord[];
-            onTodoRead?: () => void;
+            onGoalsRead?: () => void;
             restartable?: boolean;
-            todoReadGate?: Promise<void>;
+            goalsReadGate?: Promise<void>;
         } = {},
     ): {
         contextReads(): number;
@@ -839,7 +844,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                           ],
                 controller: { pid: process.pid, uptimeSeconds: 0 },
                 counts: {
-                    activeTodos: 0,
                     failedCalls24h: failure.count,
                     instancesAttention: 0,
                     instancesCritical: 0,
@@ -861,7 +865,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                         snapshot,
                     },
                 ],
-                todos: [],
             };
         }
 
@@ -1007,21 +1010,12 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             routeModule(
                 "task",
                 {
-                    getGoals: () =>
-                        toJson({
+                    getGoals: async () => {
+                        options.onGoalsRead?.();
+                        await options.goalsReadGate;
+                        return toJson({
                             goals: [],
                             lastSeq: worker.snapshot().lastSeq,
-                        }),
-                    getTodo: async () => {
-                        options.onTodoRead?.();
-                        await options.todoReadGate;
-                        return toJson({
-                            lastSeq: worker.snapshot().lastSeq,
-                            todo: {
-                                items: [],
-                                revision: 0,
-                                summary: { completed: 0, total: 0 },
-                            },
                         });
                     },
                 },

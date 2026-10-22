@@ -1,15 +1,15 @@
 # Workspace
 
-Workspace 是 portable-devshell 基于 Context 的交互与恢复层，负责 Goal、Todo、Tool Approval、durable Wait、ToolCall Activity 和自动模型 re-entry。它不是独立 Worker，也不拥有第二套任务状态；服务端的 Context、Task、Approval 和 Audit 才是权威数据来源。
+Workspace 是 portable-devshell 基于 Context 的交互与恢复层，负责 Goal、Agent Memory、Tool Approval、durable Wait、ToolCall Activity 和自动模型 re-entry。它不是独立 Worker，也不拥有第二套任务状态；服务端的 Context、Task、Approval 和 Audit 才是权威数据来源。
 
-独立 Ask/Question Store 已按产品决策退役，不再提供 `workspace_ask` 或 `mcpapp_ask`。需要人工处理的 Tool Approval 仍通过 Inline Interaction 呈现，Goal、Todo 和后台 Wait 不依赖 Question。
+独立 Ask/Question Store 已按产品决策退役，不再提供 `workspace_ask` 或 `mcpapp_ask`。需要人工处理的 Tool Approval 仍通过 Inline Interaction 呈现，Goal、Agent Memory 和后台 Wait 不依赖 Question。
 
 ## 组成
 
 ```text
 Context / Instance authoritative state
   ├── Goal
-  ├── Todo / checkpoint
+  ├── Agent Memory (var/agent-work; plans / checkpoint)
   ├── Tool Approval
   ├── durable Wait (tmux task / long read)
   ├── ToolCall Audit / Activity
@@ -22,7 +22,7 @@ Context / Instance authoritative state
        └── per-tool Inline ToolCall
 ```
 
-MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投影 `primary / work / background`、`modelContext`、`reentry` 和 Activity。UI 不修改 Todo、Goal 或 Approval 的权威状态，也不将 iframe 本地缓存作为事实来源。
+MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投影 `primary / work / background`、`modelContext`、`reentry` 和 Activity。UI 不修改 Goal 或 Approval 的权威状态，也不将 iframe 本地缓存作为事实来源。
 
 ## Bootstrap 与重新呈现
 
@@ -47,7 +47,7 @@ App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知�
 
 MCP App 使用官方 MCP Apps SDK，按用途分三类资源：
 
-- **Fullscreen Workspace**：Overview、Tasks、Activity；显示持续存在的 Goal/Todo、后台 Wait 和审计记录。
+- **Fullscreen Workspace**：Overview、Goals、Activity；显示持续存在的 Goal、后台 Wait 和审计记录。
 - **Inline Interaction**：等待用户处理的 Approval / Wait，不要求打开 Fullscreen。
 - **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `tmux_read` 的结果在 Activity 中按对应 Task 汇聚。
 
@@ -63,7 +63,6 @@ UI 通过 app-only `mcpapp_action` 提交 `itemId`、`actionId`、`requestId` �
 
 ```text
 Approval  approve / deny
-Task      pause / resume / cancel
 Goal      pause / resume / retry / stop
 ```
 
@@ -71,11 +70,13 @@ Goal      pause / resume / retry / stop
 
 ## Goal
 
-Goal 是跨多轮模型执行的有序目标，状态包括 `active`、`blocked`、`paused`、`completed`、`stopped`。Workspace 按当前 Context 与 Workspace 投影 Goal 进度；Continuation 使模型在完成当前步骤后继续处理后续步骤。用户 Pause/Resume/Stop 与旧恢复指令之间使用 revision 和 ownership fencing。
+Goal 是当前 Context 跨多轮执行的**最终目标**，而非分步骤任务计划。Goal 只有目标文本（`objective`）、必要的备注（`note`）、Revision 与 `active`、`blocked`、`paused`、`completed`、`stopped` 状态；不会存储 `steps` 或任务项。模型使用 `workspace_goal` 的 `start / get / update / block / finish` 管理目标，`finish` 明确将目标标记为完成；所有计划、步骤、检查点和工作记录均属于绑定的 Agent Memory。用户 Pause/Resume/Stop 与恢复指令通过 Revision 和 ownership fencing 协调。Continuation 只判断未完成 Goal 的恢复资格，不依赖步骤数。
 
-## Todo 与 checkpoint
+## Agent Memory 与工作记录
 
-Todo 使用稳定 `taskId`、revision 和任务项状态；Goal 可以与 Todo 并存。Checkpoint 包含 `summary`、`next`、`blockers` 等可恢复信息，供下一轮模型重入，而不仅是 UI 装饰。模型使用 `todo_read` / `todo_write` 维护计划；人工清理使用独立管理入口。
+每个 Context 绑定一个持久化 Memory 目录，位于 Workspace 的 `var/agent-work/<name>/`。模型应尽快使用 `devshell memory init <name>` 新建，或 `devshell memory inherit <name>` 接续工作。首次 `environ_info` 提示绑定方法；若未绑定就开始调用其他工具，Comment Extension 将在首次正常工具调用时以 `auto-<随机后缀>` 创建并绑定 Memory，后续复用而不重复创建。显式 init/inherit 优先于自动分配；自动创建失败不阻断正常工具调用。
+
+计划、任务清单、进度、Checkpoint、决策与 Agent 协作内容由 Memory 文件维护。`progress_report` 负责向用户发送进度消息，不存储计划，也不更改 Goal/Memory 状态。`todo_read`、`todo_write` 和独立 TodoStore 已退役。
 
 ## durable Wait 与 tmux 长任务
 
@@ -102,19 +103,19 @@ waiting
 
 ## 自动模型 re-entry
 
-resolved Wait 或需要继续的 Goal/Task 通过 `reentry.directives` 暴露恢复资格。App 使用 app-only `mcpapp_reentry` 仲裁：
+resolved Wait 或需要继续的 Goal 通过 `reentry.directives` 暴露恢复资格。App 使用 app-only `mcpapp_reentry` 仲裁：
 
 1. `claim` 取得当前 Context 的 re-entry ownership；
-2. `validate` 再次核对 Wait、Goal/Todo 和 Context 状态；
+2. `validate` 再次核对 Wait、Goal 和 Context 状态；
 3. 当前模型执行仍在进行或存在待决 Approval 时，不抢占用户和模型；
 4. 使用服务器生成的 `modelContext` 更新 Host，随后 `attempt`；
 5. 调用 Host `sendMessage`，再 `report` accepted/rejected/uncertain；失败时适时 `release`，不盲目重复发送。
 
-因此，iframe remount、旧 Action 回执重试或 Control 重启不应导致同一个来源被重复恢复；用户显式暂停、中断或停止 Goal/Task 时，旧的恢复资格必须失效。
+因此，iframe remount、旧 Action 回执重试或 Control 重启不应导致同一个来源被重复恢复；用户显式暂停、中断或停止 Goal 或 Wait 时，旧的恢复资格必须失效。
 
 ## 恢复与重启
 
-Control/MCP/iframe 重启后，Context、Goal/Todo、durable Wait 与 Audit 从权威持久状态恢复。原 HTTP 请求已消失的 held Wait 需要作为可恢复后台状态处理，而不是假定旧工具调用仍在。Workspace 重新获取 snapshot 后再考虑是否 re-entry。
+Control/MCP/iframe 重启后，Context、Goal、Agent Memory、durable Wait 与 Audit 从权威持久状态恢复。原 HTTP 请求已消失的 held Wait 需要作为可恢复后台状态处理，而不是假定旧工具调用仍在。Workspace 重新获取 snapshot 后再考虑是否 re-entry。
 
 tmux Task 的生命周期属于 Worker/runtime，不因 MCP HTTP 断连、Context 刷新、Workspace remount 或 Control transport 重连而自动结束。
 

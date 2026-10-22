@@ -170,7 +170,7 @@ class ContextToolRuntime {
                             : memory !== undefined
                                 ? [`Memory: ${memory.directory}`]
                                 : this.#modelCommands(context.instance).includes("memory")
-                                    ? ["Memory 未初始化。执行 devshell memory init <name>；接续已有记忆可使用 devshell memory inherit <name>。"]
+                                    ? ["Memory 未初始化。尽快使用 devshell memory init <name> 或 devshell memory inherit <name>。若直接开始工作，将自动分配 Memory。"]
                                     : []),
                         ...alerts.map((advice) => advice.text),
                     ],

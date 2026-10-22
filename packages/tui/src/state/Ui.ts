@@ -3,7 +3,7 @@ import { type TuiRoute, type TuiRouteViewState } from "./route/Model.js";
 export type TuiPageId =
     | "overview"
     | "instances"
-    | "todo"
+    | "goals"
     | "config"
     | "connections"
     | "messages"

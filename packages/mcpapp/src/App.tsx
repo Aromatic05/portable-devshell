@@ -294,7 +294,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         if (view !== "workspace" || status !== "connected" || !snapshot || !session ||
             snapshot !== snapshotRef.current || snapshot.ctxId !== session.ctxId) return;
         const directive = snapshot.reentry?.directives?.find((item) =>
-            item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
+            item.intent === "goal-resume" || item.intent === "goal-retry");
         const schedule = snapshot.reentry?.schedule;
         const recovery = directive ?? (schedule ? {
             kind: "reentry" as const, intent: "automatic" as const,
@@ -555,7 +555,7 @@ function actionKey(epoch: number, cursor: number, item: McpAppItem, action: NonN
 
 function recoveryIdentity(snapshot: McpAppSnapshot | undefined) {
     const directive = snapshot?.reentry?.directives?.find((item) =>
-        item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
+        item.intent === "goal-resume" || item.intent === "goal-retry");
     const schedule = snapshot?.reentry?.schedule;
     if (directive) return JSON.stringify([directive.id, directive.intent, directive.sourceId]);
     if (schedule) return JSON.stringify([undefined, "automatic", schedule.sourceId, schedule.readyAt]);

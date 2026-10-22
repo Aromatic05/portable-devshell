@@ -287,7 +287,7 @@ test("repeated environ_info keeps the Context temporary directory and reports it
     try {
         const before = await bootstrap("chat-1");
         assert.deepEqual(before.comment, [
-            "Memory 未初始化。执行 devshell memory init <name>；接续已有记忆可使用 devshell memory inherit <name>。",
+            "Memory 未初始化。尽快使用 devshell memory init <name> 或 devshell memory inherit <name>。若直接开始工作，将自动分配 Memory。",
         ]);
         assert.deepEqual(Object.keys(before), ["comment"]);
 

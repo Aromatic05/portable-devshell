@@ -12,7 +12,7 @@ const pages: Array<{ page: WebPage; label: string }> = [
     { page: "instances", label: "Instances" },
     { page: "messages", label: "Messages" },
     { page: "audit", label: "Audit" },
-    { page: "todos", label: "Todos" },
+    { page: "goals", label: "Goals" },
 ];
 
 export function PageSwitcher({
@@ -25,7 +25,7 @@ export function PageSwitcher({
     active: WebRoute;
     applications: readonly WebApplicationDescriptor[];
     extensionPages: readonly WebPageDescriptor[];
-    counts: { instances: number; todos: number };
+    counts: { instances: number };
     navigate(route: WebRoute): void;
 }) {
     const [open, setOpen] = useState(false);
@@ -211,10 +211,9 @@ export function PageSwitcher({
 
 function pageBadge(
     page: WebPage,
-    counts: { instances: number; todos: number },
+    counts: { instances: number },
 ): number | undefined {
     if (page === "instances") return counts.instances;
-    if (page === "todos") return counts.todos;
     return undefined;
 }
 

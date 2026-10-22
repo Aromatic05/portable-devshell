@@ -334,7 +334,7 @@ Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec
 
 Comment 还通过 native/model `memory` 命令、Mailing reconciliation 与 file-edit rewrite trigger 协调 Worker workspace 中 `var/agent-work` 的 Memory/mailbox 文件；这些文件不是 Control 本地数据，也不是全部存入 Host SQLite。
 
-Comment Extension 拥有完整 `message` 端点：实例消息使用 `<instance>:message`，偏好设置使用 `@control:message`。`message.subscribe` 的事件筛选与 `todo_report` 到 `message.changed` 的投影由 Comment 实现；`instance.observe.watchEvents` 的 `onSeed` 提供初始事件与 cursor，初始序列缺口会拒绝订阅。
+Comment Extension 拥有完整 `message` 端点：实例消息使用 `<instance>:message`，偏好设置使用 `@control:message`。`message.subscribe` 的事件筛选与 `progress_report` 到 `message.changed` 的投影由 Comment 实现；`instance.observe.watchEvents` 的 `onSeed` 提供初始事件与 cursor，初始序列缺口会拒绝订阅。
 
 某些 Extension Point binding 在一次 invocation 内需要读取 Host 已经掌握、并且能够按当前 authoritative context 进一步收窄的状态。这类能力通过 invocation context 提供，不属于 generation capability，也不是新的 Extension Point。
 
@@ -451,7 +451,7 @@ CLI、Web 与 TUI 因此只共享 Extension lifecycle、Config、generation leas
 
 `execution.environment` 与 `execution.sandbox` 注册 versioned JSON driver descriptor。Control 在 Worker start 时解析所选 generation；环境/cwd 求值在目标 Worker 上执行。环境配置是有序数组，sandbox 是单一选择；内置 `variables` 与 `bubblewrap` 由 Core 处理，Direnv 通过 Extension environment point 提供。字段见[配置参考](../operations/configuration.md)。
 
-`mcp.tools` 使用静态 tool declaration 建立模型可见 catalog，执行时 acquire binding；Comment 的 `todo_report` 属于这一入口。它与 shell shim 的 `cli.model-commands`、`[extensions].model` allowlist 是不同入口。
+`mcp.tools` 使用静态 tool declaration 建立模型可见 catalog，执行时 acquire binding；Comment 的 `progress_report` 属于这一入口。它与 shell shim 的 `cli.model-commands`、`[extensions].model` allowlist 是不同入口。
 
 `toolcall.review` 返回 `continue` / `reject`，按稳定 hook 顺序执行，首个 reject 停止。人工审批由 Core Review hook 等待。`toolcall.rewrite` 接收和返回完整调用值，可改变 tool、payload 与路由；Host 保留 principal、external bindings、context mode 和 extension attribution。两方向都按同一升序执行，不自动反序；outbound 可能重新获取同 owner 的已替换 generation。
 
@@ -533,7 +533,7 @@ Agent 的 `send / steer / follow-up` 只确认 provider 已接受消息。需要
 ```text
 InstanceRegistry / provider transport
 Control config stores
-Context / Workspace / Goal / Wait / Todo internals
+Context / Workspace / Goal / Wait / Memory internals
 Approval manager / audit writer
 raw Artifact host endpoint
 MCP HTTP/OAuth host internals

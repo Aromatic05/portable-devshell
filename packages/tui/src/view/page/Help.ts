@@ -15,7 +15,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Enter selects the focused item or activates its action.",
                 "Space expands or collapses the focused box.",
                 "0 opens Overview; 1-9 open feature pages; Shift+1-9 switch instances.",
-                "Overview is read-only and prioritizes alerts, unhealthy instances, recent activity, and actionable todos.",
+                "Overview is read-only and prioritizes alerts, unhealthy instances, recent activity, and Workspace Goals.",
                 "Terminal uses the selected instance; Right/Tab enters it, Ctrl+T switches Instances/Tmux Panes, and Ctrl+] returns to the sidebar. From the sidebar, K confirms and kills the persistent PTY; leaving the page only detaches.",
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
                 "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; Esc closes the current tmux pane view; bracketed paste is preserved.",

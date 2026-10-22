@@ -20,7 +20,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
                 activity: "observation",
                 description: "Send progress.",
                 destructiveHint: false,
-                id: "todo_report",
+                id: "progress_report",
                 idempotentHint: false,
                 inputSchema: {
                     properties: {
@@ -40,7 +40,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
                 title: "Message user",
             },
             extensionId: "comment",
-            id: "todo_report",
+            id: "progress_report",
         },
     ];
     const service = new McpExtensionService({
@@ -56,7 +56,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
         },
         async acquireRegistration(pointId: string, id: string) {
             assert.equal(pointId, "mcp.tools");
-            assert.equal(id, "todo_report");
+            assert.equal(id, "progress_report");
             return {
                 extensionId: "comment",
                 lease: {
@@ -120,9 +120,9 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
     });
     const uninstall = service.install(registry);
     try {
-        const tool = registry.get("remote-server", "todo_report")?.definition;
-        assert.equal(tool?.name, "todo_report");
-        assert.equal(injected.some((entry) => entry.name === "todo_report"), true);
+        const tool = registry.get("remote-server", "progress_report")?.definition;
+        assert.equal(tool?.name, "progress_report");
+        assert.equal(injected.some((entry) => entry.name === "progress_report"), true);
         assert.equal(tool?.description, "Send progress.");
         assert.deepEqual(tool?._meta, {
             devshell: {
@@ -141,7 +141,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
                 },
             },
         });
-        const execute = executes.get("todo_report");
+        const execute = executes.get("progress_report");
         assert.ok(execute);
         const result = await execute(
             "call-one",
@@ -154,7 +154,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
                 },
                 kind: "call",
                 payload: { message: "done" },
-                toolName: "todo_report",
+                toolName: "progress_report",
             },
         );
         const presented = presentToolCallResult(
@@ -166,8 +166,8 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
 
         declarations = [];
         listener?.();
-        assert.equal(registry.get("remote-server", "todo_report"), undefined);
-        assert.equal(executes.has("todo_report"), false);
+        assert.equal(registry.get("remote-server", "progress_report"), undefined);
+        assert.equal(executes.has("progress_report"), false);
     } finally {
         uninstall();
         unbind();

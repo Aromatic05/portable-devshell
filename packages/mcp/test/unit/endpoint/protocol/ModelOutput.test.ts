@@ -124,48 +124,6 @@ test("file_edit explicitly accounts for omitted applied operations", () => {
     assert.equal(shown.every((operation) => operation.diff === undefined), true);
 });
 
-test("todo_read model projection preserves continuation across Core pages", () => {
-    const tasks = Array.from({ length: 20 }, (_, i) => ({
-        taskId: `task-${i}`,
-        title: `Task ${i} ${"x".repeat(320)}`,
-        status: "pending",
-        completed: 0,
-        total: 2,
-        revision: 1,
-        updatedAt: "2026-10-13T00:00:00Z",
-    }));
-    const original = { items: [], revision: 0,
-        summary: { completed: 0, total: 0 }, tasks,
-        offset: 20, nextOffset: 40 };
-    const projected = projectMcpModelOutput("todo_read", original);
-    const output = data(projected);
-    const selected = output.tasks as Array<{ taskId: string }>;
-    assert.equal(size(projected) <= 2_000 * 3, true);
-    assert.equal(selected.length > 0 && selected.length < tasks.length, true);
-    assert.equal(selected[0]?.taskId, "task-0");
-    assert.equal(output.nextOffset, 20 + selected.length);
-    assert.equal(output.modelOutputTruncated, true);
-    assert.equal(original.tasks.length, 20);
-    assert.equal(original.nextOffset, 40);
-});
-
-test("todo_read can summarize one oversized item without losing its identity", () => {
-    const original = { revision: 1, summary: { completed: 0, total: 1 },
-        taskId: "task-only", title: "important", items: [{
-            id: "item-1", status: "in_progress",
-            content: "中".repeat(3_000), detail: "界".repeat(2_000),
-        }], checkpoint: { summary: "长".repeat(1_000) } };
-    const projected = projectMcpModelOutput("todo_read", original);
-    const output = data(projected);
-    assert.equal(size(projected) <= 2_000 * 3, true);
-    assert.equal(output.modelOutputTruncated, true);
-    const first = (output.items as Array<Record<string, JsonValue>>)[0]!;
-    assert.equal(first.id, "item-1");
-    assert.equal(first.status, "in_progress");
-    assert.equal((first.content as string).includes("�"), false);
-    assert.equal(original.items[0]?.content.length, 3_000);
-});
-
 test("cursor-consuming results are never silently replaced with a preview", () => {
     const tmux = { task: { id: "task-1", status: "running" },
         output: ["line".repeat(3_000)] };

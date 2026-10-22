@@ -1163,59 +1163,74 @@ test("recovery runtime dispatch requires running owned state and exposes the man
     assert.match(launcher, /runInsideTestspaceNamespace\(\s+namespace,\s+scriptPath,\s+runtimeArgv,/u);
 });
 
-test("recovery real Todo and SQLite event storage retain revision fencing across service lifetimes", async (t) => {
+test("recovery real Goal and SQLite event storage retain revision fencing across service lifetimes", async (t) => {
     const { tsImport } = await import("tsx/esm/api");
-    const { TodoService } = await tsImport("../packages/core/src/task/todo/index.ts", {
+    const { GoalService } = await tsImport("../packages/core/src/task/goal/index.ts", {
         parentURL: import.meta.url, tsconfig: fileURLToPath(new URL("../tsconfig.test.json", import.meta.url)),
     });
     const AuditDatabase = await recoveryAuditDatabase();
-    const root = await mkdtemp(join(tmpdir(), "pds-recovery-todo-"));
+    const root = await mkdtemp(join(tmpdir(), "pds-recovery-goal-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const { readFile } = await import("node:fs/promises");
-    const filePath = join(root, "todo.json");
+    const filePath = join(root, "goals.json");
     const auditPath = join(root, "audit.sqlite");
+    const ctxId = "recovery-context";
     const databaseOptions = { maxBytes: 16 * 1024 * 1024, retentionDays: 7 };
     const eventOptions = { sequence: (event) => event.seq, timestamp: (event) => event.at };
     let database = new AuditDatabase(auditPath, databaseOptions);
     t.after(() => database.close());
     let events = database.store("events", eventOptions);
     let sequence = events.readHighWater();
-    const createService = () => new TodoService({
+    const createService = () => new GoalService({
         filePath, instanceName: "recovery-local",
         appendEvent: (type, data) => events.append({
             type, data, seq: ++sequence, at: new Date().toISOString(), instanceName: "recovery-local",
         }),
     });
     const first = createService();
-    const created = await first.write({ revision: 0, title: "recover committed work",
-        todos: [{ id: "verify", content: "verify restart", status: "in_progress" }] }, "recovery-context");
+    const created = await first.manage(ctxId, {
+        action: "start", objective: "Recover committed work", workspace: root,
+    });
     assert.equal(created.revision, 1);
+    assert.equal(created.status, "active");
+    assert.equal("steps" in created, false);
     const committedFile = await readFile(filePath, "utf8");
     const committedEvents = events.readAll();
-    assert.equal(committedEvents[0].type, "todo.created");
+    assert.equal(committedEvents[0].type, "goal.updated");
     await database.close();
     database = new AuditDatabase(auditPath, databaseOptions);
     events = database.store("events", eventOptions);
     sequence = events.readHighWater();
     const recovered = createService();
-    assert.deepEqual(await recovered.read({ taskId: created.taskId }), created);
+    const reloaded = await recovered.read(ctxId);
+    assert.equal(reloaded.goalId, created.goalId);
+    assert.equal(reloaded.objective, created.objective);
+    assert.equal(reloaded.revision, created.revision);
     assert.deepEqual(events.readAll(), committedEvents);
-    await assert.rejects(recovered.write({ taskId: created.taskId, revision: 0,
-        title: created.title, todos: [{ id: "verify", content: "lost update", status: "pending" }] },
-    "recovery-context"), { code: "todo.revisionConflict" });
+    await assert.rejects(recovered.manage(ctxId, {
+        action: "update", objective: "Lost update", expectedGoalId: created.goalId,
+        expectedRevision: 0,
+    }), /revision 0 to 1/u);
     assert.equal(await readFile(filePath, "utf8"), committedFile);
     assert.deepEqual(events.readAll(), committedEvents);
-    const updated = await recovered.write({ taskId: created.taskId, revision: created.revision,
-        title: created.title, todos: [{ id: "verify", content: "verify restart", status: "completed" }] },
-    "recovery-context");
+    const updated = await recovered.manage(ctxId, {
+        action: "update", note: "Checkpoint persisted in Memory", expectedGoalId: created.goalId,
+        expectedRevision: created.revision,
+    });
     assert.equal(updated.revision, 2);
-    assert.equal(updated.summary.completed, 1);
+    assert.equal(updated.status, "active");
     assert.ok(events.readHighWater() > committedEvents.at(-1).seq);
+    const finished = await recovered.manage(ctxId, {
+        action: "finish", expectedGoalId: created.goalId, expectedRevision: updated.revision,
+    });
+    assert.equal(finished.status, "completed");
     await database.close();
     database = new AuditDatabase(auditPath, databaseOptions);
     events = database.store("events", eventOptions);
-    assert.deepEqual(await createService().read({ taskId: created.taskId }), updated);
-    assert.equal(events.readAll().filter((event) => event.type === "todo.completed").length, 1);
+    const readBack = await createService().read(ctxId);
+    assert.equal(readBack.status, "completed");
+    assert.equal(readBack.revision, finished.revision);
+    assert.equal(events.readAll().filter((event) => event.type === "goal.updated").length, 3);
     await database.close();
 });
 

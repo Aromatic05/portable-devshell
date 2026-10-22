@@ -11,7 +11,6 @@ export class InstancePaths {
     readonly containerAdoptionDatabaseFile: string;
     readonly messageDatabaseFile: string;
     readonly goalsFile: string;
-    readonly todoFile: string;
     readonly waitsFile: string;
     readonly workerConfigFile: string;
     readonly workerLogFile: string;
@@ -28,7 +27,6 @@ export class InstancePaths {
         );
         this.goalsFile = join(this.controlWorkerDir, "goals.json");
         this.auditDatabaseFile = join(this.controlWorkerDir, "audit.sqlite3");
-        this.todoFile = join(this.controlWorkerDir, "todo.json");
         this.waitsFile = join(this.controlWorkerDir, "detached-waits.json");
         this.workerConfigFile = join(this.instanceRootDir, "config.toml");
         this.workerLogFile = join(this.instanceRootDir, "logs", "worker.log");

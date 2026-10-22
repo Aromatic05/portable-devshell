@@ -7,13 +7,12 @@ import { createAuditRuntime } from "../../../../core/src/audit/index.ts";
 import { createToolCallExecutionRuntime } from "../../../../core/src/toolcall/index.ts";
 import { GoalService } from "../../../../core/src/task/goal/index.ts";
 import { GoalState } from "../../../../core/src/task/goal/storage/State.ts";
-import { TodoService } from "../../../../core/src/task/todo/index.ts";
 import { installMcpAppReentry } from "../../../../core/src/instance/mcpapp/Reentry.ts";
 import { McpAppActionStore } from "../../../src/mcpapp/ActionStore.ts";
 import { deliverMcpAppReentry } from "../../../src/mcpapp/Reentry.ts";
 import { createTestContextRuntime } from "../../ContextRuntime.ts";
 
-async function durableReentry(intent: "goal-resume" | "task-resume" = "goal-resume") {
+async function durableReentry(intent: "goal-resume" = "goal-resume") {
     const directory = await createTestTempDirectory("reentry-owner-loss-sqlite");
     const instance = asInstanceName("local");
     let clock = Date.parse("2026-10-20T00:00:00.000Z");
@@ -25,7 +24,6 @@ async function durableReentry(intent: "goal-resume" | "task-resume" = "goal-resu
     const createServices = async () => {
         const goal = new GoalService({ appendEvent: async () => undefined, filePath: join(directory, "goals.json"),
             instanceName: instance, state: new GoalState({ now: () => new Date(clock).toISOString() }) });
-        const todo = new TodoService({ appendEvent: async () => undefined, filePath: join(directory, "todo.json"), instanceName: instance });
         const actions = new McpAppActionStore({ filePath: actionPath, now });
         await actions.initialize();
         const audit = createAuditRuntime({ filePath: join(directory, "audit.sqlite"), instanceName: instance, eventBufferSize: 32 });
@@ -35,19 +33,15 @@ async function durableReentry(intent: "goal-resume" | "task-resume" = "goal-resu
             prepareWorkspace: async () => { throw new Error("Reentry must use the registered Instance executor"); },
         });
         const native = createToolCallRuntime({ resolveTarget: () => execution.target() });
-        const stop = installMcpAppReentry(native.hooks, { goal, todo } as never);
-        return { goal, todo, actions, audit, execution, native,
+        const stop = installMcpAppReentry(native.hooks, { goal } as never);
+        return { goal, actions, audit, execution, native,
             async close() { stop(); native.close(); await execution.close(); await audit.close(); } };
     };
     let services = await createServices();
     const goal = await services.goal.manage(context.ctxId, { action: "start", workspace: directory,
-        objective: "Recover after owner loss", steps: [{ id: "work", text: "Continue work" }] });
+        objective: "Recover after owner loss" });
     assert.ok(goal);
-    const task = await services.todo.write({ revision: 0, title: "Resumed Task", todos: [
-        { id: "work", content: "Continue task", status: "in_progress" },
-    ] }, context.ctxId);
-    assert.ok(task.taskId);
-    const sourceId = intent === "task-resume" ? task.taskId : goal.goalId;
+    const sourceId = goal.goalId;
     const directiveId = "owner-loss-directive";
     await services.actions.prepare(context.ctxId, instance, { actionId: directiveId, itemId: sourceId,
         instance, operation: intent, targetId: sourceId });
@@ -78,7 +72,7 @@ const beginAttempt = async (f: Fixture) => { assert.ok(await f.actions.beginAtte
 const attempt = async (f: Fixture) => { assert.equal((await f.call({ action: "attempt" }) as { attempted: boolean }).attempted, true); };
 const beginReport = async (f: Fixture) => { assert.ok(await f.actions.beginReport(f.directiveId, f.base.claimId, "accepted")); };
 
-for (const intent of ["goal-resume", "task-resume"] as const) {
+for (const intent of ["goal-resume"] as const) {
     for (const state of [
         { name: "applied", steps: [] },
         { name: "reserved before Instance claim", steps: [reserve] },
@@ -137,7 +131,7 @@ for (const intent of ["goal-resume", "task-resume"] as const) {
 }
 
 test("SQLite Reentry reservation cannot attempt or validate before Instance claim confirmation", async (t) => {
-    const f = await durableReentry("task-resume"); t.after(() => f.close());
+    const f = await durableReentry(); t.after(() => f.close());
     await reserve(f);
     assert.deepEqual(await f.call({ action: "validate" }), { valid: false });
     assert.deepEqual(await f.call({ action: "attempt" }), { attempted: false });
@@ -172,37 +166,7 @@ test("SQLite Reentry preserves the Instance claim through the 180s Wait and reco
     assert.equal((await f.readGoal())?.continuationCount, 1);
 });
 
-test("SQLite task-resume refuses takeover of a live confirmed claim but recovers after owner restart", async (t) => {
-    const f = await durableReentry("task-resume"); t.after(() => f.close());
-    assert.equal((await f.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
-    const claimed = await f.actions.get(f.directiveId);
-    assert.equal(claimed?.status, "attempting");
-    assert.equal(claimed.claimId, f.base.claimId);
-    assert.deepEqual(await f.call({ action: "claim", claimId: "competing-host" }), { claimed: false });
-    assert.deepEqual(await f.actions.get(f.directiveId), claimed);
-    assert.equal((await f.call({ action: "attempt" }) as { attempted: boolean }).attempted, true);
 
-    const next = await durableReentry("task-resume"); t.after(() => next.close());
-    assert.equal((await next.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
-    await next.restart();
-    assert.equal((await next.call({ action: "claim", claimId: "replacement-host" }) as { claimed: boolean }).claimed, true);
-    assert.deepEqual(await next.call({ action: "attempt" }), { attempted: false });
-    assert.equal((await next.call({ action: "attempt", claimId: "replacement-host" }) as { attempted: boolean }).attempted, true);
-});
-
-test("SQLite task-resume preserves a live claim for the full 180s handoff and replaces it only after expiry", async (t) => {
-    const f = await durableReentry("task-resume"); t.after(() => f.close());
-    assert.equal((await f.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
-    f.advance(180_000);
-    assert.deepEqual(await f.call({ action: "claim", claimId: "next-host" }), { claimed: false });
-    f.advance(120_001);
-    assert.equal((await f.call({ action: "claim", claimId: "next-host" }) as { claimed: boolean }).claimed, true);
-    assert.deepEqual(await f.call({ action: "attempt" }), { attempted: false });
-    assert.equal((await f.call({ action: "attempt", claimId: "next-host" }) as { attempted: boolean }).attempted, true);
-    assert.deepEqual(await f.call({ action: "attempt", claimId: "next-host" }), { attempted: false, duplicate: true });
-    const attempts = (await f.records()).filter((row) => (row.input as { action?: string }).action === "attempt");
-    assert.equal(attempts.length, 1);
-});
 
 test("SQLite Reentry explicitly refused attempt remains releasable and usable after claim expiry", async (t) => {
     const f = await durableReentry(); t.after(() => f.close());

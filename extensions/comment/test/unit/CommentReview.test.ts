@@ -4,8 +4,6 @@ import test from "node:test";
 import {
     createCommentAdvice,
     createCommentDelivery,
-    createCommentTodoAccess,
-    createCommentTodoInvalid,
     createCommentToolCallGate,
     type CommentControlDecision,
     type CommentPort,
@@ -29,9 +27,7 @@ const base = {
 
 type Ports = Pick<
     CommentPort,
-    | "beforeTodoToolCall"
     | "consumePending"
-    | "recordTodoInvalid"
     | "reviewToolCall"
 >;
 
@@ -44,11 +40,9 @@ const unusedInvocation = {
 
 function createPort(overrides: Partial<Ports> = {}): Ports {
     return {
-        async beforeTodoToolCall() {},
         async consumePending(_instance, _ctxId, callId) {
             return { callId, messages: [] };
         },
-        recordTodoInvalid() {},
         async reviewToolCall() {
             return { kind: "allow" };
         },
@@ -104,56 +98,6 @@ test("Comment toolcall gate applies model control only to inbound MCP calls with
     assert.deepEqual(calls, ["review:bash_run"]);
 });
 
-test("Comment todo-access hook consumes Todo access on admitted inbound MCP calls only", async () => {
-    const calls: string[] = [];
-    const access = createCommentTodoAccess(
-        createPort({
-            async beforeTodoToolCall(_instance, _ctxId, toolName) {
-                calls.push(`before:${toolName}`);
-            },
-        }),
-    );
-
-    assert.deepEqual(await access(base, unusedInvocation), base.value);
-    assert.deepEqual(calls, ["before:bash_run"]);
-    assert.deepEqual(
-        await access({ ...base, direction: "outbound" }, unusedInvocation),
-        base.value,
-    );
-    assert.deepEqual(
-        await access(
-            {
-                ...base,
-                value: {
-                    ...base.value,
-                    context: { ...base.value.context, source: "cli" as const },
-                },
-            },
-            unusedInvocation,
-        ),
-        {
-            ...base.value,
-            context: { ...base.value.context, source: "cli" },
-        },
-    );
-    assert.deepEqual(
-        await access(
-            {
-                ...base,
-                value: {
-                    ...base.value,
-                    context: { instance: "demo", source: "mcp" as const },
-                },
-            },
-            unusedInvocation,
-        ),
-        {
-            ...base.value,
-            context: { instance: "demo", source: "mcp" },
-        },
-    );
-    assert.deepEqual(calls, ["before:bash_run"]);
-});
 
 test("Comment delivery hook writes the queued Comment and the advice hook appends hints independently", async () => {
     const delivery = createCommentDelivery(
@@ -231,7 +175,7 @@ test("Comment toolcall gate maps push stop and resume to rejected ToolCalls", as
             "#push response deadline reached.",
             "You must reply to the user's #push message before using more tools.",
             "#push message: #push 报告进度",
-            "Call todo_report with a direct response to the #push message above.",
+            "Call progress_report with a direct response to the #push message above.",
         ].join("\n\n"),
     });
     assert.deepEqual(await gate(base, unusedInvocation), {
@@ -249,47 +193,5 @@ test("Comment toolcall gate maps push stop and resume to rejected ToolCalls", as
             details: { commentId: "resume-1" },
         },
         reason: "The user sent #resume. This tool was not executed. Read the Comment before deciding the next action: continue now",
-    });
-});
-
-test("Comment todo-invalid hook records invalid todo_write failures and the advice hook explains them", async () => {
-    const invalid: string[] = [];
-    const todoInvalid = createCommentTodoInvalid(
-        createPort({
-            recordTodoInvalid(instance, ctxId) {
-                invalid.push(`${instance}:${ctxId}`);
-            },
-        }),
-    );
-    const advice = createCommentAdvice();
-    const errorInput = {
-        ...base,
-        direction: "outbound" as const,
-        value: {
-            ...base.value,
-            kind: "error" as const,
-            payload: {
-                error: {
-                    code: "todo.invalid",
-                    message: "invalid",
-                    retryable: false,
-                },
-            },
-            toolName: "todo_write",
-        },
-    };
-
-    const recorded = await todoInvalid(errorInput, unusedInvocation);
-    assert.deepEqual(recorded, errorInput.value);
-    assert.deepEqual(invalid, ["demo:ctx-comment"]);
-    assert.deepEqual((await advice(errorInput, unusedInvocation)).payload, {
-        comment: [
-            "[todo.invalid] Fix the reported invariant and resubmit the full plan.",
-        ],
-        error: {
-            code: "todo.invalid",
-            message: "invalid",
-            retryable: false,
-        },
     });
 });

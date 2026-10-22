@@ -15,7 +15,6 @@ import {
     createConnectionTransport,
     createProcessTransport,
     createServerTransport,
-    createTaskTransport,
     createToolTransport,
     type ApprovalTransport,
     type ConfigTransport,
@@ -30,8 +29,6 @@ import {
     type ConnectionTransport,
     type ProcessTransport,
     type ServerTransport,
-    type TaskEvent,
-    type TaskTransport,
     type ToolTransport,
 } from "@portable-devshell/shared";
 
@@ -43,10 +40,6 @@ import { CliClientEventStream } from "./Stream.js";
 export { CliClientEventStream };
 
 export interface CliClientOptions extends ControlChannelOptions {}
-
-export type CliClientTodo = Pick<TaskTransport, "deleteTodo" | "getTodo"> & {
-    subscribe(fromSeq: number): Promise<CliClientEventStream<TaskEvent>>;
-};
 
 /**
  * CLI-local dependency surface. It carries the explicitly named domain
@@ -67,7 +60,6 @@ export interface CliClients {
     reverse: ConnectionTransport;
     runtime(instance: string): CliClientRuntime;
     server: ServerTransport;
-    todo(instance: string): CliClientTodo;
     tool(instance: string): ToolTransport;
     close(): void;
     reconnect(): Promise<void>;
@@ -100,15 +92,6 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
             return createCliRuntimeAdapter(endpoint, instance, runtime);
         },
         server: createServerTransport(endpoint, { clientKind: "cli" }),
-        todo: (instance) => {
-            const task = createTaskTransport(endpoint, instance);
-            return {
-                deleteTodo: task.deleteTodo,
-                getTodo: task.getTodo,
-                subscribe: async (fromSeq) =>
-                    new CliClientEventStream(await task.subscribe(fromSeq)),
-            };
-        },
         tool: (instance) => createToolTransport(endpoint, instance),
         close: () => endpoint.close(),
         reconnect: async () => await endpoint.reconnect(),

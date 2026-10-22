@@ -70,20 +70,6 @@ test("Tmux transcript polls share Task ID with the original command and stay aud
     assert.equal(cards[0]?.name, "tmux_read");
 });
 
-test("Todo audit cards retain their stable taskId for Workspace plan aggregation", () => {
-    const cards = projectMcpAppActivity([
-        call("write", "ctx", "todo_write", 1, {
-            input: { title: "Build UI", revision: 1, taskId: "plan-1" },
-            output: { taskId: "plan-1", items: [{ status: "in_progress", content: "Build" }] },
-        }),
-        call("read", "ctx", "todo_read", 2, {
-            input: { taskId: "plan-1" },
-            output: { taskId: "plan-1", items: [{ status: "completed", content: "Build" }] },
-        }),
-    ], "ctx");
-    assert.deepEqual(cards.map((item) => item.taskId), ["plan-1", "plan-1"]);
-});
-
 test("Workspace audit projection preserves semantic operations within bounds and never exposes credentials", () => {
     const records = [
         call("edit", "ctx-a", "file_edit", 4, {

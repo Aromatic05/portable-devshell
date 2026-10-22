@@ -19,7 +19,7 @@ test("MCP App Receipt store measures full-file persistence cost as records grow"
             for (let i = previous; i < count; i++) {
                 await store.prepareOnce("ctx-benchmark", "demo", {
                     actionId: `receipt-${i}`, instance: "demo", itemId: `item-${i}`,
-                    operation: "task-pause", targetId: `item-${i}`,
+                    operation: "goal-pause", targetId: `item-${i}`,
                 });
             }
             const totalMs = performance.now() - started;

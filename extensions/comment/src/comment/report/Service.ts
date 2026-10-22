@@ -6,7 +6,7 @@ import type {
 import {
     COMMENT_REPORT_CONVERSATION_WINDOW,
     duplicateReportError,
-    todoUseOtherToolsError,
+    reportRateLimitError,
 } from "./Policy.js";
 import { CommentReportState } from "./State.js";
 
@@ -49,18 +49,6 @@ export class CommentReportService {
         this.#state = options.state ?? new CommentReportState();
     }
 
-    async beforeTodoToolCall(ctxId: string, toolName: string): Promise<void> {
-        if (!isTodoTool(toolName)) return;
-        // Domain validation and revision CAS distinguish invalid writes from
-        // useful reads, updates, and conflict recovery; admission only enforces
-        // the existing ban on repeated invalid operations.
-        this.#state.assertTodoEnabled(ctxId, this.#now());
-    }
-
-    recordTodoInvalid(ctxId: string): void {
-        this.#state.recordInvalid(ctxId, this.#now());
-    }
-
     async report(ctxId: string, message: string, callId: string): Promise<void> {
         await this.#state.withReport(ctxId, this.#now, async (state) => {
             const entries = await this.#messageHistory.list({
@@ -76,12 +64,10 @@ export class CommentReportService {
                 pending.replyCommentId !== undefined || pending.push !== undefined;
             if (!replyRequired) {
                 if (state.lastReportMessage === message) {
-                    this.recordTodoInvalid(ctxId);
                     throw duplicateReportError(ctxId);
                 }
                 if (state.tokens < 1) {
-                    this.recordTodoInvalid(ctxId);
-                    throw todoUseOtherToolsError();
+                    throw reportRateLimitError();
                 }
             }
 
@@ -98,12 +84,4 @@ export class CommentReportService {
             state.lastReportMessage = message;
         });
     }
-}
-
-function isTodoTool(toolName: string): boolean {
-    return (
-        toolName === "todo_read" ||
-        toolName === "todo_report" ||
-        toolName === "todo_write"
-    );
 }

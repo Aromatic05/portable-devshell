@@ -279,14 +279,6 @@ function isTuiRouteResourceValid(
         const context = findAuditContext(domains, instance, key);
         return context !== undefined && context.calls.length > 0;
     }
-    if (route.page === "todo" && route.view === "detail") {
-        if (instance === undefined) return false;
-        const todo = domains.todo(instance).todo;
-        return (
-            todo?.taskId === route.todoId ||
-            todo?.tasks?.some((task) => task.taskId === route.todoId) === true
-        );
-    }
     return true;
 }
 
@@ -313,16 +305,6 @@ export function selectBreadcrumbSegments(
             if (route.view === "message") {
                 segments.push("message");
             }
-            break;
-        case "todo":
-            if (route.view === "detail")
-                segments.push(
-                    resolveTodoBreadcrumbTitle(
-                        state,
-                        domains,
-                        route.todoId,
-                    ),
-                );
             break;
         case "extensions":
             if (route.view === "page") {
@@ -357,22 +339,7 @@ export function selectBreadcrumbSegments(
     return segments;
 }
 
-function resolveTodoBreadcrumbTitle(
-    state: TuiAppState,
-    domains: TuiDomainReader,
-    todoId: string,
-): string {
-    const instance = state.ui.selectedInstance;
-    const todo =
-        instance === undefined
-            ? undefined
-            : domains.todo(instance).todo;
-    const title =
-        todo?.taskId === todoId
-            ? todo.title
-            : todo?.tasks?.find((task) => task.taskId === todoId)?.title;
-    return truncateTuiBreadcrumbSegment(title ?? todoId);
-}
+
 
 export function truncateTuiBreadcrumbSegment(value: string): string {
     return value.length <= 16

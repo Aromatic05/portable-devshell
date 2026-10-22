@@ -256,7 +256,7 @@ h4 {
 }
 .metrics,
 .instances,
-.todo-list,
+.goal-list,
 .overview-grid {
     display: grid;
     gap: 0.8rem;
@@ -664,33 +664,6 @@ pre {
 }
 .feed a:hover {
     text-decoration: underline;
-}
-.todo-checkpoint {
-    margin-top: 0.75rem;
-    border-left: 3px solid #52647d;
-    padding-left: 0.75rem;
-}
-.todo-checkpoint p {
-    margin: 0.35rem 0;
-}
-.todo-checkpoint strong {
-    display: inline;
-    margin-right: 0.45rem;
-    font-size: inherit;
-}
-.todo-details {
-    margin-top: 0.75rem;
-}
-.todo-details summary {
-    cursor: pointer;
-}
-.todo-details li {
-    margin: 0.35rem 0;
-}
-.todo-details small {
-    display: block;
-    margin-left: 1.5rem;
-    color: #93a4bd;
 }
 .danger.subtle {
     color: #ffb4bd;

@@ -17,11 +17,11 @@ test("Goal task getGoal only returns the requested Context when Workspaces overl
     });
     await service.manage("ctx-a", {
         action: "start", objective: "Authorized goal", workspace: "/shared",
-        steps: [{ id: "a", text: "Work A" }],
+
     });
     await service.manage("ctx-b", {
         action: "start", objective: "Other Context secret", workspace: "/shared",
-        steps: [{ id: "b", text: "Work B" }],
+
     });
     const route = createGoalTaskRouteModule({
         events: { cursor: () => 14 },
@@ -50,12 +50,12 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
     await service.manage("ctx-active", {
         action: "start",
         objective: "Active goal",
-        steps: [{ id: "active", text: "Continue" }],
+
     });
     await service.manage("ctx-blocked", {
         action: "start",
         objective: "Blocked goal",
-        steps: [{ id: "blocked", text: "Wait" }],
+
     });
     await service.manage("ctx-blocked", {
         action: "block",
@@ -64,8 +64,9 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
     await service.manage("ctx-completed", {
         action: "start",
         objective: "Completed goal",
-        steps: [{ id: "done", status: "completed", text: "Done" }],
+
     });
+    await service.manage("ctx-completed", { action: "finish" });
 
     const stopped = await service.stopAll();
 
@@ -96,7 +97,7 @@ test("GoalService persists ordinary activity outside the structural Goal documen
     await service.manage("ctx-goal", {
         action: "start",
         objective: "Keep working",
-        steps: [{ id: "work", text: "Work" }],
+
     });
     const structural = await readFile(filePath, "utf8");
 
@@ -133,7 +134,7 @@ test("GoalService keeps continuation settlement on the structural persistence pa
     await service.manage("ctx-goal", {
         action: "start",
         objective: "Settle continuation",
-        steps: [{ id: "work", text: "Work" }],
+
     });
     await service.continuation("ctx-goal", {
         action: "claim",
@@ -169,7 +170,7 @@ test("GoalService falls back to structural persistence when the activity sidecar
     await service.manage("ctx-goal", {
         action: "start",
         objective: "Fallback",
-        steps: [{ id: "work", text: "Work" }],
+
     });
     const before = await readFile(filePath, "utf8");
     await writeFile(
@@ -195,7 +196,7 @@ test("concurrent Goal claims have one owner and a persisted human pause prevents
     for (const ctxId of ["ctx-a", "ctx-b"]) {
         await service.manage(ctxId, {
             action: "start", objective: `Goal ${ctxId}`, workspace: "/shared",
-            steps: [{ id: "work", text: "Work" }],
+
         });
     }
     const claim = (claimId: string) => ({

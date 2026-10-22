@@ -18,7 +18,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { createApprovalRouteModule } from "../approval/Public.js";
-import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "../task/Public.js";
+import { createGoalTaskRouteModule, createWaitTaskRouteModule } from "../task/Public.js";
 import { createTerminalRouteModule } from "../terminal/Public.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
@@ -62,8 +62,8 @@ export function createInstanceHost(
             sessions: state.terminal.sessions.api,
         }),
         createGoalTaskRouteModule({ events, goal: state.task.api.goal }),
-        createTodoTaskRouteModule(
-            { events, name, todo: state.task.api.todo, wait: state.task.api.wait },
+        createWaitTaskRouteModule(
+            { events, name, wait: state.task.api.wait },
             subscriptions,
         ),
         createToolRouteModule(

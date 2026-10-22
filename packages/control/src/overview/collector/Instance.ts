@@ -2,20 +2,17 @@ import {
     asInstanceName,
     createApprovalTransport,
     createProcessTransport,
-    createTaskTransport,
     createToolTransport,
     type Endpoint,
     type OperationalOverviewActivity,
     type OperationalOverviewAlert,
     type OperationalOverviewInstance,
-    type OperationalOverviewTodo,
 } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 import {
     createCollectionFailure,
     createRecentFailureAlert,
     createSnapshotAlerts,
-    createTodoAlerts,
     selectOperationalActivity,
 } from "./Policy.js";
 
@@ -24,7 +21,6 @@ export interface OperationalOverviewInstanceCollection {
     alerts: OperationalOverviewAlert[];
     failedCalls24h: number;
     instance: OperationalOverviewInstance;
-    todos: OperationalOverviewTodo[];
 }
 
 export class OperationalOverviewInstanceCollector {
@@ -55,7 +51,6 @@ export class OperationalOverviewInstanceCollector {
         };
         const process = createProcessTransport(this.options.endpoint, name);
         const approval = createApprovalTransport(this.options.endpoint, name);
-        const task = createTaskTransport(this.options.endpoint, name);
         const tools = createToolTransport(this.options.endpoint, name);
         const snapshotEnvelope = await read(
             "snapshot",
@@ -74,12 +69,8 @@ export class OperationalOverviewInstanceCollector {
         );
         const snapshot = snapshotEnvelope.snapshot;
         alerts.push(...createSnapshotAlerts(name, snapshot));
-        const [pending, todoEnvelope, records, failure] = await Promise.all([
+        const [pending, records, failure] = await Promise.all([
             read("approvals", () => approval.list({ pendingOnly: true }), []),
-            read("todos", () => task.getTodo(), {
-                lastSeq: 0,
-                todo: { items: [], revision: 0, summary: { completed: 0, total: 0 } },
-            }),
             read(
                 "activity",
                 () =>
@@ -101,10 +92,6 @@ export class OperationalOverviewInstanceCollector {
                 { count: 0 },
             ),
         ]);
-        const todos = (todoEnvelope.todo.tasks ?? []).map((todo) => ({
-            ...todo,
-            instance: name,
-        }));
         if (pending.length > 0)
             alerts.push({
                 id: `approval.pending:${name}`,
@@ -114,14 +101,12 @@ export class OperationalOverviewInstanceCollector {
                 title: "Approval required",
                 detail: `${pending.length} approval requests waiting.`,
             });
-        alerts.push(...createTodoAlerts(name, todos));
         const recent = createRecentFailureAlert(name, failure);
         if (recent.alert !== undefined) alerts.push(recent.alert);
         return {
             activity: selectOperationalActivity(records, this.options.activityLimit),
             alerts,
             failedCalls24h: recent.count,
-            todos,
             instance: {
                 mcpEnabled: descriptor.config.mcpEnabled,
                 name,

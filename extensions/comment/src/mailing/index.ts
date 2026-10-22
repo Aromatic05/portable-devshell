@@ -3,7 +3,7 @@ import { modelCommands, nativeCommands } from "@portable-devshell/extension/cli"
 import { rewrite } from "@portable-devshell/extension/toolcall";
 
 import { executeMemoryModelCommand, executeMemoryNativeCommand } from "./Command.js";
-import { createMailingHook } from "./Hook.js";
+import { createMailingHook, createMemoryAutoHook } from "./Hook.js";
 import { MailingService, type MailingPort } from "./Service.js";
 
 /** Memory bindings and their derived Mailing are owned by the Comment Extension. */
@@ -28,6 +28,9 @@ export function createMailingService(
 }
 
 export function registerMailing(context: ExtensionContext, mailing: MailingRuntime): void {
+    context.register(rewrite, "memory-auto", createMemoryAutoHook(mailing, (error) =>
+        context.logger.warn("Automatic Memory binding failed", { message: String(error) }),
+    ));
     context.register(rewrite, "mailing-trigger", createMailingHook(mailing, (error) =>
         context.logger.warn("Mailing trigger failed", { message: String(error) }),
     ));

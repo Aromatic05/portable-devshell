@@ -16,7 +16,6 @@ import { executeInit } from "./Init.js";
 import { executeInstanceLifecycle } from "./instance/lifecycle/Command.js";
 import { executeInstanceLogs } from "./instance/observe/Logs.js";
 import { executeWatchStatus } from "./instance/observe/Status.js";
-import { executeTodoCommand } from "./instance/Todo.js";
 import { executeToolCommand } from "./instance/Tool.js";
 import type { CliParsedCommand } from "./Parse.js";
 import {
@@ -108,7 +107,6 @@ export async function dispatchCliCommand(
         executeInstanceLifecycle,
         executeInstanceLogs,
         executeWatchStatus,
-        executeTodoCommand,
         executeToolCommand,
     ];
     for (const handler of handlers) if (await handler(command, context)) return;
@@ -126,8 +124,7 @@ export function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind === "cli.command" ||
         (command.kind.startsWith("extension.") &&
             command.kind !== "extension.help") ||
-        command.kind.startsWith("tool.") ||
-        command.kind.startsWith("todo.")
+        command.kind.startsWith("tool.")
     )
         return true;
     return (

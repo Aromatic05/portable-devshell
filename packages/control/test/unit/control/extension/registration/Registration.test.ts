@@ -117,7 +117,7 @@ test("Extension registration preserves point-specific declaration ids", () => {
                 "mcp.tools": [
                     {
                         description: "Report progress",
-                        id: "todo_report",
+                        id: "progress_report",
                         inputSchema: { type: "object" },
                         outputSchema: { type: "object" },
                     },
@@ -128,7 +128,7 @@ test("Extension registration preserves point-specific declaration ids", () => {
         createControlExtensionPointRegistry(),
     );
 
-    builder.register(mcpTools, "todo_report", async () => ({
+    builder.register(mcpTools, "progress_report", async () => ({
         structuredContent: { reported: true },
     }));
 });

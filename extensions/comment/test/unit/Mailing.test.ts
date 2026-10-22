@@ -4,7 +4,7 @@ import test from "node:test";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type { ExtensionWorkerExecuteCapability, ExtensionWorkerOpenInput } from "@portable-devshell/extension/worker";
 import type { CliModelCommandInvocationContext, CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
-import { createMailingHook } from "../../src/mailing/Hook.ts";
+import { createMailingHook, createMemoryAutoHook } from "../../src/mailing/Hook.ts";
 import { executeMemoryModelCommand, executeMemoryNativeCommand } from "../../src/mailing/Command.ts";
 import { MailingService } from "../../src/mailing/Service.ts";
 import { parseOutbox, taskName } from "../../src/mailing/Protocol.ts";
@@ -239,6 +239,48 @@ test("Memory init creates only when explicit, while inherit transfers the same d
     assert.deepEqual(await mailing.release(b), { released: name });
     assert.deepEqual(await mailing.status(b), {});
     assert.equal(fs.files.has(root + name + "/INDEX.md"), true);
+});
+
+test("Auto Memory binds only on the first regular ToolCall and remains stable under concurrency", async (t) => {
+    const { mailing, fs } = fixture();
+    t.after(async () => mailing.close());
+    const target = { instance, workspace, ctxId: "ctx-a" };
+    const hook = createMemoryAutoHook(mailing, (error) => assert.fail(String(error)));
+    const call = (toolName: string, command = "pwd") => ({
+        callId: "first-work", direction: "inbound" as const,
+        value: { kind: "call" as const, toolName, payload: { command },
+            context: { ...target, source: "mcp" as const } },
+    });
+    const invocation = {} as never;
+    await hook(call("environ_info") as never, invocation);
+    assert.deepEqual(await mailing.status(target), {});
+    await hook(call("bash_run", "devshell memory init explicit-name") as never, invocation);
+    assert.deepEqual(await mailing.status(target), {});
+    await Promise.all(Array.from({ length: 8 }, () => hook(call("file_read") as never, invocation)));
+    const selected = await mailing.status(target);
+    assert.ok("name" in selected);
+    assert.match(selected.name, /^auto-[0-9a-f]{12}$/u);
+    assert.equal(fs.files.get(root + selected.name + "/INDEX.md"), `# ${selected.name}\n`);
+    assert.equal((await mailing.list(target)).memories.filter((name) => name.startsWith("auto-")).length, 1);
+    await hook(call("bash_run") as never, invocation);
+    assert.deepEqual(await mailing.status(target), selected);
+});
+
+test("Explicit Memory init and inherit take priority and invalidate a previous owner's auto cache", async (t) => {
+    const { mailing, fs } = fixture();
+    t.after(async () => mailing.close());
+    const a = { instance, workspace, ctxId: "ctx-a" };
+    const b = { instance, workspace, ctxId: "ctx-b" };
+    const explicit = await mailing.init(a, "named-work");
+    assert.deepEqual(await mailing.ensureBound(a), explicit);
+    assert.equal((await mailing.list(a)).memories.filter((name) => name.startsWith("auto-")).length, 0);
+    await mailing.inherit(b, "named-work");
+    assert.deepEqual(await mailing.status(a), {});
+    const fallback = await mailing.ensureBound(a);
+    assert.match(fallback.name, /^auto-/u);
+    assert.notEqual(fallback.name, explicit.name);
+    assert.deepEqual(await mailing.status(b), explicit);
+    assert.equal(fs.files.get(root + explicit.name + "/INDEX.md"), "# named-work\n");
 });
 
 test("Memory inherits legacy Mailing claims without losing accepted message state", async (t) => {

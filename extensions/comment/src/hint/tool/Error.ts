@@ -70,7 +70,7 @@ const crossToolHints: Record<string, string> = {
         "Supply the required client identity.",
     "control.clientIdentityInvalid": "Correct the client identity.",
     "control.modelReplyRequired":
-        "Call todo_report before using more tools.",
+        "Call progress_report before using more tools.",
     "control.modelResumed":
         "Read the resumed user instruction before deciding the next action.",
     "control.modelStopped":

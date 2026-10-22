@@ -8,7 +8,6 @@ import {
     parseExtensionCommand,
 } from "./extension/Command.js";
 import { parseInstanceCommand, parseWatchCommand } from "./instance/Parse.js";
-import { parseTodoCommand } from "./instance/Todo.js";
 import { parseApprovalCommand, parseToolCommand } from "./instance/Tool.js";
 import type { CliHelpTopic } from "./Usage.js";
 
@@ -70,7 +69,6 @@ export type CliParsedCommand =
       }
     | { kind: "debug.release"; patchId: string }
     | { kind: "debug.unload"; patchId: string }
-    | { instance: string; kind: "todo.delete"; taskId: string }
     | { kind: "control.logs" }
     | { kind: "control.restart" }
     | { kind: "control.start" }
@@ -103,7 +101,6 @@ export type CliParsedCommand =
     | { kind: "instance.cleanup.list" }
     | { kind: "instance.cleanup.retry"; instance: string }
     | { follow: boolean; instance: string; kind: "instance.logs" }
-    | { follow: boolean; instance: string; kind: "instance.todo" }
     | { instance: string; kind: "instance.start" }
     | { instance: string; kind: "instance.status" }
     | { instance: string; kind: "instance.stop" }
@@ -150,8 +147,6 @@ export class CliParser {
                 return parseApprovalCommand(argv.slice(1));
             case "tool":
                 return parseToolCommand(argv.slice(1));
-            case "todo":
-                return parseTodoCommand(argv.slice(1));
             case "oauth":
                 return parseOAuthCommand(argv.slice(1));
             case "context":
@@ -198,8 +193,7 @@ function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
         case "oauth":
         case "context":
         case "debug":
-        case "tool":
-        case "todo": {
+        case "tool": {
             const command = argv.slice(1, -1).join(" ");
             return {
                 ...(command.length === 0 ? {} : { command }),

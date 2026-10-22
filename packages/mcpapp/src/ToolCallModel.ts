@@ -62,9 +62,7 @@ export const toolTitles: Record<string, string> = {
     tmux_input: "Send terminal input",
     tmux_inspect: "Inspect terminal",
     tmux_manage: "Manage terminals",
-    todo_read: "Read task plan",
-    todo_write: "Update task plan",
-    todo_report: "Progress report",
+    progress_report: "Progress report",
     environ_info: "Workspace environment",
     environ_remote: "Remote environment",
     artifact_viewImage: "View image",
@@ -107,9 +105,7 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
         case "tmux_input": return string(args?.task) ?? string(args?.pane) ?? summary ?? "Terminal input";
         case "tmux_inspect": return string(args?.pane) ?? summary ?? "Terminal snapshot";
         case "tmux_manage": return string(args?.command) ?? summary ?? "Terminal resources";
-        case "todo_read":
-        case "todo_write": return string(args?.title) ?? string(output?.title) ?? summary ?? "Task plan";
-        case "todo_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";
+        case "progress_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";
         case "artifact_viewImage": return string(output?.name) ?? string(args?.path) ??
             string(args?.handle) ?? summary ?? "Image";
         case "environ_info": return string(output?.workspace) ?? string(args?.workspace) ?? summary ?? "Context ready";

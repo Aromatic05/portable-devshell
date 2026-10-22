@@ -97,7 +97,7 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(template("mcpapp_open"), workspaceResource.uri);
         assert.equal(template("bash_run"), widgetFor("bash_run"));
         assert.notEqual(template("bash_run"), template("file_read"));
-        for (const name of ["bash_run", "file_read", "file_glob", "file_edit", "todo_report"]) {
+        for (const name of ["bash_run", "file_read", "file_glob", "file_edit", "progress_report"]) {
             assert.equal(template(name), widgetFor(name));
             const variant = await client.readResource({ uri: widgetFor(name) });
             assert.match(variant.contents[0]?.text ?? "", new RegExp('data-tool-name="' + name + '"', "u"));

@@ -120,7 +120,7 @@ export class McpAppCall {
         const action = typeof input === "object" && input !== null && !Array.isArray(input)
             ? input : {};
         const { itemId, actionId, requestId, expectedRevision } = action;
-        const allowed = ["approve", "deny", "task-pause", "task-resume", "task-cancel",
+        const allowed = ["approve", "deny",
             "goal-pause", "goal-resume", "goal-retry", "goal-stop"];
         if (typeof itemId !== "string" || !itemId || typeof actionId !== "string" ||
             !allowed.includes(actionId) || typeof requestId !== "string" ||
@@ -192,7 +192,7 @@ export class McpAppCall {
                     await store.conflict(key, execution);
                     return result;
                 }
-                await store.apply(key, executedAction === "goal-resume" || executedAction === "goal-retry" || executedAction === "task-resume"
+                await store.apply(key, executedAction === "goal-resume" || executedAction === "goal-retry"
                     ? { kind: "reentry", intent: executedAction, sourceId: executedItem, id: key }
                     : undefined, execution);
                 return result;

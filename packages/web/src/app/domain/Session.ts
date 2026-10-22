@@ -14,7 +14,6 @@ import {
     OverviewViewModel,
     ProcessViewModel,
     ServerSession,
-    TodoViewModel,
     ToolCallViewModel,
     createApprovalTransport,
     createArtifactTransport,
@@ -66,7 +65,6 @@ export class WebDomainSession {
     readonly #approvals = new Map<string, ApprovalViewModel>();
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
-    readonly #todos = new Map<string, TodoViewModel>();
     readonly #messageTransport: MessageTransport;
 
     constructor(options: WebDomainSessionOptions) {
@@ -145,24 +143,11 @@ export class WebDomainSession {
         return viewModel;
     }
 
-    todo(instance: string): TodoViewModel {
-        let viewModel = this.#todos.get(instance);
-        if (viewModel === undefined) {
-            viewModel = new TodoViewModel(
-                createTaskTransport(this.#endpoint, instance),
-            );
-            this.#todos.set(instance, viewModel);
-        }
-        return viewModel;
-    }
-
     releaseInstance(instance: string): void {
         this.#runtimes.get(instance)?.close();
         this.#runtimes.delete(instance);
         this.#approvals.get(instance)?.close();
         this.#approvals.delete(instance);
-        this.#todos.get(instance)?.close();
-        this.#todos.delete(instance);
         this.goals.release(instance);
         this.toolCalls.release(instance);
     }
@@ -201,10 +186,8 @@ export class WebDomainSession {
     close(): void {
         for (const viewModel of this.#runtimes.values()) viewModel.close();
         for (const viewModel of this.#approvals.values()) viewModel.close();
-        for (const viewModel of this.#todos.values()) viewModel.close();
         this.#runtimes.clear();
         this.#approvals.clear();
-        this.#todos.clear();
         this.goals.close();
         this.toolCalls.close();
         this.messages.close();

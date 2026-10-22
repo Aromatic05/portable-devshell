@@ -6,7 +6,7 @@ import {
     refreshTuiAudit,
     refreshTuiAuditInstances,
     refreshTuiMessages,
-    refreshTuiTodo,
+    refreshTuiGoals,
 } from "./Refresh.js";
 
 /**
@@ -72,15 +72,9 @@ export class TuiRouteDataLoader {
                 if (signal.aborted) return;
                 await refreshTuiMessages(domains);
                 return;
-            case "todo":
-                if (instance !== undefined) {
-                    if (signal.aborted) return;
-                    const input =
-                        route.view === "detail"
-                            ? { taskId: route.todoId }
-                            : undefined;
-                    await refreshTuiTodo(domains, instance, input);
-                }
+            case "goals":
+                if (instance !== undefined && !signal.aborted)
+                    await refreshTuiGoals(domains, instance);
                 return;
             case "extensions":
                 if (route.view === "page") {

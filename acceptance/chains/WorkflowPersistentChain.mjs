@@ -18,7 +18,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
     const callsApi = (ctxId) => fixture.control((shared, connection) => shared.createToolTransport(connection, instance).listCalls({ ctxId, limit: 1000, includeInput: true, includeOutput: true }));
     const receipts = async () => JSON.parse(await readFile(join(fixture.home, ".devshell", "control", "workspace-app-leases.json.actions"), "utf8"));
     const marker = `L05-${randomUUID()}`;
-    const title = `workflow-${marker}`;
+    const objective = `workflow-${marker}`;
     const effectsFile = join(fixture.workspace, "effects.txt");
     const startedMarker = `${marker}-started`;
     const doneMarker = `${marker}-completed`;
@@ -30,46 +30,42 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const ctxId = environment.structuredContent.ctxId;
         assert.equal(typeof ctxId, "string");
         assert.ok(ctxId.length > 0);
-        const created = (await call(client, "todo_write", { ctxId, revision: 0, title,
-            todos: [{ id: "execute", content: "Perform one durable tmux operation across Control restart", status: "in_progress" }],
-            checkpoint: { summary: "Long operation authorized once", next: "Recover its existing terminal task" },
-        })).structuredContent;
-        const taskId = created.taskId;
-        assert.equal(typeof taskId, "string");
-        const readTodo = async () => (await taskApi((api) => api.getTodo({ taskId }))).todo;
-        const initial = await readTodo();
-        assert.equal(initial.title, title);
+        assert.equal((await call(client, "workspace_goal", { ctxId, action: "get" })).structuredContent.goal, null);
+        const created = (await call(client, "workspace_goal", { ctxId, action: "start", objective })).structuredContent.goal;
+        const goalId = created.goalId;
+        assert.equal(typeof goalId, "string");
+        const readGoal = async () => (await taskApi((api) => api.getGoal(ctxId))).goal;
+        const initial = await readGoal();
+        assert.equal(initial.objective, objective);
         assert.equal(initial.revision, created.revision);
-        assert.equal(initial.items[0].status, "in_progress");
-        record("persistent-todo-created", { ctxId, taskId, revision: initial.revision });
+        assert.equal(initial.status, "active");
+        assert.equal(initial.workspace, fixture.workspace);
+        record("persistent-goal-created", { ctxId, goalId, revision: initial.revision });
 
-        const pause = { ctxId, itemId: taskId, actionId: "task-pause", expectedRevision: initial.revision, requestId: randomUUID() };
+        const pause = { ctxId, itemId: goalId, actionId: "goal-pause", expectedRevision: initial.revision, requestId: randomUUID() };
         assert.equal((await call(client, "mcpapp_action", pause)).structuredContent.status, "applied");
-        const paused = await readTodo();
-        assert.equal(typeof paused.pausedAt, "string");
-        assert.ok(paused.revision > initial.revision);
+        const paused = await readGoal();
+        assert.equal(paused.status, "paused");
+        assert.equal(paused.revision, initial.revision + 1);
         assert.equal((await call(client, "mcpapp_action", pause)).structuredContent.status, "applied");
-        assert.deepEqual(await readTodo(), paused, "pause receipt replay mutated the Todo");
-        // Real MCP v2 rejects stale task actions with a revision-specific
-        // ProtocolError. Rejecting without changing the Todo is the invariant.
-        await assert.rejects(client.callTool({ name: "mcpapp_action", arguments: { ctxId, itemId: taskId,
-            actionId: "task-resume", expectedRevision: initial.revision, requestId: randomUUID() } }),
-        /(?:changed from revision|Todo revision conflict)/iu,
-        "stale revision must be rejected through the real MCP boundary");
-        assert.deepEqual(await readTodo(), paused, "rejected action changed durable state");
+        assert.deepEqual(await readGoal(), paused, "pause receipt replay mutated the Goal");
+        await assert.rejects(client.callTool({ name: "mcpapp_action", arguments: { ctxId, itemId: goalId,
+            actionId: "goal-resume", expectedRevision: initial.revision, requestId: randomUUID() } }),
+        /changed from revision/iu, "stale Goal action must fail through the real MCP boundary");
+        assert.deepEqual(await readGoal(), paused, "rejected action changed durable state");
         const faultMarker = `${marker}-exit7`;
         const fault = (await call(client, "bash_run", { ctxId, command: `printf '%s' '${faultMarker}'; printf '%s' '${faultMarker}-stderr' >&2; exit 7`, timeoutMs: 10000 })).structuredContent;
         assert.equal(fault.exitCode, 7);
         assert.equal(fault.stdout, faultMarker);
         assert.equal(fault.stderr, `${faultMarker}-stderr`);
-        const resume = { ctxId, itemId: taskId, actionId: "task-resume", expectedRevision: paused.revision, requestId: randomUUID() };
+        const resume = { ctxId, itemId: goalId, actionId: "goal-resume", expectedRevision: paused.revision, requestId: randomUUID() };
         assert.equal((await call(client, "mcpapp_action", resume)).structuredContent.status, "applied");
-        const resumed = await readTodo();
-        assert.equal(resumed.pausedAt, undefined);
-        assert.ok(resumed.revision > paused.revision);
-        const directive = (await snapshot(client, ctxId)).reentry.directives.find((entry) => entry.intent === "task-resume" && entry.sourceId === taskId);
+        const resumed = await readGoal();
+        assert.equal(resumed.status, "active");
+        assert.equal(resumed.revision, paused.revision + 1);
+        const directive = (await snapshot(client, ctxId)).reentry.directives.find((entry) => entry.intent === "goal-resume" && entry.sourceId === goalId);
         assert.ok(directive?.id, "resume did not persist a recovery directive");
-        record("action-error-recovery-and-replay", { taskId, directiveId: directive.id, revision: resumed.revision });
+        record("action-error-recovery-and-replay", { goalId, directiveId: directive.id, revision: resumed.revision });
 
         // Gate completion on a file written by a later *real Worker* bash call.
         // A finite 10-minute guard prevents a failed harness leaving work alive.
@@ -101,6 +97,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         record("wait-detached-durable", { terminalTask, waitId: wait.waitId, callId: wait.callId, elapsedMs });
 
         // This actually shuts down the Wait monitor, Control and Worker owner.
+        const beforeRestart = await readGoal();
         await client.close();
         await fixture.stop();
         await fixture.assertTmuxAlive(startedMarker);
@@ -110,15 +107,16 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.ok(beforeDisk.some((row) => row.collection === "events" && row.value.type === "wait.detached" && row.value.data?.waitId === wait.waitId));
         await fixture.start();
         await connect();
-        assert.deepEqual(await readTodo(), resumed, "Todo changed across Control restart");
+        assertGoalUnchanged(await readGoal(), beforeRestart, "Goal changed across Control restart");
         assert.equal((await readWaits()).find((entry) => entry.waitId === wait.waitId).status, "detached");
         assert.ok((await snapshot(client, ctxId)).reentry.directives.some((entry) => entry.id === directive.id));
+        const beforeReplay = await readGoal();
         assert.equal((await call(client, "mcpapp_action", resume)).structuredContent.status, "applied");
-        assert.deepEqual(await readTodo(), resumed, "persisted action replay executed resume twice");
-        const recovery = { ctxId, directiveId: directive.id, claimId: `claim-${randomUUID()}`, intent: "task-resume", sourceId: taskId };
+        assertGoalUnchanged(await readGoal(), beforeReplay, "persisted action replay executed resume twice");
+        const recovery = { ctxId, directiveId: directive.id, claimId: `claim-${randomUUID()}`, intent: "goal-resume", sourceId: goalId };
         const claim = (await call(client, "mcpapp_reentry", { ...recovery, action: "claim" })).structuredContent;
         assert.equal(claim.claimed, true);
-        assert.match(claim.delivery.message, /workspace Task/u);
+        assert.match(claim.delivery.message, /workspace Goal/u);
         assert.ok(claim.delivery.modelContext);
         assert.equal((await call(client, "mcpapp_reentry", { ...recovery, claimId: `competitor-${randomUUID()}`, action: "claim" })).structuredContent.claimed, false);
         assert.equal((await call(client, "mcpapp_reentry", { ...recovery, action: "validate" })).structuredContent.valid, true);
@@ -154,13 +152,14 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.equal(finalWait.result.task.status, "0");
         assert.equal(finalWaits.filter((entry) => entry.targetId === terminalTask).length, 1, "recovery created a duplicate Wait");
         assert.deepEqual((await readFile(effectsFile, "utf8")).trim().split("\n"), [startedMarker, doneMarker], "command side effects must occur exactly once");
-        const current = await readTodo();
-        const finished = (await call(client, "todo_write", { ctxId, taskId, title, revision: current.revision,
-            todos: [{ id: "execute", content: initial.items[0].content, status: "completed" }],
-            checkpoint: { summary: "Existing terminal task completed once after two Control restarts" },
-        })).structuredContent;
-        assert.equal((await readTodo()).revision, finished.revision);
-        assert.equal((await readTodo()).items[0].status, "completed");
+        const current = await readGoal();
+        const finished = (await call(client, "workspace_goal", { ctxId, action: "finish",
+            expectedGoalId: goalId, expectedRevision: current.revision,
+        })).structuredContent.goal;
+        assert.equal(finished.revision, current.revision + 1);
+        assert.equal((await readGoal()).revision, finished.revision);
+        assert.equal((await readGoal()).status, "completed");
+        assert.equal((await taskApi(api => api.getGoals())).goals.filter(entry => entry.goalId === goalId).length, 0);
         const finalCalls = await callsApi(ctxId);
         assert.equal(finalCalls.filter((entry) => entry.toolName === "mcpapp_action" && entry.status === "failed").length, 1,
             "the stale revision failure must be audited once before successful recovery");
@@ -174,7 +173,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.equal(resumeCalls.length, 1, "replayed action produced a second Instance execution");
         const attemptCalls = finalCalls.filter((entry) => entry.toolName === "mcpapp_reentry" && entry.input?.action === "attempt");
         assert.equal(attemptCalls.length, 1, "replayed attempt entered Instance twice");
-        record("terminal-wait-todo-verified", { terminalTask, wait: finalWait, todo: await readTodo(), output: completed.output });
+        record("terminal-wait-goal-verified", { terminalTask, wait: finalWait, goal: await readGoal(), output: completed.output });
 
         // Stop to flush audit, then query SQLite read-only with no server helper.
         await client.close();
@@ -198,7 +197,15 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const waitEvents = disk.filter((row) => row.collection === "events" && row.value.data?.waitId === wait.waitId).map((row) => row.value);
         assert.deepEqual(waitEvents.map((entry) => entry.type), ["wait.detached", "wait.resolved"]);
         assert.ok(waitEvents[1].seq > waitEvents[0].seq);
-        assert.ok(disk.some((row) => row.collection === "events" && row.value.type === "todo.completed"), "missing durable Todo completion event");
+        const goalEvents = disk.filter(row => row.collection === "events" && row.value.type === "goal.updated" && row.value.data?.goalId === goalId).map(row => row.value);
+        assert.ok(goalEvents.some(event => event.data.ctxId === ctxId && event.data.status === "completed"), "missing durable Goal completion event");
+        assert.ok(goalEvents.every((event, index) => index === 0 || event.seq > goalEvents[index - 1].seq));
+        const storedGoals = JSON.parse(await readFile(join(fixture.state, "goals.json"), "utf8")).goals;
+        const storedGoal = storedGoals.filter(entry => entry.createdByCtxId === ctxId);
+        assert.equal(storedGoal.length, 1);
+        for (const field of ["goalId", "objective", "revision", "status", "note", "workspace", "createdAt", "updatedAt"]) {
+            assert.equal(storedGoal[0][field], finished[field], `disk lost completed Goal field ${field}`);
+        }
         const diskLogs = disk.filter((row) => row.collection === "logs" && row.value.callId === faultCall.callId).map((row) => row.value);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stdout").map((entry) => entry.message).join(""), faultMarker);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stderr").map((entry) => entry.message).join(""), `${faultMarker}-stderr`);
@@ -206,11 +213,20 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.ok(terminalRead, "SQLite must retain the independently verified terminal completion output");
         assert.deepEqual((await readWaitDocument(fixture)).waits.find((entry) => entry.waitId === wait.waitId), finalWait);
         record("sqlite-audit-events-verified", { calls: persistedCalls.length, waitEvents, launchCount: 1, resumeExecutions: 1, attemptExecutions: 1 });
-        return { ctxId, taskId, terminalTask, waitId: wait.waitId, restarts: 2, connections: clients.length,
-            handoffElapsedMs: elapsedMs, hostDelivery: "simulated-rejected", persistentTodo: true,
+        return { ctxId, goalId, terminalTask, waitId: wait.waitId, restarts: 2, connections: clients.length,
+            handoffElapsedMs: elapsedMs, hostDelivery: "simulated-rejected", persistentGoal: true,
             waitResolved: true, noDuplicateExecution: true, sqliteAuditVerified: true,
-            scope: "Task/Todo; Goal creation and native ChatGPT Host delivery are not exercised" };
+            scope: "Goal, Wait and action reentry; native ChatGPT Host delivery is not exercised" };
     } finally {
         for (const connected of clients) await connected.close();
     }
+}
+
+// Only continuationDue is computed from the wall clock at read time.
+function assertGoalUnchanged(actual, expected, message) {
+    const actualState = { ...actual };
+    const expectedState = { ...expected };
+    delete actualState.continuationDue;
+    delete expectedState.continuationDue;
+    assert.deepEqual(actualState, expectedState, message);
 }

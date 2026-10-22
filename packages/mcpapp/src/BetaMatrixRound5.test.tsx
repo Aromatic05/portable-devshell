@@ -58,16 +58,16 @@ test("round5: only the in-flight approval disables its actions; settling it rest
     expect(host.modes).toEqual([]);
 });
 
-test("round5: Goal confirmation can be cancelled and Todo stale receipt requires dispatch with refreshed revision", async () => {
+test("round5: Goal confirmation can be cancelled and Goal stale receipt requires dispatch with refreshed revision", async () => {
     let state = snapshot(); serve((url, init) => url.pathname.endsWith("/snapshot") ? response(state) : hold(init?.signal));
     host.invoke = async () => { state = snapshot("ctx-a", "alpha", 20); return result({ status: "stale" }); };
     await render(<AppView />); await authorize(); await click("Pause Goal");
     expect(actions()).toHaveLength(0); await click("Back");
     expect(button("Pause Goal").disabled).toBe(false); expect(actions()).toHaveLength(0);
-    await click("Resume Todo");
-    expect(actions()[0]!.arguments).toMatchObject({ itemId: "todo-a", actionId: "task-resume", expectedRevision: 13 });
+    await click("Resume Goal");
+    expect(actions()[0]!.arguments).toMatchObject({ itemId: "goal-a", actionId: "goal-resume", expectedRevision: 13 });
     expect(container.querySelector('[role="alert"]')!.textContent).toContain("review the latest status");
-    await click("Resume Todo");
+    await click("Resume Goal");
     expect(actions()).toHaveLength(2); expect(actions()[1]!.arguments.expectedRevision).toBe(22);
     await click("Pause Goal"); expect(actions()).toHaveLength(2); await click("Confirm Pause Goal");
     expect(actions()[2]!.arguments).toMatchObject({ itemId: "goal-a", actionId: "goal-pause", expectedRevision: 20 });
@@ -95,23 +95,23 @@ test("round5: recovery owner conflict does not deliver, release another owner, o
     serveSnapshot(recovery()); host.invoke = async () => result({ claimed: false, owner: "other-host" });
     await render(<AppView />); await authorize();
     expect(phases()).toEqual(["claim"]); expect(host.sent).toEqual([]); expect(host.contexts).toEqual([]);
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
     expect(button("Pause Goal").disabled).toBe(false);
-    await click("Resume Todo");
+    await click("Resume Goal");
     expect(actions()).toHaveLength(1); expect(phases()).toEqual(["claim"]);
     expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 
-test("round5: invalidated Todo recovery releases its exact claim before any Host context or send", async () => {
-    serveSnapshot(recovery(snapshot(), "task-resume"));
+test("round5: invalidated Goal recovery releases its exact claim before any Host context or send", async () => {
+    serveSnapshot(recovery(snapshot(), "goal-resume"));
     host.invoke = async (call) => call.arguments.action === "claim" ? claim() : result({ valid: false });
     await render(<AppView />); await authorize();
     expect(phases()).toEqual(["claim", "validate", "release"]);
     expect(new Set(host.calls.map((call) => call.arguments.claimId)).size).toBe(1);
-    expect(host.calls.map((call) => call.arguments.sourceId)).toEqual(["todo-a", "todo-a", "todo-a"]);
-    expect(host.calls.map((call) => call.arguments.intent)).toEqual(["task-resume", "task-resume", "task-resume"]);
+    expect(host.calls.map((call) => call.arguments.sourceId)).toEqual(["goal-a", "goal-a", "goal-a"]);
+    expect(host.calls.map((call) => call.arguments.intent)).toEqual(["goal-resume", "goal-resume", "goal-resume"]);
     expect(host.sent).toEqual([]); expect(host.contexts).toEqual([]);
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("round5: Host context failure releases recovery and retains original error without attempted delivery", async () => {
@@ -121,7 +121,7 @@ test("round5: Host context failure releases recovery and retains original error 
     expect(phases()).toEqual(["claim", "validate", "release"]);
     expect(host.contexts).toHaveLength(1); expect(host.sent).toEqual([]);
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("host context quota exceeded");
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("round5: ambiguous Host send reports uncertain once and watch rerender does not replay recovery", async () => {
@@ -137,7 +137,7 @@ test("round5: ambiguous Host send reports uncertain once and watch rerender does
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: { ...state, cursor: 12 } })));
     expect(host.sent).toHaveLength(1); expect(host.contexts).toHaveLength(1);
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
-    expect(button("Resume Todo").disabled).toBe(false);
+    expect(button("Resume Goal").disabled).toBe(false);
 });
 
 test("round5: browser private-state hydration restores Activity after remount without reopening claimed fullscreen", async () => {

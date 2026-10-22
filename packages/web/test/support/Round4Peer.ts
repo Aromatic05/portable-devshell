@@ -23,8 +23,6 @@ for (const instance of ['alpha', 'beta']) {
     const task = endpoint.bind('task', instance);
     services.push(new Rpc(task, {
         getGoals: () => read(instance, 'goals', { goals: [], lastSeq: 0 }),
-        getTodo: () => read(instance, 'todo', { todo: { revision: 0, items: [], summary: { completed: 0, total: 0 } }, lastSeq: 0 }),
-        deleteTodo: () => { database.prepare('DELETE FROM snapshots WHERE instance=? AND kind=?').run(instance, 'todo'); return {}; },
     }));
     for (const [kind, port] of [['tool', tool], ['task', task]] as const) {
         const service = new Stream(port);

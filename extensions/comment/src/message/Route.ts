@@ -59,7 +59,7 @@ function projectMessageEvent(
     if (
         event.type === "toolCall.completed" &&
         isRecord(event.data) &&
-        event.data.toolName === "todo_report"
+        event.data.toolName === "progress_report"
     ) {
         return { ...event, type: "message.changed" } as unknown as MessageEvent;
     }

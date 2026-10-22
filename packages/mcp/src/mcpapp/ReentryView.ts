@@ -44,9 +44,6 @@ export function projectMcpAppReentry(
     const goalEligible =
         goal !== undefined &&
         goal.status === "active" &&
-        goal.steps.some(
-            (step) => step.status === "active" || step.status === "pending",
-        ) &&
         hasDueTrigger &&
         !goal.continuationUncertain &&
         !goal.continuationPending &&

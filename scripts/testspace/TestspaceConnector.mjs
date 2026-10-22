@@ -14,15 +14,14 @@ import {
 export const SAFE_ACTIONS = [
     "bash_run",
     "file_read",
-    "todo_read",
-    "todo_write",
+    "workspace_goal",
     "tmux_run",
 ];
-const TODO_TITLE = "testspace connector activity";
-const TODO_ACTIVITY_INTERVAL_MS = 35_000;
+const GOAL_OBJECTIVE = "testspace connector activity";
+const GOAL_ACTIVITY_INTERVAL_MS = 35_000;
 const MAX_LOG_BYTES = 8 * 1024 * 1024;
 
-export function createSafeAction(name, { ctxId, iteration, revision = 0, taskId }) {
+export function createSafeAction(name, { ctxId, iteration, goal }) {
     switch (name) {
         case "bash_run":
             return {
@@ -47,37 +46,19 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0, taskId 
                 },
                 name,
             };
-        case "todo_read":
-            return { arguments: { ctxId }, name };
-        case "todo_write": {
-            const phase = iteration % 4;
+        case "workspace_goal":
             return {
                 arguments: {
                     ctxId,
-                    revision,
-                    ...(taskId === undefined ? {} : { taskId }),
-                    title: TODO_TITLE,
-                    todos: [
-                        {
-                            content: "Generate harmless connector calls",
-                            id: "generate-calls",
-                            status: phase === 0 ? "completed" : "in_progress",
-                        },
-                        {
-                            content: "Inspect activity in TUI Audit",
-                            id: "observe-audit",
-                            status: phase === 0 ? "in_progress" : "pending",
-                        },
-                        {
-                            content: "Inspect the Web overview",
-                            id: "observe-web",
-                            status: "pending",
-                        },
-                    ],
+                    action: goal?.status === "active" ? "update" : "get",
+                    ...(goal?.status === "active" ? {
+                        expectedGoalId: goal.goalId,
+                        expectedRevision: goal.revision,
+                        note: `Connector activity iteration ${iteration}; inspect actual ToolCalls in TUI Audit and Web.`,
+                    } : {}),
                 },
                 name,
             };
-        }
         case "tmux_run":
             return {
                 arguments: {
@@ -100,8 +81,8 @@ export async function runConnectorLoop(options) {
     let client;
     let ctxId;
     let toolNames = new Set();
-    let todo = { revision: 0 };
-    let nextTodoAt = 0;
+    let goal;
+    let nextGoalAt = 0;
     let health = {
         endpoint: options.endpoint,
         instance: options.instance,
@@ -172,39 +153,27 @@ export async function runConnectorLoop(options) {
                         ],
                         model: "testspace-gpt-simulator",
                     });
-                    if (toolNames.has("todo_write")) {
-                        todo = await readTodoState(client, ctxId);
-                        if (todo.taskId === undefined) {
-                            const initialTodo = createSafeAction("todo_write", {
-                                ctxId,
-                                iteration: 1,
-                                revision: 0,
-                            });
-                            const result = await client.callTool(initialTodo);
-                            if (result.isError === true)
-                                throw new Error(`Testspace initial Todo failed: ${JSON.stringify(result)}`);
-                            todo = {
-                                taskId: result.structuredContent?.taskId,
-                                revision: result.structuredContent?.revision,
-                            };
-                            if (typeof todo.taskId !== "string" || !Number.isSafeInteger(todo.revision))
-                                throw new Error("Testspace initial Todo returned no task identity or revision.");
+                    if (toolNames.has("workspace_goal")) {
+                        goal = await readGoalState(client, ctxId);
+                        if (goal === null || goal.status === "completed" || goal.status === "stopped") {
+                            const result = await client.callTool({ name: "workspace_goal",
+                                arguments: { ctxId, action: "start", objective: GOAL_OBJECTIVE } });
+                            goal = goalFromResult(result);
+                            if (goal === null) throw new Error("Testspace Goal start returned no Goal.");
                             await log(options.logFile, {
                                 at: new Date().toISOString(),
-                                event: "testspace.todo.seeded",
+                                event: "testspace.goal.seeded",
                                 structuredContent: result.structuredContent,
                             });
                         }
-                        // Preserve Comment's two-access burst limit. Future
-                        // Todo activity uses a paced, cached task identity.
-                        nextTodoAt = Date.now() + TODO_ACTIVITY_INTERVAL_MS;
+                        nextGoalAt = Date.now() + GOAL_ACTIVITY_INTERVAL_MS;
                     }
                 }
 
                 iteration += 1;
                 const available = SAFE_ACTIONS.filter((name) =>
                     toolNames.has(name) &&
-                    (!name.startsWith("todo_") || Date.now() >= nextTodoAt),
+                    (name !== "workspace_goal" || Date.now() >= nextGoalAt),
                 );
                 if (available.length === 0)
                     throw new Error(
@@ -215,7 +184,7 @@ export async function runConnectorLoop(options) {
                 const call = createSafeAction(selected, {
                     ctxId,
                     iteration,
-                    ...todo,
+                    goal,
                 });
                 const toolCallId = `testspace-${process.pid}-${iteration}`;
 
@@ -232,16 +201,9 @@ export async function runConnectorLoop(options) {
                 });
 
                 const result = await client.callTool(call);
-                if (selected.startsWith("todo_")) {
-                    nextTodoAt = Date.now() + TODO_ACTIVITY_INTERVAL_MS;
-                    if (result.isError !== true) {
-                        todo = selected === "todo_read"
-                            ? todoFromRead(result.structuredContent, ctxId)
-                            : {
-                                taskId: result.structuredContent?.taskId,
-                                revision: result.structuredContent?.revision,
-                            };
-                    }
+                if (selected === "workspace_goal") {
+                    nextGoalAt = Date.now() + GOAL_ACTIVITY_INTERVAL_MS;
+                    goal = result.isError === true ? undefined : goalFromResult(result);
                 }
                 const activityAt = new Date().toISOString();
                 await log(options.logFile, {
@@ -278,8 +240,8 @@ export async function runConnectorLoop(options) {
                 client = undefined;
                 ctxId = undefined;
                 toolNames = new Set();
-                todo = { revision: 0 };
-                nextTodoAt = 0;
+                goal = undefined;
+                nextGoalAt = 0;
             }
 
             if (
@@ -331,24 +293,21 @@ async function connect(endpoint, workspace) {
     };
 }
 
-async function readTodoState(client, ctxId) {
-    const result = await client.callTool({
-        arguments: { ctxId },
-        name: "todo_read",
-    });
-    if (result.isError === true)
-        throw new Error(`Testspace Todo read failed: ${JSON.stringify(result)}`);
-    return todoFromRead(result.structuredContent, ctxId);
+async function readGoalState(client, ctxId) {
+    return goalFromResult(await client.callTool({
+        arguments: { ctxId, action: "get" },
+        name: "workspace_goal",
+    }));
 }
 
-function todoFromRead(content, ctxId) {
-    const tasks = content?.tasks;
-    const task = Array.isArray(tasks)
-        ? tasks.find((item) => item.title === TODO_TITLE && item.ctxId === ctxId)
-        : undefined;
-    return task === undefined
-        ? { revision: 0 }
-        : { taskId: task.taskId, revision: task.revision };
+function goalFromResult(result) {
+    if (result.isError === true)
+        throw new Error(`Testspace Goal call failed: ${JSON.stringify(result)}`);
+    const goal = result.structuredContent?.goal;
+    if (goal === null) return null;
+    if (typeof goal?.goalId !== "string" || !Number.isSafeInteger(goal.revision) || goal.revision < 1)
+        throw new Error("Testspace Goal returned no identity or revision.");
+    return goal;
 }
 
 async function log(path, record) {

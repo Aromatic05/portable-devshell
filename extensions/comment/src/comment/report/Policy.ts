@@ -3,9 +3,6 @@ import { ExtensionError } from "@portable-devshell/extension";
 export const COMMENT_REPORT_BUCKET_CAPACITY = 2;
 export const COMMENT_REPORT_REFILL_INTERVAL_MS = 30_000;
 export const COMMENT_REPORT_CONVERSATION_WINDOW = 400;
-export const COMMENT_TODO_INVALID_WINDOW_MS = 120_000;
-export const COMMENT_TODO_INVALID_DISABLE_MS = 300_000;
-export const COMMENT_TODO_INVALID_LIMIT = 3;
 
 export function refillBucket(
     tokens: number,
@@ -23,20 +20,20 @@ export function refillBucket(
 
 export function duplicateReportError(ctxId: string): Error {
     return new ExtensionError({
-        code: "todo.invalid",
+        code: "progress.duplicate",
         details: { ctxId, reason: "duplicate" },
         message:
-            "todo_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
+            "progress_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
         retryable: false,
     });
 }
 
-export function todoUseOtherToolsError(): Error {
+export function reportRateLimitError(): Error {
     return new ExtensionError({
-        code: "todo.invalid",
-        details: { action: "use_other_tools" },
+        code: "progress.rateLimited",
+        details: { reason: "rate_limited" },
         message:
-            "You have performed too many useless operations. Use other tools.",
+            "Too many progress reports. Continue useful work before reporting again.",
         retryable: false,
     });
 }

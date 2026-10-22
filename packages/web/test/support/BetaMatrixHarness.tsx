@@ -1,7 +1,6 @@
 import { render } from "@testing-library/react";
 import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 import { Config } from "../../src/view/page/Config.js";
-import { Todos } from "../../src/view/page/Todos.js";
 import { Audit } from "../../src/view/page/activity/audit/Page.js";
 import { WebStore } from "../../src/state/Store.js";
 import { WebTestDomains, withWebDomains } from "./DomainHarness.js";
@@ -35,22 +34,6 @@ export function setupConfig() {
     const view = (instance: string) => withWebDomains(domains,
         <Config disabled={false} instance={instance} store={store} />);
     return { domains, store, view, ...render(view("alpha")) };
-}
-
-export function todo(taskId: string, revision: number, title = taskId) {
-    return { taskId, revision, title,
-        items: [{ id: "step", content: "Inspect", status: "in_progress" }],
-        summary: { completed: 0, currentItemId: "step", total: 1 } };
-}
-
-export function setupTodos() {
-    const domains = new WebTestDomains();
-    Object.assign(domains.goals, { load: async () => undefined });
-    domains.setInstances([{ name: "alpha" }, { name: "beta" }]);
-    domains.setTodo("alpha", todo("same-task", 3, "Alpha project"));
-    domains.setTodo("beta", todo("same-task", 9, "Beta project"));
-    const store = new WebStore(domains.domains);
-    return { domains, store, ...render(withWebDomains(domains, <Todos store={store} />)) };
 }
 
 export const auditCall = {

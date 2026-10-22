@@ -76,7 +76,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             "Read resource",
         );
         assert.equal(
-            mcpToolTitle("todo_report", extensionToolMeta),
+            mcpToolTitle("progress_report", extensionToolMeta),
             "Message user",
         );
         assert.equal(mcpToolTitle("future_unknown"), "Future unknown");

@@ -376,7 +376,6 @@ test("CliMain keeps static help available without depending on Control business 
         "oauth",
         "context",
         "tool",
-        "todo",
     ]) {
         assert.equal(await cli.run([topic, "--help"]), 0);
         assert.match(stdout.flush(), new RegExp(topic, "iu"));
@@ -1485,9 +1484,9 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     assert.equal(await cli.run(["watch", "status", "demo-local"]), 0);
     assert.equal(
         stdout.flush(),
-        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\nTodo: none\n" +
-            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\nTodo: none\n" +
-            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\nTodo: none\n",
+        "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\n" +
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\n",
     );
     assert.equal(stderr.flush(), "");
 });
@@ -1628,89 +1627,6 @@ function createBuffer(): {
     };
 }
 
-test("CliMain reads and follows Todo through control RPC", async () => {
-    const stdout = createBuffer();
-    const stderr = createBuffer();
-    let reads = 0;
-    let closed = false;
-    const cli = new CliMain({
-        createCliClients: () =>
-            testClients({
-                async getTodo() {
-                    reads += 1;
-                    return reads === 1
-                        ? {
-                              lastSeq: 0,
-                              todo: {
-                                  items: [
-                                      {
-                                          content: "Inspect",
-                                          id: "inspect",
-                                          status: "in_progress",
-                                      },
-                                  ],
-                                  revision: 1,
-                                  summary: {
-                                      completed: 0,
-                                      currentItemId: "inspect",
-                                      total: 1,
-                                  },
-                                  taskId: "task-1",
-                                  title: "Todo follow",
-                              },
-                          }
-                        : {
-                              lastSeq: 1,
-                              todo: {
-                                  items: [
-                                      {
-                                          content: "Inspect",
-                                          id: "inspect",
-                                          status: "completed",
-                                      },
-                                  ],
-                                  revision: 2,
-                                  summary: { completed: 1, total: 1 },
-                                  taskId: "task-1",
-                                  title: "Todo follow",
-                              },
-                          };
-                },
-                async subscribeTodo() {
-                    return {
-                        close() {
-                            closed = true;
-                        },
-                        async nextEvent() {
-                            return {
-                                event: "todo.completed",
-                                payload: {},
-                                seq: 1,
-                                target: {
-                                    instance: "demo-local",
-                                    kind: "instance",
-                                },
-                                type: "event",
-                            };
-                        },
-                    };
-                },
-            } as never),
-        followEventLimit: 1,
-        stderr,
-        stdout,
-    });
-
-    assert.equal(
-        await cli.run(["instance", "todo", "demo-local", "--follow"]),
-        0,
-    );
-    assert.match(stdout.flush(), /Progress: 0\/1[\s\S]*Progress: 1\/1/u);
-    assert.equal(reads, 2);
-    assert.equal(closed, true);
-    assert.equal(stderr.flush(), "");
-});
-
 test("CliMain rejects an incompatible protocol before a business request", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
@@ -1841,10 +1757,6 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
                     );
                     return [];
                 },
-                async deleteTodo(instance: string, taskId: string) {
-                    calls.push(`todo.delete:${instance}:${taskId}`);
-                    return {};
-                },
                 async updateConfig(request: unknown) {
                     calls.push(`config.update:${JSON.stringify(request)}`);
                     return {};
@@ -1889,7 +1801,6 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         ["context", "renew", "ctx-1"],
         ["tool", "calls", "demo", "call-1"],
         ["tool", "calls", "demo", "--limit", "50", "--before", "call-200"],
-        ["todo", "delete", "demo", "task-1"],
     ];
     for (const command of commands) assert.equal(await cli.run(command), 0);
 
@@ -1914,7 +1825,6 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         "context.renew:ctx-1",
         'tool.calls:demo:{"callIds":["call-1"],"limit":1}',
         'tool.calls:demo:{"before":"call-200","limit":50}',
-        "todo.delete:demo:task-1",
     ]);
     assert.equal(stderr.flush(), "");
     assert.notEqual(stdout.flush(), "");
@@ -2039,17 +1949,6 @@ function testClients(client: Record<string, unknown>) {
             stop: (...args: unknown[]) => invoke("stopInstance", [instance, ...args]),
             readLogs: (...args: unknown[]) => invoke("readLogs", [instance, ...args]),
             subscribe: (...args: unknown[]) => invoke("subscribe", [instance, ...args]),
-        }),
-        todo: (instance: string) => ({
-            deleteTodo: (...args: unknown[]) => invoke("deleteTodo", [instance, ...args]),
-            getTodo: (...args: unknown[]) => invoke("getTodo", [instance, ...args]),
-            subscribe: (...args: unknown[]) =>
-                invoke(
-                    typeof client.subscribeTodo === "function"
-                        ? "subscribeTodo"
-                        : "subscribe",
-                    [instance, ...args],
-                ),
         }),
         web: {
             applications: (...args: unknown[]) =>

@@ -116,7 +116,7 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
     assert.match(workspaceContent?.text ?? "", /data-mcpapp-view="workspace"/u);
     assert.match(toolCallContent?.text ?? "", /data-mcpapp-view="toolcall"/u);
     assert.equal(extensions.listResources().length, 3);
-    for (const name of ["bash_run", "file_read", "file_edit", "todo_report"]) {
+    for (const name of ["bash_run", "file_read", "file_edit", "progress_report"]) {
         const uri = toolCall?.uri + "?widgetRevision=1&toolName=" + name;
         const content = await extensions.readResource(uri);
         assert.equal(content?.uri, uri);

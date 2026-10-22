@@ -20,7 +20,7 @@ import {
     refreshTuiAll,
     refreshTuiAudit,
     refreshTuiMessages,
-    refreshTuiTodo,
+    refreshTuiGoals,
 } from "../control/Refresh.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiAppStore } from "../../state/store/App.js";
@@ -246,16 +246,6 @@ export class TuiRuntimeControlOperations {
         });
     }
 
-    async deleteTodo(instance: string, taskId: string): Promise<void> {
-        await this.#request(
-            this.options.clients.task(instance).deleteTodo(taskId),
-            `todo.delete:${instance}:${taskId}`,
-        );
-        await this.#refreshBestEffort(`todo:${instance}`, async () => {
-            await refreshTuiTodo(this.options.domains, instance);
-        });
-    }
-
     async setInstanceEnabled(
         instance: string,
         enabled: boolean,
@@ -337,9 +327,9 @@ export class TuiRuntimeControlOperations {
                 return;
             case "terminal":
                 return;
-            case "todo":
+            case "goals":
                 if (instance !== undefined)
-                    await refreshTuiTodo(this.options.domains, instance);
+                    await refreshTuiGoals(this.options.domains, instance);
                 return;
             case "config":
                 await this.options.domains.config.refresh();

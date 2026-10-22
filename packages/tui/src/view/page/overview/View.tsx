@@ -202,9 +202,8 @@ function instanceHeader(width: number): string {
             ["CONNECTION", 12],
             ["DAEMON", 10],
             ["MCP", 4],
-            ["TODO", 5],
             ["APPR", 5],
-            ["DETAIL", remainingWidth(width, [22, 9, 10, 12, 10, 4, 5, 5])],
+            ["DETAIL", remainingWidth(width, [22, 9, 10, 12, 10, 4, 5])],
         ]);
     }
     if (width >= 78) {
@@ -213,7 +212,6 @@ function instanceHeader(width: number): string {
             ["PROVIDER", 9],
             ["RUNTIME", 10],
             ["CONNECTION", 12],
-            ["TODO", 5],
             ["APPR", 5],
         ]);
     }
@@ -221,7 +219,6 @@ function instanceHeader(width: number): string {
         ["NAME", 20],
         ["RUNTIME", 10],
         ["CONNECTION", 12],
-        ["T", 3],
         ["A", 3],
     ]);
 }
@@ -235,11 +232,10 @@ function instanceLine(row: TuiOverviewInstanceRowModel, width: number): string {
             [row.connection, 12],
             [row.daemon, 10],
             [row.mcpEnabled ? "on" : "off", 4],
-            [String(row.todos), 5],
             [String(row.approvals), 5],
             [
                 row.lastError ?? "",
-                remainingWidth(width, [22, 9, 10, 12, 10, 4, 5, 5]),
+                remainingWidth(width, [22, 9, 10, 12, 10, 4, 5]),
             ],
         ]);
     }
@@ -249,7 +245,6 @@ function instanceLine(row: TuiOverviewInstanceRowModel, width: number): string {
             [row.provider, 9],
             [row.runtime, 10],
             [row.connection, 12],
-            [String(row.todos), 5],
             [String(row.approvals), 5],
         ]);
     }
@@ -257,7 +252,6 @@ function instanceLine(row: TuiOverviewInstanceRowModel, width: number): string {
         [row.name, 20],
         [row.runtime, 10],
         [row.connection, 12],
-        [String(row.todos), 3],
         [String(row.approvals), 3],
     ]);
 }

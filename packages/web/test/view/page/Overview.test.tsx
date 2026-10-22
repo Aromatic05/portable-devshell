@@ -79,7 +79,6 @@ it("links an Overview instance directly to its bookmarkable detail route", () =>
         alerts: [],
         controller: { pid: 1, uptimeSeconds: 1 },
         counts: {
-            activeTodos: 0,
             failedCalls24h: 0,
             instancesAttention: 0,
             instancesCritical: 0,
@@ -105,7 +104,6 @@ it("links an Overview instance directly to its bookmarkable detail route", () =>
                 },
             },
         ],
-        todos: [],
     });
 
     expect(screen.getByRole("link", { name: "demo" })).toHaveAttribute(
@@ -124,7 +122,6 @@ function overviewState(counts: {
         alerts: [],
         controller: { pid: 1, uptimeSeconds: 1 },
         counts: {
-            activeTodos: 0,
             failedCalls24h: 0,
             instancesAttention: counts.instancesAttention,
             instancesCritical: counts.instancesCritical,
@@ -135,7 +132,6 @@ function overviewState(counts: {
         generatedAt: "2026-09-16T00:00:00Z",
         health: "healthy",
         instances: [],
-        todos: [],
     };
 }
 

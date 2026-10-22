@@ -313,17 +313,17 @@ test("server Goal recovery intent delivers model context and one Host message af
     expect(host.sent).toHaveLength(1);
 });
 
-test("server Task resume directive delivers exactly one Host message", async () => {
+test("server Goal resume directive delivers exactly one Host message", async () => {
     const state = {
-        ctxId: "ctx-task", instance: "demo", cursor: 18, agentBusy: false,
-        presentation: { work: [{ id: "todo-one", title: "Continue Todo" }], background: [] },
+        ctxId: "ctx-goal", instance: "demo", cursor: 18, agentBusy: false,
+        presentation: { work: [{ id: "goal-one", title: "Continue Goal" }], background: [] },
         reentry: { pending: true, directives: [{
-            kind: "reentry", id: "task-receipt", intent: "task-resume", sourceId: "todo-one",
+            kind: "reentry", id: "goal-receipt", intent: "goal-resume", sourceId: "goal-one",
         }] },
     };
     host.recovery = (request) => {
         if (request.action === "claim") return { claimed: true, delivery: {
-            message: "Resume authorized Todo", modelContext: { structuredContent: { todo: "todo-one" } },
+            message: "Resume authorized Goal", modelContext: { structuredContent: { goal: "goal-one" } },
         } };
         if (request.action === "validate") return { valid: true };
         if (request.action === "attempt") return { attempted: true };
@@ -342,15 +342,15 @@ test("server Task resume directive delivers exactly one Host message", async () 
     root = createRoot(container);
     await act(async () => { root?.render(<AppView />); });
     await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: { "portable-devshell/mcpapp": {
-        ctxId: "ctx-task", token: "private-task-lease", liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
+        ctxId: "ctx-goal", token: "private-goal-lease", liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
     } } }); });
     await vi.waitFor(() => expect(host.actions.map((value) => value.arguments.action))
         .toEqual(["claim", "validate", "attempt", "report"]));
-    expect(host.actions.every((value) => value.arguments.intent === "task-resume" &&
-        value.arguments.sourceId === "todo-one" && value.arguments.directiveId === "task-receipt")).toBe(true);
-    expect(host.sent).toEqual([{ role: "user", content: [{ type: "text", text: "Resume authorized Todo" }] }]);
+    expect(host.actions.every((value) => value.arguments.intent === "goal-resume" &&
+        value.arguments.sourceId === "goal-one" && value.arguments.directiveId === "goal-receipt")).toBe(true);
+    expect(host.sent).toEqual([{ role: "user", content: [{ type: "text", text: "Resume authorized Goal" }] }]);
     expect(host.modelContexts).toHaveLength(1);
-    expect(container.textContent).not.toContain("private-task-lease");
+    expect(container.textContent).not.toContain("private-goal-lease");
 });
 
 function recoverySnapshotForFailure() {

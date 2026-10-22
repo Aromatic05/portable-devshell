@@ -128,11 +128,6 @@ import {
                     calls.push("server.restart");
                 },
             },
-            task: (instance: string) => ({
-                async deleteTodo(taskId: string) {
-                    calls.push(`todo.delete:${instance}:${taskId}`);
-                },
-            }),
             tool: (instance: string) => ({
                 async call(
                     toolName: string,
@@ -284,11 +279,6 @@ import {
                     refreshed.push("toolCalls");
                 },
             },
-            todo: (instance: string) => ({
-                async load() {
-                    refreshed.push(`todo:${instance}`);
-                },
-            }),
         } as unknown as TuiDomainSession;
         const operations = new TuiRuntimeOperations({
             clients,
@@ -329,7 +319,6 @@ import {
         ]);
         assert.deepEqual(harness.refreshed, [
             "instances",
-            "todo:alpha",
             "goals:alpha",
         ]);
         const command = harness.store.getState().commandRecords[0];
@@ -499,7 +488,7 @@ import {
         );
         await harness.operations.reloadPage("config", "alpha");
         await harness.operations.reloadPage("audit", "alpha");
-        await harness.operations.reloadPage("todo", "alpha");
+        await harness.operations.reloadPage("goals", "alpha");
         await harness.operations.reloadPage("connections", "alpha");
 
         assert.equal(
@@ -528,16 +517,13 @@ import {
             "extension",
             "messagePreferences",
             "reconnect",
-            "todo:alpha",
             "goals:alpha",
-            "todo:alpha",
             "goals:alpha",
             "config",
             "context",
             "toolCalls",
             "message:instance",
             "messages:instance",
-            "todo:alpha",
             "goals:alpha",
             "config",
             "oauth",

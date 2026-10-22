@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { createRound4Peer } from "./Round4Peer.js";
-import { Endpoint, Rpc, StreamChannel, ToolCallViewModel, GoalViewModel, TodoViewModel,
+import { Endpoint, Rpc, StreamChannel, ToolCallViewModel, GoalViewModel,
     asInstanceName, createTaskTransport, createToolTransport, type ToolCallRecord, type GoalSnapshot } from "@portable-devshell/shared";
 import { WebTestDomains } from "./DomainHarness.js";
 
@@ -31,11 +31,9 @@ export function round4Domains(peer: Awaited<ReturnType<typeof startRound4Peer>>)
         transport: (instance) => createToolTransport(peer.endpoint, instance) });
     const goals = new GoalViewModel({ refreshDelayMs: 0,
         transport: (instance) => createTaskTransport(peer.endpoint, instance) });
-    const todos = new Map(["alpha", "beta"].map((instance) =>
-        [instance, new TodoViewModel(createTaskTransport(peer.endpoint, instance))] as const));
-    Object.assign(harness.domains, { toolCalls, goals, todo: (instance: string) => todos.get(instance)! });
-    return { harness, toolCalls, goals, todos,
-        close() { toolCalls.close(); goals.close(); for (const todo of todos.values()) todo.close(); } };
+    Object.assign(harness.domains, { toolCalls, goals });
+    return { harness, toolCalls, goals,
+        close() { toolCalls.close(); goals.close(); } };
 }
 
 export function round4Calls(count: number): ToolCallRecord[] {
@@ -51,8 +49,6 @@ export function round4Goal(revision: number, status: "active" | "completed" = "a
     return { autoContinueExhausted: false, continuationCount: 0, continuationDue: false,
         continuationDueAt: "2099-01-01T00:00:00Z", continuationPending: false, continuationUncertain: false,
         goalId: "goal-alpha", objective: "Verify round4 persistence",
-        revision, status, workspace: "/temporary/alpha", steps: [
-            { id: "step-1", text: "Inspect lifecycle", status: status === "completed" ? "completed" : "active" },
-        ], createdAt: "2026-10-20T00:00:00Z", updatedAt: "2026-10-20T00:00:00Z",
+        revision, status, workspace: "/temporary/alpha", createdAt: "2026-10-20T00:00:00Z", updatedAt: "2026-10-20T00:00:00Z",
         lastAgentActivityAt: "2026-10-20T00:00:00Z", lastProgressAt: "2026-10-20T00:00:00Z" };
 }

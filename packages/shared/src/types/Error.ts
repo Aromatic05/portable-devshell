@@ -56,8 +56,6 @@ export const runtimeErrorCodes = {
     reverseSelfManagedLifecycle: "reverse.selfManagedLifecycle",
     reverseSelfManagedOffline: "reverse.selfManagedOffline",
     reverseTransportUnavailable: "reverse.transportUnavailable",
-    todoInvalid: "todo.invalid",
-    todoRevisionConflict: "todo.revisionConflict",
     toolCallCancelled: "core.toolCallCancelled",
     toolCallRejected: "core.toolCallRejected",
     toolResultDeliveryFailed: "core.toolResultDeliveryFailed",

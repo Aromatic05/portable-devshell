@@ -194,7 +194,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             source: "mcp",
             startedAt: "2026-08-03T00:05:59.000Z",
             status: "completed",
-            toolName: "todo_report",
+            toolName: "progress_report",
             workspace: "/workspace/alpha",
         };
         const harness = await createHarness([report]);
@@ -574,7 +574,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         });
         for (const call of toolCalls) {
             if (
-                call.toolName !== "todo_report" ||
+                call.toolName !== "progress_report" ||
                 call.status !== "completed" ||
                 call.ctxId === undefined ||
                 typeof call.input !== "object" ||
@@ -904,19 +904,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                 name: "getGoals",
                                 handle: () => ({ goals: [], lastSeq: 1 }),
                             },
-                            {
-                                name: "getTodo",
-                                handle: () => ({
-                                    lastSeq: 1,
-                                    todo: {
-                                        items: [],
-                                        revision: 0,
-                                        summary: { completed: 0, total: 0 },
-                                        taskId: "task-1",
-                                        title: "Todo",
-                                    },
-                                }),
-                            },
                         ],
                         streams: [
                             { name: "subscribe", handle: emptySubscription },
@@ -1004,7 +991,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             alerts: [],
             controller: { pid: process.pid, uptimeSeconds: 1 },
             counts: {
-                activeTodos: 0,
                 failedCalls24h: 0,
                 instancesAttention: 0,
                 instancesCritical: 0,
@@ -1015,7 +1001,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             generatedAt: "2026-08-03T00:00:00.000Z",
             health: "healthy",
             instances: [],
-            todos: [],
         };
     }
 

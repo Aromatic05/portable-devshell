@@ -110,7 +110,6 @@ export class TuiTestDomains {
 
     readonly #runtimes = new Map<string, TestDomainSource<any>>();
     readonly #approvals = new Map<string, TestDomainSource<any>>();
-    readonly #todos = new Map<string, TestDomainSource<any>>();
 
     readonly domains: TuiDomainSession;
     readonly reader: TuiDomainReader;
@@ -135,7 +134,6 @@ export class TuiTestDomains {
             toolCalls: this.toolCalls,
             runtime: (instance: string) => this.runtime(instance),
             approval: (instance: string) => this.approval(instance),
-            todo: (instance: string) => this.todo(instance),
         } as unknown as TuiDomainSession;
         this.reader = new TuiDomainReader(this.domains, attach);
         this.projection = createTuiViewProjection(this.reader);
@@ -158,13 +156,6 @@ export class TuiTestDomains {
         }));
     }
 
-    todo(instance: string): TestDomainSource<any> {
-        return this.#source(this.#todos, instance, () => ({
-            lastSeq: 0,
-            status: "stopped",
-        }));
-    }
-
     setInstances(instances: readonly any[]): void {
         this.instances.patch({ instances: [...instances] });
     }
@@ -175,10 +166,6 @@ export class TuiTestDomains {
 
     setApprovals(instance: string, approvals: readonly any[]): void {
         this.approval(instance).patch({ approvals: [...approvals] });
-    }
-
-    setTodo(instance: string, todo: any): void {
-        this.todo(instance).patch({ todo });
     }
 
     setToolCalls(instance: string, calls: readonly any[]): void {
@@ -387,7 +374,6 @@ export class TuiDomainHarness {
     readonly #configSource: TestDomainSource<any>;
     readonly #runtimes = new Map<string, any>();
     readonly #approvals = new Map<string, any>();
-    readonly #todos = new Map<string, any>();
 
     constructor(options: TuiDomainHarnessOptions = {}) {
         this.#options = options;
@@ -782,19 +768,7 @@ export class TuiDomainHarness {
             }
         };
         const taskTransport = {
-            deleteTodo: async () => ({}) as Record<string, never>,
             getGoals: async () => ({ goals: [], lastSeq: 1 }),
-            getTodo: async () =>
-                ({
-                    lastSeq: 1,
-                    todo: {
-                        items: [],
-                        revision: 0,
-                        summary: { completed: 0, total: 0 },
-                        taskId: "task-1",
-                        title: "Todo",
-                    },
-                }) as any,
             subscribe: async () => {
                 throw new Error("Task subscription is not supported.");
             },
@@ -845,11 +819,9 @@ export class TuiDomainHarness {
             toolCalls,
             runtime: (instance: string) => this.runtime(instance),
             approval: (instance: string) => this.approval(instance),
-            todo: (instance: string) => this.todo(instance),
             releaseInstance: (instance: string) => {
                 this.#runtimes.delete(instance);
                 this.#approvals.delete(instance);
-                this.#todos.delete(instance);
             },
             load: async () => {
                 await server.connect();
@@ -972,37 +944,6 @@ export class TuiDomainHarness {
             },
         );
         this.#approvals.set(instance, source);
-        return source;
-    }
-
-    todo(instance: string): any {
-        let source = this.#todos.get(instance);
-        if (source !== undefined) return source;
-        source = Object.assign(
-            new TestDomainSource({
-                lastSeq: 0,
-                status: "stopped",
-                todo: undefined as any,
-            }),
-            {
-                close: () => undefined,
-                delete: async () => undefined,
-                load: async () => {
-                    source.patch({
-                        lastSeq: 1,
-                        todo: {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                            taskId: "task-1",
-                            title: "Todo",
-                        },
-                    });
-                },
-                refresh: async () => undefined,
-            },
-        );
-        this.#todos.set(instance, source);
         return source;
     }
 

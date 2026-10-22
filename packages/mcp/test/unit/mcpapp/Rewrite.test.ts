@@ -19,7 +19,7 @@ function harness(mode: "rewrite-action" | "rewrite-tool" | "rewrite-instance" | 
     const actions = new McpAppActionStore();
     const raw = mode === "original"
         ? { status: "applied", actionId: "goal-resume", itemId: "goal-original" }
-        : { status: "applied", actionId: "task-pause", itemId: "task-executed" };
+        : { status: "applied", actionId: "goal-pause", itemId: "goal-executed" };
     const dispatch = {
         async callTool(_tool: string, _input: JsonValue, _request: unknown, _signal?: AbortSignal,
             onExecuted?: (callId: string, value: unknown, result: JsonValue) => void) {
@@ -45,18 +45,18 @@ test("Action Receipt records the rewritten executed action, not the original ree
     const { actions, call } = harness("rewrite-action");
     const id = "action-rewrite-12345678";
     assert.deepEqual(await call.call("mcpapp_action", input(id), request), {
-        status: "applied", actionId: "task-pause", itemId: "task-executed",
+        status: "applied", actionId: "goal-pause", itemId: "goal-executed",
     });
     const receipt = await actions.get(receiptKey(id));
     assert.equal(receipt?.resolved.operation, "goal-resume");
     assert.deepEqual(receipt?.execution, {
         callId: "instance-call-id", instance: "demo", toolName: "mcpapp_action",
-        actionId: "task-pause", itemId: "task-executed",
+        actionId: "goal-pause", itemId: "goal-executed",
     });
     assert.equal(receipt?.status, "applied");
     assert.equal(receipt?.effect, undefined);
     assert.deepEqual(await call.call("mcpapp_action", input(id), request), {
-        status: "applied", actionId: "task-pause", itemId: "task-executed",
+        status: "applied", actionId: "goal-pause", itemId: "goal-executed",
     });
 });
 

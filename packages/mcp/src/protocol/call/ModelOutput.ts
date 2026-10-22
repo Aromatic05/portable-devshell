@@ -30,9 +30,7 @@ const DEFAULT_TOOL_TOKENS: Readonly<Record<string, number>> = {
     tmux_input: 4_000,
     tmux_inspect: 4_000,
     tmux_manage: 1_000,
-    todo_read: 2_000,
-    todo_write: 500,
-    todo_report: 500,
+    progress_report: 500,
     environ_info: 2_000,
     environ_remote: 2_000,
 };
@@ -67,15 +65,13 @@ export function projectMcpModelOutput(
     const native = original instanceof McpNativeToolResult;
     let result = native ? original.structuredContent : original;
     let content: CallToolResult["content"] = native ? original.content : [];
-    if (toolName !== "todo_write" && toolName !== "todo_report" &&
+    if (toolName !== "progress_report" &&
         resultBytes(result, content) <= budget)
         return original;
 
     // The success message is the input the model just sent, not new evidence.
-    if (toolName === "todo_report" && isRecord(result) && result.reported === true)
+    if (toolName === "progress_report" && isRecord(result) && result.reported === true)
         content = [];
-    if (toolName === "todo_write" && isRecord(result))
-        result = compactTodoWrite(result);
 
     if (resultBytes(result, content) > budget) {
         if (toolName === "bash_run" && isRecord(result))
@@ -86,8 +82,6 @@ export function projectMcpModelOutput(
             result = projectFileGrep(result, budget, content);
         else if (toolName === "file_edit" && isRecord(result))
             result = projectFileEdit(result, budget, content);
-        else if (toolName === "todo_read" && isRecord(result))
-            result = projectTodoRead(result, budget, content);
     }
 
     // A presentation's text and structuredContent share the same model budget.
@@ -115,16 +109,6 @@ export function projectMcpModelOutput(
         isError: original.isError,
         structuredContent: result,
     });
-}
-
-function compactTodoWrite(value: RecordValue): RecordValue {
-    if (!Array.isArray(value.items) || typeof value.revision !== "number")
-        return value;
-    const compact: RecordValue = { revision: value.revision };
-    for (const key of ["taskId", "title", "summary", "checkpoint", "comment"]) {
-        if (value[key] !== undefined) compact[key] = value[key];
-    }
-    return compact;
 }
 
 function projectBash(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {
@@ -245,75 +229,6 @@ function projectFileEdit(value: RecordValue, budget: number, content: CallToolRe
         };
     }
     return projected;
-}
-
-function projectTodoRead(
-    value: RecordValue,
-    budget: number,
-    content: CallToolResult["content"],
-): RecordValue {
-    const field = Array.isArray(value.tasks) ? "tasks" :
-        Array.isArray(value.items) ? "items" : undefined;
-    if (field === undefined) return value;
-    const entries = [...(value[field] as JsonValue[])];
-    const offset = typeof value.offset === "number" ? value.offset : 0;
-    let projected: RecordValue = { ...value, [field]: entries };
-
-    // The continuation index is based on the first omitted original item,
-    // not the Worker/TaskStore page end. The next todo_read therefore resumes
-    // without losing any entry even if the Core page was already limited.
-    while (resultBytes(projected, content) > budget && entries.length > 1) {
-        entries.pop();
-        projected = {
-            ...value,
-            [field]: entries,
-            offset,
-            nextOffset: offset + entries.length,
-            modelOutputTruncated: true,
-        };
-    }
-    if (resultBytes(projected, content) <= budget) return projected;
-
-    // A single TODO item may contain several 4 KiB fields. Preserve its
-    // required identity/status but shorten optional prose; the full value
-    // remains in TodoStore and can be retrieved with a larger budget.
-    for (const limit of [1_024, 256, 64]) {
-        const shortened = entries.map((entry) => briefTodoEntry(entry, limit));
-        projected = {
-            ...projected,
-            [field]: shortened,
-            modelOutputTruncated: true,
-            ...(isRecord(value.checkpoint) ? {
-                checkpoint: briefTodoCheckpoint(value.checkpoint, limit),
-            } : {}),
-        };
-        if (resultBytes(projected, content) <= budget) return projected;
-    }
-    return projected;
-}
-
-function briefTodoEntry(value: JsonValue, bytes: number): JsonValue {
-    if (!isRecord(value)) return value;
-    const result: RecordValue = { ...value };
-    for (const field of ["content", "detail", "currentItem", "title"]) {
-        if (typeof result[field] === "string")
-            result[field] = shorten(result[field], bytes, "head");
-    }
-    if (isRecord(result.checkpoint))
-        result.checkpoint = briefTodoCheckpoint(result.checkpoint, bytes);
-    return result;
-}
-
-function briefTodoCheckpoint(value: RecordValue, bytes: number): RecordValue {
-    const result: RecordValue = { ...value };
-    for (const field of ["summary", "next"]) {
-        if (typeof result[field] === "string")
-            result[field] = shorten(result[field], bytes, "head");
-    }
-    if (Array.isArray(result.blockers))
-        result.blockers = result.blockers.slice(0, 3).map((entry) =>
-            typeof entry === "string" ? shorten(entry, bytes, "head") : entry);
-    return result;
 }
 
 function shortenNumberedLines(

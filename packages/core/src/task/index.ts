@@ -3,7 +3,6 @@ import type { TaskRuntimeOptions, TaskRuntime } from "./Api.js";
 
 
 import { GoalService } from "./goal/index.js";
-import { TodoService } from "./todo/index.js";
 import { WaitService } from "./wait/index.js";
 
 
@@ -19,18 +18,13 @@ export function createTaskRuntime(options: TaskRuntimeOptions): TaskRuntime {
         filePath: options.paths.goalsFile,
         instanceName: options.instanceName,
     });
-    const todo = new TodoService({
-        appendEvent,
-        filePath: options.paths.todoFile,
-        instanceName: options.instanceName,
-    });
     const wait = new WaitService({
         appendEvent,
         filePath: options.paths.waitsFile,
         invoke: { invoke: options.invokeTool },
     });
     return {
-        api: { goal, todo, wait },
+        api: { goal, wait },
         close: async () => await wait.close(),
         resume: () => wait.resume(),
     };

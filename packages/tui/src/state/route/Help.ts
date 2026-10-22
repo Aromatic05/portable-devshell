@@ -42,9 +42,8 @@ export function buildContextualHelpLines(state: TuiAppState): string[] {
             "Enter opens the focused Context or Tool Call; Space expands details.",
             "M opens the Message for a concrete Context; / searches Audit.",
         ],
-        todo: [
-            "Enter opens the focused Todo; Space expands details.",
-            "Destructive actions require confirmation.",
+        goals: [
+            "Space expands the selected final Goal and its status.",
         ],
         extensions: [
             "Enter opens an Extension-provided terminal page.",

@@ -121,21 +121,6 @@ test("tmux_run and tmux_inspect use tasks, panes, transcript and wait semantics"
     expect(view.textContent).toContain("/repo");
 });
 
-test("todo_write presents progress, actionable task states and Checkpoint", async () => {
-    const view = await display({ name: "todo_write", isError: false, output: {
-        title: "MCP App renderer", revision: 2, summary: { completed: 1, total: 3 },
-        items: [{ id: "a", content: "Inspect source", status: "completed" },
-            { id: "b", content: "Implement viewer", status: "in_progress" },
-            { id: "c", content: "Run testspace", status: "pending" }],
-        checkpoint: { summary: "Core UI is built", next: "Test each tool" },
-    } });
-    expect(view.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("1");
-    expect(view.querySelectorAll(".tc-todo-list li")).toHaveLength(3);
-    expect(view.querySelector('.tc-todo-list li[data-state="in_progress"]')?.textContent)
-        .toContain("Implement viewer");
-    expect(view.textContent).toContain("Core UI is built");
-});
-
 test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {
     const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+uCPEAAAAASUVORK5CYII=";
     const widget = { schema: "portable-devshell.toolcall.v1", toolName: "artifact_viewImage",
@@ -207,35 +192,8 @@ test("unknown tools show human-readable fields; the optional raw view also redac
     expect(view.querySelector(".tc-technical pre")?.textContent).toContain("[redacted]");
 });
 
-test("Workspace shows only the latest plan per Task, while preserving older audited revisions on demand", async () => {
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => { root?.render(<WorkspaceDashboard renderItem={() => null} snapshot={{
-        ctxId: "ctx-a", instance: "demo", cursor: 10, agentBusy: false,
-        presentation: { work: [], background: [] },
-        activity: [
-            { callId: "new", name: "todo_write", taskId: "plan-1", state: "completed",
-                at: "2026-10-13T12:03:00Z", output: { taskId: "plan-1", title: "Build UI",
-                    items: [{ content: "Build UI", status: "completed" }],
-                    summary: { completed: 1, total: 1 } } },
-            { callId: "old", name: "todo_write", taskId: "plan-1", state: "completed",
-                at: "2026-10-13T12:01:00Z", output: { taskId: "plan-1", title: "Build UI",
-                    items: [{ content: "Build UI", status: "in_progress" }],
-                    summary: { completed: 0, total: 1 } } },
-            { callId: "other", name: "todo_write", taskId: "plan-2", state: "completed",
-                at: "2026-10-13T12:00:00Z", output: { taskId: "plan-2", title: "Run tests",
-                    items: [], summary: { completed: 0, total: 0 } } },
-        ],
-    }} />); });
-    await act(async () => { Array.from(container!.querySelectorAll(".dashboard-tabs button"))
-        .find((button) => button.textContent === "Activity")?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    expect(container.querySelectorAll(".dashboard-timeline > li")).toHaveLength(2);
-    const entries = container.querySelectorAll<HTMLButtonElement>(".dashboard-timeline .toolcall-compact");
-    await act(async () => { entries[0]?.click(); });
-    expect(container.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("1");
-    const internal = Array.from(container.querySelectorAll(".workspace-setting"))
-        .find((node) => node.textContent?.includes("Include polling"))?.querySelector<HTMLInputElement>("input");
-    await act(async () => { internal?.click(); });
-    expect(container.querySelectorAll(".dashboard-timeline > li")).toHaveLength(3);
+test("progress_report renders a compact report and its readable message", async () => {
+    const view = await display({ name: "progress_report", isError: false, output: { reported: true } },
+        { message: "Final Goal and Memory are now active" });
+    expect(view.textContent).toContain("Final Goal and Memory are now active");
 });

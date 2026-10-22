@@ -17,6 +17,7 @@ let fixture;
 let browser;
 let cli;
 let endpoint;
+let peerEndpoint;
 let mcp;
 const streams = new Set();
 const observers = [];
@@ -68,6 +69,18 @@ try {
         await shared.createServerTransport(endpoint, { clientKind: "cli" }).hello();
         const processApi = shared.createProcessTransport(endpoint, instance);
         const taskApi = shared.createTaskTransport(endpoint, instance);
+        peerEndpoint = new shared.Endpoint({ connectChannel: (signal) => shared.LocalChannel.connect(socketPath, { signal }) });
+        await shared.createServerTransport(peerEndpoint, { clientKind: "cli" }).hello();
+        const peerTaskApi = shared.createTaskTransport(peerEndpoint, instance);
+        const assertContextVisible = async () => {
+            const native = await shared.createContextTransport(endpoint).validateForInstance(ctxId, instance);
+            const peer = (await cli.context.list({ instance })).find(context => context.ctxId === ctxId);
+            assert.ok(peer, "CLI transport lost the MCP Context");
+            assert.deepEqual(peer.environments, native.environments);
+            assert.ok(native.environments.some(environment => environment.instance === instance && environment.workspace === fixture.workspace));
+            const listed = JSON.parse(runCli(["context", "list"], fixture.env).stdout);
+            assert.equal(listed.filter(context => context.ctxId === ctxId).length, 1);
+        };
         const approvalApi = shared.createApprovalTransport(endpoint, instance);
         const toolApi = shared.createToolTransport(endpoint, instance);
         const configApi = shared.createConfigTransport(endpoint);
@@ -164,62 +177,54 @@ try {
             stoppedEvents: 1, startedEvents: 1, matchingNativeAndCliEvents: true, finalSeq: restarted.lastSeq,
         });
 
-        phase = "mcp-todo-revision-replay-web";
-        const title = `CrossClient-${randomUUID()}`;
-        const input = { ctxId, revision: 0, title, todos: [{ id: "verify", content: "crossclient-step-0", status: "in_progress" }] };
-        let todo = await call("todo_write", input);
-        const taskId = todo.taskId;
-        assert.equal(typeof taskId, "string");
-        const readTask = () => taskApi.getTodo({ taskId });
-        const before = await readTask();
-        assert.equal(before.todo.revision, todo.revision);
+        phase = "mcp-goal-revision-replay-web";
+        const objective = `CrossClient-${randomUUID()}`;
+        await assertContextVisible();
+        assert.equal((await call("workspace_goal", { ctxId, action: "get" })).goal, null);
+        let goal = (await call("workspace_goal", { ctxId, action: "start", objective })).goal;
+        const goalId = goal.goalId;
+        assert.equal(typeof goalId, "string");
+        const readGoal = () => taskApi.getGoal(ctxId);
+        const before = await readGoal();
+        assert.equal(before.goal.revision, goal.revision);
+        assert.equal(before.goal.objective, objective);
+        assert.equal((await peerTaskApi.getGoal(ctxId)).goal.goalId, goalId);
         const taskStream = await taskApi.subscribe(before.lastSeq + 1);
         streams.add(taskStream);
-        const updated = { ...input, taskId, revision: todo.revision,
-            todos: [{ id: "verify", content: "crossclient-step-1", status: "in_progress" }] };
-        todo = await call("todo_write", updated);
-        const event = await within(taskStream.next(), "live Todo event");
+        const updated = { ctxId, action: "update", expectedGoalId: goalId, expectedRevision: goal.revision,
+            note: "crossclient-update-1" };
+        goal = (await call("workspace_goal", updated)).goal;
+        assert.equal(goal.revision, before.goal.revision + 1);
+        const event = await within(taskStream.next(), "live Goal event");
         assert.equal(event.kind, "event");
-        assert.equal(event.event.type, "todo.updated");
-        assert.equal(event.event.data.taskId, taskId);
-        assert.equal(event.event.data.revision, todo.revision);
+        assert.equal(event.event.type, "goal.updated");
+        assert.equal(event.event.data.goalId, goalId);
+        assert.equal(event.event.data.ctxId, ctxId);
         assert.ok(event.event.seq > before.lastSeq);
-        assert.equal((await readTask()).todo.revision, todo.revision);
+        assert.equal((await readGoal()).goal.revision, goal.revision);
         taskStream.close(); streams.delete(taskStream);
-        // A real stale snapshot request must propose a DIFFERENT change;
-        // repeating the exact previous payload would instead hit the separate
-        // Todo no-op guard before revision validation.
-        const staleUpdate = { ...updated,
-            todos: [{ id: "verify", content: "crossclient-stale-should-not-apply", status: "in_progress" }] };
-        let staleResponse;
-        let staleError;
-        try { staleResponse = await mcp.callTool({ name: "todo_write", arguments: staleUpdate }); }
-        catch (error) { staleError = error; }
-        if (staleError !== undefined) {
-            const errorText = String(staleError) + " " + JSON.stringify(staleError.data ?? {});
-            assert.match(errorText, /(?:changed from revision|revision conflict|revisionConflict|stale)/iu,
-                "Stale Todo write failed for an unrelated reason: " + errorText);
-        } else {
-            assert.equal(staleResponse?.isError, true,
-                "Stale Todo write unexpectedly succeeded: " + JSON.stringify(staleResponse));
-            assert.match(JSON.stringify(staleResponse), /revision|conflict|stale/iu);
-        }
-        assert.equal((await readTask()).todo.revision, todo.revision);
-        const pause = { ctxId, itemId: taskId, actionId: "task-pause", expectedRevision: todo.revision, requestId: randomUUID() };
+        await assert.rejects(mcp.callTool({ name: "workspace_goal", arguments: {
+            ...updated, note: "crossclient-stale-should-not-apply",
+        } }), /changed from revision/iu, "stale Goal mutation must fail through MCP");
+        assert.equal((await readGoal()).goal.revision, goal.revision);
+        assert.equal((await readGoal()).goal.note, updated.note);
+        const pause = { ctxId, itemId: goalId, actionId: "goal-pause", expectedRevision: goal.revision, requestId: randomUUID() };
         assert.equal((await call("mcpapp_action", pause)).status, "applied");
-        const paused = await readTask();
-        assert.equal(typeof paused.todo.pausedAt, "string");
+        const paused = await readGoal();
+        assert.equal(paused.goal.status, "paused");
+        assert.equal(paused.goal.revision, goal.revision + 1);
         assert.equal((await call("mcpapp_action", pause)).status, "applied");
-        assert.equal((await readTask()).todo.revision, paused.todo.revision, "Same requestId must not apply pause twice");
-        assert.equal((await call("mcpapp_action", { ctxId, itemId: taskId, actionId: "task-resume", expectedRevision: paused.todo.revision, requestId: randomUUID() })).status, "applied");
-        todo = (await readTask()).todo;
-        assert.equal(todo.pausedAt, undefined);
-        await browser.visit("#/todos");
-        await assertWebTodo(browser, title, todo.revision);
+        assert.deepEqual((await readGoal()).goal, paused.goal, "Same requestId must not apply pause twice");
+        assert.equal((await call("mcpapp_action", { ctxId, itemId: goalId, actionId: "goal-resume", expectedRevision: paused.goal.revision, requestId: randomUUID() })).status, "applied");
+        goal = (await readGoal()).goal;
+        assert.equal(goal.status, "active");
+        assert.equal(goal.revision, paused.goal.revision + 1);
+        await browser.visit("#/goals");
+        await assertWebGoal(browser, objective, goal.revision);
         await browser.reload();
-        await assertWebTodo(browser, title, todo.revision);
-        assert.match(runCli(["instance", "todo", instance], fixture.env).stdout, new RegExp(title, "u"));
-        mark("mcp-todo-crossclient-revision", { taskId, revision: todo.revision, eventSeq: event.event.seq, staleRejected: true, replayNoRevisionChange: true, hardReload: true });
+        await assertWebGoal(browser, objective, goal.revision);
+        assert.equal((await peerTaskApi.getGoal(ctxId)).goal.revision, goal.revision);
+        mark("mcp-goal-crossclient-revision", { ctxId, goalId, revision: goal.revision, eventSeq: event.event.seq, staleRejected: true, replayNoRevisionChange: true, hardReload: true });
 
         phase = "mcp-approval-web-decision-audit";
         await configApi.update({ instance: { instanceName: instance, patch: {
@@ -287,12 +292,12 @@ try {
             decidedBy: "web", repeatCliExit: repeat.status, workerEffects: 1, hardReload: true });
 
         phase = "stale-snapshot-retention-gap-recovery";
-        // Leave one stale reader disconnected while >50 REAL task changes cross
+        // Leave one stale reader disconnected while >50 REAL Goal changes cross
         // MCP ingress. eventBufferSize=50 is configured by AcceptanceFixture.
-        const staleCursor = (await readTask()).lastSeq + 1;
+        const staleCursor = (await readGoal()).lastSeq + 1;
         for (let index = 0; index < 60; index++) {
-            todo = await call("todo_write", { ctxId, taskId, title, revision: todo.revision,
-                todos: [{ id: "verify", content: `crossclient-gap-${index}`, status: "in_progress" }] });
+            goal = (await call("workspace_goal", { ctxId, action: "update", expectedGoalId: goalId,
+                expectedRevision: goal.revision, note: `crossclient-gap-${index}` })).goal;
         }
         // Initial unavailable cursor is a normal stream.gap cancellation in
         // ProcessSubscriptionManager, not a synthetic gap envelope.
@@ -308,28 +313,38 @@ try {
         // stale snapshot window. A fresh subscription must see the next commit.
         await cli.reconnect();
         await negotiateCliControl(cli);
-        const fresh = await cli.todo(instance).getTodo({ taskId });
-        assert.equal(fresh.todo.revision, todo.revision);
-        const recoveredStream = await cli.todo(instance).subscribe(fresh.lastSeq + 1);
+        await peerEndpoint.reconnect();
+        await shared.createServerTransport(peerEndpoint, { clientKind: "cli" }).hello();
+        await assertContextVisible();
+        const fresh = await peerTaskApi.getGoal(ctxId);
+        assert.equal(fresh.goal.revision, goal.revision);
+        const recoveredStream = await peerTaskApi.subscribe(fresh.lastSeq + 1);
         streams.add(recoveredStream);
-        todo = await call("todo_write", { ctxId, taskId, title, revision: todo.revision,
-            todos: [{ id: "verify", content: "crossclient-gap-recovered", status: "in_progress" }] });
-        const recoveredEvent = await within(recoveredStream.nextEvent(), "CLI resumed real Todo event");
-        assert.equal(recoveredEvent.type, "todo.updated");
-        assert.equal(recoveredEvent.data.revision, todo.revision);
+        goal = (await call("workspace_goal", { ctxId, action: "update", expectedGoalId: goalId,
+            expectedRevision: goal.revision, note: "crossclient-gap-recovered" })).goal;
+        const recovered = await within(recoveredStream.next(), "independent CLI endpoint resumed real Goal event");
+        assert.equal(recovered.kind, "event");
+        const recoveredEvent = recovered.event;
+        assert.equal(recoveredEvent.type, "goal.updated");
+        assert.equal(recoveredEvent.data.goalId, goalId);
+        assert.equal(recoveredEvent.data.ctxId, ctxId);
         recoveredStream.close(); streams.delete(recoveredStream);
-        await browser.visit("#/todos");
+        await browser.visit("#/goals");
         await browser.reload();
-        await assertWebTodo(browser, title, todo.revision);
-        const final = await readTask();
-        assert.equal(final.todo.revision, todo.revision);
-        assert.equal(final.todo.items[0].content, "crossclient-gap-recovered");
-        assert.equal((await taskApi.getTodo()).todo.tasks.filter(task => task.taskId === taskId).length, 1);
-        const diskTodo = await readFile(join(fixture.home, ".devshell", instance, "control-worker", "todo.json"), "utf8");
-        assert.ok(diskTodo.includes(taskId) && diskTodo.includes("crossclient-gap-recovered"));
+        await assertWebGoal(browser, objective, goal.revision);
+        const final = await readGoal();
+        assert.equal(final.goal.revision, goal.revision);
+        assert.equal(final.goal.note, "crossclient-gap-recovered");
+        assert.equal((await taskApi.getGoals()).goals.filter(entry => entry.goalId === goalId).length, 1);
+        const diskGoals = JSON.parse(await readFile(join(fixture.home, ".devshell", instance, "control-worker", "goals.json"), "utf8"));
+        const diskGoal = diskGoals.goals.filter(entry => entry.createdByCtxId === ctxId);
+        assert.equal(diskGoal.length, 1);
+        assert.equal(diskGoal[0].goalId, goalId);
+        assert.equal(diskGoal[0].revision, goal.revision);
+        assert.equal(diskGoal[0].note, "crossclient-gap-recovered");
         await authoritative("ready");
         mark("stale-snapshot-gap-reconnect-final-consistency", { gapCode: gap.error.code, staleCursor,
-            oldestAvailableSeq: gap.error.details.oldestAvailableSeq, revision: todo.revision, recoveredEventSeq: recoveredEvent.seq,
+            oldestAvailableSeq: gap.error.details.oldestAvailableSeq, revision: goal.revision, recoveredEventSeq: recoveredEvent.seq,
             nativeCliWebAndDiskAgree: true });
 
         phase = "temporary-control-restart-durable-crossclient-reload";
@@ -347,23 +362,31 @@ try {
         await cli.reconnect();
         await negotiateCliControl(cli);
         await authoritative("ready");
-        const restored = await readTask();
-        assert.deepEqual(restored.todo, final.todo, "Todo must survive Control restart exactly");
+        const restored = await readGoal();
+        const finalState = { ...final.goal };
+        const restoredState = { ...restored.goal };
+        delete finalState.continuationDue;
+        delete restoredState.continuationDue;
+        // Due eligibility is computed against the current clock; persisted fields must agree.
+        assert.deepEqual(restoredState, finalState, "Goal must survive Control restart exactly");
         assert.ok(restored.lastSeq > final.lastSeq, "Durable event cursor must advance across restart");
         assert.deepEqual(await approvalApi.get(approval.approvalId), decision, "Web decision must survive Control restart");
         const restoredCalls = await toolApi.listCalls({ callIds: [approval.callId], limit: 10 });
         assert.equal(restoredCalls.length, 1);
         assert.equal(restoredCalls[0].status, "completed");
         assert.equal(await readFile(effectFile, "utf8"), "initial\nrecovered\napproved\n", "Restart must not replay approved Worker command");
-        assert.match(runCli(["instance", "todo", instance], fixture.env).stdout, new RegExp(title, "u"));
+        await assertContextVisible();
+        await peerEndpoint.reconnect();
+        await shared.createServerTransport(peerEndpoint, { clientKind: "cli" }).hello();
+        assert.deepEqual((await peerTaskApi.getGoal(ctxId)).goal, restored.goal);
         assert.match(runCli(["approval", "show", instance, approval.approvalId], fixture.env).stdout, /approved/u);
         await browser.reload();
-        await assertWebTodo(browser, title, todo.revision);
+        await assertWebGoal(browser, objective, goal.revision);
         await browser.visit(`#/audit/context/${encodeURIComponent(instance)}/${encodeURIComponent(ctxId)}/call/${encodeURIComponent(approval.callId)}`);
         await browser.reload();
         await browser.wait(`document.body.innerText.includes(${JSON.stringify(approval.callId)}) &&
             [...document.querySelectorAll('.tool-call-record .result')].some(node => node.textContent === 'completed')`, "exact durable audit after Control restart");
-        mark("control-restart-durable-final-state", { cliExits: [0, 0, 0, 0], revision: restored.todo.revision,
+        mark("control-restart-durable-final-state", { cliExits: [0, 0, 0, 0], revision: restored.goal.revision,
             lastSeq: restored.lastSeq, approvedCallCount: 1, workerCommandNotReplayed: true,
             webHardReload: true, nativeAndCliReload: true });
         report.status = "passed";
@@ -382,7 +405,7 @@ try {
     for (const stream of streams) await cleanup("stream", () => stream.close());
     if (browser) await cleanup("Chromium", () => browser.close());
     if (mcp) await cleanup("MCP", () => mcp.close());
-    cli?.close(); endpoint?.close();
+    cli?.close(); endpoint?.close(); peerEndpoint?.close();
     if (fixture) {
         if (controlAttempted) {
             await cleanup("temporary instance stop", () => runCli(["instance", "stop", instance], fixture.env));
@@ -397,12 +420,12 @@ try {
     process.exitCode = exitCode;
 }
 
-async function assertWebTodo(page, title, revision) {
+async function assertWebGoal(page, objective, revision) {
     await page.wait(`(() => {
         const cards = [...document.querySelectorAll('article.card')].filter(card =>
-            [...card.querySelectorAll('h3')].some(node => node.textContent === ${JSON.stringify(title)}));
+            [...card.querySelectorAll('h4')].some(node => node.textContent === ${JSON.stringify(objective)}));
         return cards.length === 1 && cards[0].innerText.includes(${JSON.stringify(`revision ${revision}`)});
-    })()`, `one Web Todo at revision ${revision}`);
+    })()`, `one Web Goal at revision ${revision}`);
 }
 
 function observe(stream, cliAdapter) {

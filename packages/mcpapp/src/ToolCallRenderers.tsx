@@ -15,7 +15,6 @@ function textList(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((entry): entry is string =>
         typeof entry === "string").map(redact) : [];
 }
-function heading(text: string): ReactNode { return <h3 className="tc-section-title">{text}</h3>; }
 
 function OutlineView({ text }: { text: string }): ReactNode {
     return <ul className="tc-outline" aria-label="File structure">{redact(text).split(/\r?\n/u)
@@ -207,50 +206,6 @@ function TmuxView({ name, input, result }: ToolCallPresentation): ReactNode {
     </div>;
 }
 
-function TodoView({ input, result, name }: ToolCallPresentation): ReactNode {
-    const args = record(input);
-    const output = record(result?.output);
-    const items = entries(output?.items);
-    const tasks = entries(output?.tasks);
-    const plan = record(output?.summary);
-    const checkpoint = record(output?.checkpoint) ?? record(args?.checkpoint);
-    const completed = number(plan?.completed) ?? items.filter((item) => item.status === "completed").length;
-    const total = number(plan?.total) ?? items.length;
-    return <div className="tc-view">
-        <div className="tc-file-header"><strong>{string(output?.title) ??
-            string(args?.title) ?? "Task plan"}</strong>
-            <span className="tc-mini-label">{name === "todo_write" ? "Updated" : "Current"}</span></div>
-        {total > 0 && <div className="tc-progress" role="progressbar" aria-label="Tasks completed"
-            aria-valuenow={completed} aria-valuemin={0} aria-valuemax={total}>
-            <span style={{ width: Math.min(100, Math.max(0, (completed / total) * 100)) + "%" }} /></div>}
-        <InfoStrip>{completed} / {total} complete</InfoStrip>
-        {items.length > 0 && <ul className="tc-todo-list">{items.map((item, index) => {
-            const status = string(item.status) ?? "pending";
-            return <li key={string(item.id) ?? index} data-state={status}>
-                <span className="tc-todo-icon" aria-hidden="true">{status === "completed" ? "✓" :
-                    status === "in_progress" ? "◉" : status === "failed" ? "✕" :
-                        status === "blocked" ? "!" : "○"}</span>
-                <div><span>{string(item.content) ?? "Unnamed task"}</span>
-                    {string(item.detail) && <p>{string(item.detail)}</p>}</div>
-            </li>;
-        })}</ul>}
-        {tasks.length > 0 && !items.length && <div className="tc-pane-list">
-            {tasks.map((item, index) => <section className="tc-pane" key={index}>
-                <div className="tc-file-header"><strong>{string(item.title) ?? "Plan"}</strong>
-                    <TaskState status={item.status} /></div>
-                <InfoStrip>{number(item.completed) ?? 0} / {number(item.total) ?? 0} complete</InfoStrip>
-            </section>)}
-        </div>}
-        {checkpoint && <section className="tc-checkpoint">
-            {heading("Checkpoint")}
-            {string(checkpoint.summary) && <p>{string(checkpoint.summary)}</p>}
-            {string(checkpoint.next) && <p><strong>Next:</strong> {string(checkpoint.next)}</p>}
-            {textList(checkpoint.blockers).length > 0 && <Notice tone="warning">
-                {textList(checkpoint.blockers).join("; ")}</Notice>}
-        </section>}
-    </div>;
-}
-
 function ImageView({ input, result }: ToolCallPresentation): ReactNode {
     const output = record(result?.output);
     const source = record(output?.source);
@@ -315,9 +270,7 @@ const renderers: Record<string, Renderer> = {
     tmux_input: TmuxView,
     tmux_inspect: TmuxView,
     tmux_manage: TmuxView,
-    todo_read: TodoView,
-    todo_write: TodoView,
-    todo_report: ReportView,
+    progress_report: ReportView,
     artifact_viewImage: ImageView,
     environ_info: EnvironmentView,
     environ_remote: EnvironmentView,

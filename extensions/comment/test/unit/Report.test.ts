@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    runtimeErrorCodes,
     toRemoteErrorBody,
-    type RemoteErrorBody,
 } from "@portable-devshell/shared";
 
 import { CommentReportService } from "../../src/comment/report/Service.ts";
@@ -78,9 +76,6 @@ function createHarness() {
         advance(milliseconds: number) {
             now += milliseconds;
         },
-        async before(toolName: string) {
-            await service.beforeTodoToolCall(ctxId, toolName);
-        },
         deliverComment(id: string, text: string) {
             entries.push({
                 callId: `delivery-${id}`,
@@ -114,21 +109,9 @@ function createHarness() {
 
 async function assertUseOtherTools(operation: Promise<unknown>): Promise<void> {
     await assert.rejects(operation, (error: unknown) => {
-        const body: RemoteErrorBody | undefined = toRemoteErrorBody(error);
-        assert.equal(body?.code, runtimeErrorCodes.todoInvalid);
+        const body = toRemoteErrorBody(error);
+        assert.equal(body?.code, "progress.rateLimited");
         assert.equal(body?.retryable, false);
-        assert.equal(
-            body?.message,
-            "You have performed too many useless operations. Use other tools.",
-        );
-        assert.equal(
-            typeof body?.details === "object" &&
-                body.details !== null &&
-                !Array.isArray(body.details)
-                ? body.details.action
-                : undefined,
-            "use_other_tools",
-        );
         return true;
     });
 }
@@ -164,7 +147,7 @@ test("Comment report policy rejects duplicate autonomous reports without spendin
     await assert.rejects(harness.report("same"), (error: unknown) => {
         assert.equal(
             toRemoteErrorBody(error)?.code,
-            runtimeErrorCodes.todoInvalid,
+            "progress.duplicate",
         );
         assert.equal(
             (
@@ -179,46 +162,7 @@ test("Comment report policy rejects duplicate autonomous reports without spendin
     await assertUseOtherTools(harness.report("third"));
 });
 
-test("Comment report policy disables Todo after repeated invalid operations and expires the ban", async () => {
-    const harness = createHarness();
 
-    await harness.report("same");
-    for (let index = 0; index < 3; index += 1) {
-        await assert.rejects(
-            harness.report("same"),
-            (error: unknown) =>
-                toRemoteErrorBody(error)?.code ===
-                runtimeErrorCodes.todoInvalid,
-        );
-    }
-
-    await assertUseOtherTools(harness.before("todo_read"));
-    harness.advance(299_999);
-    await assertUseOtherTools(harness.before("todo_report"));
-    harness.advance(1);
-    await harness.before("todo_report");
-});
-
-test("Comment report policy forgets invalid operations outside the rolling window", async () => {
-    const harness = createHarness();
-
-    await harness.report("same");
-    for (let index = 0; index < 2; index += 1) {
-        await assert.rejects(
-            harness.report("same"),
-            (error: unknown) =>
-                toRemoteErrorBody(error)?.code ===
-                runtimeErrorCodes.todoInvalid,
-        );
-    }
-    harness.advance(120_000);
-    await assert.rejects(
-        harness.report("same"),
-        (error: unknown) =>
-            toRemoteErrorBody(error)?.code === runtimeErrorCodes.todoInvalid,
-    );
-    await harness.report("new information");
-});
 
 test("Comment report policy serializes concurrent autonomous reports", async () => {
     const harness = createHarness();
@@ -240,40 +184,7 @@ test("Comment report policy serializes concurrent autonomous reports", async () 
     assert.equal(harness.reports.length, 2);
 });
 
-test("Comment report policy permits repeated Todo access without spending report tokens", async () => {
-    const harness = createHarness();
 
-    await harness.before("todo_read");
-    await harness.before("todo_write");
-    await harness.before("todo_read");
-
-    await harness.report("report one");
-    await harness.report("report two");
-    await assertUseOtherTools(harness.report("report three"));
-
-    harness.advance(30_000);
-    await harness.before("todo_write");
-    await harness.report("report three");
-});
-
-test("Comment report policy admits concurrent Todo access without manufacturing invalid operations", async () => {
-    const harness = createHarness();
-
-    const results = await Promise.allSettled([
-        harness.before("todo_read"),
-        harness.before("todo_write"),
-        harness.before("todo_read"),
-    ]);
-
-    assert.equal(
-        results.filter((result) => result.status === "fulfilled").length,
-        3,
-    );
-    assert.equal(
-        results.filter((result) => result.status === "rejected").length,
-        0,
-    );
-});
 
 test("Comment report obligations bypass autonomous throttling and clear only after persistence succeeds", async () => {
     const harness = createHarness();

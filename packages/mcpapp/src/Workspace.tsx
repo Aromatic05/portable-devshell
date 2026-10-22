@@ -131,13 +131,8 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     const [showInternalCalls, setShowInternalCalls] = useState(false);
     const { primary, work, background } = snapshot.presentation;
     const pendingCount = primary ? 1 : 0;
-    const shownPlans = new Set<string>();
     const visibleActivity = showInternalCalls ? snapshot.activity : snapshot.activity?.filter((item) => {
         if (item.name === "tmux_read" || item.name === "mcpapp_open") return false;
-        if ((item.name === "todo_write" || item.name === "todo_read") && item.taskId) {
-            if (shownPlans.has(item.taskId)) return false;
-            shownPlans.add(item.taskId);
-        }
         return true;
     });
     const pollsByTask = new Map<string, Activity[]>();

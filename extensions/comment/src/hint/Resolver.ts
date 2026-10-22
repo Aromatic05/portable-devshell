@@ -5,7 +5,6 @@ import { crossToolErrorHints } from "./tool/Error.js";
 import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./tool/control/Artifact.js";
 import { instanceErrorHints } from "./tool/control/Instance.js";
-import { todoErrorHints } from "./tool/control/Todo.js";
 import { bashErrorHints, bashResultHints } from "./tool/worker/Bash.js";
 import {
     fileEditResultHints,
@@ -58,7 +57,6 @@ const instanceTools = new Set([
     "instance_create",
     "instance_stop",
 ]);
-const todoTools = new Set(["todo_read", "todo_write"]);
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => bashErrorHints(body);
@@ -70,7 +68,6 @@ function errorResolverFor(toolName: string): ErrorResolver | undefined {
         return (_name, body) => artifactControlErrorHints(body);
     if (instanceTools.has(toolName))
         return (_name, body) => instanceErrorHints(body);
-    if (todoTools.has(toolName)) return (_name, body) => todoErrorHints(body);
     return undefined;
 }
 

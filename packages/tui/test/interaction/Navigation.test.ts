@@ -602,7 +602,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
             alerts: [],
             controller: { pid: 1, uptimeSeconds: 60 },
             counts: {
-                activeTodos: 1,
                 failedCalls24h: 1,
                 instancesAttention: 0,
                 instancesCritical: 0,
@@ -626,18 +625,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                         ready: true,
                         status: "ready",
                     },
-                },
-            ],
-            todos: [
-                {
-                    completed: 0,
-                    currentItem: "Investigate failure",
-                    instance: asInstanceName("alpha"),
-                    revision: 1,
-                    status: "in_progress",
-                    taskId: "task-1",
-                    title: "Recover worker",
-                    total: 1,
                 },
             ],
         });
@@ -1371,151 +1358,17 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
         );
     });
 
-    test("Todo owns Goal presentation and does not leak it into Instances", async () => {
+    test("Goals owns final objective presentation and does not leak it into Instances", async () => {
         const harness = createHarness();
-        harness.domains.setGoals("alpha", [
-            {
-                autoContinueExhausted: false,
-                continuationCount: 1,
-                continuationDue: false,
-                continuationDueAt: "2026-08-31T10:00:00.000Z",
-                continuationPending: false,
-                continuationUncertain: false,
-                createdAt: "2026-08-31T09:00:00.000Z",
-                goalId: "goal-visible",
-                lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
-                lastProgressAt: "2026-08-31T09:30:00.000Z",
-                maxContinuations: 10,
-                objective: "Ship Workspace recovery",
-                revision: 4,
-                status: "active",
-                steps: [
-                    {
-                        id: "inspect",
-                        status: "completed",
-                        text: "Inspect",
-                    },
-                    { id: "fix", status: "active", text: "Fix" },
-                ],
-                updatedAt: "2026-08-31T09:30:00.000Z",
-                workspace:
-                    "/home/aromatic/Applications/OwnProject/portable-devshell",
-            },
-        ]);
-        assert.equal(
-            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.some((box) =>
-                box.id.startsWith("todo-"),
-            ),
-            false,
-        );
-
-        harness.store.setSelectedPage("todo");
-        const overviewBoxes = selectMainScreenModel(
-            harness.store.getState(),
-            harness.domains.reader,
-        ).boxes;
-        assert.deepEqual(
-            overviewBoxes.map((box) => box.id),
-            [
-                "todo-goal:goal-visible",
-                "todo-task:task-1",
-                "todo-item:inspect",
-                "todo-item:implement",
-                "todo-item:verify",
-            ],
-        );
-        assert.equal(overviewBoxes[0]?.primaryAction, undefined);
-        for (const box of overviewBoxes.slice(1)) {
-            assert.notEqual(box.primaryAction, undefined);
-        }
-        await openPrimaryRoute(harness, "todo-task:task-1");
-        assert.deepEqual(currentTuiRoute(harness.store.getState()), {
-            page: "todo",
-            todoId: "task-1",
-            view: "detail",
-        });
-        assert.deepEqual(
-            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
-                (box) => box.id,
-            ),
-            [
-                "todo-goal:goal-visible",
-                "todo-summary:task-1",
-                "todo-item:inspect",
-                "todo-item:implement",
-                "todo-item:verify",
-            ],
-        );
-    });
-
-    test("Todo project deletion requires confirmation before permanently deleting its history", async () => {
-        const deleted: Array<{ instance: string; taskId: string }> = [];
-        const harness = createHarness({
-            onTodoDelete: async (instance, taskId) => {
-                deleted.push({ instance, taskId });
-            },
-        });
-
-        harness.store.setSelectedPage("todo");
-        await openPrimaryRoute(harness, "todo-task:task-1");
-        const summary = expandBox(harness, "todo-summary:task-1");
-        harness.store.setMainFocusId(summary.id);
-        harness.store.setFocusScope("boxDetail");
-        harness.store.setSelectedDetailLine(
-            summary.expandedKey,
-            "todo-summary:task-1:button:delete-project",
-        );
-
-        await harness.dispatch({ type: "focus.activate" });
-        const overlay = topTuiOverlay(
-            harness.store.getState().interaction.overlays,
-        );
-        assert.equal(overlay?.kind, "confirmation");
-        assert.equal(
-            overlay?.kind === "confirmation" ? overlay.title : undefined,
-            "Confirm Todo Project Deletion",
-        );
-        if (overlay?.kind !== "confirmation")
-            throw new Error("confirmation overlay missing");
-        assert.match(overlay.body, /Todo support/u);
-        assert.match(overlay.body, /task-1/u);
-        assert.match(overlay.body, /alpha/u);
-        assert.deepEqual(deleted, []);
-
-        await harness.dispatch({ button: "confirm", type: "confirm.focus" });
-        await harness.dispatch({ type: "confirm.accept" });
-        assert.deepEqual(deleted, [{ instance: "alpha", taskId: "task-1" }]);
-    });
-
-    test("failed destructive actions keep confirmation context and expose the failure", async () => {
-        const harness = createHarness({
-            onTodoDelete: async () => {
-                throw new Error("Delete failed.");
-            },
-        });
-
-        harness.store.setSelectedPage("todo");
-        await openPrimaryRoute(harness, "todo-task:task-1");
-        const summary = expandBox(harness, "todo-summary:task-1");
-        harness.store.setMainFocusId(summary.id);
-        harness.store.setFocusScope("boxDetail");
-        harness.store.setSelectedDetailLine(
-            summary.expandedKey,
-            "todo-summary:task-1:button:delete-project",
-        );
-        await harness.dispatch({ type: "focus.activate" });
-        await harness.dispatch({ button: "confirm", type: "confirm.focus" });
-        await harness.dispatch({ type: "confirm.accept" });
-
-        const overlay = topTuiOverlay(
-            harness.store.getState().interaction.overlays,
-        );
-        assert.equal(overlay?.kind, "confirmation");
-        if (overlay?.kind !== "confirmation")
-            throw new Error("confirmation overlay missing");
-        assert.equal(overlay.busy, false);
-        assert.equal(overlay.error, "Delete failed.");
-        assert.equal(overlay.selectedAction, "confirm");
+        harness.domains.setGoals("alpha", [{
+            goalId: "goal-visible", objective: "Ship Workspace recovery", status: "active", revision: 4,
+        }]);
+        harness.store.setSelectedPage("instances");
+        assert.equal(selectMainScreenModel(harness.store.getState(), harness.domains.reader)
+            .boxes.some((box) => box.id.startsWith("goal:")), false);
+        harness.store.setSelectedPage("goals");
+        assert.deepEqual(selectMainScreenModel(harness.store.getState(), harness.domains.reader)
+            .boxes.map((box) => box.id), ["goal:goal-visible"]);
     });
 
     test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
@@ -4606,7 +4459,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
             onMessagePreferencesUpdate?: (
                 patch: MessagePreferencesPatch,
             ) => Promise<void>;
-            onTodoDelete?: (instance: string, taskId: string) => Promise<void>;
             onToolCall?: (
                 instance: string,
                 toolName: string,
@@ -4708,7 +4560,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
             onContextDisable: options.onContextDisable,
             onMessagePreferencesUpdate:
                 options.onMessagePreferencesUpdate,
-            onTodoDelete: options.onTodoDelete,
             onQuit: async () => undefined,
             onRedraw: () => undefined,
             onToolCall: options.onToolCall ?? (async () => true),
@@ -4854,34 +4705,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                 ready: false,
                 status: "stopped",
             },
-        });
-        domains.setTodo("alpha", {
-            items: [
-                {
-                    content: "Inspect",
-                    id: "inspect",
-                    status: "completed",
-                },
-                {
-                    content: "Implement Todo",
-                    detail: "Adding dedicated TUI page",
-                    id: "implement",
-                    status: "in_progress",
-                },
-                {
-                    content: "Verify",
-                    id: "verify",
-                    status: "pending",
-                },
-            ],
-            revision: 2,
-            summary: {
-                completed: 1,
-                currentItemId: "implement",
-                total: 3,
-            },
-            taskId: "task-1",
-            title: "Todo support",
         });
         domains.setToolCalls("alpha", [
             {

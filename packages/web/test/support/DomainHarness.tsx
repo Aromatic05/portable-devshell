@@ -216,7 +216,6 @@ export class WebTestDomains {
 
     readonly #runtimes = new Map<string, any>();
     readonly #approvals = new Map<string, any>();
-    readonly #todos = new Map<string, any>();
 
     readonly domains: WebDomainSession;
 
@@ -239,11 +238,9 @@ export class WebTestDomains {
             reverse: this.reverse,
             runtime: (instance: string) => this.runtime(instance),
             approval: (instance: string) => this.approval(instance),
-            todo: (instance: string) => this.todo(instance),
             releaseInstance: (instance: string) => {
                 this.#runtimes.delete(instance);
                 this.#approvals.delete(instance);
-                this.#todos.delete(instance);
             },
             load: asyncVoid,
             reconnect: asyncVoid,
@@ -291,25 +288,6 @@ export class WebTestDomains {
         return source;
     }
 
-    todo(instance: string): any {
-        let source = this.#todos.get(instance);
-        if (source !== undefined) return source;
-        source = Object.assign(
-            new TestDomainSource({
-                lastSeq: 0,
-                status: "stopped",
-                todo: undefined as any,
-            }),
-            {
-                delete: asyncVoid,
-                load: asyncVoid,
-                refresh: asyncVoid,
-            },
-        );
-        this.#todos.set(instance, source);
-        return source;
-    }
-
     setInstances(instances: readonly any[]): void {
         this.instances.patch({ instances: [...instances] });
     }
@@ -320,10 +298,6 @@ export class WebTestDomains {
 
     setApprovals(instance: string, approvals: readonly any[]): void {
         this.approval(instance).patch({ approvals: [...approvals] });
-    }
-
-    setTodo(instance: string, todo: any): void {
-        this.todo(instance).patch({ todo });
     }
 
     setToolCalls(instance: string, calls: readonly any[]): void {

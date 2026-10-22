@@ -339,7 +339,6 @@ const builtinCliCommands = [
     "start",
     "status",
     "stop",
-    "todo",
     "tool",
     "tui",
     "update",

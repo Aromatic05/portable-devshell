@@ -450,26 +450,6 @@ test("instance already-exists and config-invalid use real catalog codes and safe
     assert.match(config[0].text, /outOfRange/);
 });
 
-test("todo revision conflict and invalid invariants are classified", () => {
-    assert.deepEqual(
-        codes(resolveErrorHints("todo_write", body("todo.revisionConflict"))),
-        ["todo.revisionConflict"],
-    );
-    const invalid = resolveErrorHints("todo_write", body("todo.invalid"));
-    assert.deepEqual(codes(invalid), ["todo.invalid"]);
-    assert.equal(
-        invalid[0].text,
-        "Fix the reported invariant and resubmit the full plan.",
-    );
-
-    const useOtherTools = resolveErrorHints(
-        "todo_write",
-        body("todo.invalid", { details: { action: "use_other_tools" } }),
-    );
-    assert.deepEqual(codes(useOtherTools), ["todo.invalid"]);
-    assert.equal(useOtherTools[0].text, "Use other tools.");
-});
-
 test("cross-tool error hints apply to any tool and walk the cause chain", () => {
     const denied = resolveErrorHints("bash_run", body("core.approvalDenied"));
     assert.deepEqual(codes(denied), ["core.approvalDenied"]);
@@ -490,9 +470,9 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     ]);
 });
 
-test("message control errors use dedicated cross-tool guidance instead of Todo invariants", () => {
+test("message control errors use dedicated cross-tool guidance", () => {
     const stopped = resolveErrorHints(
-        "todo_write",
+        "bash_run",
         body("control.modelStopped"),
     );
     assert.deepEqual(codes(stopped), ["control.modelStopped"]);
@@ -504,7 +484,7 @@ test("message control errors use dedicated cross-tool guidance instead of Todo i
         body("control.modelReplyRequired"),
     );
     assert.deepEqual(codes(pushed), ["control.modelReplyRequired"]);
-    assert.match(pushed[0]?.text ?? "", /todo_report/u);
+    assert.match(pushed[0]?.text ?? "", /progress_report/u);
 
     const resumed = resolveErrorHints("bash_run", body("control.modelResumed"));
     assert.deepEqual(codes(resumed), ["control.modelResumed"]);

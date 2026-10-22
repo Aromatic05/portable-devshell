@@ -144,7 +144,8 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
 | tmux              | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`                           |
-| Todo              | `todo_read`、`todo_write`、Comment `mcp.tools` contribution `todo_report`                                                                      |
+| Goal              | `workspace_goal`（最终目标管理）                                                      |
+| Comment           | Comment `mcp.tools` 提供 `progress_report`（面向用户的进度报告）                        |
 | Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |
 | Instance          | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
@@ -172,7 +173,7 @@ Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 M
 
 模型侧正常调用 `environ_info` 完成 Context 与 Workspace bootstrap。启用 Workspace 后，`mcpapp_open` 仅用于显式重新呈现/恢复界面，并不是每次工具调用的前置步骤。独立 Ask/Question Store 和 `workspace_ask` / `mcpapp_ask` 已退役，不是当前模型工具。
 
-App 通过带隐藏 capability 的 Live Workspace route 读取 `snapshot` / `watch`；修改 Approval、Goal、Task 使用 app-only `mcpapp_action`，自动模型恢复使用 app-only `mcpapp_reentry`。这些写入仍由 ToolCall Pipeline 验证和审计，不允许普通模型直接调用，也不会将领域内部的 Goal/Todo/Wait DTO 交给 UI 自行修改。Inline ToolCall/Interaction 与 Fullscreen Workspace 使用不同的 presentation resource。
+App 通过带隐藏 capability 的 Live Workspace route 读取 `snapshot` / `watch`；修改 Approval 和 Goal 人工控制状态使用 app-only `mcpapp_action`，自动模型恢复使用 app-only `mcpapp_reentry`。这些写入仍由 ToolCall Pipeline 验证和审计，不允许普通模型直接调用，也不会将领域内部的 Goal/Wait DTO 交给 UI 自行修改。Inline ToolCall/Interaction 与 Fullscreen Workspace 使用不同的 presentation resource。
 
 详见 [Workspace](workspace.md)。
 

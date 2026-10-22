@@ -42,22 +42,6 @@ export function installMcpAppAction(
                 userControl: true,
                 ...(value.context.workspace === undefined ? {} : { workspace: value.context.workspace }),
             });
-        } else {
-            if (action.expectedRevision === undefined) throw denied("Task revision is required.");
-            // A targeted Todo read returns the task's items, not the task
-            // summaries carrying Context ownership. Read the active catalog
-            // before the revision-checked mutation.
-            const todo = await api.task.todo.read();
-            if (!todo.tasks?.some((task) => task.taskId === action.itemId && task.ctxId === ctxId))
-                throw denied("The Task is unavailable in this Context.");
-            signal?.throwIfAborted();
-            await api.task.todo.control(
-                action.itemId,
-                action.actionId === "task-pause" ? "pause"
-                    : action.actionId === "task-resume" ? "resume" : "cancel",
-                ctxId,
-                action.expectedRevision,
-            );
         }
         return { status: "applied", itemId: action.itemId, actionId: action.actionId } as JsonValue;
     });
@@ -70,7 +54,7 @@ function readAction(value: JsonValue): { itemId: string; actionId: string; expec
     if (typeof itemId !== "string" || itemId.length === 0 || itemId.length > 256 ||
         typeof requestId !== "string" || requestId.length < 16 || requestId.length > 128 ||
         typeof actionId !== "string" || ![
-            "approve", "deny", "task-pause", "task-resume", "task-cancel",
+            "approve", "deny",
             "goal-pause", "goal-resume", "goal-retry", "goal-stop",
         ].includes(actionId) ||
         (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0)))

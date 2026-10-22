@@ -48,13 +48,6 @@ export function parseInstanceCommand(
                 instance: required(argv[1], "instance name is required"),
                 kind: "instance.logs",
             };
-        case "todo":
-            expectTodoArgs(argv);
-            return {
-                follow: argv.includes("--follow") || argv.includes("-f"),
-                instance: required(argv[1], "instance name is required"),
-                kind: "instance.todo",
-            };
         case "call":
             if (argv.length !== 5)
                 throw CliRenderError.usage(
@@ -128,14 +121,6 @@ function expectReverse(
         instance: required(argv[1], "instance name is required"),
         kind,
     } as CliParsedCommand;
-}
-function expectTodoArgs(argv: readonly string[]): void {
-    if (
-        argv.length === 2 ||
-        (argv.length === 3 && (argv[2] === "--follow" || argv[2] === "-f"))
-    )
-        return;
-    throw CliRenderError.usage("instance todo requires <instance> [--follow]");
 }
 function expectLogsArgs(argv: readonly string[]): void {
     if (argv.length === 2 || (argv.length === 3 && argv[2] === "-f")) return;

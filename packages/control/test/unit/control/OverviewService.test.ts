@@ -12,7 +12,6 @@ import {
     type InstanceWorkerInfo,
     type OAuthApprovalRequest,
     type ToolCallRecord,
-    type TodoTaskSummary,
 } from "@portable-devshell/shared";
 import { Instance } from "@portable-devshell/core";
 import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
@@ -60,7 +59,6 @@ interface OverviewEndpointInstance {
         untilMs: number,
     ) => { count: number; latest?: ToolCallRecord };
     snapshot: () => InstanceProcessEnvelope;
-    todo?: () => unknown;
 }
 
 function processEnvelope(
@@ -71,18 +69,6 @@ function processEnvelope(
         lastSeq: snapshot.lastSeq,
         snapshot,
         ...(worker === undefined ? {} : { worker }),
-    };
-}
-
-function todoEnvelope(tasks: readonly TodoTaskSummary[] = []): unknown {
-    return {
-        lastSeq: 0,
-        todo: {
-            items: [],
-            revision: 0,
-            summary: { completed: 0, total: 0 },
-            tasks,
-        },
     };
 }
 
@@ -99,9 +85,6 @@ function overviewEndpoint(
         });
         new Rpc(endpoint.bind("approval", host), {
             list: () => data.approvals?.() ?? [],
-        });
-        new Rpc(endpoint.bind("task", host), {
-            getTodo: () => data.todo?.() ?? todoEnvelope(),
         });
         new Rpc(endpoint.bind("tool", host), {
             listCalls: (payload) => data.calls?.(payload) ?? [],
@@ -125,17 +108,7 @@ function collector(endpoint: Endpoint): OperationalOverviewInstanceCollector {
     });
 }
 
-test("operational overview prioritizes failures, approvals, activity, and todos without raw payloads", async () => {
-    const blockedTodo: TodoTaskSummary = {
-        completed: 1,
-        currentItem: "Waiting for worker package",
-        revision: 4,
-        status: "blocked",
-        taskId: "task-1",
-        title: "Upgrade worker",
-        total: 3,
-        updatedAt: "2026-07-30T23:00:00.000Z",
-    };
+test("operational overview prioritizes failures, approvals, activity, without raw payloads", async () => {
     const failedCall: ToolCallRecord = {
         callId: "call-1",
         completedAt: "2026-07-30T23:30:00.000Z",
@@ -183,7 +156,6 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                         version: "0.4.10",
                     },
                 ),
-            todo: () => todoEnvelope([blockedTodo]),
         },
         "failed-one": {
             snapshot: () =>
@@ -242,7 +214,6 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         uptimeSeconds: 90,
     });
     assert.deepEqual(overview.counts, {
-        activeTodos: 1,
         failedCalls24h: 1,
         instancesAttention: 0,
         instancesCritical: 1,
@@ -254,7 +225,6 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
     assert.ok(
         overview.alerts.some((alert) => alert.kind === "approval.oauthPending"),
     );
-    assert.ok(overview.alerts.some((alert) => alert.kind === "todo.blocked"));
     assert.deepEqual(overview.activity, [
         {
             callId: "call-1",
@@ -328,7 +298,6 @@ test("operational overview treats a deliberately stopped instance as neutral whi
 
     assert.equal(overview.health, "attention");
     assert.deepEqual(overview.counts, {
-        activeTodos: 0,
         failedCalls24h: 0,
         instancesAttention: 1,
         instancesCritical: 0,
@@ -469,7 +438,6 @@ test("operational overview coalesces concurrent reads without caching later refr
                             status: "ready",
                         },
                     },
-                    todos: [],
                 };
             },
         },
@@ -526,61 +494,6 @@ test("controller resource alerts participate in overall health", async () => {
     assert.equal(overview.controller.system?.diskPercent, 96);
 });
 
-test("operational overview isolates snapshot and todo collection failures per instance", async () => {
-    const snapshotBroken = instance("snapshot-broken");
-    const todoBroken = instance("todo-broken");
-    const endpoint = overviewEndpoint({
-        "snapshot-broken": {
-            snapshot: () => {
-                throw new Error("snapshot unavailable");
-            },
-        },
-        "todo-broken": {
-            snapshot: () =>
-                processEnvelope({
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 1,
-                    name: asInstanceName("todo-broken"),
-                    ready: true,
-                    status: "ready",
-                }),
-            todo: () => {
-                throw new Error("todo store unavailable");
-            },
-        },
-    });
-
-    const overview = await createOperationalOverviewRuntime({
-        instanceCollector: collector(endpoint),
-        instances: { list: () => [snapshotBroken, todoBroken] },
-        now: () => now,
-        systemCollector: healthySystemCollector,
-    }).read();
-
-    assert.equal(overview.health, "critical");
-    assert.equal(overview.instances.length, 2);
-    assert.equal(
-        overview.instances.find(
-            (instance) => instance.name === "snapshot-broken",
-        )?.snapshot.status,
-        "failed",
-    );
-    assert.ok(
-        overview.alerts.some(
-            (alert) =>
-                alert.kind === "instance.failed" &&
-                alert.instance === "snapshot-broken",
-        ),
-    );
-    assert.ok(
-        overview.alerts.some(
-            (alert) =>
-                alert.kind === "overview.partial" &&
-                alert.instance === "todo-broken",
-        ),
-    );
-});
 
 test("operational overview remains available when one collection source fails", async () => {
     const descriptor = instance("local-one");

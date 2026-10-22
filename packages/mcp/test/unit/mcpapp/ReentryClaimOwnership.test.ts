@@ -210,7 +210,7 @@ test("Reentry lost report reply after Goal commit recovers after both stores res
             assert.ok(request.execute);
             return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
         } }) });
-        const stop = installMcpAppReentry(native.hooks, { goal, todo: fixture.todo } as never);
+        const stop = installMcpAppReentry(native.hooks, { goal } as never);
         try {
             const call = delivery(fixture, restarted, (input) => native.api.call("local", "mcpapp_reentry", input, {
                 ctxId: fixture.context.ctxId, workspace: "/repo", source: "mcp",

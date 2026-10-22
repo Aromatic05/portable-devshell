@@ -21,7 +21,7 @@ import {
 import {
     readProcessSubscriptionFromSeq,
 } from "../../../../core/src/instance/Route.ts";
-import { readTodoSubscriptionFromSeq } from "../../../../core/src/task/todo/Route.ts";
+import { readTaskSubscriptionFromSeq } from "../../../../core/src/task/wait/Route.ts";
 import {
     readToolCall,
     readToolCallQuery,
@@ -171,14 +171,14 @@ test("process route strictly validates subscription cursors", () => {
             readProcessSubscriptionFromSeq({ fromSeq: cursor }),
             cursor,
         );
-        assert.equal(readTodoSubscriptionFromSeq({ fromSeq: cursor }), cursor);
+        assert.equal(readTaskSubscriptionFromSeq({ fromSeq: cursor }), cursor);
     }
     for (const cursor of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
         assertTargetInvalid(() =>
             readProcessSubscriptionFromSeq({ fromSeq: cursor }),
         );
         assertTargetInvalid(() =>
-            readTodoSubscriptionFromSeq({ fromSeq: cursor }),
+            readTaskSubscriptionFromSeq({ fromSeq: cursor }),
         );
     }
 });

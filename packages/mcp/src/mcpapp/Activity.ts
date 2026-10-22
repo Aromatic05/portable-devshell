@@ -97,10 +97,6 @@ function target(record: ToolCallRecord): string | undefined {
 }
 
 function taskId(record: ToolCallRecord): string | undefined {
-    if (record.toolName === "todo_read" || record.toolName === "todo_write") {
-        const id = object(record.output)?.taskId ?? object(record.input)?.taskId;
-        return typeof id === "string" ? protect(id, 160) : undefined;
-    }
     if (!record.toolName.startsWith("tmux_")) return undefined;
     const requested = object(record.input)?.task;
     if (typeof requested === "string") return protect(requested, 160);

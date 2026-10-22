@@ -11,12 +11,11 @@ import type {
     JsonValue,
     MessageStream,
     TaskEvent,
-    TodoReadInput,
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
-import type { TodoApi, WaitApi } from "../Api.js";
+import type { WaitApi } from "../Api.js";
 
-interface TodoTaskRouteSubscriptionPort {
+interface WaitTaskRouteSubscriptionPort {
     subscribe(
         stream: MessageStream,
         context: ControlPortContext,
@@ -27,10 +26,9 @@ interface TodoTaskRouteSubscriptionPort {
     ): Promise<void>;
 }
 
-interface TodoTaskRouteInstancePort {
+interface WaitTaskRouteInstancePort {
     events: InstanceEventSource;
     name: string;
-    todo: Pick<TodoApi, "delete" | "read">;
     wait: Pick<WaitApi, "list">;
 }
 
@@ -40,20 +38,13 @@ interface TodoTaskRouteInstancePort {
 
 
 
-export function createTodoTaskRouteModule(
-    instance: TodoTaskRouteInstancePort,
-    subscriptions: TodoTaskRouteSubscriptionPort,
+export function createWaitTaskRouteModule(
+    instance: WaitTaskRouteInstancePort,
+    subscriptions: WaitTaskRouteSubscriptionPort,
 ): ControlPortDefinition {
     return routeModule(
         "task",
         {
-            getTodo: async (request) =>
-                ({
-                    lastSeq: instance.events.cursor(),
-                    todo: await instance.todo.read(
-                        readTodoInput(request.payload),
-                    ),
-                }) as unknown as JsonValue,
             getWaits: async (request) => {
                 const payload = request.payload;
                 if (!isRecord(payload) || typeof payload.ctxId !== "string" || payload.ctxId.trim().length === 0)
@@ -68,10 +59,6 @@ export function createTodoTaskRouteModule(
                     waits: await instance.wait.list(payload.ctxId.trim()),
                 } as unknown as JsonValue;
             },
-            deleteTodo: async (request) => {
-                await instance.todo.delete(readTodoTaskId(request.payload));
-                return {};
-            },
         },
         {
             subscribe: async (stream, request, context) =>
@@ -80,7 +67,7 @@ export function createTodoTaskRouteModule(
                     context,
                     instance.name,
                     instance.events,
-                    readTodoSubscriptionFromSeq(request.payload),
+                    readTaskSubscriptionFromSeq(request.payload),
                     (event) =>
                         isTaskEventType(event.type)
                             ? (event as TaskEvent)
@@ -90,7 +77,7 @@ export function createTodoTaskRouteModule(
     );
 }
 
-export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
+export function readTaskSubscriptionFromSeq(payload?: JsonValue): number {
     if (
         !isRecord(payload) ||
         typeof payload.fromSeq !== "number" ||
@@ -104,50 +91,6 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
         });
     }
     return payload.fromSeq;
-}
-
-export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
-    if (payload === undefined) return undefined;
-    if (!isRecord(payload)) {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "task.getTodo payload must be an object.",
-            retryable: false,
-        });
-    }
-    const keys = Object.keys(payload);
-    if (keys.length === 0) return undefined;
-    if (keys.length !== 1 || keys[0] !== "taskId") {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "task.getTodo accepts only the optional taskId selector.",
-            retryable: false,
-        });
-    }
-    const value = payload.taskId;
-    if (typeof value !== "string" || value.trim().length === 0) {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "task.getTodo taskId must be a non-empty string.",
-            retryable: false,
-        });
-    }
-    return { taskId: value.trim() };
-}
-
-export function readTodoTaskId(payload?: JsonValue): string {
-    if (
-        !isRecord(payload) ||
-        typeof payload.taskId !== "string" ||
-        payload.taskId.trim().length === 0
-    ) {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "task.deleteTodo taskId must be a non-empty string.",
-            retryable: false,
-        });
-    }
-    return payload.taskId;
 }
 
 function isRecord(

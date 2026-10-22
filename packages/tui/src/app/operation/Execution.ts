@@ -111,7 +111,7 @@ export class TuiRuntimeExecutionOperations {
                 }
                 if ((feedback?.comment?.length ?? 0) > 0) {
                     this.options.store.setScreenStatus(
-                        "todo",
+                        "goals",
                         feedback.comment!.join(" "),
                     );
                 }

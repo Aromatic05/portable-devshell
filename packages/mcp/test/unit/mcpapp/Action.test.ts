@@ -47,13 +47,13 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
             tools,
             mcpAppActions: actions,
         });
-        const call = (target: McpEndpoint, itemId = "task-a", principal = "local", requestId = "same-action-request-1234") =>
+        const call = (target: McpEndpoint, itemId = "goal-a", principal = "local", requestId = "same-action-request-1234") =>
             target.callTool("mcpapp_action", {
-                ctxId: record.ctxId, itemId, actionId: "task-pause", expectedRevision: 3, requestId,
+                ctxId: record.ctxId, itemId, actionId: "goal-pause", expectedRevision: 3, requestId,
             }, { principal });
         const first = endpoint(store);
         const [a, b] = await Promise.all([call(first), call(first)]);
-        assert.deepEqual(a, { status: "applied", itemId: "task-a", actionId: "task-pause" });
+        assert.deepEqual(a, { status: "applied", itemId: "goal-a", actionId: "goal-pause" });
         assert.deepEqual(b, a);
         assert.equal(mutations, 1);
         assert.deepEqual(await call(first), a);
@@ -64,19 +64,19 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
         assert.deepEqual(await call(endpoint(restarted)), a);
         assert.equal(mutations, 1);
 
-        await assert.rejects(call(endpoint(restarted), "task-b"), /conflicts/u);
-        await assert.rejects(call(first, "task-a", "not-owner"));
+        await assert.rejects(call(endpoint(restarted), "goal-b"), /conflicts/u);
+        await assert.rejects(call(first, "goal-a", "not-owner"));
         assert.equal(mutations, 1);
 
         // Different request identity is a new deliberate user action.
-        await call(first, "task-a", "local", "second-action-request-5678");
+        await call(first, "goal-a", "local", "second-action-request-5678");
         assert.equal(mutations, 2);
 
         // A second endpoint has its own in-flight map; the shared store must
         // reserve the request atomically before either can execute it.
         const concurrent = await Promise.all([
-            call(first, "task-a", "local", "third-action-request-9012"),
-            call(endpoint(store), "task-a", "local", "third-action-request-9012"),
+            call(first, "goal-a", "local", "third-action-request-9012"),
+            call(endpoint(store), "goal-a", "local", "third-action-request-9012"),
         ]);
         assert.equal(mutations, 3);
         assert.equal(concurrent.some((value) => (value as { status: string }).status === "applied"), true);

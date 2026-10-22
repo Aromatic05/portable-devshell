@@ -1,7 +1,7 @@
 import type { CliCommandDescriptor } from "@portable-devshell/shared";
 
 export type CliHelpTopic =
-    "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
+    "approval" | "config" | "context" | "debug" | "oauth" | "tool";
 
 export function renderCliUsage(
     commands: readonly CliCommandDescriptor[] = [],
@@ -29,7 +29,6 @@ export function renderCliUsage(
         "  context <command>              Manage MCP contexts and messages",
         "  debug <command>                Apply protected local runtime debug patches",
         "  tool <command>                 Inspect tool calls",
-        "  todo <command>                 Manage Todo projects",
         "  tui                            Open the terminal UI",
         "  instance <command>             Manage instances",
         "  watch <command>                Follow instance state or logs",
@@ -115,11 +114,6 @@ export function renderCliTopicUsage(
                     "  devshell tool calls <instance> [callId]",
                     "  devshell tool calls <instance> [--limit <n>] [--before <callId>] [--after <callId>]",
                 ].join("\n");
-            case "todo":
-                return [
-                    "Usage:",
-                    "  devshell todo delete <instance> <taskId>",
-                ].join("\n");
         }
     })();
     return command === undefined
@@ -141,7 +135,6 @@ export function renderInstanceUsage(command?: string): string {
         "  devshell instance start <instance>",
         "  devshell instance stop <instance>",
         "  devshell instance logs <instance> [-f]",
-        "  devshell instance todo <instance> [--follow|-f]",
         "  devshell instance call <instance> <workspace> <toolName> <json|@file|->",
         "  devshell instance device-code <instance>",
         "  devshell instance rotate-token <instance>",

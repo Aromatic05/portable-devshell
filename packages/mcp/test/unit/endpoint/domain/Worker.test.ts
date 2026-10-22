@@ -13,7 +13,6 @@ import type {
 } from "@portable-devshell/shared";
 import type { McpToolProvenanceRecorder } from "../../../../src/protocol/tool/Provenance.ts";
 import { contextToolDefinitions } from "../../../../../control/src/context/tool/Definition.ts";
-import { todoToolDefinitions } from "../../../../../core/src/task/todo/tool/Definition.ts";
 import {
     createTestMcpRuntimeState,
 } from "../../../ContextRuntime.ts";
@@ -267,240 +266,141 @@ test("truncated bash output remains readable without an artifact recovery tool",
     );
 });
 
-test("Todo read/write and Extension report remain available while the worker is stopped", async () => {
-    const calls: string[] = [];
-    const todoReport: ToolDefinition = {
-        requiredCapabilities: [],
-        description: "Send a user-visible message. #push requires a reply; #stop disables tools until #resume.",
-        group: "todo",
-        inputSchema: {
-            additionalProperties: false,
-            properties: { message: { type: "string" } },
-            required: ["message"],
-            type: "object",
-        },
-        name: "todo_report",
-        outputSchema: { type: "object" },
-    };
-    const tools = createToolCalls(async (
+
+
+test("MCP Extension operation uses final rewritten tool and Context without worker preparation", async () => {
+    const h = await rewrittenEndpoint("ext_final", true);
+    await h.endpoint.callTool(
+        "ext_original",
+        { ctxId: h.original.ctxId, purpose: "operation" },
+        context,
+    );
+    assert.deepEqual(
+        h.changes.find((change) => change[0] === "extension"),
+        [
+            "extension",
+            "final",
+            "ext_final",
+            h.values[0]!.payload,
+            h.values[0]!.context,
+        ],
+    );
+    assert.equal(
+        h.changes.some((change) => change[0] === "workspace"),
+        false,
+    );
+    assert.deepEqual(h.provenance, [
+        { callId: h.callIds[0], instance: "final", purpose: "operation" },
+    ]);
+    await h.close();
+});
+
+function createManagedEndpoint(
+    worker = createWorker(),
+    tools: ToolCallApi = createToolCalls(),
+    options: {
+        contextMode?: "explicit" | "openai-session";
+        contextState?: ReturnType<typeof createTestMcpRuntimeState>;
+        toolProvenance?: McpToolProvenanceRecorder;
+        toolDefinitions?: readonly ToolDefinition[];
+    } = {},
+): McpEndpoint {
+    const state = options.contextState ?? contextState;
+    const toolSource = new TestToolSource();
+    const workerTools = worker.listTools();
+    const workerToolNames = new Set(workerTools.map(({ name }) => name));
+    toolSource.register("main-pc", [
+        ...workerTools,
+        ...contextToolDefinitions(),
+        ...(options.toolDefinitions ?? []).filter(
+            ({ name }) => !workerToolNames.has(name),
+        ),
+    ]);
+    return new McpEndpoint({
+        context: state.contextTransport,
+        contextMode: options.contextMode,
+        instanceName: "main-pc",
+        toolProvenance: options.toolProvenance,
+        toolSource,
+        tools,
+    });
+}
+
+function createToolCalls(
+    handle: (
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ) => Promise<JsonValue> | JsonValue = async (instance, toolName) => ({
         instance,
         toolName,
-        input,
-        callContext,
-    ): Promise<JsonValue> => {
-        if (toolName === "todo_report") {
-            assert.equal(toolName, "todo_report");
-            const message = (input as { message?: string }).message ?? "";
-            calls.push(
-                `report:${instance}:${callContext.ctxId}:call-test:${message}`,
-            );
-            return { reported: true };
-        }
-        if (toolName === "todo_read") {
-            calls.push(
-                `read:${instance}:${(input as { taskId?: string; title?: string }).taskId ?? (input as { title?: string }).title ?? "all"}`,
-            );
-            return {
-                items: [],
-                revision: 0,
-                summary: { completed: 0, total: 0 },
+    }),
+): ToolCallApi {
+    return {
+        async call(
+            instance,
+            toolName,
+            input,
+            callContext,
+            _signal,
+            transformResult,
+            invocationInput,
+        ) {
+            const callId = "call-test";
+            const value = {
+                context: { ...callContext, instance: asInstanceName(instance) },
+                kind: "call" as const,
+                payload: input,
+                toolName,
             };
-        }
-        if (toolName === "todo_write") {
-            calls.push(
-                `write:${instance}:${callContext.ctxId}:${String((input as { revision?: number }).revision)}`,
+            const preparedInput =
+                (await invocationInput?.(input, callId, value)) ?? input;
+            const result = await handle(
+                instance,
+                toolName,
+                preparedInput,
+                callContext,
             );
-            return {
-                items: [],
-                revision: 1,
-                summary: { completed: 0, total: 0 },
-            };
-        }
-        throw new Error(`Unexpected Todo tool ${toolName}`);
-    });
-    const endpoint = createManagedEndpoint(
-        createWorker({ hasSchema: false, ready: false }),
-        tools,
-        { toolDefinitions: [...todoToolDefinitions(), todoReport] },
-    );
-
-    assert.deepEqual(
-        await endpoint.callTool("todo_read", withContext({}), context),
-        {
-            items: [],
-            revision: 0,
-            summary: { completed: 0, total: 0 },
+            return (await transformResult?.(result, callId)) ?? result;
         },
-    );
-    const todoReadSchema = endpoint
-        .listTools()
-        .find((tool) => tool.name === "todo_read")?.outputSchema;
-    assert.deepEqual(todoReadSchema, { type: "object" });
-    const todoWriteSchema = endpoint
-        .listTools()
-        .find((tool) => tool.name === "todo_write")?.inputSchema as {
-        properties?: {
-            todos?: {
-                contains?: unknown;
-                items?: {
-                    allOf?: unknown;
-                    properties?: Record<string, unknown>;
-                };
-                maxContains?: unknown;
-                minContains?: unknown;
-            };
-        };
     };
-    assert.deepEqual(
-        Object.keys(
-            todoWriteSchema.properties?.todos?.items?.properties ?? {},
-        ).sort(),
-        ["content", "detail", "id", "status"],
-    );
-    assert.equal(todoWriteSchema.properties?.todos?.items?.allOf, undefined);
-    assert.equal(todoWriteSchema.properties?.todos?.contains, undefined);
-    assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
-    assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
-    const registeredTodoReport = endpoint
-        .listTools()
-        .find((tool) => tool.name === "todo_report");
-    assert.match(registeredTodoReport?.description ?? "", /#push/u);
-    assert.match(registeredTodoReport?.description ?? "", /#stop/u);
-    const report = (await endpoint.callTool(
-        "todo_report",
-        withContext({ message: "Finished the first acceptance stage." }),
-        context,
-    )) as {
-        content?: unknown;
-        structuredContent?: unknown;
-    };
-    assert.deepEqual(report, { reported: true });
-    await endpoint.callTool(
-        "todo_read",
-        withContext({ title: "Recover" }),
-        context,
-    );
-    await endpoint.callTool(
-        "todo_read",
-        withContext({ taskId: "task-recover" }),
-        context,
-    );
-    await endpoint.callTool(
-        "todo_write",
-        withContext({ revision: 0, title: "Recover", todos: [] }),
-        context,
-    );
-    assert.deepEqual(calls, [
-        "read:main-pc:all",
-        `report:main-pc:${activeContext.ctxId}:call-test:Finished the first acceptance stage.`,
-        "read:main-pc:Recover",
-        "read:main-pc:task-recover",
-        `write:main-pc:${activeContext.ctxId}:0`,
-    ]);
+}
 
-    assert.equal(
-        endpoint.listTools().some((tool) => tool.name === "todo_read"),
-        true,
-    );
-});
-
-test("openai-session binding uses the same Todo contract as explicit ctxId", async () => {
-    const state = createTestMcpRuntimeState();
-    await state.contexts.initialize();
-    const current = await state.contexts.registry.create({
-        environments: [
-            {
-                instance: "main-pc",
-                workspace: "/workspace",
+function createWorker(options: {
+    hasSchema?: boolean;
+    ready?: boolean;
+    tools?: ToolDefinition[];
+} = {}) {
+    return {
+        async appendMcpSessionClosed() {},
+        async appendMcpSessionOpened() {},
+        async appendMcpToolCalled() {},
+        async readAlerts() {
+            return { advice: [] };
+        },
+        handshake: {
+            homeDirectory: "/home/demo",
+            instance: "main-pc",
+            platform: {
+                arch: "x86_64",
+                distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
+                os: "linux",
+                packageManager: "pacman",
+                shell: { executable: "/bin/bash", kind: "bash", version: "5" },
             },
-        ],
-        principal: "local",
-    });
-    await state.contexts.registry.attachEnvironment(current.ctxId, {
-        instance: "main-pc",
-        workspace: "/workspace",
-    }, {
-        bindings: [{ kind: "openai/session", value: "chat-session-todo" }],
-        principal: "local",
-    });
-    const tasks = [
-        {
-            completed: 0,
-            ctxId: current.ctxId,
-            revision: 1,
-            status: "in_progress",
-            taskId: "task-current",
-            title: "Current task",
-            total: 1,
-            updatedAt: "2026-08-20T00:00:00.000Z",
         },
-        {
-            completed: 0,
-            ctxId: "ctx-other-session",
-            revision: 2,
-            status: "paused",
-            taskId: "task-other",
-            title: "Other task",
-            total: 2,
-            updatedAt: "2026-08-19T00:00:00.000Z",
+        hasToolSchemaCache() {
+            return options.hasSchema ?? true;
         },
-    ];
-    const tools = createToolCalls(async (_instance, toolName) => {
-        if (toolName === "todo_read") {
-            return {
-                items: [],
-                revision: 0,
-                summary: { completed: 0, total: 0 },
-                tasks,
-            };
-        }
-        throw new Error(`Unexpected Todo tool ${toolName}`);
-    });
-    const endpoint = createManagedEndpoint(
-        createWorker({ hasSchema: false, ready: false }),
-        tools,
-        {
-            contextMode: "openai-session",
-            contextState: state,
-            toolDefinitions: todoToolDefinitions(),
+        listTools() {
+            return options.tools ?? [bashTool];
         },
-    );
-    const requestContext = {
-        principal: "local",
-        requestId: "request-session-todo",
-        requestMeta: { "openai/session": "chat-session-todo" },
-    } as const;
-
-    const discovered = (await endpoint.callTool(
-        "todo_read",
-        {},
-        requestContext,
-    )) as {
-        tasks?: Array<Record<string, unknown>>;
+        snapshot() {
+            return { ready: options.ready ?? true };
+        },
     };
-    assert.deepEqual(
-        discovered.tasks?.map((task) => task.taskId),
-        ["task-current", "task-other"],
-    );
-    assert.equal(discovered.tasks?.[0]?.ctxId, current.ctxId);
-
-    const todoTool = endpoint
-        .listTools()
-        .find((tool) => tool.name === "todo_read");
-    assert.deepEqual(todoTool?.outputSchema, { type: "object" });
-    assert.notEqual(
-        (todoTool?.inputSchema as { properties?: Record<string, unknown> })
-            .properties?.taskId,
-        undefined,
-    );
-    assert.equal(
-        (todoTool?.inputSchema as { properties?: Record<string, unknown> })
-            .properties?.ctxId,
-        undefined,
-    );
-    state.toolCallRuntime.close();
-    await state.contexts.close();
-});
+}
 
 async function rewrittenEndpoint(
     toolName: string,
@@ -758,138 +658,4 @@ for (const name of ["bash_run", "ext_original", "tmux_run"]) {
         );
         await h.close();
     });
-}
-
-test("MCP Extension operation uses final rewritten tool and Context without worker preparation", async () => {
-    const h = await rewrittenEndpoint("ext_final", true);
-    await h.endpoint.callTool(
-        "ext_original",
-        { ctxId: h.original.ctxId, purpose: "operation" },
-        context,
-    );
-    assert.deepEqual(
-        h.changes.find((change) => change[0] === "extension"),
-        [
-            "extension",
-            "final",
-            "ext_final",
-            h.values[0]!.payload,
-            h.values[0]!.context,
-        ],
-    );
-    assert.equal(
-        h.changes.some((change) => change[0] === "workspace"),
-        false,
-    );
-    assert.deepEqual(h.provenance, [
-        { callId: h.callIds[0], instance: "final", purpose: "operation" },
-    ]);
-    await h.close();
-});
-
-function createManagedEndpoint(
-    worker = createWorker(),
-    tools: ToolCallApi = createToolCalls(),
-    options: {
-        contextMode?: "explicit" | "openai-session";
-        contextState?: ReturnType<typeof createTestMcpRuntimeState>;
-        toolProvenance?: McpToolProvenanceRecorder;
-        toolDefinitions?: readonly ToolDefinition[];
-    } = {},
-): McpEndpoint {
-    const state = options.contextState ?? contextState;
-    const toolSource = new TestToolSource();
-    const workerTools = worker.listTools();
-    const workerToolNames = new Set(workerTools.map(({ name }) => name));
-    toolSource.register("main-pc", [
-        ...workerTools,
-        ...contextToolDefinitions(),
-        ...(options.toolDefinitions ?? []).filter(
-            ({ name }) => !workerToolNames.has(name),
-        ),
-    ]);
-    return new McpEndpoint({
-        context: state.contextTransport,
-        contextMode: options.contextMode,
-        instanceName: "main-pc",
-        toolProvenance: options.toolProvenance,
-        toolSource,
-        tools,
-    });
-}
-
-function createToolCalls(
-    handle: (
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-    ) => Promise<JsonValue> | JsonValue = async (instance, toolName) => ({
-        instance,
-        toolName,
-    }),
-): ToolCallApi {
-    return {
-        async call(
-            instance,
-            toolName,
-            input,
-            callContext,
-            _signal,
-            transformResult,
-            invocationInput,
-        ) {
-            const callId = "call-test";
-            const value = {
-                context: { ...callContext, instance: asInstanceName(instance) },
-                kind: "call" as const,
-                payload: input,
-                toolName,
-            };
-            const preparedInput =
-                (await invocationInput?.(input, callId, value)) ?? input;
-            const result = await handle(
-                instance,
-                toolName,
-                preparedInput,
-                callContext,
-            );
-            return (await transformResult?.(result, callId)) ?? result;
-        },
-    };
-}
-
-function createWorker(options: {
-    hasSchema?: boolean;
-    ready?: boolean;
-    tools?: ToolDefinition[];
-} = {}) {
-    return {
-        async appendMcpSessionClosed() {},
-        async appendMcpSessionOpened() {},
-        async appendMcpToolCalled() {},
-        async readAlerts() {
-            return { advice: [] };
-        },
-        handshake: {
-            homeDirectory: "/home/demo",
-            instance: "main-pc",
-            platform: {
-                arch: "x86_64",
-                distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
-                os: "linux",
-                packageManager: "pacman",
-                shell: { executable: "/bin/bash", kind: "bash", version: "5" },
-            },
-        },
-        hasToolSchemaCache() {
-            return options.hasSchema ?? true;
-        },
-        listTools() {
-            return options.tools ?? [bashTool];
-        },
-        snapshot() {
-            return { ready: options.ready ?? true };
-        },
-    };
 }

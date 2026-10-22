@@ -121,7 +121,6 @@ export type TuiUiIntent =
     | { type: "terminal.requestKill" }
     | { instance: string; type: "terminal.kill" }
     | { instance: string; type: "instance.delete" }
-    | { instance: string; taskId: string; type: "todo.delete" }
     | {
           actionId: string;
           itemId?: string;

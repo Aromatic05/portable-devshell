@@ -1,6 +1,6 @@
 # Context
 
-Context 是 portable-devshell 由 Control 管理的**应用级连续性对象**。它把一次 Agent 工作过程中需要持续归属的状态绑定在一起：workspace environment、Todo、Goal、Wait、Approval、Comments、审计和自动模型恢复。
+Context 是 portable-devshell 由 Control 管理的**应用级连续性对象**。它把一次 Agent 工作过程中需要持续归属的状态绑定在一起：workspace environment、Goal、Memory、Wait、Approval、Comments、审计和自动模型恢复。
 
 Context 不是 MCP transport session，也不是认证凭据。
 
@@ -60,7 +60,7 @@ External binding 是 Host 身份与内部 Context 的映射，例如 ChatGPT 的
 
 1. binding 只用于找到 Context；
 2. principal 仍单独参与校验；
-3. Todo、Wait、Approval 等内部对象从不直接依赖 Host 专用 ID。
+3. Goal、Wait、Approval 等内部对象从不直接依赖 Host 专用 ID。
 
 这样 Host 集成可以变化，而不需要把平台专用字段扩散到整个运行时。
 
@@ -155,7 +155,7 @@ Context 还维护短生命周期的 execution/re-entry 状态，用来防止 Wor
 典型规则：
 
 - 当前 Context 正在执行 model tool call 时，resolved Wait 不立即重复唤醒模型；
-- 自动恢复需要先 claim，再重新验证 Goal/Todo/Wait 是否仍然有效；
+- 自动恢复需要先 claim，再重新验证 Goal/Wait 是否仍然有效；
 - 用户显式接管、暂停或中断时，会改变 re-entry ownership，而不是伪造一个新的 Context。
 
 完整状态机见 [Workspace](workspace.md)。

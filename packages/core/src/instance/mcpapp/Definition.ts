@@ -20,7 +20,7 @@ export function mcpAppActionDefinition(): ToolDefinition {
             properties: {
                 itemId: { type: "string", minLength: 1, maxLength: 256 },
                 actionId: { type: "string", enum: [
-                    "approve", "deny", "task-pause", "task-resume", "task-cancel",
+                    "approve", "deny",
                     "goal-pause", "goal-resume", "goal-retry", "goal-stop",
                 ] },
                 expectedRevision: { type: "integer", minimum: 0 },
@@ -45,7 +45,7 @@ export function mcpAppReentryDefinition(): ToolDefinition {
         name: "mcpapp_reentry",
         group: "mcpapp",
         requiredCapabilities: [],
-        description: "Advance an authorized Instance-owned Goal or Todo recovery for Host delivery.",
+        description: "Advance an authorized Instance-owned Goal recovery for Host delivery.",
         _meta: {
             ui: { visibility: ["app"] },
             devshell: { mcp: { title: "Workspace recovery", annotations: {
@@ -62,7 +62,7 @@ export function mcpAppReentryDefinition(): ToolDefinition {
                 claimId: { type: "string", minLength: 1, maxLength: 128 },
                 sourceId: { type: "string", minLength: 1, maxLength: 256 },
                 directiveId: { type: "string", minLength: 1, maxLength: 128 },
-                intent: { type: "string", enum: ["automatic", "goal-resume", "goal-retry", "task-resume"] },
+                intent: { type: "string", enum: ["automatic", "goal-resume", "goal-retry"] },
                 outcome: { type: "string", enum: ["accepted", "rejected", "uncertain"] },
             },
         },

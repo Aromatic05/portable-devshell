@@ -40,8 +40,6 @@ import {
     CommentExtension,
     createCommentAdvice,
     createCommentDelivery,
-    createCommentTodoAccess,
-    createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
 import {
@@ -249,8 +247,6 @@ test(
         let reviewHooks: ToolCallReviewHook[] = [];
         let rewriteHooks: ToolCallRewriteHook[] = [];
         const commentGate = createCommentToolCallGate(comment.comment);
-        const commentTodoAccess = createCommentTodoAccess(comment.comment);
-        const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
         const commentAdvice = createCommentAdvice();
         const commentDelivery = createCommentDelivery(comment.comment);
         const unsupportedInvocation = {
@@ -282,24 +278,6 @@ test(
                 ),
         }];
         rewriteHooks = [
-            {
-                hook: "comment.rewrite",
-                id: "01-todo-access",
-                rewrite: async (input) =>
-                    (await commentTodoAccess(
-                        input as never,
-                        unsupportedInvocation as never,
-                    )) as unknown as ToolCallHookValue,
-            },
-            {
-                hook: "comment.rewrite",
-                id: "02-todo-invalid",
-                rewrite: async (input) =>
-                    (await commentTodoInvalid(
-                        input as never,
-                        unsupportedInvocation as never,
-                    )) as unknown as ToolCallHookValue,
-            },
             {
                 hook: "comment.rewrite",
                 id: "03-advice",

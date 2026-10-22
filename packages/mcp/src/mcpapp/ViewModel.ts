@@ -8,7 +8,6 @@ import {
     type Endpoint,
     type ApprovalRequest,
     type GoalSnapshot,
-    type TodoReadResult,
     type WaitRecord,
     type InstanceEventRecord,
 } from "@portable-devshell/shared";
@@ -24,7 +23,6 @@ export function projectMcpAppSnapshot(input: {
     ctxId: string;
     goal: { goal: GoalSnapshot | null; lastSeq: number };
     instance: string;
-    todo: { todo: TodoReadResult; lastSeq: number };
     directives?: McpAppReentryDirective[];
     waits?: { waits: WaitRecord[]; lastSeq: number };
     workspace?: string;
@@ -37,7 +35,6 @@ export function projectMcpAppSnapshot(input: {
     const approvals = input.approvals.approvals.filter((entry) =>
         entry.ctxId === input.ctxId && entry.status === "pending",
     );
-    const tasks = (input.todo.todo.tasks ?? []).filter((task) => task.ctxId === input.ctxId);
     const waits = (input.waits?.waits ?? []).filter((wait) => wait.ctxId === input.ctxId);
     const work: McpAppWorkItem[] = [
         ...goals.filter((goal) => goal.status !== "completed" && goal.status !== "stopped")
@@ -49,10 +46,6 @@ export function projectMcpAppSnapshot(input: {
                     : goal.status === "blocked" ? "blocked" as const : "paused" as const,
                 badge: `Goal · ${goal.status}`,
                 ...(goal.note ? { note: goal.note } : {}),
-                progress: {
-                    current: goal.steps.filter((step) => step.status === "completed").length,
-                    total: goal.steps.length,
-                },
                 actions: [
                     goal.status === "active"
                         ? { id: "goal-pause", label: "Pause", expectedRevision: goal.revision }
@@ -61,33 +54,13 @@ export function projectMcpAppSnapshot(input: {
                         confirmation: { message: "Stop this Goal?" }, expectedRevision: goal.revision },
                 ],
             })),
-        ...tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled")
-            .map((task) => ({
-                kind: "work" as const,
-                id: task.taskId,
-                title: task.title,
-                state: task.status === "in_progress" ? "running" as const
-                    : task.status === "blocked" || task.status === "failed" ? "blocked" as const
-                    : "paused" as const,
-                badge: `Task · ${task.status}`,
-                ...(task.currentItem ? { current: task.currentItem } : {}),
-                ...(task.checkpoint?.summary ? { note: task.checkpoint.summary } : {}),
-                progress: { current: task.completed, total: task.total },
-                actions: [
-                    task.pausedAt
-                        ? { id: "task-resume", label: "Resume", expectedRevision: task.revision }
-                        : { id: "task-pause", label: "Pause", expectedRevision: task.revision },
-                    { id: "task-cancel", label: "Cancel", tone: "danger" as const,
-                        confirmation: { message: "Cancel this Task?" }, expectedRevision: task.revision },
-                ],
-            })),
     ];
     const snapshot: McpAppSnapshot = {
         ctxId: input.ctxId,
         instance: input.instance,
         // Each authority captured a cursor before its read. Starting at their
         // minimum means changes racing with any read cannot be missed.
-        cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.todo.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
+        cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
         agentBusy: work.some((item) => item.state === "running"),
         presentation: {
             ...(approvals[0] === undefined ? {} : {
@@ -124,7 +97,7 @@ export function projectMcpAppSnapshot(input: {
     };
     snapshot.modelContext = mcpAppModelContext(snapshot, {
         ...(goals[0] === undefined ? {} : { goal: goals[0] }),
-        tasks,
+        tasks: [],
         background: waits.map((wait) => ({
             kind: "tmux", status: wait.status, targetId: wait.targetId,
             detachedAt: wait.createdAt,
@@ -148,12 +121,12 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
     const snapshot = async (instance: string, ctxId: string, workspace?: string) => {
         const task = createTaskTransport(endpoint, instance);
         const approval = createApprovalTransport(endpoint, instance);
-        const [goal, todo, approvals, waits, directives] = await Promise.all([
-            task.getGoal(ctxId), task.getTodo(), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
+        const [goal, approvals, waits, directives] = await Promise.all([
+            task.getGoal(ctxId), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
             actions?.pendingDirectives(ctxId, instance) ?? Promise.resolve([]),
         ]);
         const projected = projectMcpAppSnapshot({
-            approvals, ctxId, goal, instance, todo, waits, directives,
+            approvals, ctxId, goal, instance, waits, directives,
             ...(workspace === undefined ? {} : { workspace }),
         });
         // Activity is a read-only projection of Instance-owned ToolCall audit.

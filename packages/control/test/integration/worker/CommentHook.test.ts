@@ -6,8 +6,6 @@ import {
     CommentExtension,
     createCommentAdvice,
     createCommentDelivery,
-    createCommentTodoAccess,
-    createCommentTodoInvalid,
     createCommentToolCallGate,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
@@ -261,26 +259,14 @@ const instanceKey = {};
 function commentReviewRegistrationHost(comment: CommentPort) {
     const bindings: Record<string, unknown> = {
         "toolcall-gate": createCommentToolCallGate(comment),
-        "todo-access": createCommentTodoAccess(comment),
         "comment-delivery": createCommentDelivery(comment),
         "tool-advice": createCommentAdvice(),
-        "todo-invalid": createCommentTodoInvalid(comment),
     };
     const declarations = [
         {
             hook: "500-toolcall-gate",
             id: "toolcall-gate",
             pointId: "toolcall.review",
-        },
-        {
-            hook: "500-todo-access",
-            id: "todo-access",
-            pointId: "toolcall.rewrite",
-        },
-        {
-            hook: "501-todo-invalid",
-            id: "todo-invalid",
-            pointId: "toolcall.rewrite",
         },
         {
             hook: "502-tool-advice",

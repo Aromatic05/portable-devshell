@@ -36,7 +36,6 @@ function label(key: string): string {
         oauthApprovals: "OAuth approvals",
         overview: "Overview",
         stream: "Live updates",
-        todos: "Todos",
         toolCalls: "Tool calls",
     };
     return instance === undefined

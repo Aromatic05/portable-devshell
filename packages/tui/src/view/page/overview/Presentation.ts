@@ -33,7 +33,6 @@ export interface TuiOverviewInstanceViewport {
 }
 
 const EMPTY_COUNTS: TuiOverviewPresentation["counts"] = {
-    activeTodos: 0,
     failedCalls24h: 0,
     instancesAttention: 0,
     instancesCritical: 0,
@@ -65,21 +64,10 @@ export function selectTuiOverviewPresentation(
         };
     }
 
-    const activeTodoCountByInstance = new Map<string, number>();
-    for (const todo of overview.todos) {
-        if (todo.status === "completed" || todo.status === "cancelled")
-            continue;
-        activeTodoCountByInstance.set(
-            todo.instance,
-            (activeTodoCountByInstance.get(todo.instance) ?? 0) + 1,
-        );
-    }
-
     const instances = overview.instances
         .map((instance) =>
             toInstanceRow(
                 instance,
-                activeTodoCountByInstance.get(instance.name) ?? 0,
                 state.ui.mainFocusId === `overview-instance:${instance.name}`,
             ),
         )
@@ -165,7 +153,6 @@ export function selectTuiOverviewInstanceViewport(
 
 function toInstanceRow(
     instance: OperationalOverviewInstance,
-    todos: number,
     focused: boolean,
 ): TuiOverviewInstanceRowModel {
     const snapshot = instance.snapshot;
@@ -180,7 +167,6 @@ function toInstanceRow(
         name: instance.name,
         provider: instance.provider,
         runtime: snapshot.status,
-        todos,
         tone: instanceTone(instance),
     };
 }
@@ -300,7 +286,6 @@ function controllerSummary(overview: OperationalOverview): string {
     return [
         `instances ${counts.instancesReady}/${counts.instancesTotal} ready`,
         `approvals ${counts.pendingApprovals}`,
-        `todos ${counts.activeTodos}`,
         `failed calls 24h ${counts.failedCalls24h}`,
     ].join(" · ");
 }

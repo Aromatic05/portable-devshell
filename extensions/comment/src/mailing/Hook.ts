@@ -32,3 +32,34 @@ export function createMailingHook(
         return input.value;
     };
 }
+
+/** The initial environ_info only advises the model. Its next tool call
+ * automatically binds an unclaimed Context, without blocking execution on
+ * Worker or Extension availability errors.
+ */
+export function createMemoryAutoHook(
+    mailing: Pick<MailingService, "ensureBound">,
+    onError: (error: unknown) => void,
+): ToolCallRewriteBinding {
+    return async (input) => {
+        const call = input.value;
+        if (input.direction !== "inbound" || call.kind !== "call" ||
+            call.context.source !== "mcp" || call.toolName === "environ_info" ||
+            call.context.ctxId === undefined || call.context.workspace === undefined)
+            return call;
+        // Do not preempt a deliberate memory init/inherit command launched
+        // through the ordinary bash tool; that would leave an orphan fallback.
+        const payload = call.payload;
+        if (call.toolName === "bash_run" && payload !== null &&
+            typeof payload === "object" && !Array.isArray(payload) &&
+            typeof payload.command === "string" &&
+            /^\s*devshell\s+memory\s+(?:init|inherit)\s+[^\s]+(?:\s*)$/u.test(payload.command))
+            return call;
+        await mailing.ensureBound({
+            ctxId: call.context.ctxId,
+            instance: call.context.instance,
+            workspace: call.context.workspace,
+        }).catch(onError);
+        return call;
+    };
+}

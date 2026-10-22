@@ -26,7 +26,6 @@ export interface TuiOverviewInstanceRowModel {
     readonly name: string;
     readonly provider: string;
     readonly runtime: string;
-    readonly todos: number;
     readonly tone: TuiOverviewTone;
 }
 
@@ -58,7 +57,6 @@ export interface TuiOverviewPresentation {
         readonly uptime: string;
     };
     readonly counts: {
-        readonly activeTodos: number;
         readonly failedCalls24h: number;
         readonly instancesAttention: number;
         readonly instancesCritical: number;

@@ -77,8 +77,7 @@ export function snapshot(ctxId = "ctx-a", instance = "alpha", cursor = 11): McpA
     return { ctxId, instance, cursor, agentBusy: true, presentation: {
         work: [{ id: "goal-a", title: `Goal ${ctxId}`, actions: [
             { id: "goal-pause", label: "Pause Goal", expectedRevision: cursor, confirmation: { message: "Pause?" } },
-        ] }, { id: "todo-a", title: `Todo ${ctxId}`, actions: [
-            { id: "task-resume", label: "Resume Todo", expectedRevision: cursor + 2 },
+            { id: "goal-resume", label: "Resume Goal", expectedRevision: cursor + 2 },
         ] }],
         primary: { id: "approval-a", title: "Approval required", actions: [
             { id: "approve", label: "Approve" }, { id: "deny", label: "Deny" },
@@ -86,9 +85,9 @@ export function snapshot(ctxId = "ctx-a", instance = "alpha", cursor = 11): McpA
         background: [{ id: "wait-a", title: "Long build", badge: "Wait · active", detail: "task-tmux-a" }],
     } };
 }
-export function recovery(state = snapshot(), intent: "goal-resume" | "task-resume" = "goal-resume") {
+export function recovery(state = snapshot(), intent: "goal-resume" | "goal-retry" = "goal-resume") {
     return { ...state, reentry: { directives: [{ kind: "reentry" as const,
-        id: "directive-a", intent, sourceId: intent === "task-resume" ? "todo-a" : "goal-a" }] } };
+        id: "directive-a", intent, sourceId: "goal-a" }] } };
 }
 export function result(value: unknown) { return { isError: false, structuredContent: value }; }
 export function claim() { return result({ claimed: true,

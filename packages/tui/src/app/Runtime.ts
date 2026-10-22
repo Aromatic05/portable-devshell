@@ -402,9 +402,6 @@ export class TuiRuntime {
             onInstanceDangerAction: async (_action, instance) => {
                 await this.#operations.deleteInstance(instance);
             },
-            onTodoDelete: async (instance, taskId) => {
-                await this.#operations.deleteTodo(instance, taskId);
-            },
             onExtensionPageAction: async (pageId, actionId, itemId) => {
                 await domains.extension.tuiAction(pageId, actionId, itemId);
             },

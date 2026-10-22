@@ -25,7 +25,7 @@ export { createDebugTransport, type DebugTransport } from "./control/debug/Trans
 export { type CliCommandDescriptor, type CliCommandWireResult, type ExtensionCatalogSnapshot, type ExtensionChangeEvent, type ExtensionPublicRuntimeRecord, type ExtensionRemoveResult, type ExtensionRuntimeRecord, type ExtensionSnapshot, type TuiPageDescriptor, type TuiPageSnapshot, type WebApplicationDescriptor, type WebPageAction, type WebPageDescriptor, type WebPageSnapshot } from "./control/extension/Model.js";
 export { type CliCommandTransport, createCliCommandTransport, createExtensionRuntimeTransport, createTuiPageTransport, createWebPageTransport, type ExtensionRuntimeTransport } from "./control/extension/Transport.js";
 export { ExtensionViewModel } from "./control/extension/ViewModel.js";
-export { type OperationalHealth, type OperationalOverview, type OperationalOverviewActivity, type OperationalOverviewAlert, type OperationalOverviewInstance, type OperationalOverviewSystem, type OperationalOverviewTodo, type OperationalOverviewWorker } from "./control/overview/Model.js";
+export { type OperationalHealth, type OperationalOverview, type OperationalOverviewActivity, type OperationalOverviewAlert, type OperationalOverviewInstance, type OperationalOverviewSystem, type OperationalOverviewWorker } from "./control/overview/Model.js";
 export { createOverviewTransport, type OverviewTransport } from "./control/overview/Transport.js";
 export { OverviewViewModel } from "./control/overview/ViewModel.js";
 export { CONTROL_PROTOCOL_RANGE, CONTROL_PROTOCOL_VERSION, type ControlClientKind, type ControlProtocolHelloResponse } from "./control/server/Model.js";
@@ -106,10 +106,9 @@ export { ContextViewModel } from "./workspace/context/ViewModel.js";
 export { compactContextId, type ContextMessageDirective, type ContextMessageListInput, type ContextMessageQueueInput, type ContextMessageReadResult, type ContextMessageRecord, type ContextMessageStatus, type MessageEntry, type MessageEntryKind, type MessageListInput, humanMessageTitle, isMessageEventType, type MessageEvent, type MessageEventType, parseContextMessageDirective } from "./workspace/message/Model.js";
 export { createMessagePreferenceTransport, type MessagePreferenceTransport, createMessageTransport, type MessageTransport } from "./workspace/message/Transport.js";
 export { MessageHistoryViewModel, type MessageHistoryViewModelState, MessagePreferenceViewModel, type MessagePreferenceViewModelState, MessageViewModel, type MessageViewModelState } from "./workspace/message/ViewModel.js";
-export { type ActiveTodoSummary, type GoalActivityKind, type GoalContinuationInput, type GoalManageInput, type GoalRecord, type GoalSnapshot, type GoalStep, type GoalStepInput, type GoalStepStatus, isTaskEventType, type TaskEvent, type TaskEventType, TODO_MAX_ARCHIVED, TODO_MAX_CHECKPOINT_BLOCKERS, TODO_MAX_ID_LENGTH, TODO_MAX_ITEMS, TODO_MAX_TEXT_LENGTH, TODO_MAX_TITLE_LENGTH, type TodoCheckpoint, type TodoCheckpointInput, type TodoItem, type TodoReadInput, type TodoReadResult, type TodoState, type TodoStatus, type TodoSummary, type TodoTaskControlAction, type TodoTaskSummary, type TodoWriteInput, type WaitDetachInput, type WaitRecord, type WaitStatus } from "./workspace/task/Model.js";
-export { projectTodoTaskSummaries } from "./workspace/task/Projection.js";
+export { type GoalActivityKind, type GoalContinuationInput, type GoalManageInput, type GoalRecord, type GoalSnapshot, isTaskEventType, type TaskEvent, type TaskEventType, type WaitDetachInput, type WaitRecord, type WaitStatus } from "./workspace/task/Model.js";
 export { createTaskTransport, type TaskTransport } from "./workspace/task/Transport.js";
-export { GoalViewModel, TodoViewModel } from "./workspace/task/ViewModel.js";
+export { GoalViewModel } from "./workspace/task/ViewModel.js";
 
 export { ProcessSubscriptionManager } from "./execution/process/Subscription.js";
 

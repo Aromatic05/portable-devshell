@@ -10,7 +10,7 @@ CLI / TUI / Web / MCP Host
           ▼
 TypeScript Control daemon
   ├── config + instance registry
-  ├── audit / approval / todo
+  ├── audit / approval / goal
   ├── Context + Workspace state
   ├── physical HTTP Listener + revocable leases
   ├── MCP v2 / OAuth routes
@@ -185,7 +185,7 @@ ctxId
   ├── principal
   ├── external Host bindings
   ├── environments per instance
-  ├── Todo / Goal / Wait / Approval ownership
+  ├── Goal / Wait / Approval / Memory ownership
   └── execution + re-entry state
 ```
 
@@ -202,7 +202,7 @@ Workspace App 是 Context 上的交互/恢复层，不是另一份 workspace 关
 ```text
 MCP App presentation
 Goal
-Todo checkpoint
+Memory checkpoint
 Approval
 durable Wait
 automatic model re-entry

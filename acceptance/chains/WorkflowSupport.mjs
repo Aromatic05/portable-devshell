@@ -8,7 +8,6 @@ import { DatabaseSync } from "node:sqlite";
 import { zstdDecompressSync } from "node:zlib";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { resolvePreparedWorker, runCli, workerEnvironmentName } from "../AcceptanceSupport.mjs";
-import { withTestspaceControlConnection } from "../../scripts/testspace/TestspaceReverse.mjs";
 import { resolveTestspaceTmuxSockets, stopTestspaceTmux } from "../../scripts/testspace/TestspaceRuntime.mjs";
 
 export const instance = "l05-workflow";
@@ -55,10 +54,24 @@ export async function createWorkflowFixture(record) {
         PORTABLE_DEVSHELL_HOME: devshellHome, XDG_RUNTIME_DIR: runtime,
         XDG_CONFIG_HOME: join(home, ".config"), XDG_DATA_HOME: join(home, ".local", "share"),
         XDG_CACHE_HOME: join(home, ".cache"), [workerEnvironmentName()]: worker };
+    delete env.PORTABLE_DEVSHELL_CONTROL_URL;
+    delete env.PORTABLE_DEVSHELL_CONTROL_TOKEN;
+    env.TMPDIR = runtime;
     for (const name of Object.keys(env)) {
         if (name.startsWith("DEVSHELL_WORKER_INTERNAL_") || name.startsWith("DEVSHELL_TESTSPACE_")) delete env[name];
     }
-    const control = (operation) => withTestspaceControlConnection(runtime, operation);
+    const control = async (operation) => {
+        const shared = await import("../../packages/shared/dist/index.js");
+        const endpoint = new shared.Endpoint({
+            connectChannel: signal => shared.connectControlChannel({ environment: env, xdgRuntimeDir: runtime }, signal),
+        });
+        try {
+            await shared.createServerTransport(endpoint, { clientKind: "cli" }).hello();
+            return await operation(shared, endpoint);
+        } finally {
+            endpoint.close();
+        }
+    };
     const cli = (args) => {
         const result = runCli(args, env, { allowFailure: true });
         record("cli", { args, exit: result.status, stdout: result.stdout, stderr: result.stderr });

@@ -5,7 +5,7 @@ export const webPages = [
     "instances",
     "messages",
     "audit",
-    "todos",
+    "goals",
 ] as const;
 
 export type WebPage = (typeof webPages)[number];
@@ -33,7 +33,7 @@ export type WebRoute =
           ctxId?: string;
           callId: string;
       }
-    | { page: "todos" };
+    | { page: "goals" };
 
 export function pageRoute(page: WebPage): WebRoute {
     switch (page) {

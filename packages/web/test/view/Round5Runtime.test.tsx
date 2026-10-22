@@ -5,12 +5,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useSyncExternalStore } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Audit } from "../../src/view/page/activity/audit/Page.js";
-import { Todos } from "../../src/view/page/Todos.js";
+import { Goals } from "../../src/view/page/Goals.js";
 import { Instances } from "../../src/view/page/Instances.js";
 import type { WebRoute } from "../../src/app/Route.js";
 import { WebStore } from "../../src/state/Store.js";
 import { round4Calls, round4Domains, round4Goal, startRound4Peer } from "../support/Round4Harness.js";
-import { todo } from "../support/BetaMatrixHarness.js";
 import { WebTestDomains, withWebDomains } from "../support/DomainHarness.js";
 import { configView, deferred } from "../support/BetaMatrixHarness.js";
 
@@ -121,32 +120,19 @@ it("round5: crash-recovered goal completion and newer revision render together",
     const { peer, domains, store, database } = await fixture();
     await peer.put("alpha", "goals", { goals: [round4Goal(12, "completed")], lastSeq: 12 });
     await domains.goals.load("alpha");
-    render(withWebDomains(domains.harness, <Todos store={store} />));
+    render(withWebDomains(domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
     expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed");
     expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 12");
 });
 
-it("round5: Todo snapshot revision and content recover from SQLite after remount", async () => {
-    const { peer, domains, store, database } = await fixture();
-    await peer.put("alpha", "todo", { todo: todo("persisted-task", 6, "Recovered task"), lastSeq: 6 });
-    await domains.todos.get("alpha")!.load();
-    const first = render(withWebDomains(domains.harness, <Todos store={store} />));
-    expect(await screen.findByText("Recovered task")).toBeInTheDocument();
-    first.unmount();
-    const restarted = await restartDomains(database, domains);
-    await restarted.domains.todos.get("alpha")!.load();
-    render(withWebDomains(restarted.domains.harness, <Todos store={new WebStore(restarted.domains.harness.domains)} />));
-    expect(await screen.findByText("Recovered task")).toBeInTheDocument();
-    expect(screen.getByText("Recovered task").closest("article")).toHaveTextContent("revision 6");
-});
 
 it("round5: goal stream revision supersedes stale mounted snapshot and remains after remount", async () => {
     const { peer, domains, store, database } = await fixture();
     await peer.put("alpha", "goals", { goals: [round4Goal(2)], lastSeq: 2 });
     await domains.goals.load("alpha");
     await waitFor(async () => expect((await peer.subscribers())["alpha:task"]).toBe(1));
-    const first = render(withWebDomains(domains.harness, <Todos store={store} />));
+    const first = render(withWebDomains(domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
     await act(async () => peer.put("alpha", "goals", { goals: [round4Goal(3, "completed")], lastSeq: 3 },
         { instanceName: "alpha", seq: 3, type: "goal.updated", at: "2026-10-20T00:03:00Z" }));
@@ -155,23 +141,11 @@ it("round5: goal stream revision supersedes stale mounted snapshot and remains a
     first.unmount();
     const restarted = await restartDomains(database, domains);
     await restarted.domains.goals.load("alpha");
-    render(withWebDomains(restarted.domains.harness, <Todos store={new WebStore(restarted.domains.harness.domains)} />));
+    render(withWebDomains(restarted.domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
     expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 3");
 });
 
-it("round5: failed Todo delete preserves durable revision and retries only after explicit user action", async () => {
-    const { peer, domains, store } = await fixture();
-    await peer.put("alpha", "todo", { todo: todo("task", 8, "Protected durable task"), lastSeq: 8 });
-    await domains.todos.get("alpha")!.load();
-    const failure = new Error("Todo revision 8 is locked by recovery checkpoint 21");
-    domains.todos.get("alpha")!.delete = async () => { throw failure; };
-    const view = render(withWebDomains(domains.harness, <Todos store={store} />));
-    expect(await screen.findByText("Protected durable task")).toBeInTheDocument();
-    expect(await peer.read("alpha", "todo")).toMatchObject({ todo: { revision: 8 } });
-    view.unmount();
-    expect(await peer.read("alpha", "todo")).toMatchObject({ todo: { taskId: "task", revision: 8 } });
-});
 
 it("round5: instance deletion cleanup debt is shown after successful deregistration", async () => {
     const { domains, store } = lifecycleFixture();

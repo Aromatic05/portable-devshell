@@ -146,7 +146,7 @@ export class CommentService {
                 return { commentId: stoppedByCommentId, kind: "stop" };
             }
             if (
-                toolName === "todo_report" ||
+                toolName === "progress_report" ||
                 state.pendingPushCommentId === undefined
             ) {
                 return { kind: "allow" };

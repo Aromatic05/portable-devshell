@@ -5,7 +5,6 @@ import { createToolCallRuntime, type JsonValue } from "@portable-devshell/shared
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import { GoalService } from "../../../../src/task/goal/index.ts";
 import { GoalState } from "../../../../src/task/goal/storage/State.ts";
-import { TodoService } from "../../../../src/task/todo/index.ts";
 import { installMcpAppReentry } from "../../../../src/instance/mcpapp/Reentry.ts";
 
 test("MCPApp Reentry uses Context-owned Goal continuation and fences duplicate delivery", async () => {
@@ -17,7 +16,7 @@ test("MCPApp Reentry uses Context-owned Goal continuation and fences duplicate d
     });
     const created = await goal.manage("ctx-a", {
         action: "start", workspace: "/repo", objective: "Continue work",
-        steps: [{ id: "step", text: "Write tests" }],
+
     });
     assert.ok(created);
     const runtime = createToolCallRuntime({
@@ -27,7 +26,7 @@ test("MCPApp Reentry uses Context-owned Goal continuation and fences duplicate d
         } }),
     });
     const stop = installMcpAppReentry(runtime.hooks, {
-        goal, todo: { read: async () => ({ tasks: [] }) },
+        goal,
     } as never);
     const call = (input: JsonValue, ctxId = "ctx-a", source: "mcp" | "cli" = "mcp") =>
         runtime.api.call("local", "mcpapp_reentry", input, { ctxId, workspace: "/repo", source });
@@ -55,45 +54,6 @@ test("MCPApp Reentry uses Context-owned Goal continuation and fences duplicate d
     }
 });
 
-test("MCPApp Task recovery requires a resumed Todo in the same Context", async () => {
-    const directory = await createTestTempDirectory("mcpapp-todo-reentry");
-    const todo = new TodoService({
-        appendEvent: async () => undefined,
-        filePath: join(directory, "todo.json"), instanceName: "local",
-    });
-    const created = await todo.write({ revision: 0, title: "Resume task", todos: [
-        { id: "work", content: "Work item", status: "in_progress" },
-    ] }, "ctx-owner");
-    const taskId = created.taskId;
-    assert.ok(taskId);
-    const runtime = createToolCallRuntime({ resolveTarget: () => ({
-        async dispatch(request) {
-            assert.ok(request.execute);
-            return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
-        },
-    }) });
-    const stop = installMcpAppReentry(runtime.hooks, { todo } as never);
-    const call = (ctxId: string, action: string) => runtime.api.call("local", "mcpapp_reentry", {
-        action, claimId: "task-claim-123", intent: "task-resume", sourceId: taskId,
-        ...(action === "report" ? { outcome: "accepted" } : {}),
-    }, { ctxId, workspace: "/repo", source: "mcp" });
-    try {
-        await todo.control(taskId, "pause", "ctx-owner", created.revision);
-        assert.deepEqual(await call("ctx-owner", "claim"), { claimed: false });
-        const paused = (await todo.read()).tasks?.find((item) => item.taskId === taskId);
-        await todo.control(taskId, "resume", "ctx-owner", paused?.revision);
-        assert.deepEqual(await call("ctx-other", "claim"), { claimed: false });
-        assert.deepEqual(await call("ctx-owner", "claim"), { claimed: true });
-        assert.deepEqual(await call("ctx-owner", "validate"), { valid: true });
-        assert.deepEqual(await call("ctx-owner", "attempt"), { attempted: true });
-        assert.deepEqual(await call("ctx-owner", "report"), { reported: true });
-        await todo.control(taskId, "cancel", "ctx-owner");
-        assert.deepEqual(await call("ctx-owner", "validate"), { valid: false });
-    } finally {
-        stop();
-        runtime.close();
-    }
-});
 
 async function goalReentry(now?: () => string) {
     const directory = await createTestTempDirectory("reentry-claim-ownership");
@@ -102,7 +62,7 @@ async function goalReentry(now?: () => string) {
         filePath, instanceName: "local", state: new GoalState({ now }) });
     let goal = createGoal();
     const created = await goal.manage("ctx-owner", { action: "start", workspace: "/repo",
-        objective: "Recover the same Goal", steps: [{ id: "work", text: "Work" }] });
+        objective: "Recover the same Goal", });
     assert.ok(created);
     const runtime = createToolCallRuntime({ resolveTarget: () => ({ async dispatch(request) {
         assert.ok(request.execute);

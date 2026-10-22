@@ -1,6 +1,5 @@
 import type { InstanceName } from "../../types/Instance.js";
 import type { InstanceSnapshot } from "../../execution/process/Model.js";
-import type { ActiveTodoSummary } from "../../workspace/task/Model.js";
 import type {
     ToolCallSource,
     ToolCallStatus,
@@ -29,7 +28,6 @@ export interface OperationalOverviewController {
 }
 
 export interface OperationalOverviewCounts {
-    activeTodos: number;
     failedCalls24h: number;
     instancesAttention: number;
     instancesCritical: number;
@@ -72,10 +70,6 @@ export interface OperationalOverviewInstance {
     worker?: OperationalOverviewWorker;
 }
 
-export interface OperationalOverviewTodo extends ActiveTodoSummary {
-    instance: InstanceName;
-}
-
 export interface OperationalOverviewActivity {
     callId: string;
     completedAt?: string;
@@ -99,9 +93,7 @@ export interface OperationalOverviewAlert {
         | "controller.memoryPressure"
         | "instance.attention"
         | "instance.failed"
-        | "overview.partial"
-        | "todo.blocked"
-        | "todo.failed";
+        | "overview.partial";
     severity: OperationalAlertSeverity;
     title: string;
 }
@@ -114,5 +106,4 @@ export interface OperationalOverview {
     generatedAt: string;
     health: OperationalHealth;
     instances: OperationalOverviewInstance[];
-    todos: OperationalOverviewTodo[];
 }

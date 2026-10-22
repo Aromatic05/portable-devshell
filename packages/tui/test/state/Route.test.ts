@@ -349,31 +349,10 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         ]);
     });
 
-    test("Todo detail breadcrumb uses the task title instead of the selected instance", () => {
+    test("Goals breadcrumb presents the final objective page", () => {
         const { domains, store } = createStore();
-        domains.setTodo("alpha", {
-            items: [],
-            revision: 1,
-            summary: { completed: 0, total: 0 },
-            tasks: [
-                {
-                    completed: 0,
-                    revision: 1,
-                    status: "pending",
-                    taskId: "task-1",
-                    title: "Implement router",
-                    total: 3,
-                    updatedAt: "2026-07-31T00:00:00.000Z",
-                },
-            ],
-        });
-        store.setSelectedPage("todo");
-        store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
-
-        assert.deepEqual(
-            selectBreadcrumbSegments(store.getState(), domains.reader),
-            ["todo", "Implement router"],
-        );
+        store.setSelectedPage("goals");
+        assert.deepEqual(selectBreadcrumbSegments(store.getState(), domains.reader), ["goals"]);
     });
 
     test("page changes made from the sidebar preserve sidebar focus until the user enters the page", () => {

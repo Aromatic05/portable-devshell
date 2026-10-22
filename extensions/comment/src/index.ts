@@ -98,11 +98,6 @@ export interface CommentInstanceSource {
 
 export interface CommentPort {
     queue(instance: string, ctxId: string, text: string, identity?: MailingNotificationIdentity): Promise<void>;
-    beforeTodoToolCall(
-        instance: string,
-        ctxId: string,
-        toolName: string,
-    ): Promise<void>;
     consumePending(
         instance: string,
         ctxId: string,
@@ -120,8 +115,7 @@ export interface CommentPort {
         push?: { commentId: string; message: string };
         replyCommentId?: string;
     }>;
-    recordTodoInvalid(instance: string, ctxId: string): void;
-    reportTodo(
+    reportProgress(
         instance: string,
         ctxId: string,
         message: string,
@@ -191,11 +185,6 @@ export class CommentExtension {
             queue: async (instance, ctxId, text, identity) => {
                 await this.#require(instance).comment.queue({ ctxId, text }, identity);
             },
-            beforeTodoToolCall: async (instance, ctxId, toolName) =>
-                await this.#require(instance).report.beforeTodoToolCall(
-                    ctxId,
-                    toolName,
-                ),
             consumePending: async (instance, ctxId, callId) =>
                 await this.#require(instance).comment.consumePending(
                     ctxId,
@@ -208,9 +197,7 @@ export class CommentExtension {
                 ),
             pendingReport: async (instance, ctxId) =>
                 await this.#require(instance).comment.pendingReport(ctxId),
-            recordTodoInvalid: (instance, ctxId) =>
-                this.#require(instance).report.recordTodoInvalid(ctxId),
-            reportTodo: async (instance, ctxId, message, callId) =>
+            reportProgress: async (instance, ctxId, message, callId) =>
                 await this.#require(instance).report.report(
                     ctxId,
                     message,
@@ -452,17 +439,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
         queue: async (instance, ctxId, text, identity) => await comment.comment.queue(instance, ctxId, text, identity),
     });
     const gate = createCommentToolCallGate(comment.comment);
-    const todoAccess = createCommentTodoAccess(comment.comment);
     const delivery = createCommentDelivery(comment.comment);
     const advice = createCommentAdvice();
-    const todoInvalid = createCommentTodoInvalid(comment.comment);
     context.register(review, "toolcall-gate", async (input, invocation) => {
         await source.refresh();
         return await gate(input, invocation);
-    });
-    context.register(rewrite, "todo-access", async (input, invocation) => {
-        await source.refresh();
-        return await todoAccess(input, invocation);
     });
     context.register(rewrite, "comment-delivery", async (input, invocation) => {
         await source.refresh();
@@ -472,16 +453,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await source.refresh();
         return await advice(input, invocation);
     });
-    context.register(rewrite, "todo-invalid", async (input, invocation) => {
-        await source.refresh();
-        return await todoInvalid(input, invocation);
-    });
     registerMailing(context, mailing);
     registerCommentRoutes(context, source, comment);
     context.register(
         mcpTools,
-        "todo_report",
-        createTodoReportTool(source, comment.comment),
+        "progress_report",
+        createProgressReportTool(source, comment.comment),
     );
     builtinRuntime = { comment, mailing, source };
     // Resume pre-existing Context workspaces immediately; periodic polling
@@ -556,27 +533,6 @@ export function createCommentToolCallGate(
     };
 }
 
-export function createCommentTodoAccess(
-    comment: Pick<CommentPort, "beforeTodoToolCall">,
-): ToolCallRewriteBinding {
-    return async (input: ToolCallRewriteInvocation) => {
-        if (
-            input.direction !== "inbound" ||
-            input.value.kind !== "call" ||
-            input.value.context.source !== "mcp" ||
-            input.value.context.ctxId === undefined
-        ) {
-            return input.value;
-        }
-        await comment.beforeTodoToolCall(
-            input.value.context.instance,
-            input.value.context.ctxId,
-            input.value.toolName,
-        );
-        return input.value;
-    };
-}
-
 export function createCommentDelivery(
     comment: Pick<CommentPort, "consumePending">,
 ): ToolCallRewriteBinding {
@@ -613,26 +569,6 @@ export function createCommentAdvice(): ToolCallRewriteBinding {
                   ...input.value,
                   payload: appendOutputComments(input.value.payload, comments),
               };
-    };
-}
-
-export function createCommentTodoInvalid(
-    comment: Pick<CommentPort, "recordTodoInvalid">,
-): ToolCallRewriteBinding {
-    return (input: ToolCallRewriteInvocation) => {
-        if (
-            input.direction === "outbound" &&
-            input.value.kind === "error" &&
-            input.value.toolName === "todo_write" &&
-            input.value.context.ctxId !== undefined &&
-            readToolErrorCode(input.value.payload) === "todo.invalid"
-        ) {
-            comment.recordTodoInvalid(
-                input.value.context.instance,
-                input.value.context.ctxId,
-            );
-        }
-        return input.value;
     };
 }
 
@@ -784,9 +720,9 @@ function createCommentRouteBinding(
     };
 }
 
-function createTodoReportTool(
+function createProgressReportTool(
     source: BuiltinCommentInstanceSource,
-    comment: Pick<CommentPort, "reportTodo">,
+    comment: Pick<CommentPort, "reportProgress">,
 ): McpToolBinding {
     return async (input, invocation) => {
         await source.refresh();
@@ -794,12 +730,12 @@ function createTodoReportTool(
         if (ctxId === undefined || ctxId.length === 0) {
             throw new ExtensionError({
                 code: "mcp.contextInvalid",
-                message: "todo_report requires a validated ctxId.",
+                message: "progress_report requires a validated ctxId.",
                 retryable: false,
             });
         }
-        const message = readTodoReportMessage(input);
-        await comment.reportTodo(
+        const message = readProgressReportMessage(input);
+        await comment.reportProgress(
             invocation.instance,
             ctxId,
             message,
@@ -814,28 +750,28 @@ function createTodoReportTool(
 
 const COMMENT_REPORT_MAX_TEXT_LENGTH = 4_000;
 
-function readTodoReportMessage(input: ExtensionJsonValue): string {
+function readProgressReportMessage(input: ExtensionJsonValue): string {
     if (typeof input !== "object" || input === null || Array.isArray(input))
-        throw invalidTodoReportInput("todo_report requires an object input.");
+        throw invalidProgressReportInput("progress_report requires an object input.");
     const keys = Object.keys(input);
     if (keys.length !== 1 || keys[0] !== "message")
-        throw invalidTodoReportInput("todo_report accepts only message.");
+        throw invalidProgressReportInput("progress_report accepts only message.");
     const value = input.message;
     if (typeof value !== "string" || value.trim().length === 0)
-        throw invalidTodoReportInput(
-            "todo_report message must be a non-empty string.",
+        throw invalidProgressReportInput(
+            "progress_report message must be a non-empty string.",
         );
     const message = value.trim();
     if (message.length > COMMENT_REPORT_MAX_TEXT_LENGTH)
-        throw invalidTodoReportInput(
-            "todo_report message must be at most " +
+        throw invalidProgressReportInput(
+            "progress_report message must be at most " +
                 COMMENT_REPORT_MAX_TEXT_LENGTH +
                 " characters.",
         );
     return message;
 }
 
-function invalidTodoReportInput(message: string): ExtensionError {
+function invalidProgressReportInput(message: string): ExtensionError {
     return new ExtensionError({
         code: "control.invalidTarget",
         message,
@@ -959,7 +895,7 @@ function reviewDecision(
                     "#push response deadline reached.",
                     "You must reply to the user's #push message before using more tools.",
                     `#push message: ${decision.comment}`,
-                    "Call todo_report with a direct response to the #push message above.",
+                    "Call progress_report with a direct response to the #push message above.",
                 ].join("\n\n"),
             };
         case "resume":
@@ -984,20 +920,6 @@ function reviewDecision(
                         : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
             };
     }
-}
-
-function readToolErrorCode(value: ExtensionJsonValue): string | undefined {
-    if (
-        typeof value !== "object" ||
-        value === null ||
-        Array.isArray(value) ||
-        typeof value.error !== "object" ||
-        value.error === null ||
-        Array.isArray(value.error)
-    ) {
-        return undefined;
-    }
-    return typeof value.error.code === "string" ? value.error.code : undefined;
 }
 
 function instanceSignature(

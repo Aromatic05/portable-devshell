@@ -8,7 +8,7 @@ import { buildConnectionsPageBoxes } from "./instance/connection/Overview.js";
 import { buttonLine } from "../component/Editor.js";
 import { buildHelpPageBoxes } from "./Help.js";
 import { buildInstancesPageBoxes } from "./instance/Instances.js";
-import { buildTodoPageBoxes } from "./workflow/Overview.js";
+import { buildGoalsPageBoxes } from "./workflow/Goals.js";
 import { makeBox } from "./Support.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 
@@ -21,7 +21,7 @@ export function buildBoxesForPage(
     const boxes = buildUnfilteredBoxes(state, reader, page, instanceName);
     if (
         page !== "instances" &&
-        page !== "todo" &&
+        page !== "goals" &&
         page !== "config" &&
         page !== "extensions" &&
         page !== "audit"
@@ -61,10 +61,10 @@ function buildUnfilteredBoxes(
             return buildHelpPageBoxes(state);
         case "instances":
             return buildInstancesPageBoxes(state, reader);
-        case "todo":
+        case "goals":
             return instanceName === undefined
                 ? []
-                : buildTodoPageBoxes(state, reader, instanceName);
+                : buildGoalsPageBoxes(state, reader, instanceName);
         case "config":
             return instanceName === undefined
                 ? []
@@ -137,7 +137,7 @@ function buildExtensionPageBoxes(
 
 function filterStatusBox(
     state: TuiAppState,
-    page: "instances" | "todo" | "config" | "extensions" | "audit",
+    page: "instances" | "goals" | "config" | "extensions" | "audit",
     instanceName: string | undefined,
     query: string,
     visible: number,

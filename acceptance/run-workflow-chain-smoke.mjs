@@ -2,18 +2,17 @@
 // Entry: node acceptance/run-workflow-chain-smoke.mjs
 // ~3-5 minutes on a normal host. Exit 0 = complete chain; 1 = failure;
 // exit 2 = listen EPERM/EACCES before services start (environment blocked).
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkflowFixture } from "./chains/WorkflowSupport.mjs";
 import { runWorkflowPersistentChain } from "./chains/WorkflowPersistentChain.mjs";
 
-const evidence = fileURLToPath(new URL(`../var/agent-work/beta-matrix-round7/L05-workflow/run-${Date.now()}-${process.pid}/`, import.meta.url));
-mkdirSync(evidence, { recursive: true });
+const evidence = mkdtempSync(join(tmpdir(), "workflow-chain-evidence-"));
 const phases = [];
-const requiredPhases = ["control-worker-ready", "persistent-todo-created", "action-error-recovery-and-replay",
+const requiredPhases = ["control-worker-ready", "persistent-goal-created", "action-error-recovery-and-replay",
     "wait-detached-durable", "restart-one-directive-claimed", "restart-two-attempt-replay-fenced",
-    "terminal-wait-todo-verified", "sqlite-audit-events-verified"];
+    "terminal-wait-goal-verified", "sqlite-audit-events-verified"];
 function record(phase, detail = {}) {
     phases.push(phase);
     appendFileSync(join(evidence, "phases.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), phase, ...detail })}\n`);
@@ -26,6 +25,8 @@ try {
     fixture = await createWorkflowFixture(record);
     record("isolated-fixture-created", { root: fixture.root });
     summary.result = await runWorkflowPersistentChain(fixture, record);
+    const missing = requiredPhases.filter(phase => !phases.includes(phase));
+    if (missing.length > 0) throw new Error(`Required workflow phases were not verified: ${missing.join(", ")}`);
     summary.status = "passed";
 } catch (error) {
     summary.error = error.stack ?? String(error);
