@@ -19,7 +19,9 @@ async function fixture(t: test.TestContext) {
     await mkdir(workspace);
     const env = {
         HOME: home,
-        PATH: "/usr/bin:/bin",
+        // Use the runner's CLI search path: Homebrew installs direnv under
+        // /opt/homebrew/bin on macOS, rather than /usr/bin.
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
         XDG_CONFIG_HOME: join(home, "config"),
         XDG_DATA_HOME: join(home, "data"),
         XDG_CACHE_HOME: join(home, "cache"),
