@@ -157,11 +157,16 @@ export class MailingService {
         for (const [key, scope] of this.#scopes) {
             if (scope.instance === instance) this.#scopes.delete(key);
         }
+        for (const key of this.#autoChecked.keys()) {
+            if (key.startsWith(`${instance}\0`)) this.#autoChecked.delete(key);
+        }
     }
 
-    async retireContext(_ctxId: string): Promise<void> {
-        // Retirement must retain durable acknowledgements. Unassigned notices
-        // follow the next binding through the active Context registry.
+    async retireContext(ctxId: string): Promise<void> {
+        // Keep durable acknowledgements but discard the non-authoritative cache.
+        for (const key of this.#autoChecked.keys()) {
+            if (key.endsWith(`\0${ctxId}`)) this.#autoChecked.delete(key);
+        }
     }
 
     async poll(): Promise<void> {
@@ -236,6 +241,9 @@ export class MailingService {
                 throw new Error(`Memory ${name} already exists; use devshell memory inherit ${name}`);
             if (mode === "inherit" && !exists)
                 throw new Error(`Memory ${name} does not exist; use devshell memory init ${name}`);
+            // Invalidate before any write: an interrupted Worker response can
+            // leave a committed binding even if the rest of dispatch fails.
+            this.#invalidateCachedScope(input);
             if (!exists) await files.create(`${ROOT}/${name}/INDEX.md`, `# ${name}\n`);
             // A Context holds one Memory; inherit transfers the identity, even
             // when a prior Context is still active. No directory is copied.
@@ -247,13 +255,6 @@ export class MailingService {
             this.#remember(input);
             await this.#dispatch(files, input, state, active);
             const selected = this.#selection(input, name);
-            const ownerKey = `${input.instance}\0${input.workspace}\0${input.ctxId}`;
-            // An explicit inherit can transfer a live Memory. Do not leave a
-            // previous Context with a stale fast-path cache for the same name.
-            for (const [key, cached] of this.#autoChecked) {
-                if (cached.name === name && key !== ownerKey) this.#autoChecked.delete(key);
-            }
-            this.#autoChecked.set(ownerKey, selected);
             const oldMail = await files.read(`${ROOT}/${name}/mailbox.md`);
             if (oldMail !== undefined && oldMail.trim().length > 0) {
                 // dispatch may have advanced the durable journal; do not overwrite it.
@@ -266,6 +267,7 @@ export class MailingService {
                 await this.#save(files, current);
                 await this.#flushNotices(files, input, current, active);
             }
+            this.#autoChecked.set(`${input.instance}\0${input.workspace}\0${input.ctxId}`, selected);
             return selected;
         });
     }
@@ -274,9 +276,9 @@ export class MailingService {
         return await this.#exclusive(input, async (files) => {
             const state = parseState(await files.read(STATE_FILE));
             const task = Object.keys(state.bindings).find((key) => state.bindings[key] === input.ctxId);
+            this.#invalidateCachedScope(input);
             if (task === undefined) return {};
             delete state.bindings[task];
-            this.#autoChecked.delete(`${input.instance}\0${input.workspace}\0${input.ctxId}`);
             await this.#save(files, state);
             return { released: task };
         });
@@ -327,6 +329,13 @@ export class MailingService {
 
     #key(input: MailingTarget): string {
         return `${input.instance}\0${input.workspace}`;
+    }
+
+    #invalidateCachedScope(input: MailingTarget): void {
+        const prefix = `${this.#key(input)}\0`;
+        for (const key of this.#autoChecked.keys()) {
+            if (key.startsWith(prefix)) this.#autoChecked.delete(key);
+        }
     }
 
     async #activeContexts(scope: MailingTarget): Promise<Set<string>> {

@@ -248,14 +248,24 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
     const hook = createMemoryAutoHook(mailing, (error) => assert.fail(String(error)));
     const call = (toolName: string, command = "pwd") => ({
         callId: "first-work", direction: "inbound" as const,
-        value: { kind: "call" as const, toolName, payload: { command },
+        value: { kind: "call" as const, toolName,
+            payload: toolName === "tmux_input" ? { text: command } : { command },
             context: { ...target, source: "mcp" as const } },
     });
     const invocation = {} as never;
     await hook(call("environ_info") as never, invocation);
     assert.deepEqual(await mailing.status(target), {});
-    await hook(call("bash_run", "devshell memory init explicit-name") as never, invocation);
-    assert.deepEqual(await mailing.status(target), {});
+    for (const [toolName, command] of [
+        ["bash_run", "devshell memory init explicit-name"],
+        ["bash_run", "devshell memory init explicit-name; pwd"],
+        ["bash_run", "cd /testspace/workspace && devshell memory inherit old-name"],
+        ["bash_run", "printf ready; devshell memory init explicit-name\npwd"],
+        ["tmux_run", "devshell memory init explicit-name && pwd"],
+        ["tmux_input", "devshell memory inherit old-name\n"],
+    ]) {
+        await hook(call(toolName!, command!) as never, invocation);
+        assert.deepEqual(await mailing.status(target), {});
+    }
     await Promise.all(Array.from({ length: 8 }, () => hook(call("file_read") as never, invocation)));
     const selected = await mailing.status(target);
     assert.ok("name" in selected);
@@ -281,6 +291,28 @@ test("Explicit Memory init and inherit take priority and invalidate a previous o
     assert.notEqual(fallback.name, explicit.name);
     assert.deepEqual(await mailing.status(b), explicit);
     assert.equal(fs.files.get(root + explicit.name + "/INDEX.md"), "# named-work\n");
+});
+
+test("Memory owner cache follows the durable binding even when inherited mail delivery fails", async (t) => {
+    const { mailing, fs } = fixture();
+    t.after(async () => mailing.close());
+    const a = { instance, workspace, ctxId: "ctx-a" };
+    const b = { instance, workspace, ctxId: "ctx-b" };
+    const original = await mailing.init(a, "named-work");
+    assert.deepEqual(await mailing.ensureBound(a), original);
+    fs.files.set(outbox, mail("Unsent notice", "Retained in the journal", "named-work"));
+    fs.failAppendOnceOn = root + "named-work/mailbox.md";
+    await assert.rejects(mailing.inherit(b, "named-work"), /simulated Worker disconnect/u);
+
+    // The binding committed before the Mailing failure; old cache must not
+    // grant the transferred directory back to its previous Context.
+    assert.deepEqual(await mailing.status(a), {});
+    assert.deepEqual(await mailing.status(b), original);
+    const newBinding = await mailing.ensureBound(a);
+    assert.match(newBinding.name, /^auto-[0-9a-f]{12}$/u);
+    assert.notEqual(newBinding.name, original.name);
+    assert.deepEqual(await mailing.status(a), newBinding);
+    assert.deepEqual(await mailing.status(b), original);
 });
 
 test("Memory inherits legacy Mailing claims without losing accepted message state", async (t) => {

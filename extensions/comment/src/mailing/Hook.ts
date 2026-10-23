@@ -47,14 +47,17 @@ export function createMemoryAutoHook(
             call.context.source !== "mcp" || call.toolName === "environ_info" ||
             call.context.ctxId === undefined || call.context.workspace === undefined)
             return call;
-        // Do not preempt a deliberate memory init/inherit command launched
-        // through the ordinary bash tool; that would leave an orphan fallback.
+        // Any shell invocation that may explicitly bind Memory takes priority,
+        // including commands joined by ;, &&, || or a newline. False positives
+        // merely defer the fallback to the next ordinary ToolCall.
         const payload = call.payload;
-        if (call.toolName === "bash_run" && payload !== null &&
-            typeof payload === "object" && !Array.isArray(payload) &&
-            typeof payload.command === "string" &&
-            /^\s*devshell\s+memory\s+(?:init|inherit)\s+[^\s]+(?:\s*)$/u.test(payload.command))
-            return call;
+        if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+            const text = call.toolName === "tmux_input" ? payload.text :
+                call.toolName === "bash_run" || call.toolName === "tmux_run" ? payload.command : undefined;
+            if (typeof text === "string" &&
+                /\bdevshell\s+memory\s+(?:init|inherit)(?=\s|$)/u.test(text))
+                return call;
+        }
         await mailing.ensureBound({
             ctxId: call.context.ctxId,
             instance: call.context.instance,
