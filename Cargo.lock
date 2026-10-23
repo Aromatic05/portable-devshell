@@ -611,6 +611,7 @@ dependencies = [
  "globset",
  "ignore",
  "lru 0.16.4",
+ "memchr",
  "nix 0.30.1",
  "portable-pty",
  "prost",

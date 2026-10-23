@@ -139,7 +139,7 @@ Unix 上可映射到源码行的 bash_run / tmux_run / tmux_read 输出
 
 knowledge progression 的规则是：`file_read` / `file_grep` 建立 knowledge；成功的 `file_edit` 将 knowledge 推进到新 revision；失败的 `file_edit` 不创建新的 knowledge，也不丢弃原先有效的 knowledge。Write/Rewrite 成功后结果正文全部 known；Patch 成功后原 coverage 随行号变化 remap，并把本次生成的源码行计入 coverage；Move 将 snapshot 随路径迁移；Delete 清除该路径 snapshot。
 
-Unix Worker 还会识别静态的 Bash 读取命令及由白名单过滤器组成的管道，包括 `cat`、`head`、`tail`、`sed -n`、`grep`、`rg` 等。执行方式、返回结构均不改变；仅在已返回的命令输出能够按文件路径、行号或原文内容精确验证时，把对应完整行并入现有 Context coverage。`rg -n` 的目录搜索结果可通过 `path:line:content` 对应多个文件；`tmux_read` 使用先前 `tmux_run` 的任务来源映射。动态路径、无法确认的输出、超出映射预算的内容不会被猜测为已读。此机制不监听文件系统写入，也不在 Windows 启用。
+Unix Worker 还会识别静态的 Bash 读取命令及由白名单过滤器组成的管道，包括 `cat`、`head`、`tail`、`sed -n`、`grep`、`rg` 等。执行方式、返回结构均不改变；仅在已返回的命令输出能够按文件路径、行号或原文内容精确验证时，把对应完整行并入现有 Context coverage。`rg -n` 的目录搜索结果可通过 `path:line:content` 对应多个文件；`tmux_read` 使用先前 `tmux_run` 的任务来源映射。`grep -n`、`uniq -c` 等会改变文本形态的管道阶段暂不作为透明过滤器。单次映射仅处理最多 8 KiB 的输出、4 MiB 的源文件；目录搜索最多映射 64 个文件、扫描 32 MiB 源码。超出内部预算、动态路径或无法确认的输出不增加 coverage，但命令仍正常执行。此机制不监听文件系统写入，也不在 Windows 启用。
 
 MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_grep` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。`file_read view=metadata` 不建立快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。因此成功 edit 后不需要机械地重新 read；只有 coverage 缺失、因外部修改失效，或下一次 edit 需要尚未观察的既有源码行时才需要重新读取或搜索。
 

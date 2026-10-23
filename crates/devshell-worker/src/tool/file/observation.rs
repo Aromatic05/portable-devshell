@@ -4,18 +4,20 @@
 //! static file sources; only exact, unambiguous source lines become coverage.
 //! It never changes command execution or observes writes.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tree_sitter::{Node, Parser};
 
-use super::state::{FULL_SNAPSHOT_LIMIT, TextFile};
+use super::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use super::{FileToolState, resolve_existing};
 use crate::tool::ToolCall;
 
 const MAX_OUTPUT_BYTES: usize = 8 * 1024;
 const MAX_OBSERVED_LINES: usize = MAX_OUTPUT_BYTES;
-const MAX_OBSERVED_FILES: usize = 512;
+const MAX_OBSERVED_FILES: usize = 64;
+const MAX_DIRECTORY_SCAN_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct CommandReadPlan {
@@ -88,10 +90,24 @@ impl CommandReadPlan {
             _ => return None,
         }
         let first = commands.first()?;
-        let (source, numbered, range) = source_from_command(first)?;
+        let (source, numbered, mut range) = source_from_command(first)?;
         for downstream in commands.iter().skip(1) {
             if !stdin_filter(downstream) {
                 return None;
+            }
+        }
+        // A single head/tail directly after plain cat selects original file
+        // positions without transforming line text. Propagate that range
+        // instead of guessing from potentially duplicated output strings.
+        if first.name == "cat" && !numbered && commands.len() == 2 {
+            let filter = &commands[1];
+            if matches!(filter.name.as_str(), "head" | "tail") {
+                let count = output_line_count(&filter.args)?;
+                range = Some(if filter.name == "head" {
+                    ReadRange::First(count)
+                } else {
+                    ReadRange::Last(count)
+                });
             }
         }
         Some(Self {
@@ -161,13 +177,26 @@ impl CommandReadPlan {
                 return;
             }
         }
+        let mut scan_bytes_remaining = MAX_DIRECTORY_SCAN_BYTES;
         for (path, (resolved, observations)) in groups {
-            if let Some(file) = read_text(call, &resolved) {
-                let seen = observations
-                    .iter()
-                    .filter_map(|(line, value)| matches_line(&file, *line, value).then_some(*line))
-                    .collect::<BTreeSet<_>>();
-                remember(call, state, &path, &file, seen);
+            let Some(size) = resolved.metadata().ok().map(|meta| meta.len()) else {
+                continue;
+            };
+            if size > FULL_SNAPSHOT_LIMIT as u64 || size > scan_bytes_remaining {
+                continue;
+            }
+            scan_bytes_remaining -= size;
+            let expected = observations
+                .iter()
+                .map(|(line, value)| (*line, value.as_str()))
+                .collect::<HashMap<_, _>>();
+            let mut seen = BTreeSet::new();
+            if let Some(metadata) = scan_observed_file(call, &resolved, |number, text| {
+                if expected.get(&number).is_some_and(|known| *known == text) {
+                    seen.insert(number);
+                }
+            }) {
+                remember_sparse(call, state, &path, &metadata, seen);
             }
         }
     }
@@ -180,18 +209,32 @@ impl CommandReadPlan {
         output: &str,
     ) {
         let path = &resolved.canonical;
+        if resolved
+            .metadata()
+            .ok()
+            .is_some_and(|meta| meta.len() > 128 * 1024)
+        {
+            if let Some(range) = self.range {
+                self.observe_file_known_range(call, state, resolved, output, range);
+            } else {
+                self.observe_file_streamed(call, state, resolved, output);
+            }
+            return;
+        }
         let Some(file) = read_text(call, resolved) else {
             return;
         };
         let mut seen = BTreeSet::new();
-        let normalized = file.normalized();
-        let complete = normalized;
         let (from, to) = self
             .range
             .map(|range| range.bounds(file.lines.len()))
             .unwrap_or((0, file.lines.len()));
-        // Whole-file reading is unambiguous even with duplicate source lines.
-        if self.range.is_none() && output == complete {
+        // Do not construct a full-file String when the model saw only a short
+        // search result. CRLF/BOM can make the on-disk byte count larger.
+        let whole_file = self.range.is_none()
+            && file.total_bytes <= output.len().saturating_mul(2).saturating_add(3)
+            && output == file.normalized();
+        if whole_file {
             seen.extend(1..=file.lines.len());
         } else if from < to && output == rendered_range(&file, from, to) {
             // A deterministic sed/head/tail range can contain duplicate lines.
@@ -212,40 +255,210 @@ impl CommandReadPlan {
                         }
                         continue;
                     }
-                    if let Some((printed_path, number, value)) = split_numbered_path(line) {
-                        if let Some((_, resolved)) = self.resolve(call, printed_path)
-                            && resolved.canonical == *path
-                            && matches_line(&file, number, value)
-                        {
-                            seen.insert(number);
-                        }
-                        continue;
+                    if let Some((printed_path, number, value)) = split_numbered_path(line)
+                        && let Some((_, resolved)) = self.resolve(call, printed_path)
+                        && resolved.canonical == *path
+                        && matches_line(&file, number, value)
+                    {
+                        seen.insert(number);
                     }
+                    // An unknown numbered representation cannot establish provenance.
+                    continue;
                 }
                 unnumbered.push(line);
             }
-            // An exact, uniquely located contiguous range also establishes
-            // duplicate lines, for example with head/tail/sed.
+            // Linear-time contiguous-sequence search first, then a single
+            // pass for uniquely identified individual lines. Repeated source
+            // lines must not trigger O(output_lines * source_lines) scans.
             if !unnumbered.is_empty() {
                 if let Some(start) = unique_contiguous_range(&file.lines[from..to], &unnumbered) {
                     seen.extend(from + start + 1..=from + start + unnumbered.len());
                 } else {
-                    for line in unnumbered {
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let mut locations = file.lines[from..to]
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(i, value)| (value == line).then_some(from + i + 1));
-                        if let (Some(line_no), None) = (locations.next(), locations.next()) {
-                            seen.insert(line_no);
-                        }
-                    }
+                    seen.extend(unique_source_lines(
+                        &file.lines[from..to],
+                        &unnumbered,
+                        from,
+                    ));
                 }
             }
         }
         remember(call, state, path, &file, seen);
+    }
+
+    /// Deterministic source ranges are validated against the precise original
+    /// line positions, even for files containing millions of repeated values.
+    fn observe_file_known_range(
+        &self,
+        call: &ToolCall,
+        state: &FileToolState,
+        resolved: &crate::instance::sandbox::path::ResolvedPath,
+        output: &str,
+        range: ReadRange,
+    ) {
+        let Some(bytes) = read_observed_bytes(call, resolved) else {
+            return;
+        };
+        let revision = blake3::hash(&bytes).to_hex().to_string();
+        let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        let Some(content) = std::str::from_utf8(body).ok() else {
+            return;
+        };
+        // Count line breaks without building an owned Vec for every line.
+        let total_lines = memchr::memchr_iter(b'\n', content.as_bytes()).count()
+            + usize::from(!content.is_empty() && !content.ends_with('\n'));
+        let (from, to) = range.bounds(total_lines);
+        if from >= to {
+            return;
+        }
+        let candidates = content
+            .split_terminator('\n')
+            .skip(from)
+            .take(to - from)
+            .map(|record| record.strip_suffix('\r').unwrap_or(record))
+            .collect::<Vec<_>>();
+        if candidates.iter().any(|line| line.contains('\r')) {
+            return;
+        }
+        let metadata = TextMetadata {
+            revision,
+            total_bytes: bytes.len(),
+            total_lines,
+        };
+        let expected = candidates.join("\n")
+            + if to < total_lines || content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+        let mut seen = BTreeSet::new();
+        if output == expected {
+            seen.extend(from + 1..=to);
+        } else {
+            let returned = complete_lines(output);
+            if returned.is_empty() {
+                return;
+            }
+            if let Some(start) = unique_borrowed_range(&candidates, &returned) {
+                seen.extend(from + start + 1..=from + start + returned.len());
+            } else {
+                let wanted = returned
+                    .iter()
+                    .copied()
+                    .filter(|line| !line.is_empty())
+                    .collect::<HashSet<_>>();
+                let mut found = HashMap::<&str, Option<usize>>::new();
+                for (index, line) in candidates.iter().enumerate() {
+                    if let Some(known) = wanted.get(line) {
+                        match found.entry(*known) {
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(Some(from + index + 1));
+                            }
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                *entry.get_mut() = None;
+                            }
+                        }
+                    }
+                }
+                seen.extend(found.into_values().flatten());
+            }
+        }
+        remember_sparse(call, state, &resolved.canonical, &metadata, seen);
+    }
+
+    /// Inspect long, mostly-unseen files using borrowed line slices.
+    /// The same BLAKE3 revision is computed while scanning.
+    fn observe_file_streamed(
+        &self,
+        call: &ToolCall,
+        state: &FileToolState,
+        resolved: &crate::instance::sandbox::path::ResolvedPath,
+        output: &str,
+    ) {
+        if resolved
+            .metadata()
+            .ok()
+            .is_none_or(|meta| meta.len() > FULL_SNAPSHOT_LIMIT as u64)
+        {
+            return;
+        }
+        let lines = complete_lines(output);
+        if lines.is_empty() {
+            return;
+        }
+        let mut numbered = HashMap::<usize, &str>::new();
+        let mut plain = Vec::new();
+        for line in lines {
+            if self.numbered {
+                if let Some((number, value)) =
+                    split_numbered_line(line).or_else(|| split_tab_numbered_line(line))
+                {
+                    numbered.insert(number, value);
+                    continue;
+                }
+                if let Some((source_path, number, value)) = split_numbered_path(line)
+                    && self
+                        .resolve(call, source_path)
+                        .is_some_and(|(_, file)| file.canonical == resolved.canonical)
+                {
+                    numbered.insert(number, value);
+                }
+                // Never match unrecognized numbered output to a literal line.
+                continue;
+            }
+            plain.push(line);
+        }
+        let wanted = plain
+            .iter()
+            .copied()
+            .filter(|line| !line.is_empty())
+            .collect::<HashSet<_>>();
+        let mut positions = HashMap::<&str, Option<usize>>::with_capacity(wanted.len());
+        let prefix = kmp_prefix(&plain);
+        let mut matched = 0usize;
+        let mut unique_match = None;
+        let mut multiple_matches = false;
+        let mut seen = BTreeSet::new();
+        let metadata = scan_observed_file(call, resolved, |number, text| {
+            if numbered.get(&number).is_some_and(|value| *value == text) {
+                seen.insert(number);
+            }
+            if let Some(known) = wanted.get(text) {
+                // Reuse the output's stable line, without per-match allocation.
+                match positions.entry(*known) {
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(Some(number));
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        *entry.get_mut() = None;
+                    }
+                }
+            }
+            if !plain.is_empty() && !multiple_matches {
+                while matched > 0 && text != plain[matched] {
+                    matched = prefix[matched - 1];
+                }
+                if text == plain[matched] {
+                    matched += 1;
+                }
+                if matched == plain.len() {
+                    if unique_match.is_some() {
+                        multiple_matches = true;
+                    } else {
+                        unique_match = Some(number + 1 - plain.len());
+                    }
+                    matched = prefix[matched - 1];
+                }
+            }
+        });
+        let Some(metadata) = metadata else {
+            return;
+        };
+        if let Some(start) = unique_match.filter(|_| !multiple_matches) {
+            seen.extend(start..start + plain.len());
+        } else {
+            seen.extend(positions.into_values().flatten());
+        }
+        remember_sparse(call, state, &resolved.canonical, &metadata, seen);
     }
 
     fn resolve(
@@ -363,6 +576,13 @@ fn source_from_command(command: &SimpleCommand) -> Option<(String, bool, Option<
         }
         "grep" | "egrep" | "fgrep" | "rg" => {
             let (files, numbered) = search_operands(command)?;
+            if !numbered
+                && args
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "-H" | "--with-filename"))
+            {
+                return None;
+            }
             if files.is_empty() && command.name == "rg" {
                 Some((".".to_string(), numbered, None))
             } else if files.len() == 1 {
@@ -382,7 +602,16 @@ fn stdin_filter(command: &SimpleCommand) -> bool {
         }
         "sed" => sed_operands(&command.args).is_some_and(|files| files.is_empty()),
         "grep" | "egrep" | "fgrep" | "rg" => {
-            search_operands(command).is_some_and(|(files, _)| files.is_empty())
+            // -n/-H add synthetic prefixes; textual coincidence is not proof
+            // that the corresponding source line was observed.
+            search_operands(command).is_some_and(|(files, numbered)| {
+                files.is_empty()
+                    && !numbered
+                    && !command
+                        .args
+                        .iter()
+                        .any(|arg| matches!(arg.as_str(), "-H" | "--with-filename" | "-r" | "-R"))
+            })
         }
         "sort" => command
             .args
@@ -391,7 +620,7 @@ fn stdin_filter(command: &SimpleCommand) -> bool {
         "uniq" => command
             .args
             .iter()
-            .all(|arg| matches!(arg.as_str(), "-c" | "-d" | "-u")),
+            .all(|arg| matches!(arg.as_str(), "-d" | "-u")),
         _ => false,
     }
 }
@@ -490,6 +719,10 @@ fn search_operands(command: &SimpleCommand) -> Option<(Vec<String>, bool)> {
         if !arg.starts_with('-') || arg == "-" {
             break;
         }
+        if command.name == "rg" && matches!(arg, "-r" | "-R") {
+            // ripgrep -r is --replace, not grep's recursive option.
+            return None;
+        }
         if matches!(arg, "-n" | "--line-number") {
             numbered = true;
         } else if matches!(
@@ -576,25 +809,135 @@ fn matches_line(file: &TextFile, number: usize, text: &str) -> bool {
     number > 0 && file.lines.get(number - 1).is_some_and(|line| line == text)
 }
 
+fn kmp_prefix(returned: &[&str]) -> Vec<usize> {
+    let mut prefix = vec![0; returned.len()];
+    let mut previous = 0_usize;
+    for index in 1..returned.len() {
+        while previous > 0 && returned[previous] != returned[index] {
+            previous = prefix[previous - 1];
+        }
+        if returned[previous] == returned[index] {
+            previous += 1;
+        }
+        prefix[index] = previous;
+    }
+    prefix
+}
+
 fn unique_contiguous_range(source: &[String], returned: &[&str]) -> Option<usize> {
+    let m = returned.len();
+    if m == 0 || m > source.len() {
+        return None;
+    }
+    // KMP, O(source_lines + output_lines), including adversarial repetition.
+    let prefix = kmp_prefix(returned);
+    let mut matched = 0_usize;
+    let mut only = None;
+    for (index, line) in source.iter().enumerate() {
+        while matched > 0 && line != returned[matched] {
+            matched = prefix[matched - 1];
+        }
+        if line == returned[matched] {
+            matched += 1;
+        }
+        if matched == m {
+            if only.is_some() {
+                return None;
+            }
+            only = Some(index + 1 - m);
+            matched = prefix[matched - 1];
+        }
+    }
+    only
+}
+
+fn unique_borrowed_range(source: &[&str], returned: &[&str]) -> Option<usize> {
     if returned.is_empty() || returned.len() > source.len() {
         return None;
     }
-    let mut candidates =
-        source
-            .windows(returned.len())
-            .enumerate()
-            .filter_map(|(offset, lines)| {
-                lines
-                    .iter()
-                    .zip(returned)
-                    .all(|(source, seen)| source == seen)
-                    .then_some(offset)
-            });
-    match (candidates.next(), candidates.next()) {
-        (Some(offset), None) => Some(offset),
+    let mut matches = source
+        .windows(returned.len())
+        .enumerate()
+        .filter_map(|(index, lines)| (lines == returned).then_some(index));
+    match (matches.next(), matches.next()) {
+        (Some(index), None) => Some(index),
         _ => None,
     }
+}
+
+fn unique_source_lines(source: &[String], returned: &[&str], offset: usize) -> BTreeSet<usize> {
+    let wanted = returned
+        .iter()
+        .copied()
+        .filter(|text| !text.is_empty())
+        .collect::<HashSet<_>>();
+    let mut positions = HashMap::<&str, Option<usize>>::with_capacity(wanted.len());
+    for (index, line) in source.iter().enumerate() {
+        if !wanted.contains(line.as_str()) {
+            continue;
+        }
+        match positions.entry(line) {
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(Some(offset + index + 1));
+            }
+            std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                *occupied.get_mut() = None;
+            }
+        }
+    }
+    positions.into_values().flatten().collect()
+}
+
+/// Read a bounded, already-authorized source file without per-line allocation.
+fn read_observed_bytes(
+    call: &ToolCall,
+    resolved: &crate::instance::sandbox::path::ResolvedPath,
+) -> Option<Vec<u8>> {
+    let metadata = resolved.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > FULL_SNAPSHOT_LIMIT as u64 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    resolved
+        .open_file()
+        .ok()?
+        .take(FULL_SNAPSHOT_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    call.check_cancelled().ok()?;
+    if bytes.len() > FULL_SNAPSHOT_LIMIT || bytes.contains(&0) {
+        return None;
+    }
+    Some(bytes)
+}
+
+/// A single BLAKE3 digest and borrowed source-line slices avoid repeated
+/// per-line allocations for large files.
+fn scan_observed_file(
+    call: &ToolCall,
+    resolved: &crate::instance::sandbox::path::ResolvedPath,
+    mut visit: impl FnMut(usize, &str),
+) -> Option<TextMetadata> {
+    let bytes = read_observed_bytes(call, resolved)?;
+    let revision = blake3::hash(&bytes).to_hex().to_string();
+    let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    let content = std::str::from_utf8(body).ok()?;
+    let mut total_lines = 0;
+    for record in content.split_terminator('\n') {
+        let line = record.strip_suffix('\r').unwrap_or(record);
+        // CR-only newlines are unusual; do not grant any coverage unless
+        // line boundaries are unambiguous under TextFile's normalization.
+        if line.contains('\r') {
+            return None;
+        }
+        total_lines += 1;
+        visit(total_lines, line);
+    }
+    Some(TextMetadata {
+        revision,
+        total_bytes: bytes.len(),
+        total_lines,
+    })
 }
 
 fn read_text(
@@ -606,6 +949,22 @@ fn read_text(
         return None;
     }
     TextFile::read_file(resolved.open_file().ok()?, &call.cancellation).ok()
+}
+
+fn remember_sparse(
+    call: &ToolCall,
+    state: &FileToolState,
+    path: &Path,
+    metadata: &TextMetadata,
+    seen: BTreeSet<usize>,
+) {
+    if seen.is_empty() || seen.len() > MAX_OBSERVED_LINES {
+        return;
+    }
+    let ordinal = state.next_snapshot_ordinal();
+    if let Ok(mut snapshots) = state.context_snapshots.lock() {
+        snapshots.remember_sparse(&call.ctx_id, path, metadata, seen, ordinal);
+    }
 }
 
 fn remember(
@@ -649,6 +1008,7 @@ mod tests {
             "cat a.rs |& head",
             "python script.py",
             "cat a.rs | cut -c 1-2",
+            "cat a.rs | grep -r something",
         ] {
             assert!(CommandReadPlan::analyze(script, cwd).is_none(), "{script}");
         }

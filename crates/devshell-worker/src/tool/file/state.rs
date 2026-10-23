@@ -129,7 +129,13 @@ impl ContextSnapshotStore {
                 if ordinal >= current.ordinal {
                     current.ordinal = ordinal;
                     current.total_lines = total_lines;
-                    current.content = content;
+                    // A sparse shell observation of the same revision may
+                    // add coverage, but must not discard a fuller file_read.
+                    if matches!(content, SnapshotContent::Full(_))
+                        || matches!(current.content, SnapshotContent::Sparse)
+                    {
+                        current.content = content;
+                    }
                 }
                 return;
             }
@@ -569,6 +575,23 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(selected_error.code, "tool.cancelled");
+    }
+
+    #[test]
+    fn newer_sparse_observation_preserves_full_content_for_same_revision() {
+        let mut store = ContextSnapshotStore::default();
+        let path = Path::new("/workspace/known.txt");
+        let text = text("revision-1", "known content".to_string());
+        let metadata = TextMetadata {
+            revision: text.revision.clone(),
+            total_bytes: text.total_bytes,
+            total_lines: 1,
+        };
+        store.remember_full("ctx", path, &text, [1], 1);
+        store.remember_sparse("ctx", path, &metadata, [1], 2);
+        let snapshot = store.latest_for_path("ctx", path).unwrap();
+        assert!(matches!(snapshot.content, super::SnapshotContent::Full(_)));
+        assert!(snapshot.seen_lines.contains(&1));
     }
 
     #[test]
