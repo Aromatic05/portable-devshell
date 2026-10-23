@@ -26,7 +26,26 @@ function goalBox(state: TuiAppState, instance: string, goal: GoalSnapshot): BoxM
 export function buildGoalsPageBoxes(
     state: TuiAppState, reader: TuiDomainReader, instance: string,
 ): BoxModel[] {
-    const goals = reader.goals.instances[instance]?.goals ?? [];
+    const snapshot = reader.goals.instances[instance];
+    const goals = snapshot?.goals ?? [];
+    const failure = snapshot?.failure;
+    const warning = failure === undefined ? [] : [makeBox(state, "goals", instance, {
+        detailLines: [failure.message, "Retry by refreshing this Instance."],
+        expandable: true,
+        id: "goals-error",
+        status: "warning",
+        summaryLines: [failure.message],
+        title: "Goals could not be loaded",
+    })];
+    if (goals.length === 0 && failure !== undefined) return warning;
+    if (goals.length === 0 && snapshot === undefined) return [makeBox(state, "goals", instance, {
+        detailLines: ["Workspace Goals have not been loaded."],
+        expandable: false,
+        id: "goals-loading",
+        status: "normal",
+        summaryLines: ["status=loading"],
+        title: "Goals",
+    })];
     if (goals.length === 0) return [makeBox(state, "goals", instance, {
         detailLines: ["No active Workspace Goal for this instance."],
         expandable: false,
@@ -35,5 +54,5 @@ export function buildGoalsPageBoxes(
         summaryLines: ["status=none"],
         title: "Goals",
     })];
-    return goals.map((goal) => goalBox(state, instance, goal));
+    return [...warning, ...goals.map((goal) => goalBox(state, instance, goal))];
 }

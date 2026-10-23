@@ -12,11 +12,22 @@ export function Goals() {
     const rows = instances.flatMap(({ name }) =>
         (goalsState.instances[name]?.goals ?? []).map((goal) => ({ goal, instance: name })),
     );
+    const failures = instances.filter(({ name }) =>
+        goalsState.instances[name]?.failure !== undefined);
+    const pending = instances.some(({ name }) => goalsState.instances[name] === undefined);
     return (
         <section>
             <h2>Goals</h2>
             <p className="hint">Final objectives for each active Workspace. Plans and checkpoints are kept in Agent Memory.</p>
-            {rows.length === 0 ? <p className="empty">No active Workspace Goals.</p> : (
+            {failures.map(({ name }) => <div key={name} role="alert">
+                <p className="error">Could not load Goals for {name}: {goalsState.instances[name]!.failure!.message}</p>
+                <button type="button" onClick={() => void domains.goals.load(name)}>Retry {name}</button>
+            </div>)}
+            {rows.length === 0 ? (
+                failures.length > 0 ? null :
+                pending ? <p className="empty">Loading Workspace Goals…</p> :
+                <p className="empty">No active Workspace Goals.</p>
+            ) : (
                 <div className="goal-list">
                     {rows.map(({ goal, instance }) => (
                         <article className="card" data-goal-id={goal.goalId}
