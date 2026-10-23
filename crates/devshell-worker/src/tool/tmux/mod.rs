@@ -14,6 +14,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::instance::runtime::WorkerRuntimeContext;
 use crate::instance::storage::InstancePaths;
 use crate::tool::ToolCommandEnvironmentProvider;
+use crate::tool::file::FileToolState;
 use crate::tool::tmux::backend::TmuxBackend;
 use crate::tool::tmux::model::{
     TmuxInputOutput, TmuxInputParams, TmuxInspectParams, TmuxManageOutput, TmuxManageParams,
@@ -72,7 +73,11 @@ where
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let params = call.parse_params()?;
         let state = self.states.state_for(&call.workspace)?;
-        crate::tool::contract::serialize((self.operation)(state.as_ref(), &call, params)?)
+        let result =
+            crate::tool::contract::serialize((self.operation)(state.as_ref(), &call, params)?)?;
+        #[cfg(unix)]
+        state.observe_read_output(&call, &self.name.as_str(), &result);
+        Ok(result)
     }
 }
 
@@ -81,6 +86,7 @@ struct TmuxStateRegistry {
     model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     runtime: WorkerRuntimeContext,
     socket_paths: EndpointPaths,
+    files: Arc<FileToolState>,
     states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
 }
 
@@ -90,10 +96,12 @@ impl TmuxStateRegistry {
         socket_paths: &EndpointPaths,
         runtime: &WorkerRuntimeContext,
         model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+        files: Arc<FileToolState>,
     ) -> Self {
         Self {
             instance_paths: instance_paths.clone(),
             model_devshell,
+            files,
             runtime: runtime.clone(),
             socket_paths: socket_paths.clone(),
             states: Mutex::new(HashMap::new()),
@@ -118,6 +126,7 @@ impl TmuxStateRegistry {
                 workspace,
             )?,
             Arc::clone(&self.model_devshell),
+            Arc::clone(&self.files),
         )?);
         TmuxState::start_reaper(&state);
         states.insert(workspace.to_path_buf(), Arc::clone(&state));
@@ -154,6 +163,7 @@ pub fn register_tools(
     socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
     model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+    files: Arc<FileToolState>,
 ) -> Result<(), ToolError> {
     if !TmuxBackend::available() {
         return Ok(());
@@ -163,6 +173,7 @@ pub fn register_tools(
         socket_paths,
         runtime,
         model_devshell,
+        files,
     ));
     registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),

@@ -19,6 +19,9 @@ use crate::tool::bash::bash_run_name;
 use crate::tool::bash::model::ShellRuntime;
 use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tool::bash::process::spawn_shell;
+use crate::tool::file::FileToolState;
+#[cfg(unix)]
+use crate::tool::file::observation::CommandReadPlan;
 use crate::tool::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolProcessGuard,
     ToolProgressEmitter,
@@ -41,17 +44,21 @@ pub struct BashRunTool {
     name: ToolName,
     artifacts: Arc<ArtifactStore>,
     model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+    #[cfg_attr(windows, allow(dead_code))]
+    files: Arc<FileToolState>,
     shell: ShellRuntime,
 }
 impl BashRunTool {
     pub fn new(
         artifacts: Arc<ArtifactStore>,
         model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+        files: Arc<FileToolState>,
     ) -> Result<Self, ToolError> {
         Ok(Self {
             name: bash_run_name(),
             artifacts,
             model_devshell,
+            files,
             shell: ShellRuntime::detect()?,
         })
     }
@@ -128,6 +135,8 @@ impl ToolHandler for BashRunTool {
             .check_capability(FilesystemCapability::ProcessExecute)
             .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
+        #[cfg(unix)]
+        let read_plan = CommandReadPlan::analyze(&params.command, &cwd.canonical);
         let execution = crate::capability::execution::ExecutionConfig::from_env()
             .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
         if let Some(config) = execution.as_ref() {
@@ -277,6 +286,15 @@ impl ToolHandler for BashRunTool {
                 "termSignal": term_signal,
             })));
         }
+        let rendered_stdout = render_inline_stream(&stdout);
+        #[cfg(unix)]
+        if !stdout.truncated
+            && !stderr.truncated
+            && stdout.kept.len().saturating_add(stderr.kept.len()) <= 8 * 1024
+            && let Some(plan) = read_plan
+        {
+            plan.observe(&call, &self.files, &rendered_stdout);
+        }
         crate::tool::contract::serialize(BashRunOutput {
             exit_code: if matches!(termination, BashTermination::Exited) {
                 status.code()
@@ -292,7 +310,7 @@ impl ToolHandler for BashRunTool {
                 None
             },
             timed_out: matches!(termination, BashTermination::Timeout).then_some(true),
-            stdout: render_inline_stream(&stdout),
+            stdout: rendered_stdout,
             stderr: render_inline_stream(&stderr),
             stdout_bytes: stdout_bytes.load(Ordering::SeqCst),
             stderr_bytes: stderr_bytes.load(Ordering::SeqCst),

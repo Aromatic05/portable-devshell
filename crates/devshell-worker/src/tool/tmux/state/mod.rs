@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use super::warning;
 use crate::tool::ToolCommandEnvironmentProvider;
+use crate::tool::file::FileToolState;
+#[cfg(unix)]
+use crate::tool::file::observation::CommandReadPlan;
+#[cfg(unix)]
+use std::num::NonZeroUsize;
 
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
@@ -62,6 +67,10 @@ struct PersistedTaskRecord {
 pub struct TmuxState {
     backend: TmuxBackend,
     model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+    #[cfg_attr(windows, allow(dead_code))]
+    files: Arc<FileToolState>,
+    #[cfg(unix)]
+    read_plans: Mutex<lru::LruCache<String, CommandReadPlan>>,
     structure: Mutex<()>,
     pane_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     tasks: Mutex<TaskRegistry>,
@@ -73,6 +82,7 @@ impl TmuxState {
     pub fn new(
         backend: TmuxBackend,
         model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
+        files: Arc<FileToolState>,
     ) -> Result<Self, ToolError> {
         let mut tasks = TaskRegistry::default();
         for record in backend.load_task_records::<PersistedTaskRecord>()? {
@@ -107,12 +117,67 @@ impl TmuxState {
         Ok(Self {
             backend,
             model_devshell,
+            files,
+            #[cfg(unix)]
+            read_plans: Mutex::new(lru::LruCache::new(NonZeroUsize::new(128).unwrap())),
             structure: Mutex::new(()),
             pane_locks: Mutex::new(HashMap::new()),
             tasks: Mutex::new(tasks),
             pending_warnings: Mutex::new(Vec::new()),
             replays: ReplayCache::default(),
         })
+    }
+
+    #[cfg(unix)]
+    pub fn observe_read_output(
+        &self,
+        call: &ToolCall,
+        tool_name: &str,
+        result: &serde_json::Value,
+    ) {
+        if !matches!(tool_name, "tmux_run" | "tmux_read") {
+            return;
+        }
+        let Some(task_id) = result
+            .get("task")
+            .and_then(|task| task.get("id"))
+            .and_then(|id| id.as_str())
+        else {
+            return;
+        };
+        if tool_name == "tmux_run" {
+            let command = call.params.get("command").and_then(|value| value.as_str());
+            let cwd = call.params.get("cwd").and_then(|value| value.as_str());
+            if let (Some(command), Ok(cwd)) = (command, resolve_cwd(call, cwd))
+                && let Some(plan) = CommandReadPlan::analyze(command, &cwd.canonical)
+                && let Ok(mut plans) = self.read_plans.lock()
+            {
+                plans.put(task_id.to_string(), plan);
+            }
+        }
+        let plan = self
+            .read_plans
+            .lock()
+            .ok()
+            .and_then(|mut plans| plans.get(task_id).cloned());
+        let Some(plan) = plan else {
+            return;
+        };
+        let Some(output) = result.get("output").and_then(|value| value.as_array()) else {
+            return;
+        };
+        if output.is_empty() {
+            return;
+        }
+        let mut text = String::new();
+        for line in output {
+            let Some(line) = line.as_str() else {
+                return;
+            };
+            text.push_str(line);
+            text.push('\n');
+        }
+        plan.observe(call, &self.files, &text);
     }
 
     pub fn start_reaper(state: &Arc<Self>) {

@@ -29,6 +29,7 @@ pub fn builtin_registry(
     registry.register(Arc::new(BashRunTool::new(
         Arc::clone(&artifacts),
         Arc::clone(&model_devshell),
+        Arc::clone(&files),
     )?) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(
         Arc::clone(&files),
@@ -43,6 +44,7 @@ pub fn builtin_registry(
         socket_paths,
         runtime,
         model_devshell,
+        files,
     )?;
     Ok(registry)
 }

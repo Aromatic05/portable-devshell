@@ -1,5 +1,7 @@
 pub mod edit;
 pub mod model;
+#[cfg(unix)]
+pub mod observation;
 pub mod read;
 pub mod search;
 pub mod state;
