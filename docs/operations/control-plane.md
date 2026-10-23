@@ -1,6 +1,6 @@
 # Control 管理面
 
-portable-devshell 的 CLI、TUI 和 Web 都是同一个 Control daemon 的管理客户端。它们共享 instance registry、配置、审批、审计、Context、Todo、Artifact 和 OAuth 状态，不各自维护第二套真相。
+portable-devshell 的 CLI、TUI 和 Web 都是同一个 Control daemon 的管理客户端。它们共享 instance registry、配置、审批、审计、Context、Goal、Artifact 和 OAuth 状态，不各自维护第二套真相。工作计划保存在 Context 绑定的 Agent Memory 中。
 
 查看总帮助或某一组命令的当前参数：
 
@@ -32,7 +32,6 @@ devshell overview
 ```text
 Control PID / uptime / system resources
 instance health
-active Todo
 最近 tool activity
 最近 24h failed/timed-out calls
 pending tool approvals
@@ -152,15 +151,11 @@ devshell context renew <ctxId>
 
 这些命令是管理/诊断接口；模型在 `openai-session` 模式下不需要看到内部 `ctxId`。见 [Context](../concepts/context.md)。
 
-## Todo
+## Goal 与 Agent Memory
 
-模型和 Workspace 使用 Todo tools 持久化任务计划；Control CLI 当前只提供显式删除：
+Goal 表示当前 Context 的最终目标，不存储步骤清单。模型通过 `workspace_goal` 创建、更新和完成 Goal；通过 `devshell memory init <name>` 或 `devshell memory inherit <name>` 绑定记录计划与 Checkpoint 的持久化目录。`progress_report` 仅负责向用户报告进度。
 
-```bash
-devshell todo delete <instance> <taskId>
-```
-
-这用于人工清理已知 task，不应作为“让模型继续/停止 Goal”的替代操作。Goal/Wait 生命周期见 [Workspace](../concepts/workspace.md)。
+Web/TUI 的 Goals 页面展示权威快照；用户 Pause/Resume/Stop 操作通过 MCP App 和领域服务执行，不由管理界面直接写入目标状态。详细机制见 [Workspace](../concepts/workspace.md)。
 
 ## Artifact
 
@@ -184,7 +179,7 @@ TUI 是同一 Control RPC 的交互式前端，适合：
 - tool approval；
 - OAuth approval；
 - audit/log；
-- Todo 与 Artifact 状态；
+- Workspace Goal 与 Artifact 状态；
 - 长时间观察。
 
 它不会把页面状态直接写进 worker；实际操作仍通过 Control service。

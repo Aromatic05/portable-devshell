@@ -119,6 +119,30 @@ describe("Web Connections", () => {
         ).toBeInTheDocument();
     });
 
+    it("copies only the enrollment command and shows code expiry", async () => {
+        const { domains, store } = setup();
+        const command = "devshell-worker enroll --controller https://controller.test --device-code issued";
+        vi.spyOn(store, "createReverseCode").mockResolvedValue(
+            `${command}\nCode expires: 2099-01-01T00:00:00.000Z`,
+        );
+        const writeText = vi.fn(async () => undefined);
+        const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true, value: { writeText },
+        });
+        try {
+            renderConnections(store, domains, "reverse-one");
+            fireEvent.click(screen.getByRole("button", { name: "Generate enrollment code" }));
+            expect(await screen.findByText(/Expires in/u)).toBeInTheDocument();
+            fireEvent.click(screen.getByRole("button", { name: "Copy enrollment command" }));
+            await waitFor(() => expect(writeText).toHaveBeenCalledWith(command));
+            expect(screen.getByText("Enrollment command copied.")).toBeInTheDocument();
+        } finally {
+            if (original === undefined) Reflect.deleteProperty(navigator, "clipboard");
+            else Object.defineProperty(navigator, "clipboard", original);
+        }
+    });
+
     it("manages OAuth approval mode and rotates a masked token", async () => {
         const config = connectionView();
         config.mcp.oauth2 = { approval: "token", token: "********" };

@@ -14,6 +14,8 @@ import type {
 import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
+import { useNow } from "../Clock.js";
+import { formatDuration } from "../Presentation.js";
 
 interface ConnectionDrafts {
     instanceMcp: ConfigInstancePatch["mcp"];
@@ -30,6 +32,7 @@ export function Connections({
     instance?: string;
     store: WebStore;
 }) {
+    const now = useNow(10_000);
     const domains = useWebDomains();
     const config = useDomainSnapshot(domains.config);
     const instancesState = useDomainSnapshot(domains.instances);
@@ -55,6 +58,7 @@ export function Connections({
         text: string;
     }>();
     const [enrollment, setEnrollment] = useState<string>();
+    const [copyFeedback, setCopyFeedback] = useState<string>();
     const [approvalToken, setApprovalToken] = useState<string>();
     const [confirm, setConfirm] = useState<"revoke">();
     const [restartingControl, setRestartingControl] = useState(false);
@@ -63,6 +67,7 @@ export function Connections({
         setDrafts(base);
         setFeedback(undefined);
         setEnrollment(undefined);
+        setCopyFeedback(undefined);
     }, [base]);
 
     const selectedEntry = instances.find(
@@ -83,6 +88,11 @@ export function Connections({
     const mcpStatus = mcp.status;
     const oauthApproval = globalOAuthApproval(configView);
     const controlRestartRequired = configView?.restartControlRequired === true;
+    const expiresText = enrollment?.split("\n").find((line) =>
+        line.startsWith("Code expires: "))?.slice("Code expires: ".length);
+    const expiration = expiresText === undefined ? NaN : Date.parse(expiresText);
+    const expiresIn = Number.isFinite(expiration)
+        ? Math.max(0, Math.ceil((expiration - now) / 1_000)) : undefined;
 
     if (missingInstance) {
         return (
@@ -526,6 +536,15 @@ export function Connections({
                         code is used.
                     </p>
                     {enrollment === undefined ? null : <pre>{enrollment}</pre>}
+                    {enrollment !== undefined && (
+                        <p className="hint" role="status">
+                            Code generated. Run the enrollment command on the remote worker.
+                            {expiresIn === undefined ? null : expiresIn === 0
+                                ? " This code has expired; generate a new one to enroll."
+                                : ` Expires in ${formatDuration(expiresIn)}.`}
+                        </p>
+                    )}
+                    {copyFeedback === undefined ? null : <p role="status">{copyFeedback}</p>}
                     <div className="actions">
                         <button
                             disabled={!interactive}
@@ -533,14 +552,31 @@ export function Connections({
                                 void store
                                     .createReverseCode(selectedEntry.name)
                                     .then((value) => {
-                                        if (value !== undefined)
+                                        if (value !== undefined) {
                                             setEnrollment(value);
+                                            setCopyFeedback(undefined);
+                                        }
                                     })
                             }
                             type="button"
                         >
                             Generate enrollment code
                         </button>
+                        {enrollment !== undefined && (
+                            <button type="button" onClick={() => {
+                                const command = enrollment.split("\n", 1)[0]!;
+                                void (async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(command);
+                                        setCopyFeedback("Enrollment command copied.");
+                                    } catch {
+                                        setCopyFeedback("Clipboard is unavailable; select the command above to copy it.");
+                                    }
+                                })();
+                            }}>
+                                Copy enrollment command
+                            </button>
+                        )}
                         <button
                             className="danger"
                             disabled={!interactive}

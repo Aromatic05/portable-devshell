@@ -77,7 +77,7 @@ devshell instance call \
 devshell tui
 ```
 
-TUI 可以查看实例、配置、审批、OAuth、审计、日志和 Todo。CLI 与 TUI 都通过同一个 Control RPC，不维护第二套运行状态。
+TUI 可以查看实例、配置、审批、OAuth、审计、日志和 Workspace Goal。CLI 与 TUI 都通过同一个 Control RPC，不维护第二套运行状态。分步骤计划和工作记录保存在 Agent Memory 中。
 
 ## 5. MCP HTTP host
 

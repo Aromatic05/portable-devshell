@@ -47,7 +47,7 @@ App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知�
 
 MCP App 使用官方 MCP Apps SDK，按用途分三类资源：
 
-- **Fullscreen Workspace**：Overview、Goals、Activity；显示持续存在的 Goal、后台 Wait 和审计记录。
+- **Fullscreen Workspace**：Overview、Activity；Overview 显示当前 Goal、待审批请求、后台 Wait，Activity 显示审计记录。
 - **Inline Interaction**：等待用户处理的 Approval / Wait，不要求打开 Fullscreen。
 - **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `tmux_read` 的结果在 Activity 中按对应 Task 汇聚。
 
@@ -56,6 +56,8 @@ ToolCall 的完整记录由 Audit 持久化；Activity 在原始 Inline 卡片�
 资源提供内容哈希 URI 及历史兼容别名，使旧会话在升级与 iframe remount 后仍可读取。建立 MCP App bridge 后，单次工具调用或 Host 消息失败只重试原会话；只有真正的 App 关闭或初次握手失败才重建 SDK 生命周期。
 
 App 从受鉴权的 Live Workspace HTTP route 读取 `snapshot / watch`。Watch 使用 instance event sequence 和相关变化通知，无变化时返回 heartbeat，不在客户端循环全量读取。
+
+临时 Watch 网络错误只暂停需要最新快照的操作，并保留同一 Context 上次成功读取的快照供用户查看；只有 Context 身份或授权发生变化时才清除原快照。若有多个待审批请求，Workspace 会显示总数并依次呈现待处理项。
 
 ## 人工操作与 Action Receipt
 

@@ -52,6 +52,7 @@ export function Overview() {
                 <Metric
                     label="Pending approvals"
                     value={String(overview.counts.pendingApprovals)}
+                    href="#/audit"
                 />
             </div>
             <SystemResources
@@ -145,20 +146,24 @@ export function Overview() {
 
 function Metric({
     detail,
+    href,
     label,
     value,
 }: {
     detail?: ReactNode;
+    href?: string;
     label: string;
     value: string;
 }) {
-    return (
-        <div className="card">
+    const content = (
+        <>
             <span>{label}</span>
             <strong>{value}</strong>
             {detail}
-        </div>
+        </>
     );
+    return href === undefined ? <div className="card">{content}</div> :
+        <a className="card" href={href} aria-label={`${label}: ${value}; open Audit`}>{content}</a>;
 }
 
 function InstanceAttention({
