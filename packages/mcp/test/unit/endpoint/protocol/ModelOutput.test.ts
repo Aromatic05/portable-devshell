@@ -64,6 +64,77 @@ test("bash model output stays bounded and retains recovery paths and execution s
     assert.equal(original.stdout.includes("\nEND"), true);
 });
 
+test("default 4000-token bash budget preserves ~11 KB of complete source output", () => {
+    for (const stdoutSize of [10_720, 10_992]) {
+        const rows = 160;
+        const perRow = Math.floor(stdoutSize / rows);
+        const leftover = stdoutSize - rows * perRow;
+        const stdout = Array.from({ length: rows }, (_, index) => {
+            const prefix = "line_" + String(index).padStart(4, "0") + "_";
+            const fill = perRow - prefix.length - 1 +
+                (index === rows - 1 ? leftover : 0);
+            return prefix + "x".repeat(fill) + "\n";
+        }).join("");
+        const result = {
+            exitCode: 0,
+            stdout,
+            stderr: "",
+            stdoutBytes: Buffer.byteLength(stdout),
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+            termination: "exited",
+            durationMs: 5,
+        };
+        const projected = projectMcpModelOutput("bash_run", result);
+        assert.equal(size(projected) <= 4_000 * 3, true);
+        assert.equal(data(projected).stdout === stdout, true);
+        assert.equal(data(projected).stdoutTruncated, false);
+    }
+});
+
+test("bash projection with smaller custom budget trims the same source output", () => {
+    const original = {
+        stdout: "source line\n".repeat(900),
+        stderr: "",
+        stdoutBytes: 10_800,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        exitCode: 0,
+    };
+    const projected = projectMcpModelOutput("bash_run", original, {
+        byTool: { bash_run: 1_000 },
+    });
+    assert.equal(size(projected) <= 1_000 * 3, true);
+    assert.equal(data(projected).stdoutTruncated, true);
+    assert.notEqual(data(projected).stdout, original.stdout);
+});
+
+test("native presentation text also consumes the 4000-token bash budget", () => {
+    const stdout = Array.from({ length: 160 }, (_, index) =>
+        "line_" + String(index).padStart(4, "0") + "_" + "x".repeat(56) + "\n")
+        .join("");
+    const original = {
+        stdout,
+        stderr: "",
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        exitCode: 0,
+    };
+    assert.equal(size(original) < 4_000 * 3, true);
+    const native = new McpNativeToolResult({
+        structuredContent: original,
+        content: [{ text: "presentation ".repeat(200), type: "text" }],
+    });
+    const projected = projectMcpModelOutput("bash_run", native);
+    assert.equal(size(projected) <= 4_000 * 3, true);
+    assert.equal(data(projected).stdoutTruncated, true);
+    assert.notEqual(data(projected).stdout, stdout);
+});
+
 test("file_read preserves file identity and resumes its original paged selector", () => {
     const content = Array.from({ length: 200 }, (_, i) =>
         `${i + 1}:${"x".repeat(140)}`).join("\n");

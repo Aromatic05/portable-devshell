@@ -40,6 +40,7 @@ fn run_pair(
 ) {
     let mut measured = Vec::with_capacity(repetitions);
     let mut control = Vec::with_capacity(repetitions);
+    let mut payload_bytes = 0usize;
     for index in 0..repetitions {
         let first = if index % 2 == 0 { tracked } else { baseline };
         let second = if index % 2 == 0 { baseline } else { tracked };
@@ -48,6 +49,10 @@ fn run_pair(
         *id += 1;
         let elapsed = start.elapsed().as_micros() as u64;
         assert_eq!(response["type"], "reply", "{response}");
+        payload_bytes = response["message"]["stdout"]
+            .as_str()
+            .map(str::len)
+            .unwrap_or_default();
         if first == tracked {
             measured.push(elapsed)
         } else {
@@ -71,7 +76,7 @@ fn run_pair(
     let (med, p95) = median_and_p95(measured);
     let (baseline_med, baseline_p95) = median_and_p95(control);
     eprintln!(
-        "BENCH label={label} iterations={} tracked_median_us={med} tracked_p95_us={p95} control_median_us={baseline_med} control_p95_us={baseline_p95} median_delta_us={}",
+        "BENCH label={label} iterations={} payload_bytes={payload_bytes} tracked_median_us={med} tracked_p95_us={p95} control_median_us={baseline_med} control_p95_us={baseline_p95} median_delta_us={}",
         repetitions,
         med as i64 - baseline_med as i64
     );
@@ -132,6 +137,39 @@ fn measure_shell_read_on_independent_devshell_repository() {
         60,
     );
 
+    run_pair(
+        &env,
+        &mut id,
+        "window-1k",
+        "head -n 100 crates/devshell-worker/src/tool/file/observation.rs",
+        "\\head -n 100 crates/devshell-worker/src/tool/file/observation.rs",
+        24,
+    );
+    run_pair(
+        &env,
+        &mut id,
+        "window-2k",
+        "head -n 200 crates/devshell-worker/src/tool/file/observation.rs",
+        "\\head -n 200 crates/devshell-worker/src/tool/file/observation.rs",
+        24,
+    );
+    run_pair(
+        &env,
+        &mut id,
+        "window-3k",
+        "head -n 250 crates/devshell-worker/src/tool/file/observation.rs",
+        "\\head -n 250 crates/devshell-worker/src/tool/file/observation.rs",
+        24,
+    );
+    run_pair(
+        &env,
+        &mut id,
+        "window-4k",
+        "head -n 300 crates/devshell-worker/src/tool/file/observation.rs",
+        "\\head -n 300 crates/devshell-worker/src/tool/file/observation.rs",
+        24,
+    );
+
     fs::write(
         env.workspace().join("repeated.txt"),
         "same\n".repeat(100_000),
@@ -143,7 +181,7 @@ fn measure_shell_read_on_independent_devshell_repository() {
         "repeated-lines",
         "cat repeated.txt | head -n 1000",
         "\\cat repeated.txt | head -n 1000",
-        3,
+        20,
     );
     env.json_command(&["stop", "--instance", "readbench-worker"]);
 }

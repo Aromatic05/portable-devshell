@@ -21,7 +21,7 @@ use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tool::bash::process::spawn_shell;
 use crate::tool::file::FileToolState;
 #[cfg(unix)]
-use crate::tool::file::observation::CommandReadPlan;
+use crate::tool::file::observation::{CommandReadPlan, MAX_OUTPUT_BYTES};
 use crate::tool::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolProcessGuard,
     ToolProgressEmitter,
@@ -286,16 +286,7 @@ impl ToolHandler for BashRunTool {
                 "termSignal": term_signal,
             })));
         }
-        let rendered_stdout = render_inline_stream(&stdout);
-        #[cfg(unix)]
-        if !stdout.truncated
-            && !stderr.truncated
-            && stdout.kept.len().saturating_add(stderr.kept.len()) <= 8 * 1024
-            && let Some(plan) = read_plan
-        {
-            plan.observe(&call, &self.files, &rendered_stdout);
-        }
-        crate::tool::contract::serialize(BashRunOutput {
+        let result = crate::tool::contract::serialize(BashRunOutput {
             exit_code: if matches!(termination, BashTermination::Exited) {
                 status.code()
             } else {
@@ -310,7 +301,7 @@ impl ToolHandler for BashRunTool {
                 None
             },
             timed_out: matches!(termination, BashTermination::Timeout).then_some(true),
-            stdout: rendered_stdout,
+            stdout: render_inline_stream(&stdout),
             stderr: render_inline_stream(&stderr),
             stdout_bytes: stdout_bytes.load(Ordering::SeqCst),
             stderr_bytes: stderr_bytes.load(Ordering::SeqCst),
@@ -323,7 +314,18 @@ impl ToolHandler for BashRunTool {
             artifact_warnings: (!artifact_warnings.is_empty()).then_some(artifact_warnings),
             duration_ms: started.elapsed().as_millis(),
             termination,
-        })
+        })?;
+        #[cfg(unix)]
+        if !stdout.truncated
+            && !stderr.truncated
+            && stdout.kept.len().saturating_add(stderr.kept.len()) <= MAX_OUTPUT_BYTES
+            && let Some(plan) = read_plan
+            && serde_json::to_vec(&result).is_ok_and(|bytes| bytes.len() <= 4_000 * 3)
+            && let Some(visible) = result.get("stdout").and_then(serde_json::Value::as_str)
+        {
+            plan.observe(&call, &self.files, visible);
+        }
+        Ok(result)
     }
 }
 struct ManagedBashChild {

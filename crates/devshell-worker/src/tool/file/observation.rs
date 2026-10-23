@@ -14,7 +14,10 @@ use super::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use super::{FileToolState, resolve_existing};
 use crate::tool::ToolCall;
 
-const MAX_OUTPUT_BYTES: usize = 8 * 1024;
+// Default bash_run MCP projection allows 4,000 tokens (~12,000 bytes),
+// including metadata. Record only outputs whose complete serialized result
+// fits that projection; reserve some space for the result envelope.
+pub(crate) const MAX_OUTPUT_BYTES: usize = 11 * 1024;
 const MAX_OBSERVED_LINES: usize = MAX_OUTPUT_BYTES;
 const MAX_OBSERVED_FILES: usize = 64;
 const MAX_DIRECTORY_SCAN_BYTES: u64 = 32 * 1024 * 1024;
