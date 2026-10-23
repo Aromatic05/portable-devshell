@@ -37,6 +37,10 @@ const DEFAULT_REFRESH_DELAY_MS = 100;
 interface ToolCallInstanceState {
     calls: ToolCallRecord[];
     failure?: Error;
+    /** Cursor is in audit insertion order, not the UI's startedAt order. */
+    historyBefore?: string;
+    historyExhausted?: boolean;
+    historyLoaded?: boolean;
     /** Last observed event sequence; informational, the engine owns the cursor. */
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
@@ -63,6 +67,7 @@ interface ToolCallViewModelOptions {
 export class ToolCallViewModel {
     readonly #cursor: (instance: string) => Promise<number>;
     readonly #listeners = new Set<() => void>();
+    readonly #historyLoads = new Map<string, Promise<number>>();
     readonly #onEvent?: (event: ToolEvent) => void;
     readonly #queries = new Map<string, ToolCallQuery | undefined>();
     readonly #refreshDelayMs: number;
@@ -105,6 +110,19 @@ export class ToolCallViewModel {
      * subscription.
      */
     async load(instance: string, query?: ToolCallQuery): Promise<void> {
+        if (this.#queries.has(instance) &&
+            JSON.stringify(this.#queries.get(instance)) !== JSON.stringify(query)) {
+            // A changed query must not retain pages from another Context,
+            // source, or tool filter.
+            this.#updateInstance(instance, (state) => ({
+                ...state,
+                calls: [],
+                historyBefore: undefined,
+                historyExhausted: undefined,
+                historyLoaded: false,
+            }));
+            this.#emit();
+        }
         this.#queries.set(instance, query);
         const epoch = this.#epoch;
         let cursor: number;
@@ -125,6 +143,43 @@ export class ToolCallViewModel {
     /** Re-reads the authoritative ledger for one materialized instance. */
     async refresh(instance: string): Promise<void> {
         await this.#refreshInstance(instance, this.#epoch);
+    }
+
+    /** Reads older ledger pages while retaining the live projection. */
+    async loadOlder(instance: string): Promise<number> {
+        const pending = this.#historyLoads.get(instance);
+        if (pending !== undefined) return await pending;
+        const request = this.#loadOlder(instance);
+        this.#historyLoads.set(instance, request);
+        try {
+            return await request;
+        } finally {
+            if (this.#historyLoads.get(instance) === request)
+                this.#historyLoads.delete(instance);
+        }
+    }
+
+    async #loadOlder(instance: string): Promise<number> {
+        const initial = this.#state.instances[instance];
+        const before = initial?.historyBefore;
+        if (before === undefined || initial?.historyExhausted) return 0;
+        const epoch = this.#epoch;
+        const query = this.#queries.get(instance);
+        const calls = await this.#transport(instance).listCalls(
+            listQuery({ ...query, before }),
+        );
+        if (!this.#current(epoch) || this.#queries.get(instance) !== query ||
+            this.#state.instances[instance]?.historyBefore !== before)
+            return 0;
+        this.#updateInstance(instance, (state) => ({
+            ...state,
+            calls: orderCalls(mergeCalls(state.calls, calls)),
+            historyBefore: calls[0]?.callId ?? before,
+            historyExhausted: calls.length === 0,
+            historyLoaded: true,
+        }));
+        this.#emit();
+        return calls.length;
     }
 
     /**
@@ -206,6 +261,7 @@ export class ToolCallViewModel {
         this.#refreshTimers.clear();
         this.#versions.clear();
         this.#queries.clear();
+        this.#historyLoads.clear();
         this.#closeSubscriptions();
         this.#listeners.clear();
         this.#state = emptyState();
@@ -222,8 +278,10 @@ export class ToolCallViewModel {
             if (!this.#valid(key, version, epoch)) return false;
             this.#updateInstance(instance, (state) => ({
                 ...state,
-                calls: orderCalls(calls),
+                calls: orderCalls(state.historyLoaded ? mergeCalls(state.calls, calls) : calls),
                 failure: undefined,
+                historyBefore: state.historyLoaded ? state.historyBefore : calls[0]?.callId,
+                historyExhausted: state.historyLoaded ? state.historyExhausted : calls.length === 0,
             }));
             this.#emit();
             return true;
@@ -378,6 +436,15 @@ function orderCalls(calls: readonly ToolCallRecord[]): ToolCallRecord[] {
             right.startedAt.localeCompare(left.startedAt) ||
             left.callId.localeCompare(right.callId),
     );
+}
+
+function mergeCalls(
+    previous: readonly ToolCallRecord[],
+    current: readonly ToolCallRecord[],
+): ToolCallRecord[] {
+    const merged = new Map(previous.map((call) => [call.callId, call]));
+    for (const call of current) merged.set(call.callId, call);
+    return [...merged.values()];
 }
 
 function detailCallIds(

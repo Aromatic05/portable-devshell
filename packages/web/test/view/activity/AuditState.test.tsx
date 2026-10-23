@@ -20,13 +20,13 @@ it("clamps shrink to the last available page and keeps the clamped page when row
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     act(() => domains.setToolCalls("alpha", round4Calls(25)));
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
-    expect(screen.getByText("Showing 21-25 of 25 matching tool calls.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 21-25 of 25 loaded matching tool calls.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     act(() => domains.setToolCalls("alpha", []));
     expect(screen.queryByRole("navigation", { name: "Tool calls pagination" })).not.toBeInTheDocument();
     act(() => domains.setToolCalls("alpha", round4Calls(65)));
     expect(screen.getByText("Page 1 of 4")).toBeInTheDocument();
-    expect(screen.getByText("Showing 1-20 of 65 matching tool calls.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1-20 of 65 loaded matching tool calls.")).toBeInTheDocument();
 });
 
 it("a superseded detail completion cannot overwrite the payload or status of a newer detail read", async () => {

@@ -231,7 +231,7 @@ describe("Audit", () => {
         );
     });
 
-    it("uses route Scope as navigation state and defaults Context filtering to active in the last 30 minutes", () => {
+    it("uses route Scope as navigation state and defaults Audit to all retained Contexts", () => {
         const { navigate } = renderAudit();
 
         const scope = screen.getByLabelText("Scope");
@@ -248,15 +248,13 @@ describe("Audit", () => {
             scope.querySelector('optgroup[label="Instances"]'),
         ).not.toBeNull();
         expect(
-            screen.getByRole("button", { name: "Filters (1)" }),
+            screen.getByRole("button", { name: "Filters" }),
         ).toBeInTheDocument();
         expect(
-            within(
-                screen.getByRole("group", { name: "Active filters" }),
-            ).getByRole("button", { name: "Context: Active · last 30 min ×" }),
-        ).toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
-        expect(screen.getByLabelText("Context status")).toHaveValue("active");
+            screen.queryByRole("group", { name: "Active filters" }),
+        ).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        expect(screen.getByLabelText("Context status")).toHaveValue("all");
         fireEvent.change(scope, {
             target: { value: "#/audit/context/alpha/ctx-alpha" },
         });
@@ -289,8 +287,10 @@ describe("Audit", () => {
         ).not.toBeInTheDocument();
     });
 
-    it("clears the visible default Context window like any other filter", () => {
+    it("clears an explicitly selected active Context window like any other filter", () => {
         renderAudit();
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "active" } });
 
         fireEvent.click(
             within(
@@ -304,7 +304,6 @@ describe("Audit", () => {
         expect(
             screen.queryByRole("group", { name: "Active filters" }),
         ).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
         expect(screen.getByLabelText("Context status")).toHaveValue("all");
     });
 
@@ -320,6 +319,8 @@ describe("Audit", () => {
                 : context,
         );
         const view = renderAudit({ contexts: staleContexts });
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+        fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "active" } });
 
         expect(
             screen.queryByRole("option", { name: /ctx-alpha/u }),
@@ -331,7 +332,6 @@ describe("Audit", () => {
             screen.queryByText("bash_run", { selector: "strong" }),
         ).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
         fireEvent.change(screen.getByLabelText("Context status"), {
             target: { value: "all" },
         });
@@ -344,7 +344,7 @@ describe("Audit", () => {
         ).toHaveLength(2);
     });
 
-    it("ages the default active Context window while the Audit page stays open", async () => {
+    it("ages a selected active Context window while the Audit page stays open", async () => {
         vi.useFakeTimers();
         try {
             vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
@@ -357,6 +357,8 @@ describe("Audit", () => {
                     : context,
             );
             renderAudit({ contexts: timedContexts });
+            fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+            fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "active" } });
             expect(
                 screen.getByRole("option", { name: /ctx-alpha.*active/u }),
             ).toBeInTheDocument();
@@ -400,7 +402,7 @@ describe("Audit", () => {
             screen.getByText("bash_run", { selector: "strong" }),
         ).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
+        fireEvent.click(screen.getByRole("button", { name: "Filters" }));
         fireEvent.change(screen.getByLabelText("Workspace"), {
             target: { value: "projects/alpha" },
         });
@@ -424,8 +426,8 @@ describe("Audit", () => {
         });
 
         expect(
-            screen.queryByText("file_read", { selector: "strong" }),
-        ).not.toBeInTheDocument();
+            screen.getByText("file_read", { selector: "strong" }),
+        ).toBeInTheDocument();
 
         fireEvent.change(screen.getByLabelText("Context ID"), {
             target: { value: "ctx-beta" },
@@ -685,6 +687,19 @@ describe("Audit", () => {
         );
     });
 
+    it("resolves an archived Tool Call deep link beyond the live read window", async () => {
+        const readDetail = vi.fn(async () => [{ ...alphaCall, callId: "archived-call" }]);
+        renderAudit({
+            route: { page: "audit", view: "call", instance: "alpha", callId: "archived-call" },
+            toolCalls: { alpha: [], beta: [] },
+            configureDomains: (domains) => {
+                vi.spyOn(domains.toolCalls, "readDetail").mockImplementation(readDetail);
+            },
+        });
+        expect(await screen.findByText("Confirm the failing command")).toBeInTheDocument();
+        expect(readDetail).toHaveBeenCalledWith("alpha", "archived-call");
+    });
+
     it("opens a call deep link directly instead of requiring a second disclosure action", () => {
         renderAudit({
             route: {
@@ -742,6 +757,57 @@ describe("Audit", () => {
         expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
         fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
         expect(screen.getByText(new RegExp(token))).toBeInTheDocument();
+    });
+
+    it("loads older Tool Calls from the source and pages through newly loaded history", async () => {
+        const newest = Array.from({ length: 20 }, (_, index) => ({
+            ...alphaCall,
+            callId: `latest-${index}`,
+            startedAt: new Date(Date.UTC(2026, 7, 31, 9, 0, index)).toISOString(),
+        }));
+        const older = Array.from({ length: 20 }, (_, index) => ({
+            ...alphaCall,
+            callId: `older-${index}`,
+            toolName: "archived_tool",
+            startedAt: new Date(Date.UTC(2026, 6, 31, 9, 0, index)).toISOString(),
+        }));
+        const loadOlder = vi.fn(async () => 20);
+        const view = renderAudit({
+            toolCalls: { alpha: newest, beta: [] },
+            configureDomains: (domains) => {
+                const current = domains.toolCalls.state.instances.alpha;
+                domains.toolCalls.patch({
+                    instances: {
+                        ...domains.toolCalls.state.instances,
+                        alpha: { ...current, historyBefore: "latest-0", historyExhausted: false },
+                    },
+                });
+                Object.assign(domains.toolCalls, {
+                    loadOlder: async (instance: string) => {
+                        await loadOlder();
+                        const previous = domains.toolCalls.state.instances[instance];
+                        domains.toolCalls.patch({
+                            instances: {
+                                ...domains.toolCalls.state.instances,
+                                [instance]: {
+                                    ...previous,
+                                    calls: [...previous.calls, ...older],
+                                    historyBefore: "older-0",
+                                    historyExhausted: true,
+                                },
+                            },
+                        });
+                        return older.length;
+                    },
+                });
+            },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Load older Tool Calls" }));
+        await waitFor(() => expect(loadOlder).toHaveBeenCalledOnce());
+        await waitFor(() => expect(screen.getByText("Page 1 of 2")).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+        expect(view.container.querySelector(".activity-feed")?.textContent).toContain("archived_tool");
+        expect(screen.queryByRole("button", { name: "Load older Tool Calls" })).not.toBeInTheDocument();
     });
 
     it("paginates matching calls", () => {

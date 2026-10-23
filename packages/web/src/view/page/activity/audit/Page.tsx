@@ -79,10 +79,19 @@ export function Audit({
     }, [allApprovals, instancesState.instances, review]);
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [contextStatus, setContextStatus] =
-        useState<AuditContextStatusFilter>("active");
+        useState<AuditContextStatusFilter>("all");
     const [toolCallPage, setToolCallPage] = useState(0);
     const [batchDisableOpen, setBatchDisableOpen] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const [olderError, setOlderError] = useState<string>();
+    const [detailRetry, setDetailRetry] = useState(0);
+    const [directCall, setDirectCall] = useState<{
+        key: string;
+        call?: ToolCallRecord;
+        error?: string;
+        loading?: boolean;
+    }>();
     const allCalls = useMemo(
         () =>
             Object.values(toolCallsState.instances).flatMap(
@@ -91,6 +100,38 @@ export function Audit({
         [toolCallsState],
     );
     const scope = auditScope(route);
+    const scopedInstanceNames = scope.kind === "all"
+        ? instancesState.instances.map((entry) => entry.name)
+        : [scope.instance];
+    const failingInstances = scopedInstanceNames.filter((instance) =>
+        toolCallsState.instances[instance]?.failure !== undefined);
+    const historyInstances = scopedInstanceNames.filter((instance) => {
+        const ledger = toolCallsState.instances[instance];
+        return ledger?.historyBefore !== undefined && ledger.historyExhausted !== true;
+    });
+    const inMemoryCall = route.view === "call" ? allCalls.find((call) =>
+        call.instance === route.instance && call.callId === route.callId &&
+        (route.ctxId === undefined || call.ctxId === route.ctxId)) : undefined;
+    useEffect(() => {
+        if (route.view !== "call" || inMemoryCall !== undefined) return;
+        let active = true;
+        setDirectCall({ key: routeKey, loading: true });
+        void domains.toolCalls.readDetail(route.instance, route.callId).then((rows) => {
+            if (!active) return;
+            setDirectCall({
+                key: routeKey,
+                call: rows.find((call) => call.instance === route.instance &&
+                    call.callId === route.callId &&
+                    (route.ctxId === undefined || call.ctxId === route.ctxId)),
+            });
+        }).catch((error: unknown) => {
+            if (active) setDirectCall({
+                key: routeKey,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
+        return () => { active = false; };
+    }, [domains, routeKey, inMemoryCall?.callId, detailRetry]);
     const contextRecords = useMemo(
         () =>
             new Map(
@@ -147,9 +188,7 @@ export function Audit({
     const tools = [...new Set([...scopedCalls, ...scopedApprovals].map((item) => item.toolName))].sort();
     const filteredSelection = useMemo(() => {
         if (route.view === "call") {
-            const call = scopedCalls.find(
-                (candidate) => candidate.callId === route.callId,
-            );
+            const call = inMemoryCall ?? (directCall?.key === routeKey ? directCall.call : undefined);
             return {
                 items: call === undefined ? [] : [call],
                 total: call === undefined ? 0 : 1,
@@ -162,7 +201,7 @@ export function Audit({
             0,
             scopedCalls.length,
         );
-    }, [filters, now, route, scopedCalls]);
+    }, [filters, now, route, scopedCalls, inMemoryCall, directCall, routeKey]);
     const currentPage = Math.min(toolCallPage, pageCount(filteredSelection.total, toolCallPageSize) - 1);
     if (currentPage !== toolCallPage) setToolCallPage(currentPage);
     const selection = route.view === "call" ? filteredSelection : {
@@ -171,14 +210,32 @@ export function Audit({
     };
     const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
     const interactive = server.status === "online" && !disabled;
+    const directLoading = route.view === "call" && inMemoryCall === undefined &&
+        (directCall?.key !== routeKey || directCall.loading === true);
     const countText =
         route.view === "call"
             ? selection.total === 0
-                ? "Tool call not found in the current read model."
+                ? directLoading ? "Loading archived Tool Call…" : "Tool Call not found in the retained audit."
                 : "Tool call detail."
             : selection.total === 0
-              ? `0 of ${scopedCalls.length} tool calls${active ? " match active filters." : "."}`
-              : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
+              ? `0 of ${scopedCalls.length} loaded tool calls${active ? " match active filters." : "."}`
+              : `Showing ${currentPage * toolCallPageSize + 1}-${currentPage * toolCallPageSize + selection.items.length} of ${selection.total} loaded matching tool calls.`;
+
+    async function loadOlder(): Promise<void> {
+        if (!interactive || loadingOlder || historyInstances.length === 0) return;
+        setLoadingOlder(true);
+        setOlderError(undefined);
+        try {
+            const results = await Promise.allSettled(historyInstances.map((instance) =>
+                domains.toolCalls.loadOlder(instance)));
+            const failed = results.map((result, index) => result.status === "rejected"
+                ? `${historyInstances[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+                : undefined).filter((message): message is string => message !== undefined);
+            if (failed.length > 0) setOlderError(failed.join("; "));
+        } finally {
+            setLoadingOlder(false);
+        }
+    }
 
     function changeFilters(next: Filters): void {
         setToolCallPage(0);
@@ -298,6 +355,19 @@ export function Audit({
             <p aria-live="polite" className="hint">
                 {countText}
             </p>
+            {failingInstances.map((instance) => (
+                <div key={instance} role="alert">
+                    <p className="error">Could not load Tool Calls from {instance}: {toolCallsState.instances[instance]!.failure!.message}</p>
+                    <button disabled={!interactive} type="button"
+                        onClick={() => void domains.toolCalls.load(instance)}>Retry {instance}</button>
+                </div>
+            ))}
+            {route.view === "call" && directCall?.key === routeKey && directCall.error !== undefined ? (
+                <div role="alert">
+                    <p className="error">Could not read Tool Call: {directCall.error}</p>
+                    <button disabled={!interactive} type="button" onClick={() => setDetailRetry((value) => value + 1)}>Retry detail</button>
+                </div>
+            ) : null}
             {batchDisableOpen ? (
                 <ContextBatchDisableDialog
                     busy={
@@ -319,9 +389,12 @@ export function Audit({
                 </p>
             ) : server.status === "connecting" && allCalls.length === 0 ? (
                 <p className="empty">Loading tool calls…</p>
+            ) : directLoading ? (
+                <p className="empty">Loading archived Tool Call…</p>
             ) : selection.items.length === 0 ? (
                 <p className="empty">
-                    {route.view === "call"
+                    {failingInstances.length > 0 ? "Tool Call history is incomplete until failed reads recover."
+                        : route.view === "call"
                         ? "This Tool Call is unavailable."
                         : active
                           ? "No tool calls match these filters."
@@ -360,12 +433,22 @@ export function Audit({
                 </ol>
             )}
             {route.view === "timeline" ? (
-                <Pagination
-                    label="Tool calls"
-                    onPageChange={setToolCallPage}
-                    page={toolCallPage}
-                    pageCount={pageCount(selection.total, toolCallPageSize)}
-                />
+                <>
+                    <Pagination
+                        label="Tool calls"
+                        onPageChange={setToolCallPage}
+                        page={currentPage}
+                        pageCount={pageCount(selection.total, toolCallPageSize)}
+                    />
+                    {historyInstances.length > 0 && (
+                        <div className="actions">
+                            <button disabled={!interactive || loadingOlder} onClick={() => void loadOlder()} type="button">
+                                {loadingOlder ? "Loading older Tool Calls…" : "Load older Tool Calls"}
+                            </button>
+                        </div>
+                    )}
+                    {olderError !== undefined && <p className="error" role="alert">Older Tool Calls could not be loaded: {olderError}</p>}
+                </>
             ) : null}
         </section>
     );

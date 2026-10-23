@@ -36,13 +36,13 @@ it("round4: SQLite-backed audit survives peer restart and paginates the same dur
     const store = new WebStore(domains.harness.domains);
     render(withWebDomains(domains.harness, <Audit store={store} navigate={() => undefined}
         route={{ page: "audit", view: "timeline", scope: { kind: "all" } }} />));
-    expect(screen.getByText("Showing 1-20 of 45 matching tool calls.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1-20 of 45 loaded matching tool calls.")).toBeInTheDocument();
     expect(screen.getByText("operation_044")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByText("Showing 21-40 of 45 matching tool calls.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 21-40 of 45 loaded matching tool calls.")).toBeInTheDocument();
     expect(screen.getByText("operation_024")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByText("Showing 41-45 of 45 matching tool calls.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 41-45 of 45 loaded matching tool calls.")).toBeInTheDocument();
     expect(screen.getByText("operation_000")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect((await peer.read("alpha", "calls") as unknown[])).toHaveLength(45);
