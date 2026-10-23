@@ -97,7 +97,10 @@ export class GoalStore {
         }
         for (const goal of pending) {
             const activity = activities.get(goal.goalId);
-            if (activity !== undefined) applyGoalActivity(goal, activity);
+            // Structural progress may have committed after the last sidecar
+            // heartbeat. Never replace that newer state with a stale row.
+            if (activity !== undefined && activity.lastAgentActivityAt > goal.lastAgentActivityAt)
+                applyGoalActivity(goal, activity);
             this.#activityHydrated.add(goal.goalId);
         }
     }

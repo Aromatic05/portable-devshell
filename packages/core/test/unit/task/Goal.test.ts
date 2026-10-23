@@ -121,6 +121,38 @@ test("GoalService persists ordinary activity outside the structural Goal documen
     );
 });
 
+test("GoalService persists real file-edit progress epochs across restart", async () => {
+    const root = await createTestTempDirectory("goal-mutation-progress-");
+    const filePath = join(root, "goals.json");
+    let now = Date.parse("2026-10-23T08:00:00.000Z");
+    const options = {
+        appendEvent: async () => undefined,
+        filePath,
+        instanceName: "alpha",
+        state: new GoalState({ now: () => new Date(now).toISOString() }),
+    };
+    const service = new GoalService(options);
+    await service.manage("ctx-a", { action: "start", objective: "Ship software" });
+    const before = await readFile(filePath, "utf8");
+    now += 10_000;
+    await service.touch("ctx-a", "execution");
+    assert.equal((await service.read("ctx-a"))?.progressEpoch, 0);
+    assert.equal(await readFile(filePath, "utf8"), before);
+    now += 10_000;
+    await service.touch("ctx-a", "mutation");
+    const changed = await service.read("ctx-a");
+    assert.equal(changed?.progressEpoch, 1);
+    assert.equal(changed?.revision, 1, "execution evidence does not change the Goal definition");
+    assert.equal(changed?.lastProgressAt, "2026-10-23T08:00:20.000Z");
+    assert.notEqual(await readFile(filePath, "utf8"), before);
+    const restartedList = await new GoalService(options).list();
+    assert.equal(restartedList[0]?.progressEpoch, 1);
+    assert.equal(restartedList[0]?.lastExecutionAt, "2026-10-23T08:00:20.000Z");
+    const restarted = new GoalService(options);
+    assert.equal((await restarted.read("ctx-a"))?.progressEpoch, 1);
+    assert.equal((await restarted.read("ctx-a"))?.lastProgressAt, changed?.lastProgressAt);
+});
+
 test("GoalService keeps continuation settlement on the structural persistence path", async () => {
     const root = await createTestTempDirectory("goal-activity-structural-");
     const filePath = join(root, "goals.json");

@@ -23,6 +23,7 @@ export function projectMcpAppSnapshot(input: {
     ctxId: string;
     goal: { goal: GoalSnapshot | null; lastSeq: number };
     instance: string;
+    agentBusy?: boolean;
     directives?: McpAppReentryDirective[];
     waits?: { waits: WaitRecord[]; lastSeq: number };
     workspace?: string;
@@ -61,7 +62,7 @@ export function projectMcpAppSnapshot(input: {
         // Each authority captured a cursor before its read. Starting at their
         // minimum means changes racing with any read cannot be missed.
         cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
-        agentBusy: work.some((item) => item.state === "running"),
+        agentBusy: input.agentBusy ?? false,
         presentation: {
             ...(approvals[0] === undefined ? {} : {
                 primary: {
@@ -93,7 +94,7 @@ export function projectMcpAppSnapshot(input: {
         },
         // A running Goal does not prove an active ToolCall. Goal continuationDue
         // already accounts for recent agent activity and persisted claims.
-        reentry: projectMcpAppReentry({ mode: "automatic" }, goals[0], false, input.directives),
+        reentry: projectMcpAppReentry({ mode: "automatic" }, goals[0], input.agentBusy ?? false, input.directives),
     };
     snapshot.modelContext = mcpAppModelContext(snapshot, {
         ...(goals[0] === undefined ? {} : { goal: goals[0] }),
@@ -125,8 +126,25 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             task.getGoal(ctxId), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
             actions?.pendingDirectives(ctxId, instance) ?? Promise.resolve([]),
         ]);
+        const tools = createToolTransport(endpoint, instance);
+        let agentBusy = false;
+        // Only actual running work suppresses automatic Goal continuation.
+        // UI, Goal control and reporting calls are not Agent execution.
+        try {
+            const running = await tools.listCalls({
+                ctxId, status: "running", limit: 64, includeInput: false, includeOutput: false,
+            });
+            agentBusy = running.some((call) =>
+                call.ctxId === ctxId && call.status === "running" &&
+                call.source !== "extension" &&
+                !["workspace_goal", "progress_report", "environ_info"].includes(call.toolName) &&
+                !call.toolName.startsWith("mcpapp_"));
+        } catch {
+            // Unavailable execution state is not evidence of activity; the
+            // Instance Goal heartbeat independently maintains the due lease.
+        }
         const projected = projectMcpAppSnapshot({
-            approvals, ctxId, goal, instance, waits, directives,
+            approvals, ctxId, goal, instance, waits, directives, agentBusy,
             ...(workspace === undefined ? {} : { workspace }),
         });
         // Activity is a read-only projection of Instance-owned ToolCall audit.
@@ -134,7 +152,7 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
         // Audit failure must not block Approval or Wait.
         try {
             projected.activity = await readMcpAppActivity(
-                createToolTransport(endpoint, instance),
+                tools,
                 ctxId,
             );
         } catch {

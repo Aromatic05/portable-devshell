@@ -32,6 +32,9 @@ test("workspace_goal persists one final objective through the ordinary ToolCall 
     try {
         assert.equal(workspaceGoalDefinition().name, "workspace_goal");
         assert.equal(workspaceGoalDefinition().group, "workspace");
+        assert.deepEqual((workspaceGoalDefinition().inputSchema as {
+            properties: { action: { enum: string[] } };
+        }).properties.action.enum, ["get", "start", "update", "block", "resume", "finish"]);
         assert.deepEqual(await call({ action: "get" }), { goal: null });
         const created = (await call({ action: "start", objective: "Release version 1" })).goal!;
         assert.equal(created.status, "active");
@@ -42,7 +45,23 @@ test("workspace_goal persists one final objective through the ordinary ToolCall 
         const updated = (await call({ action: "update", note: "Tracked in Memory", expectedRevision: created.revision })).goal!;
         assert.equal(updated.status, "active");
         assert.ok(updated.revision > created.revision);
-        const completed = (await call({ action: "finish", expectedRevision: updated.revision })).goal!;
+        const blocked = (await call({ action: "block", note: "Waiting for a dependency" })).goal!;
+        assert.equal(blocked.status, "blocked");
+        await assert.rejects(call({ action: "resume" }, "ctx-b"), /no.*Goal/iu);
+        assert.equal((await goal.read("ctx-a"))?.status, "blocked");
+        const resumed = (await call({ action: "resume", expectedGoalId: blocked.goalId,
+            expectedRevision: blocked.revision })).goal!;
+        assert.equal(resumed.status, "active");
+        assert.equal(resumed.objective, created.objective);
+        assert.equal(resumed.revision, blocked.revision + 1);
+        await goal.manage("ctx-a", { action: "block", note: "Another dependency", workspace: root });
+        assert.equal((await call({ action: "resume" })).goal?.status, "active");
+        const paused = await goal.manage("ctx-a", { action: "pause", userControl: true, workspace: root });
+        await assert.rejects(call({ action: "resume" }), /explicit user resume/u);
+        await assert.rejects(call({ action: "resume", userControl: true, ctxId: "ctx-b" }), /explicit user resume/u);
+        assert.deepEqual(await goal.read("ctx-a"), paused);
+        const userResumed = await goal.manage("ctx-a", { action: "resume", userControl: true, workspace: root });
+        const completed = (await call({ action: "finish", expectedRevision: userResumed!.revision })).goal!;
         assert.equal(completed.status, "completed");
         assert.equal((await goal.read("ctx-a"))?.status, "completed");
         assert.ok(reviewed.length >= 6);

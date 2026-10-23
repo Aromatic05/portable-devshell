@@ -118,7 +118,9 @@ export class GoalService {
                 return;
             }
             if (current === undefined || current.status !== "active") return;
-            if (requiresStructuralTouch(current)) {
+            // Mutation advances the durable progress epoch, which is not a
+            // sidecar activity field. Persist it structurally across restarts.
+            if (kind === "mutation" || requiresStructuralTouch(current)) {
                 await this.#persistStructuralTouch(
                     ctxId,
                     kind,

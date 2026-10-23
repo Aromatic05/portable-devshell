@@ -506,6 +506,8 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     snapshot = state.read(document, "ctx-goal")!;
     assert.equal(snapshot.noActionStreak, 0);
     assert.equal(snapshot.lastExecutionAt, new Date(now).toISOString());
+    assert.equal(snapshot.progressEpoch, 1);
+    assert.equal(snapshot.lastProgressAt, new Date(now).toISOString());
 
     now += GOAL_EXECUTION_LEASE_MS + 1;
     transition = state.continuation(
@@ -515,7 +517,8 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     );
     document = transition.document;
     snapshot = state.read(document, "ctx-goal")!;
-    assert.equal(transition.result.claimed, false);
+    assert.equal(transition.result.claimed, true);
+    assert.equal(snapshot.continuationPending, true);
     assert.equal(snapshot.noActionStreak, 0);
     assert.equal(snapshot.stagnationStreak, 0);
 
@@ -529,6 +532,7 @@ test("GoalState distinguishes observation, execution, re-entry, and durable prog
     assert.equal(snapshot.noActionStreak, 0);
     assert.equal(snapshot.stagnationStreak, 0);
     assert.equal(snapshot.lastProgressAt, new Date(now).toISOString());
+    assert.equal(snapshot.progressEpoch, 2);
 });
 
 test("GoalState records an external wait wake as re-entry without faking Agent activity", () => {

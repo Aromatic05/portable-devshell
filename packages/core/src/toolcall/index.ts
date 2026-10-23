@@ -20,6 +20,7 @@ export function createToolCallExecutionRuntime(
         appendEvent: options.appendEvent,
         assertReady: options.assertReady,
         instanceName: options.instanceName,
+        onExecutionActivity: options.onExecutionActivity,
         logStore: options.audit.logs,
         toolCallHistory: new ToolCallHistory(
             options.instanceName,

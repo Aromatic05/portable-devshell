@@ -16,6 +16,7 @@ import {
 
 import { createToolCallScope } from "../../../src/toolcall/execution/Context.ts";
 import { ToolCallExecutionTarget } from "../../../src/toolcall/execution/ExecutionTarget.ts";
+import { GoalState, GOAL_EXECUTION_LEASE_MS } from "../../../src/task/goal/storage/State.ts";
 
 type ToolCallReview = (
     input: ToolCallReviewInput,
@@ -54,6 +55,7 @@ function createHarness(
         failCompletedAudit?: boolean;
         failFailedAudit?: boolean;
         failQueuedAudit?: boolean;
+        onExecutionActivity?: (ctxId: string, kind: "execution" | "mutation") => Promise<void>;
         resolveTarget?: ToolCallTargetResolver;
         reviews?: readonly ToolCallReview[];
         rewrites?: readonly ToolCallRewrite[];
@@ -121,6 +123,7 @@ function createHarness(
             },
         },
         instanceName: asInstanceName(instance),
+        onExecutionActivity: options.onExecutionActivity,
         log: { async append() {} },
         toolCallScheduler: {
             reserve(request: Harness["scheduled"][number]) {
@@ -841,4 +844,94 @@ test("a failed Context rewrite does not poison a later Context call", async () =
     assert.deepEqual(rewrites, ["in:ctx-1", "in:ctx-2"]);
     assert.equal(harness.invoked.length, 1);
     assert.equal(harness.invoked[0]?.context.ctxId, "ctx-2");
+});
+
+
+test("running ToolCalls keep a Context Goal lease fresh until real execution ends", async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    let now = Date.parse("2026-10-23T00:00:00.000Z");
+    const state = new GoalState({
+        now: () => new Date(now).toISOString(),
+        goalId: () => "goal-long-running",
+    });
+    let document = state.manage(state.emptyDocument(), {
+        action: "start", objective: "Complete the long operation",
+    }, context.ctxId).document;
+    const activity: string[] = [];
+    let complete!: (value: JsonValue) => void;
+    const harness = createHarness("instance-a", {
+        onExecutionActivity: async (ctxId) => {
+            activity.push(ctxId);
+            document = state.touch(document, ctxId, "execution").document;
+        },
+        invoke: async () => await new Promise<JsonValue>((resolve) => {
+            complete = resolve;
+        }),
+    });
+    const running = harness.runtime.api.call("instance-a", "bash_run", {
+        command: "long running operation",
+    }, context);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(activity.length, 1);
+    assert.equal(state.read(document, context.ctxId)?.continuationDue, false);
+
+    for (let pulse = 0; pulse < 4; pulse++) {
+        now += 20_000;
+        t.mock.timers.tick(20_000);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(state.read(document, context.ctxId)?.continuationDue, false);
+    }
+    assert.equal(activity.length, 5);
+    complete({ ok: true });
+    await running;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(activity.length, 6, "one final activity pulse after the call completes");
+    assert.equal(state.read(document, context.ctxId)?.continuationDue, false);
+    now += GOAL_EXECUTION_LEASE_MS + 1;
+    assert.equal(state.read(document, context.ctxId)?.continuationDue, true);
+    t.mock.timers.tick(20_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(activity.length, 6, "ToolCall heartbeat stops when execution ends");
+    harness.runtime.close();
+});
+
+test("Goal control and extension-owned ToolCalls do not fabricate execution activity", async () => {
+    const activity: string[] = [];
+    const harness = createHarness("instance-a", {
+        onExecutionActivity: async (ctxId) => { activity.push(ctxId); },
+    });
+    for (const toolName of ["workspace_goal", "mcpapp_open", "mcpapp_reentry", "progress_report"]) {
+        await harness.runtime.api.call("instance-a", toolName, {}, context);
+    }
+    await harness.runtime.api.call("instance-a", "file_read", {}, {
+        ...context, source: "extension",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(activity, []);
+    harness.runtime.close();
+});
+
+
+test("only applied file edits, not reads or failed edits, advance durable Goal progress", async () => {
+    const evidence: Array<{ ctxId: string; kind: string }> = [];
+    const harness = createHarness("instance-a", {
+        onExecutionActivity: async (ctxId, kind) => {
+            evidence.push({ ctxId, kind });
+        },
+        invoke: async (toolName, input): Promise<JsonValue> => {
+            if (toolName === "file_edit") return {
+                operations: [{ status: (input as { applied?: boolean }).applied ? "applied" : "rejected" }],
+            };
+            return { ok: true };
+        },
+    });
+    await harness.runtime.api.call("instance-a", "file_read", {}, context);
+    await harness.runtime.api.call("instance-a", "file_edit", { applied: false }, context);
+    await harness.runtime.api.call("instance-a", "file_edit", { applied: true }, context);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(evidence.map((entry) => entry.kind), [
+        "execution", "execution", "execution", "execution", "execution", "mutation",
+    ]);
+    assert.ok(evidence.every((entry) => entry.ctxId === context.ctxId));
+    harness.runtime.close();
 });

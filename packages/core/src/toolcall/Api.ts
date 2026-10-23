@@ -57,6 +57,8 @@ export interface ToolCallExecutionRuntimeOptions {
     audit: AuditApi;
     endpoint: Endpoint;
     instanceName: InstanceName;
+    /** A real running ToolCall keeps its Context Goal lease fresh. */
+    onExecutionActivity?(ctxId: string, kind: "execution" | "mutation"): Promise<void>;
     prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult>;
     readTools(): Promise<readonly ToolDefinition[]>;
     releaseWorkspace(workspace: string): Promise<void>;

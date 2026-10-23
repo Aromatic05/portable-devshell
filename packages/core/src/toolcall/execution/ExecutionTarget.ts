@@ -49,6 +49,7 @@ export interface ToolCallExecutionTargetOptions {
     assertReady(): void;
     audit: WorkerInstanceToolAudit;
     instanceName: InstanceName;
+    onExecutionActivity?: (ctxId: string, kind: "execution" | "mutation") => Promise<void>;
     log: WorkerInstanceToolLog;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: Pick<WorkerToolInvoker, "invoke">;
@@ -58,6 +59,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     readonly #assertReady: ToolCallExecutionTargetOptions["assertReady"];
     readonly #audit: WorkerInstanceToolAudit;
     readonly #instanceName: InstanceName;
+    readonly #onExecutionActivity?: (ctxId: string, kind: "execution" | "mutation") => Promise<void>;
     readonly #log: WorkerInstanceToolLog;
     readonly #toolCallScheduler: WorkerToolCallScheduler;
     readonly #toolInvoker: Pick<WorkerToolInvoker, "invoke">;
@@ -66,6 +68,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         this.#assertReady = options.assertReady;
         this.#audit = options.audit;
         this.#instanceName = options.instanceName;
+        this.#onExecutionActivity = options.onExecutionActivity;
         this.#log = options.log;
         this.#toolCallScheduler = options.toolCallScheduler;
         this.#toolInvoker = options.toolInvoker;
@@ -221,24 +224,54 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 executionStarted = true;
                 if (hostRecorded)
                     await recordAudit(() => this.#audit.running(scope, runningContext));
-                if (execute !== undefined)
-                    return await execute(
-                        callId,
-                        innerInput,
-                        hookValue,
-                        signal,
-                        hookProgress,
-                    );
-                return await this.#toolInvoker.invoke(
-                    hookValue.toolName,
-                    innerInput,
-                    {
-                        ...executionContext(hookValue.context),
-                        operationId: callId,
-                    },
-                    signal,
-                    hookProgress,
-                );
+                const ctxId = hookValue.context.ctxId;
+                const recordActivity = this.#onExecutionActivity;
+                // Goal control and UI/report calls are not evidence of work.
+                const shouldTrack = ctxId !== undefined && recordActivity !== undefined &&
+                    hookValue.context.source !== "extension" &&
+                    !["workspace_goal", "progress_report", "environ_info"].includes(hookValue.toolName) &&
+                    !hookValue.toolName.startsWith("mcpapp_");
+                let heartbeat: ReturnType<typeof setInterval> | undefined;
+                let activityTail = Promise.resolve();
+                let warned = false;
+                const pulse = (kind: "execution" | "mutation" = "execution"): void => {
+                    activityTail = activityTail.then(async () => {
+                        await recordActivity!(ctxId!, kind);
+                    }).catch((error: unknown) => {
+                        if (warned) return;
+                        warned = true;
+                        console.warn("ToolCall Goal activity update failed:", error);
+                    });
+                };
+                if (shouldTrack) {
+                    pulse();
+                    // A ToolCall can run longer than the Goal inactivity lease.
+                    // Pulse only while executing; never create a background daemon.
+                    heartbeat = setInterval(pulse, 20_000);
+                    heartbeat.unref?.();
+                }
+                let appliedEdit = false;
+                try {
+                    const result = execute !== undefined
+                        ? await execute(callId, innerInput, hookValue, signal, hookProgress)
+                        : await this.#toolInvoker.invoke(
+                              hookValue.toolName,
+                              innerInput,
+                              {
+                                  ...executionContext(hookValue.context),
+                                  operationId: callId,
+                              },
+                              signal,
+                              hookProgress,
+                          );
+                    appliedEdit = hookValue.toolName === "file_edit" && hasAppliedFileEdit(result);
+                    return result;
+                } finally {
+                    if (heartbeat !== undefined) clearInterval(heartbeat);
+                    // Only an applied, completed edit advances durable progress;
+                    // a read, failed edit or heartbeat merely proves execution.
+                    if (shouldTrack) pulse(appliedEdit ? "mutation" : "execution");
+                }
             });
             executionCompleted = true;
             const presented = isPresentedToolCallResult(executed);
@@ -491,6 +524,15 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage, callId);
         }
     }
+}
+
+function hasAppliedFileEdit(value: JsonValue | ToolCallPresentedResult): boolean {
+    const result = isPresentedToolCallResult(value) ? value.result : value;
+    if (result === null || typeof result !== "object" || Array.isArray(result)) return false;
+    const operations = result.operations;
+    return Array.isArray(operations) && operations.some((entry) =>
+        entry !== null && typeof entry === "object" && !Array.isArray(entry) &&
+        entry.status === "applied");
 }
 
 function withExecutionOutcome(

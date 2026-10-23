@@ -94,6 +94,7 @@ export class InstanceState {
             audit: audit.api,
             endpoint: dependencies.endpoint,
             instanceName,
+            onExecutionActivity: (ctxId, kind) => this.task.api.goal.touch(ctxId, kind),
             prepareWorkspace: dependencies.prepareWorkspace,
             readTools: dependencies.readTools,
             releaseWorkspace: dependencies.releaseWorkspace,

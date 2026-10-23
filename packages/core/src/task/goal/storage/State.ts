@@ -272,6 +272,13 @@ export class GoalState {
             ...(executionEvidence
                 ? { lastExecutionAt: now, noActionStreak: 0 }
                 : {}),
+            ...(kind === "mutation" ? {
+                continuationCount: 0,
+                continuationRetryAfter: undefined,
+                lastProgressAt: now,
+                progressEpoch: goalProgressEpoch(current) + 1,
+                stagnationStreak: 0,
+            } : {}),
         };
         const goals = [...document.goals];
         goals[index] = next;

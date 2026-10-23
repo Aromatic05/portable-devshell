@@ -19,8 +19,8 @@ export function installWorkspaceGoalTool(hooks: ToolCallHooks, goal: GoalApi): (
         if (input === null || typeof input !== "object" || Array.isArray(input))
             throw new TypeError("workspace_goal requires an object input.");
         const { action, objective, note, expectedRevision, expectedGoalId } = input;
-        if (typeof action !== "string" || !["get", "start", "update", "block", "finish"].includes(action))
-            throw new TypeError("workspace_goal requires get, start, update, block or finish.");
+        if (typeof action !== "string" || !["get", "start", "update", "block", "resume", "finish"].includes(action))
+            throw new TypeError("workspace_goal requires get, start, update, block, resume or finish.");
         const mutation: GoalManageInput = {
             action: action as GoalManageInput["action"],
             ...(typeof objective === "string" ? { objective } : {}),

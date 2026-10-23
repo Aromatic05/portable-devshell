@@ -70,7 +70,7 @@ Goal      pause / resume / retry / stop
 
 ## Goal
 
-Goal 是当前 Context 跨多轮执行的**最终目标**，而非分步骤任务计划。Goal 只有目标文本（`objective`）、必要的备注（`note`）、Revision 与 `active`、`blocked`、`paused`、`completed`、`stopped` 状态；不会存储 `steps` 或任务项。模型使用 `workspace_goal` 的 `start / get / update / block / finish` 管理目标，`finish` 明确将目标标记为完成；所有计划、步骤、检查点和工作记录均属于绑定的 Agent Memory。用户 Pause/Resume/Stop 与恢复指令通过 Revision 和 ownership fencing 协调。Continuation 只判断未完成 Goal 的恢复资格，不依赖步骤数。
+Goal 是当前 Context 跨多轮执行的**最终目标**，而非分步骤任务计划。Goal 只有目标文本（`objective`）、必要的备注（`note`）、Revision 与 `active`、`blocked`、`paused`、`completed`、`stopped` 状态；不会存储 `steps` 或任务项。模型使用 `workspace_goal` 的 `start / get / update / block / resume / finish` 管理目标，`finish` 明确将目标标记为完成；所有计划、步骤、检查点和工作记录均属于绑定的 Agent Memory。用户 Pause/Resume/Stop 与恢复指令通过 Revision 和 ownership fencing 协调。Continuation 只判断未完成 Goal 的恢复资格，不依赖步骤数。正在执行的 ToolCall 会更新活动租约，长调用期间定期续期；确认应用了修改的 `file_edit` 会推进独立的进度纪元，普通读取和心跳不会伪造进展。Memory 仍然是计划和工作记录的权威来源。
 
 ## Agent Memory 与工作记录
 

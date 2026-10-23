@@ -27,6 +27,7 @@ export interface WorkerToolOptions {
     ): Promise<unknown>;
     assertReady(): void;
     instanceName: InstanceName;
+    onExecutionActivity?: (ctxId: string, kind: "execution" | "mutation") => Promise<void>;
     logStore: AuditLogs;
     toolCallHistory: ToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
@@ -53,6 +54,7 @@ export class WorkerInstanceTool {
             assertReady: options.assertReady,
             audit: this.#audit,
             instanceName: options.instanceName,
+            onExecutionActivity: options.onExecutionActivity,
             log: this.#log,
             toolCallScheduler: options.toolCallScheduler,
             toolInvoker: options.toolInvoker,
