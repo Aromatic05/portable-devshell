@@ -226,6 +226,9 @@ test("watch retry retains its revision floor when an action refresh overtook the
     expect(container.textContent).toContain("Revision 20 work");
     await act(async () => watch.reject(new Error("watch interrupted")));
     expect(container.textContent).toContain("watch interrupted");
+    expect(container.textContent).toContain("Revision 20 work");
+    expect(container.textContent).toContain("Showing last known state");
+    expect(container.querySelector(".workspace-actions button")).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(reads).toBe(3); expect(cursors).toEqual(["11", "20"]);
     expect(container.textContent).not.toContain("Revision 11 work");

@@ -4,7 +4,7 @@ import type { McpAppSession } from "./Session.js";
 import { ToolCallCard } from "./ToolCall.js";
 import { record } from "./ToolCallModel.js";
 
-type Tab = "overview" | "tasks" | "activity";
+type Tab = "overview" | "activity";
 type Activity = NonNullable<McpAppSnapshot["activity"]>[number];
 
 function taskTranscript(item: Activity, reads: readonly Activity[]): unknown {
@@ -130,7 +130,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     const [showHistory, setShowHistory] = useState(true);
     const [showInternalCalls, setShowInternalCalls] = useState(false);
     const { primary, work, background } = snapshot.presentation;
-    const pendingCount = primary ? 1 : 0;
+    const pendingCount = snapshot.presentation.pendingApprovals ?? (primary ? 1 : 0);
     const visibleActivity = showInternalCalls ? snapshot.activity : snapshot.activity?.filter((item) => {
         if (item.name === "tmux_read" || item.name === "mcpapp_open") return false;
         return true;
@@ -147,31 +147,31 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                 <p>{snapshot.instance} · <span>{snapshot.ctxId}</span></p>
             </div>
             <div className="dashboard-metrics">
-                <div><strong>{work.length}</strong><span>Active tasks / goals</span></div>
-                <div><strong>{pendingCount}</strong><span>Human decisions</span></div>
+                <div><strong>{work.length}</strong><span>Active Goals</span></div>
+                <div><strong>{pendingCount}</strong><span>Pending approvals</span></div>
                 <div><strong>{background.length}</strong><span>Tracked waits</span></div>
             </div>
         </div>
         <nav className="dashboard-tabs" aria-label="Workspace views">
-            {(["overview", "tasks", "activity"] as const).map((entry) =>
+            {(["overview", "activity"] as const).map((entry) =>
                 <button type="button" key={entry} aria-current={tab === entry ? "page" : undefined}
-                    onClick={() => setTab(entry)}>{entry === "overview" ? "Overview" :
-                        entry === "tasks" ? "Tasks" : "Activity"}</button>)}
+                    onClick={() => setTab(entry)}>{entry === "overview" ? "Overview" : "Activity"}</button>)}
         </nav>
-        <section className="dashboard-panel" aria-label={tab === "overview" ?
-            "Overview" : tab === "tasks" ? "Tasks" : "Activity"}>
-            {tab !== "activity" && <>
-                <h2>{tab === "tasks" ? "Current work" : "Work in progress"}</h2>
+        <section className="dashboard-panel" aria-label={tab === "overview" ? "Overview" : "Activity"}>
+            {tab === "overview" && <>
+                <h2>Current Goal</h2>
                 {work.length ? <div className="dashboard-items">
                     {work.map((item) => <div key={item.id}>{renderItem(item, "work")}</div>)}
-                </div> : <p className="dashboard-empty">No active Task or Goal for this Context.</p>}
+                </div> : <p className="dashboard-empty">No active Goal for this Context.</p>}
             </>}
             {tab === "overview" && <>
                 <h2>Needs attention</h2>
                 {primary ? <>
                     <p className="dashboard-notice">
                         {primary.title === "Approval required"
-                            ? "An approval is pending in the conversation."
+                            ? pendingCount > 1
+                                ? `Approval 1 of ${pendingCount} is awaiting a decision in the conversation.`
+                                : "An approval is pending in the conversation."
                             : "A decision is pending in the conversation."}
                     </p>
                 </> : <p className="dashboard-empty">No pending human decision.</p>}
@@ -192,7 +192,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                 {showHistory && <label className="workspace-setting">
                     <input type="checkbox" checked={showInternalCalls}
                         onChange={(event) => setShowInternalCalls(event.target.checked)} />
-                    Include polling, plan revisions and workspace events
+                    Include polling and workspace events
                 </label>}
                 {!showHistory ? <p className="dashboard-empty">ToolCall history is hidden.</p> :
                     visibleActivity?.length ? <ol className="dashboard-timeline">

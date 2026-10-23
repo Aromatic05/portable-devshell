@@ -217,7 +217,7 @@ test("round5: mismatched Activity page is rejected and explicit retry starts at 
 test("round5: refused fullscreen does not loop and failed Close permits explicit retry without workspace actions", async () => {
     host.fullscreen = true; host.acceptFullscreen = false; serveSnapshot(snapshot());
     await render(<AppView />); await authorize(); expect(host.modes).toEqual(["fullscreen"]);
-    await click("Tasks"); await click("Overview"); expect(host.modes).toEqual(["fullscreen"]);
+    await click("Activity"); await click("Overview"); expect(host.modes).toEqual(["fullscreen"]);
     await click("Open fullscreen"); expect(host.modes).toEqual(["fullscreen", "fullscreen"]);
     host.teardownError = new Error("Host cannot close this surface"); await click("Close");
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("Host cannot close this surface");

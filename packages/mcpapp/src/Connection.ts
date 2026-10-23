@@ -36,7 +36,7 @@ export interface McpAppSnapshot {
         input?: unknown;
         output?: unknown;
     }>;
-    presentation: { primary?: McpAppItem; work: McpAppItem[]; background: McpAppItem[] };
+    presentation: { primary?: McpAppItem; pendingApprovals?: number; work: McpAppItem[]; background: McpAppItem[] };
     reentry?: {
         pending?: boolean;
         schedule?: { readyAt: string; intent: "automatic"; sourceId?: string };

@@ -39,7 +39,7 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
         ctxId: "ctx-a",
         instance: "test",
         workspace: "/allowed",
-        approvals: { approvals: [approval("allowed", "ctx-a"), approval("secret", "ctx-b")], lastSeq: 15 },
+        approvals: { approvals: [approval("allowed", "ctx-a"), approval("allowed-2", "ctx-a"), approval("secret", "ctx-b")], lastSeq: 15 },
         goal: { goal: goal("allowed-goal", "/allowed"), lastSeq: 12 },
         waits: { waits: [wait("allowed-wait", "ctx-a"), wait("secret-wait", "ctx-b")], lastSeq: 14 },
     });
@@ -47,6 +47,7 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
     assert.equal(snapshot.agentBusy, false);
     assert.equal(snapshot.presentation.work[0]?.state, "running");
     assert.equal(snapshot.presentation.primary?.id, "allowed");
+    assert.equal(snapshot.presentation.pendingApprovals, 2);
     assert.deepEqual(snapshot.presentation.work.map((entry) => entry.id), ["allowed-goal"]);
     assert.deepEqual(snapshot.presentation.background.map((entry) => entry.id), ["allowed-wait"]);
     assert.deepEqual(snapshot.presentation.primary?.actions.map((action) => action.id), ["approve", "deny"]);

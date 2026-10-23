@@ -247,8 +247,6 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         if (!app || !currentScope(app)) return;
         const controller = new AbortController();
         const current = () => !controller.signal.aborted && currentScope(app);
-        clearSnapshot();
-        setLiveError(undefined);
         void (async () => {
             let cursor: number | undefined;
             let retries = 0;
@@ -268,13 +266,15 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 } catch (error) {
                     if (!current()) return;
                     const message = error instanceof Error ? error.message : "MCP App connection failed";
-                    clearSnapshot();
                     if (message === "MCP App authorization expired") {
                         replaceSession(undefined, contextRef.current);
                         clearMcpAppSession();
                         setLiveError(message);
                         return;
                     }
+                    // A transient Watch failure is not a Context revocation.
+                    // Retain the last snapshot for reading, but fence stale actions.
+                    setPendingAction(undefined);
                     setLiveError(message);
                     cursor = undefined;
                     await new Promise<void>((resolve) => {
@@ -291,7 +291,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     // The server chooses recovery eligibility and persists the claim. React
     // only hands that intent to the MCP Host; it does not run a local scheduler.
     useEffect(() => {
-        if (view !== "workspace" || status !== "connected" || !snapshot || !session ||
+        if (view !== "workspace" || status !== "connected" || liveError !== undefined || !snapshot || !session ||
             snapshot !== snapshotRef.current || snapshot.ctxId !== session.ctxId) return;
         const directive = snapshot.reentry?.directives?.find((item) =>
             item.intent === "goal-resume" || item.intent === "goal-retry");
@@ -377,11 +377,11 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 }
             }
         })();
-    }, [snapshot, session, status, view, epoch]);
+    }, [snapshot, session, status, view, epoch, liveError]);
 
     const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => {
         const app = hostRef.current;
-        if (!app || !session || !currentScope(app) || !snapshot ||
+        if (!app || !session || !currentScope(app) || liveError !== undefined || !snapshot ||
             snapshot !== snapshotRef.current || actionRef.current) return;
         const key = actionKey(epoch, snapshot.cursor, item, action);
         if (action.confirmation && pendingAction !== key) {
@@ -482,16 +482,24 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     </button>}
                     <span className="workspace-status" role="status">
                         <span className="workspace-indicator" aria-hidden="true" />
-                        {status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
+                        {status === "connected" && liveError !== undefined ? "Live reconnecting"
+                            : status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
                     </span>
                 </span>
             </header>
             <section className="workspace-content">
+                {liveError !== undefined && snapshot && <p className="workspace-notice" role="status">
+                    Live updates interrupted: {liveError}. Showing last known state; actions are paused until reconnect.
+                </p>}
                 {view === "interaction" ? <>
                     {snapshot ? <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
+                        {snapshot.presentation.pendingApprovals !== undefined &&
+                            snapshot.presentation.pendingApprovals > 1 &&
+                            <p className="workspace-notice">Approval 1 of {snapshot.presentation.pendingApprovals}</p>}
                         {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
-                            onAction={act} epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
+                            onAction={liveError === undefined && status === "connected" ? act : undefined}
+                            epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />}
                         {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
                         {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
@@ -501,7 +509,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     {actionError && <p role="alert">{actionError}</p>}
                     <WorkspaceDashboard snapshot={snapshot} session={session}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
-                            onAction={kind === "background" ? undefined : act}
+                            onAction={kind === "background" || liveError !== undefined || status !== "connected" ? undefined : act}
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />} />
                 </> : <div className="workspace-landing">

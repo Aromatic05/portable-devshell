@@ -64,6 +64,7 @@ export function projectMcpAppSnapshot(input: {
         cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
         agentBusy: input.agentBusy ?? false,
         presentation: {
+            pendingApprovals: approvals.length,
             ...(approvals[0] === undefined ? {} : {
                 primary: {
                     kind: "decision",

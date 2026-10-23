@@ -14,6 +14,7 @@ export interface McpAppSnapshot {
 
 export interface McpAppPresentation {
     primary?: McpAppPrimaryItem;
+    pendingApprovals?: number;
     work: McpAppWorkItem[];
     background: McpAppBackgroundItem[];
 }
