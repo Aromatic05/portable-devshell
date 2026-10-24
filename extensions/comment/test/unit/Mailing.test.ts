@@ -249,7 +249,7 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
     const call = (toolName: string, command = "pwd") => ({
         callId: "first-work", direction: "inbound" as const,
         value: { kind: "call" as const, toolName,
-            payload: toolName === "tmux_input" ? { text: command } : { command },
+            payload: toolName === "tmux_input" ? { task: "task-1", input: command } : { command },
             context: { ...target, source: "mcp" as const } },
     });
     const invocation = {} as never;
@@ -266,6 +266,11 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
         await hook(call(toolName!, command!) as never, invocation);
         assert.deepEqual(await mailing.status(target), {});
     }
+    await hook({ ...call("tmux_input"), value: {
+        ...call("tmux_input").value,
+        payload: { pane: "persistent-pane", input: "devshell memory init explicit-pane\n" },
+    } } as never, invocation);
+    assert.deepEqual(await mailing.status(target), {});
     await Promise.all(Array.from({ length: 8 }, () => hook(call("file_read") as never, invocation)));
     const selected = await mailing.status(target);
     assert.ok("name" in selected);

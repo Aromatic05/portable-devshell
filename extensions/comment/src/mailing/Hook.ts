@@ -52,7 +52,7 @@ export function createMemoryAutoHook(
         // merely defer the fallback to the next ordinary ToolCall.
         const payload = call.payload;
         if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
-            const text = call.toolName === "tmux_input" ? payload.text :
+            const text = call.toolName === "tmux_input" ? payload.input :
                 call.toolName === "bash_run" || call.toolName === "tmux_run" ? payload.command : undefined;
             if (typeof text === "string" &&
                 /\bdevshell\s+memory\s+(?:init|inherit)(?=\s|$)/u.test(text))
