@@ -430,7 +430,16 @@ async function verifyTarget(context, fixture) {
         files: [{ path: "./received.txt", view: "content", selector: "2000-2001:raw" }] });
     assert.equal(content.files[0].content, "2000:L07-artifact-002000\n2001:L07-artifact-002001");
     assert.deepEqual(await readFile(join(fixture.workspaces[1], "received.txt")), expected);
-    assert.deepEqual((await readdir(fixture.workspaces[1])).sort(), ["received.txt"]);
+    await verifyWorkspaceFiles(fixture.workspaces[1], ["received.txt"]);
+}
+
+async function verifyWorkspaceFiles(directory, files) {
+    // MCP ToolCalls now initialize Context Memory under var/agent-work.
+    // Artifact transfers must not leave any other payload files.
+    const entries = await readdir(directory);
+    assert.deepEqual(entries.filter((name) => name !== "var").sort(), files);
+    if (entries.includes("var"))
+        assert.deepEqual(await readdir(join(directory, "var")), ["agent-work"]);
 }
 
 async function cancelAndRecover(fixture, source) {
@@ -490,7 +499,7 @@ async function cancelAndRecover(fixture, source) {
     assert.ok(cancelled.transferredBytes > 0 && cancelled.transferredBytes < bytes);
     assert.equal(fixture.json(["transfer", "cancel", id]).transfer.status, "cancelled");
     await absent(join(destination, "cancelled.bin"));
-    assert.deepEqual(await readdir(destination), []);
+    await verifyWorkspaceFiles(destination, []);
     const persisted = await jsonFile(join(directory, `${id}.json`));
     assert.equal(persisted.cancelRequested, true);
     assert.equal(persisted.payloadId, undefined);
@@ -505,7 +514,7 @@ async function cancelAndRecover(fixture, source) {
     const checksum = await bash(context, "sha256sum cancelled.bin");
     assert.equal(checksum.stdout.trim(), `${expectedHash}  cancelled.bin`);
     assert.equal(digest(await readFile(join(destination, "cancelled.bin"))), expectedHash);
-    assert.deepEqual(await readdir(destination), ["cancelled.bin"]);
+    await verifyWorkspaceFiles(destination, ["cancelled.bin"]);
     assert.equal(fixture.json(["transfers"]).length, 5);
     return { status: "passed", durableProgressBeforePause: observed.record.transferredBytes,
         totalBytes: bytes, retryBytes: completed.transferredBytes, sha256: expectedHash };
