@@ -270,7 +270,12 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     if (heartbeat !== undefined) clearInterval(heartbeat);
                     // Only an applied, completed edit advances durable progress;
                     // a read, failed edit or heartbeat merely proves execution.
-                    if (shouldTrack) pulse(appliedEdit ? "mutation" : "execution");
+                    if (shouldTrack) {
+                        pulse(appliedEdit ? "mutation" : "execution");
+                        // A completed edit must not be reported before its
+                        // progress epoch has had a chance to become durable.
+                        await activityTail;
+                    }
                 }
             });
             executionCompleted = true;

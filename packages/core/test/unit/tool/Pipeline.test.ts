@@ -935,3 +935,30 @@ test("only applied file edits, not reads or failed edits, advance durable Goal p
     assert.ok(evidence.every((entry) => entry.ctxId === context.ctxId));
     harness.runtime.close();
 });
+
+test("an applied file edit does not finish before its final Goal progress is persisted", async () => {
+    let started!: () => void;
+    let release!: () => void;
+    const mutationStarted = new Promise<void>((resolve) => { started = resolve; });
+    const persistMutation = new Promise<void>((resolve) => { release = resolve; });
+    let durable = false;
+    const harness = createHarness("instance-a", {
+        onExecutionActivity: async (_ctxId, kind) => {
+            if (kind !== "mutation") return;
+            started();
+            await persistMutation;
+            durable = true;
+        },
+        invoke: async () => ({ operations: [{ status: "applied" }] }),
+    });
+    const running = harness.runtime.api.call("instance-a", "file_edit", {}, context);
+    await mutationStarted;
+    let returned = false;
+    void running.then(() => { returned = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(returned, false, "ToolCall must still await the final progress commit");
+    release();
+    assert.deepEqual(await running, { operations: [{ status: "applied" }] });
+    assert.equal(durable, true);
+    harness.runtime.close();
+});
