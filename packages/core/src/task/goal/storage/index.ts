@@ -2,16 +2,40 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
     createRemoteError,
     controlErrorCodes,
+    RemoteError,
     type GoalRecord,
 } from "@portable-devshell/shared";
 
 import { cleanupStaleAtomicStateTemps } from "../../AtomicState.js";
 import { GoalActivityStore, type GoalActivityRecord } from "./Activity.js";
 import { GoalState, type GoalDocument } from "./State.js";
+
+export class GoalCommitError extends RemoteError {
+    constructor(
+        cause: unknown,
+        readonly committed: true | "unknown",
+        filePath: string,
+        phase: "rename" | "directory-sync",
+    ) {
+        super({
+            cause,
+            code: committed === true
+                ? "goal.commitDurabilityUnconfirmed"
+                : "goal.commitUncertain",
+            details: { committed, filePath, phase },
+            message: committed === true
+                ? "Goal update is committed, but crash durability is unconfirmed; read the Goal before changing it again."
+                : "Goal commit outcome is unknown; read the Goal before retrying.",
+            retryable: false,
+        });
+        this.name = "GoalCommitError";
+    }
+}
 
 export class GoalStore {
     readonly #activityHydrated = new Set<string>();
@@ -21,6 +45,10 @@ export class GoalStore {
     readonly #instanceName: string;
     readonly #state: GoalState;
     #document?: GoalDocument;
+    #pendingCommit?: {
+        document: GoalDocument;
+        onCommitted?: () => Promise<void>;
+    };
 
     constructor(options: {
         filePath: string;
@@ -74,11 +102,41 @@ export class GoalStore {
         this.#activityHydrated.add(record.goalId);
     }
 
-    async write(document: GoalDocument): Promise<GoalDocument> {
+    async reconcile(): Promise<void> {
+        const pending = this.#pendingCommit;
+        if (pending === undefined) return;
+        // Never use the old cache when a rename might already be visible.
+        // An unreadable file must block all subsequent mutations.
+        const stored = this.#load();
+        this.#pruneActivity(stored);
+        this.#document = stored;
+        this.#pendingCommit = undefined;
+        if (isDeepStrictEqual(stored, pending.document))
+            await pending.onCommitted?.();
+    }
+
+    async write(
+        document: GoalDocument,
+        onCommitted?: () => Promise<void>,
+    ): Promise<GoalDocument> {
+        await this.reconcile();
         const normalized = this.#state.normalizeDocument(document);
-        await this.#writeAtomic(normalized);
+        let failure: GoalCommitError | undefined;
+        try {
+            await this.#writeAtomic(normalized);
+        } catch (error) {
+            if (!(error instanceof GoalCommitError)) throw error;
+            this.#document = undefined;
+            if (error.committed === "unknown") {
+                this.#pendingCommit = { document: normalized, onCommitted };
+                throw error;
+            }
+            failure = error;
+        }
         this.#pruneActivity(normalized);
         this.#document = normalized;
+        await onCommitted?.();
+        if (failure !== undefined) throw failure;
         return structuredClone(normalized);
     }
 
@@ -157,6 +215,7 @@ export class GoalStore {
     }
 
     #current(): GoalDocument {
+        if (this.#pendingCommit !== undefined) return this.#load();
         if (this.#document === undefined) {
             cleanupStaleAtomicStateTemps(this.#filePath);
             this.#document = this.#load();
@@ -193,17 +252,39 @@ export class GoalStore {
             } finally {
                 await handle.close();
             }
-            await rename(temporary, this.#filePath);
         } catch (error) {
             await unlink(temporary).catch(() => undefined);
             throw error;
         }
-        if (process.platform !== "win32") {
-            const handle = await open(directory, "r");
+        try {
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            this.#document = undefined;
+            let stored: GoalDocument;
             try {
-                await handle.sync();
+                stored = this.#load();
+            } catch (probeError) {
+                throw new GoalCommitError(
+                    new AggregateError([error, probeError], "Goal rename and reconciliation failed."),
+                    "unknown", this.#filePath, "rename",
+                );
             } finally {
-                await handle.close();
+                await unlink(temporary).catch(() => undefined);
+            }
+            if (isDeepStrictEqual(stored, document))
+                throw new GoalCommitError(error, true, this.#filePath, "rename");
+            throw error;
+        }
+        if (process.platform !== "win32") {
+            try {
+                const handle = await open(directory, "r");
+                try {
+                    await handle.sync();
+                } finally {
+                    await handle.close();
+                }
+            } catch (error) {
+                throw new GoalCommitError(error, true, this.#filePath, "directory-sync");
             }
         }
     }

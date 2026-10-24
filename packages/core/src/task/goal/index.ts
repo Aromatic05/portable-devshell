@@ -43,13 +43,13 @@ export class GoalService {
     }
 
     async read(ctxId: string): Promise<GoalSnapshot | undefined> {
-        await this.#operation;
-        return this.#state.read(this.#store.read(ctxId), ctxId);
+        return await this.#runExclusive(async () =>
+            this.#state.read(this.#store.read(ctxId), ctxId));
     }
 
     async list(): Promise<GoalSnapshot[]> {
-        await this.#operation;
-        return this.#state.list(this.#store.read());
+        return await this.#runExclusive(async () =>
+            this.#state.list(this.#store.read()));
     }
 
     async manage(
@@ -166,9 +166,9 @@ export class GoalService {
         ctxId: string,
     ): Promise<void> {
         if (transition.document === before) return;
-        await this.#store.write(transition.document);
         const goal = this.#state.read(transition.document, ctxId);
-        await this.#appendGoalEvent(ctxId, goal?.goalId, goal?.status);
+        await this.#store.write(transition.document, async () =>
+            this.#appendGoalEvent(ctxId, goal?.goalId, goal?.status));
     }
 
     async #persistStructuralTouch(
@@ -201,6 +201,7 @@ export class GoalService {
         });
         await previous;
         try {
+            await this.#store.reconcile();
             return await operation();
         } finally {
             release();
