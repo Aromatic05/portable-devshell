@@ -6,6 +6,7 @@ export interface GoalActivityRecord {
     lastAgentActivityAt: string;
     lastExecutionAt?: string;
     noActionStreak: number;
+    structureHash?: string;
 }
 
 export class GoalActivityStore {
@@ -24,7 +25,8 @@ export class GoalActivityStore {
                     `
                 SELECT last_agent_activity_at AS lastAgentActivityAt,
                        last_execution_at AS lastExecutionAt,
-                       no_action_streak AS noActionStreak
+                       no_action_streak AS noActionStreak,
+                       structure_hash AS structureHash
                 FROM goal_activity
                 WHERE goal_id = ?
             `,
@@ -34,6 +36,7 @@ export class GoalActivityStore {
                       lastAgentActivityAt: string;
                       lastExecutionAt: string | null;
                       noActionStreak: number;
+                      structureHash: string | null;
                   }
                 | undefined;
             if (row === undefined) return undefined;
@@ -43,6 +46,7 @@ export class GoalActivityStore {
                     ? {}
                     : { lastExecutionAt: row.lastExecutionAt }),
                 noActionStreak: Number(row.noActionStreak),
+                ...(row.structureHash === null ? {} : { structureHash: row.structureHash }),
             };
         } finally {
             database.close();
@@ -58,7 +62,8 @@ export class GoalActivityStore {
                 SELECT goal_id AS goalId,
                        last_agent_activity_at AS lastAgentActivityAt,
                        last_execution_at AS lastExecutionAt,
-                       no_action_streak AS noActionStreak
+                       no_action_streak AS noActionStreak,
+                       structure_hash AS structureHash
                 FROM goal_activity
             `,
                 )
@@ -67,6 +72,7 @@ export class GoalActivityStore {
                 lastAgentActivityAt: string;
                 lastExecutionAt: string | null;
                 noActionStreak: number;
+                structureHash: string | null;
             }>;
             return new Map(
                 rows.map((row) => [
@@ -77,6 +83,7 @@ export class GoalActivityStore {
                             ? {}
                             : { lastExecutionAt: row.lastExecutionAt }),
                         noActionStreak: Number(row.noActionStreak),
+                        ...(row.structureHash === null ? {} : { structureHash: row.structureHash }),
                     },
                 ]),
             );
@@ -91,12 +98,13 @@ export class GoalActivityStore {
             database
                 .prepare(
                     `
-                INSERT INTO goal_activity(goal_id, last_agent_activity_at, last_execution_at, no_action_streak)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO goal_activity(goal_id, last_agent_activity_at, last_execution_at, no_action_streak, structure_hash)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(goal_id) DO UPDATE SET
                     last_agent_activity_at = excluded.last_agent_activity_at,
                     last_execution_at = excluded.last_execution_at,
-                    no_action_streak = excluded.no_action_streak
+                    no_action_streak = excluded.no_action_streak,
+                    structure_hash = excluded.structure_hash
             `,
                 )
                 .run(
@@ -104,6 +112,7 @@ export class GoalActivityStore {
                     activity.lastAgentActivityAt,
                     activity.lastExecutionAt ?? null,
                     activity.noActionStreak,
+                    activity.structureHash ?? null,
                 );
         } finally {
             database.close();
@@ -141,6 +150,9 @@ export class GoalActivityStore {
                         no_action_streak INTEGER NOT NULL CHECK(no_action_streak >= 0)
                     ) STRICT;
                 `);
+                const columns = database.prepare("PRAGMA table_info(goal_activity)").all() as Array<{ name: string }>;
+                if (!columns.some((column) => column.name === "structure_hash"))
+                    database.exec("ALTER TABLE goal_activity ADD COLUMN structure_hash TEXT");
             } finally {
                 database.close();
             }

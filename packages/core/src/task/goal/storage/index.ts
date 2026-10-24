@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -93,7 +93,10 @@ export class GoalStore {
                 `Workspace Goal ${record.goalId} is no longer stored.`,
             );
         try {
-            this.#activityStore.write(record.goalId, goalActivity(record));
+            this.#activityStore.write(record.goalId, {
+                ...goalActivity(record),
+                structureHash: goalStructureHash(current.goals[index]!),
+            });
         } catch (error) {
             this.#activityAvailable = false;
             throw error;
@@ -109,6 +112,7 @@ export class GoalStore {
         // An unreadable file must block all subsequent mutations.
         const stored = this.#load();
         this.#pruneActivity(stored);
+        this.#activityHydrated.clear();
         this.#document = stored;
         this.#pendingCommit = undefined;
         if (isDeepStrictEqual(stored, pending.document))
@@ -126,7 +130,7 @@ export class GoalStore {
             await this.#writeAtomic(normalized);
         } catch (error) {
             if (!(error instanceof GoalCommitError)) throw error;
-            this.#document = undefined;
+            this.#invalidate();
             if (error.committed === "unknown") {
                 this.#pendingCommit = { document: normalized, onCommitted };
                 throw error;
@@ -134,6 +138,7 @@ export class GoalStore {
             failure = error;
         }
         this.#pruneActivity(normalized);
+        this.#activityHydrated.clear();
         this.#document = normalized;
         await onCommitted?.();
         if (failure !== undefined) throw failure;
@@ -157,7 +162,7 @@ export class GoalStore {
             const activity = activities.get(goal.goalId);
             // Structural progress may have committed after the last sidecar
             // heartbeat. Never replace that newer state with a stale row.
-            if (activity !== undefined && activity.lastAgentActivityAt > goal.lastAgentActivityAt)
+            if (activity !== undefined && shouldHydrateActivity(goal, activity))
                 applyGoalActivity(goal, activity);
             this.#activityHydrated.add(goal.goalId);
         }
@@ -182,7 +187,7 @@ export class GoalStore {
         }
         if (
             activity !== undefined &&
-            activity.lastAgentActivityAt > goal.lastAgentActivityAt
+            shouldHydrateActivity(goal, activity)
         ) {
             applyGoalActivity(goal, activity);
         }
@@ -223,6 +228,11 @@ export class GoalStore {
         return this.#document;
     }
 
+    #invalidate(): void {
+        this.#document = undefined;
+        this.#activityHydrated.clear();
+    }
+
     #load(): GoalDocument {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
@@ -259,7 +269,7 @@ export class GoalStore {
         try {
             await rename(temporary, this.#filePath);
         } catch (error) {
-            this.#document = undefined;
+            this.#invalidate();
             let stored: GoalDocument;
             try {
                 stored = this.#load();
@@ -298,6 +308,22 @@ function applyGoalActivity(
     if (activity.lastExecutionAt === undefined) delete record.lastExecutionAt;
     else record.lastExecutionAt = activity.lastExecutionAt;
     record.noActionStreak = activity.noActionStreak;
+}
+
+function shouldHydrateActivity(goal: GoalRecord, activity: GoalActivityRecord): boolean {
+    if (goal.status !== "active") return false;
+    // A matching structural generation establishes causality even for events
+    // in the same millisecond or after a wall-clock adjustment.
+    return activity.structureHash === undefined
+        ? activity.lastAgentActivityAt > goal.lastAgentActivityAt
+        : activity.structureHash === goalStructureHash(goal);
+}
+
+function goalStructureHash(record: GoalRecord): string {
+    const { lastAgentActivityAt: _activity, lastExecutionAt: _execution,
+        noActionStreak: _streak, ...structure } = record;
+    const canonical = Object.entries(structure).sort(([a], [b]) => a.localeCompare(b));
+    return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 function goalActivity(record: GoalRecord): GoalActivityRecord {
