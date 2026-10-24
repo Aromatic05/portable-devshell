@@ -74,6 +74,11 @@ const rules = [
             packageTarget("@portable-devshell/core/approval"),
         ),
     },
+    {
+        name: "generic-transport-does-not-depend-on-control-contracts",
+        roots: [domain("packages/shared/src/transport")],
+        forbidden: pathTarget("packages/shared/src/control"),
+    },
 ];
 
 const coreDomains = ["approval", "audit", "instance", "task", "terminal", "toolcall"];

@@ -1,12 +1,12 @@
 // Shared route-definition vocabulary used by provider-side host/port routing.
 // Request and response semantics stay in the owning domain Contract.
 
-import { controlErrorCodes } from "../../../types/Error.js";
-import { createRemoteError } from "../../Error.js";
+import { controlErrorCodes } from "../../types/Error.js";
+import { createRemoteError } from "../../transport/Error.js";
 
-import type { ControlClientKind } from "../../../control/server/Model.js";
-import type { JsonValue } from "../../../types/Json.js";
-import type { MessageStream } from "../../packet/Stream.js";
+import type { ControlClientKind } from "./Model.js";
+import type { JsonValue } from "../../types/Json.js";
+import type { MessageStream } from "../../transport/packet/Stream.js";
 
 export interface ControlPeerSubject {
     readonly id: string;

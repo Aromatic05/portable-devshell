@@ -2,7 +2,7 @@ import { createRemoteError } from "../../transport/Error.js";
 import { STREAM_GAP_CODE } from "../../client/Stream.js";
 import type { InstanceEventRecord } from "../../client/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
-import type { ControlPortContext } from "../../transport/endpoint/route/Control.js";
+import type { ControlPortContext } from "../../control/server/Route.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 
 

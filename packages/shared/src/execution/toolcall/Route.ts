@@ -12,7 +12,7 @@ import {
     type ControlHostDefinition,
     type ControlPortContext,
     type ControlPortDefinition,
-} from "../../transport/endpoint/route/Control.js";
+} from "../../control/server/Route.js";
 import type {
     ToolCallDispatchRequest,
     ToolCallIngressPort,
