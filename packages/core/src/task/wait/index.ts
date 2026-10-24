@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
+    createRemoteError,
     errorMessage,
     toRemoteErrorBody,
     type JsonValue,
@@ -38,11 +40,17 @@ export class WaitService {
     readonly #invoke: WaitInvokePort;
     readonly #now: () => string;
     readonly #waitId: () => string;
-    readonly #records = new Map<string, WaitRecord>();
+    #records = new Map<string, WaitRecord>();
     readonly #monitors = new Map<string, AbortController>();
     readonly #monitorTasks = new Map<string, Promise<void>>();
     readonly #monitorFailures: unknown[] = [];
-    #writeTail = Promise.resolve();
+    #operation: Promise<void> = Promise.resolve();
+    #pending?: {
+        records: WaitRecord[];
+        type: string;
+        record: WaitRecord;
+        start: boolean;
+    };
     #closed = false;
     #closePromise?: Promise<void>;
 
@@ -57,48 +65,56 @@ export class WaitService {
     }
 
     async list(ctxId?: string): Promise<WaitRecord[]> {
-        return [...this.#records.values()]
-            .filter((record) => ctxId === undefined || record.ctxId === ctxId)
-            .map((record) => structuredClone(record));
+        return await this.#exclusive(async () =>
+            [...this.#records.values()]
+                .filter((record) => ctxId === undefined || record.ctxId === ctxId)
+                .map((record) => structuredClone(record)));
     }
 
     async detach(input: WaitDetachInput): Promise<WaitRecord> {
-        if (this.#closed) throw new Error("Wait service is closed.");
-        const existing = [...this.#records.values()].find(
-            (record) =>
-                record.status === "detached" &&
-                record.targetId === input.targetId &&
-                record.ctxId === input.ctxId,
-        );
-        if (existing !== undefined) {
-            this.#start(existing);
-            return structuredClone(existing);
-        }
-        const now = this.#now();
-        const record: WaitRecord = {
-            callId: input.callId,
-            createdAt: now,
-            ...(input.ctxId === undefined ? {} : { ctxId: input.ctxId }),
-            instance: input.instance,
-            source: input.source,
-            status: "detached",
-            targetId: input.targetId,
-            toolName: input.toolName,
-            updatedAt: now,
-            waitId: this.#waitId(),
-            ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
-        };
-        this.#records.set(record.waitId, record);
-        await this.#persist();
-        await this.#appendEvent("wait.detached", record as unknown as JsonValue);
-        this.#start(record);
-        return structuredClone(record);
+        return await this.#exclusive(async () => {
+            if (this.#closed) throw new Error("Wait service is closed.");
+            const existing = [...this.#records.values()].find(
+                (record) =>
+                    record.status === "detached" &&
+                    record.targetId === input.targetId &&
+                    record.ctxId === input.ctxId,
+            );
+            if (existing !== undefined) {
+                this.#start(existing);
+                return structuredClone(existing);
+            }
+            const now = this.#now();
+            const record: WaitRecord = {
+                callId: input.callId,
+                createdAt: now,
+                ...(input.ctxId === undefined ? {} : { ctxId: input.ctxId }),
+                instance: input.instance,
+                source: input.source,
+                status: "detached",
+                targetId: input.targetId,
+                toolName: input.toolName,
+                updatedAt: now,
+                waitId: this.#waitId(),
+                ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
+            };
+            const next = new Map(this.#records);
+            next.set(record.waitId, record);
+            const warning = await this.#persist(next, "wait.detached", record, true);
+            this.#start(record);
+            await this.#emit("wait.detached", record);
+            if (warning !== undefined) throw warning;
+            return structuredClone(record);
+        });
     }
 
     resume(): void {
         if (this.#closed) return;
-        for (const record of this.#records.values())
-            if (record.status === "detached") this.#start(record);
+        void this.#exclusive(async () => {
+            for (const record of this.#records.values())
+                if (record.status === "detached") this.#start(record);
+        }).catch((error: unknown) =>
+            console.warn("Wait recovery could not read committed state:", error));
     }
 
     close(): Promise<void> {
@@ -107,7 +123,7 @@ export class WaitService {
         for (const controller of this.#monitors.values()) controller.abort();
         this.#closePromise = (async () => {
             await Promise.allSettled(this.#monitorTasks.values());
-            await this.#writeTail;
+            await this.#operation;
             if (this.#monitorFailures.length > 0)
                 throw new AggregateError(
                     this.#monitorFailures,
@@ -173,10 +189,14 @@ export class WaitService {
             } catch (error) {
                 if (signal.aborted) return;
                 if (toRemoteErrorBody(error)?.code === "tmux.taskExpired") {
-                    await this.#settle(waitId, "failed", {
-                        error: errorMessage(error),
-                    });
-                    return;
+                    try {
+                        await this.#settle(waitId, "failed", {
+                            error: errorMessage(error),
+                        });
+                        return;
+                    } catch {
+                        // Keep the monitor alive until the terminal state commits.
+                    }
                 }
                 await delay(1_000);
             }
@@ -188,45 +208,133 @@ export class WaitService {
         status: "resolved" | "failed",
         terminal: { result?: JsonValue; error?: string },
     ): Promise<void> {
-        const current = this.#records.get(waitId);
-        if (current === undefined || current.status !== "detached") return;
-        const now = this.#now();
-        const next: WaitRecord = {
-            ...current,
-            ...terminal,
-            resolvedAt: now,
-            status,
-            updatedAt: now,
-        };
-        this.#records.set(waitId, next);
-        this.#pruneTerminal();
-        await this.#persist();
-        await this.#appendEvent(`wait.${status}`, next as unknown as JsonValue);
+        await this.#exclusive(async () => {
+            const current = this.#records.get(waitId);
+            if (current === undefined || current.status !== "detached") return;
+            const now = this.#now();
+            const record: WaitRecord = {
+                ...current,
+                ...terminal,
+                resolvedAt: now,
+                status,
+                updatedAt: now,
+            };
+            const next = new Map(this.#records);
+            next.set(waitId, record);
+            this.#pruneTerminal(next);
+            const type = `wait.${status}`;
+            const warning = await this.#persist(next, type, record, false);
+            await this.#emit(type, record);
+            if (warning !== undefined)
+                console.warn("Wait terminal commit durability unconfirmed:", warning);
+        });
     }
 
-    #pruneTerminal(): void {
-        const terminal = [...this.#records.values()]
+    #pruneTerminal(records: Map<string, WaitRecord>): void {
+        const terminal = [...records.values()]
             .filter((record) => record.status !== "detached")
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         for (const record of terminal.slice(WAIT_TERMINAL_RETENTION))
-            this.#records.delete(record.waitId);
+            records.delete(record.waitId);
     }
 
-    async #persist(): Promise<void> {
-        const body = `${JSON.stringify({ version: 1, waits: [...this.#records.values()] })}\n`;
-        this.#writeTail = this.#writeTail.catch(() => undefined).then(async () => {
-            const directory = dirname(this.#filePath);
-            await mkdir(directory, { mode: 0o700, recursive: true });
-            const temporary = `${this.#filePath}.tmp.${process.pid}.${randomUUID()}`;
+    async #persist(
+        next: Map<string, WaitRecord>,
+        type: string,
+        record: WaitRecord,
+        start: boolean,
+    ): Promise<Error | undefined> {
+        const rows = [...next.values()];
+        const directory = dirname(this.#filePath);
+        await mkdir(directory, { mode: 0o700, recursive: true });
+        const temporary = `${this.#filePath}.tmp.${process.pid}.${randomUUID()}`;
+        try {
+            const handle = await open(temporary, "wx", 0o600);
             try {
-                await writeFile(temporary, body, { encoding: "utf8", flag: "wx", mode: 0o600 });
-                await rename(temporary, this.#filePath);
-            } catch (error) {
-                await unlink(temporary).catch(() => undefined);
-                throw error;
+                await handle.writeFile(`${JSON.stringify({ version: 1, waits: rows })}\n`, "utf8");
+                await handle.sync();
+            } finally {
+                await handle.close();
             }
-        });
-        await this.#writeTail;
+        } catch (error) {
+            await unlink(temporary).catch(() => undefined);
+            throw error;
+        }
+        try {
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            await unlink(temporary).catch(() => undefined);
+            let stored: WaitRecord[];
+            try {
+                stored = readDocument(this.#filePath);
+            } catch (probeError) {
+                this.#pending = { records: rows, type, record, start };
+                throw createRemoteError({
+                    code: "wait.commitUncertain",
+                    cause: new AggregateError([error, probeError]),
+                    message: "Wait commit outcome is unknown; read before retrying.",
+                    retryable: false,
+                });
+            }
+            this.#records = new Map(stored.map((entry) => [entry.waitId, entry]));
+            if (!isDeepStrictEqual(stored, rows)) throw error;
+            return createRemoteError({
+                code: "wait.commitDurabilityUnconfirmed",
+                cause: error,
+                message: "Wait state is committed, but crash durability is unconfirmed.",
+                retryable: false,
+            });
+        }
+        this.#records = next;
+        if (process.platform !== "win32") {
+            try {
+                const handle = await open(directory, "r");
+                try {
+                    await handle.sync();
+                } finally {
+                    await handle.close();
+                }
+            } catch (error) {
+                return createRemoteError({
+                    code: "wait.commitDurabilityUnconfirmed",
+                    cause: error,
+                    message: "Wait state is committed, but crash durability is unconfirmed.",
+                    retryable: false,
+                });
+            }
+        }
+    }
+
+    async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.#operation;
+        let release!: () => void;
+        this.#operation = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try {
+            const pending = this.#pending;
+            if (pending !== undefined) {
+                const stored = readDocument(this.#filePath);
+                this.#records = new Map(stored.map((record) => [record.waitId, record]));
+                this.#pending = undefined;
+                if (isDeepStrictEqual(stored, pending.records)) {
+                    if (pending.start) this.#start(pending.record);
+                    await this.#emit(pending.type, pending.record);
+                }
+            }
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
+    async #emit(type: string, record: WaitRecord): Promise<void> {
+        try {
+            await this.#appendEvent(type, record as unknown as JsonValue);
+        } catch (error) {
+            // The Wait snapshot is authoritative; an Audit failure must not
+            // prevent monitoring or make a terminal Wait appear detached.
+            console.warn("Wait event publication failed:", error);
+        }
     }
 }
 
