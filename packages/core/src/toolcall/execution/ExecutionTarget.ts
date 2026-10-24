@@ -167,6 +167,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         let toolExecutionSucceeded = false;
         let executionStarted = false;
         let executionCompleted = false;
+        let mutationActivityFailure: unknown;
         let failureStage: ToolCallFailureStage | undefined;
         let progressTail = Promise.resolve();
         let progressFailure: unknown;
@@ -238,6 +239,10 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     activityTail = activityTail.then(async () => {
                         await recordActivity!(ctxId!, kind);
                     }).catch((error: unknown) => {
+                        if (kind === "mutation") {
+                            mutationActivityFailure = error;
+                            return;
+                        }
                         if (warned) return;
                         warned = true;
                         console.warn("ToolCall Goal activity update failed:", error);
@@ -288,6 +293,16 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 presented
                     ? executed.result
                     : executed;
+            if (mutationActivityFailure !== undefined) {
+                failureStage = "postExecution";
+                throw createRemoteError({
+                    cause: mutationActivityFailure,
+                    code: "goal.activityCommitFailed",
+                    details: { callId, executionCompleted: true, result: rawResult },
+                    message: "File edit completed, but Goal progress was not committed. Do not repeat the file edit.",
+                    retryable: false,
+                });
+            }
             let adaptedResult: JsonValue;
             try {
                 adaptedResult =

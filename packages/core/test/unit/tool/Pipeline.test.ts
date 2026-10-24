@@ -962,3 +962,36 @@ test("an applied file edit does not finish before its final Goal progress is per
     assert.equal(durable, true);
     harness.runtime.close();
 });
+
+test("applied file edit with a failed Goal commit exposes its result and forbids replay", async () => {
+    const result = { operations: [{ status: "applied", path: "changed.txt" }] };
+    let executions = 0;
+    const harness = createHarness("instance-a", {
+        onExecutionActivity: async (_ctxId, kind) => {
+            if (kind === "mutation") throw new Error("injected Goal EIO");
+        },
+        invoke: async () => {
+            executions += 1;
+            return result;
+        },
+    });
+    await assert.rejects(
+        harness.runtime.api.call("instance-a", "file_edit", {}, context),
+        (error: unknown) => {
+            const body = error as {
+                code?: string;
+                retryable?: boolean;
+                details?: { executionCompleted?: boolean; failureStage?: string; result?: JsonValue };
+            };
+            assert.equal(body.code, "goal.activityCommitFailed");
+            assert.equal(body.retryable, false);
+            assert.equal(body.details?.executionCompleted, true);
+            assert.equal(body.details?.failureStage, "postExecution");
+            assert.deepEqual(body.details?.result, result);
+            return true;
+        },
+    );
+    assert.equal(executions, 1, "a completed file edit must never be automatically replayed");
+    assert.deepEqual(harness.audit, ["requested", "queued", "running", "failed"]);
+    harness.runtime.close();
+});
