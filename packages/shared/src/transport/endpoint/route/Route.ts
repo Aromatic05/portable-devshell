@@ -244,6 +244,7 @@ export class Route {
         channel: Channel,
         lifecycle?: { attached(host: Host): void; detached(host: Host): void },
         preserveExisting = false,
+        authorizePromotion?: (host: Host, channel: Channel) => boolean,
     ): () => void {
         const hosts = new Set<Host>();
         this.#incomingCodecs.set(channel, codec);
@@ -288,6 +289,22 @@ export class Route {
                 envelope.source.port === PEER_PROMOTION_PORT &&
                 envelope.dest.port === PEER_PROMOTION_PORT;
             const active = this.#peers.get(host);
+            if (promote && preserveExisting && active !== codec &&
+                authorizePromotion?.(host, channel) !== true) {
+                void codec.send({
+                    source: envelope.dest,
+                    dest: envelope.source,
+                    packet: {
+                        protocol: "rpc", type: "error", id: packet.id,
+                        error: {
+                            code: "transport.peerPromotionUnverified",
+                            message: "Peer promotion requires an authorized candidate.",
+                            retryable: false,
+                        },
+                    },
+                }).catch((error) => codec.close(normalizeError(error)));
+                return;
+            }
             if (!preserveExisting) {
                 // Independent Control sessions may reuse a Host identity.
                 // Retain the ordinary latest-peer behavior for those endpoints.

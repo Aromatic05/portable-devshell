@@ -15,6 +15,8 @@ export interface EndpointOptions {
     readonly host?: Host;
     /** Keep a validated accepted peer during a candidate handoff, rather than replacing it on first traffic. */
     readonly preserveAcceptedPeers?: boolean;
+    /** Only the acceptor can authorize promotion of an unverified candidate. */
+    authorizePeerPromotion?(host: Host, channel: Channel): boolean;
     connectChannel?(signal?: AbortSignal): Promise<Channel>;
     /** Authenticate a newly opened link before releasing regular RPC/stream requests. */
     initializeConnection?(connect: (host: Host, port: PortName) => Connection): Promise<void>;
@@ -32,6 +34,7 @@ export class Endpoint {
     readonly #connectChannel?: EndpointOptions["connectChannel"];
     readonly #initializeConnection?: EndpointOptions["initializeConnection"];
     readonly #preserveAcceptedPeers: boolean;
+    readonly #authorizePeerPromotion?: EndpointOptions["authorizePeerPromotion"];
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #openListeners = new Set<() => void>();
     readonly #ports = new Map<string, Port>();
@@ -46,6 +49,7 @@ export class Endpoint {
         this.#connectChannel = options.connectChannel;
         this.#initializeConnection = options.initializeConnection;
         this.#preserveAcceptedPeers = options.preserveAcceptedPeers ?? false;
+        this.#authorizePeerPromotion = options.authorizePeerPromotion;
     }
 
     get connected(): boolean {
@@ -85,7 +89,7 @@ export class Endpoint {
             new FrameStreamChannel(await request.accept()),
         );
         return this.#link(frame, codec, this.#route.attach(
-            codec, channel, lifecycle, this.#preserveAcceptedPeers,
+            codec, channel, lifecycle, this.#preserveAcceptedPeers, this.#authorizePeerPromotion,
         ));
     }
 

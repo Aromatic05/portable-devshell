@@ -208,12 +208,17 @@ test("unverified replacement cannot receive ordinary RPC and only verifier uses 
 });
 
 test("Worker-originated events stay on the old peer until verified cutover", async (t) => {
-    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const authorized = new Set<Channel>();
+    const worker = new Endpoint({
+        host: "worker", preserveAcceptedPeers: true,
+        authorizePeerPromotion: (_host, channel) => authorized.has(channel),
+    });
     const workerRpc = new Rpc(worker.bind("core"), {
         echo: () => "ok",
         probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
+    const acceptedChannels: MemoryChannel[] = [];
     const client = new Endpoint({
         host: "control",
         connectChannel: async () => {
@@ -221,6 +226,7 @@ test("Worker-originated events stay on the old peer until verified cutover", asy
             const right = new MemoryChannel();
             left.connect(right);
             right.connect(left);
+            acceptedChannels.push(right);
             accepts.push(worker.accept(right));
             return left;
         },
@@ -258,6 +264,7 @@ test("Worker-originated events stay on the old peer until verified cutover", asy
             }
             started();
             await gate;
+            authorized.add(acceptedChannels.at(-1)!);
         },
     });
     try {
@@ -275,12 +282,17 @@ test("Worker-originated events stay on the old peer until verified cutover", asy
 });
 
 test("stalled candidate verification aborts and leaves old peer available for a healthy replacement", async (t) => {
-    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const authorized = new Set<Channel>();
+    const worker = new Endpoint({
+        host: "worker", preserveAcceptedPeers: true,
+        authorizePeerPromotion: (_host, channel) => authorized.has(channel),
+    });
     const serverRpc = new Rpc(worker.bind("core"), {
         echo: (value) => value,
         probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
+    const acceptedChannels: MemoryChannel[] = [];
     const client = new Endpoint({
         host: "control",
         connectChannel: async () => {
@@ -288,6 +300,7 @@ test("stalled candidate verification aborts and leaves old peer available for a 
             const right = new MemoryChannel();
             left.connect(right);
             right.connect(left);
+            acceptedChannels.push(right);
             accepts.push(worker.accept(right));
             return left;
         },
@@ -314,6 +327,7 @@ test("stalled candidate verification aborts and leaves old peer available for a 
         verify: async (connect) => {
             const rpc = new Rpc(connect("worker", "core"));
             try { await rpc.request("probe"); } finally { rpc.close(); }
+            authorized.add(acceptedChannels.at(-1)!);
         },
     });
     const replacement = new Rpc(await client.connect("worker", "core"));
@@ -322,7 +336,11 @@ test("stalled candidate verification aborts and leaves old peer available for a 
 });
 
 test("stalled peer cutover acknowledgement aborts without replacing the old gateway", async (t) => {
-    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const authorized = new Set<Channel>();
+    const worker = new Endpoint({
+        host: "worker", preserveAcceptedPeers: true,
+        authorizePeerPromotion: (_host, channel) => authorized.has(channel),
+    });
     const serverRpc = new Rpc(worker.bind("core"), {
         echo: (value) => value,
         probe: () => ({ pong: true }),
@@ -354,6 +372,7 @@ test("stalled peer cutover acknowledgement aborts without replacing the old gate
             verify: async (connect) => {
                 const rpc = new Rpc(connect("worker", "core"));
                 try { await rpc.request("probe", undefined, signal); } finally { rpc.close(); }
+                authorized.add(acceptedChannels.at(-1)!);
                 // Verification succeeded; lose only the Transport promotion
                 // acknowledgement to exercise the rollback path.
                 acceptedChannels.at(-1)!.dropWrites = true;
@@ -364,6 +383,53 @@ test("stalled peer cutover acknowledgement aborts without replacing the old gate
     const old = new Rpc(await client.connect("worker", "core"));
     assert.equal(await old.request("echo", "preserved"), "preserved");
     old.close();
+});
+
+test("an unverified candidate cannot promote itself over the established peer", async (t) => {
+    // No promotion authorizer is installed: a candidate must fail closed.
+    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const serverRpc = new Rpc(worker.bind("core"), { echo: (value) => value });
+    const accepts: Array<Promise<() => void>> = [];
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(worker.accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close(); worker.close(); serverRpc.close();
+        await Promise.allSettled(accepts);
+    });
+    const old = new Rpc(await client.connect("worker", "core"));
+    t.after(() => old.close());
+    assert.equal(await old.request("echo", "old"), "old");
+    const notifications = new Event(client.bind("notifications"));
+    const sender = new Event(worker.bind("notifications").connect("control", "notifications"));
+    t.after(() => { notifications.close(); sender.close(); });
+    const received: string[] = [];
+    notifications.onEvent((name) => { received.push(name); });
+    await assert.rejects(client.reconnect({
+        preserveExisting: true,
+        verify: async (connect) => {
+            const candidate = new Rpc(connect("worker", "transport"));
+            try {
+                await assert.rejects(candidate.request("transport.peer.promote"), {
+                    code: "transport.peerPromotionUnverified", retryable: false,
+                });
+            } finally {
+                candidate.close();
+            }
+        },
+    }), { code: "transport.peerPromotionUnverified" });
+    await sender.send("from-old");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, ["from-old"]);
+    assert.equal(await old.request("echo", "preserved"), "preserved");
 });
 
 test("accepted Endpoint link retires when its Channel closes", async () => {
