@@ -6,6 +6,9 @@ import type { Packet } from "../../packet/Packet.js";
 import type { Address, Host, PortName } from "../Address.js";
 import type { Channel } from "../channel/Channel.js";
 
+export const PEER_PROMOTION_PORT = "transport";
+export const PEER_PROMOTION_METHOD = "transport.peer.promote";
+
 export type PacketListener = (
     packet: Packet,
     source: Address,
@@ -275,22 +278,23 @@ export class Route {
                 protocol?: string;
                 type?: string;
                 method?: string;
-                message?: { __devshellActivatePeer?: boolean };
+                id?: string;
             } | null;
-            const activate =
+            const promote =
                 packet?.protocol === "rpc" &&
                 packet.type === "request" &&
-                packet.method === "worker.ping" &&
-                packet.message?.__devshellActivatePeer === true;
+                packet.method === PEER_PROMOTION_METHOD &&
+                typeof packet.id === "string" &&
+                envelope.source.port === PEER_PROMOTION_PORT &&
+                envelope.dest.port === PEER_PROMOTION_PORT;
             const active = this.#peers.get(host);
             if (!preserveExisting) {
                 // Independent Control sessions may reuse a Host identity.
                 // Retain the ordinary latest-peer behavior for those endpoints.
                 this.#peers.set(host, codec);
-            } else if (activate && active !== codec) {
-                // Controller has already switched its inbound gateway before
-                // sending the confirmed cutover ping. Keep the old channel as
-                // rollback candidate until it physically closes.
+            } else if (promote && active !== codec) {
+                // The new gateway was verified before requesting promotion.
+                // Retain the old channel for rollback until it closes.
                 let candidates = this.#peerCandidates.get(host);
                 if (candidates === undefined) {
                     candidates = new Set<EnvelopeCodec>();
@@ -310,9 +314,17 @@ export class Route {
                 candidates.add(codec);
             }
             this.#refreshReachability();
-            void this.#dispatch(envelope, codec, channel).catch((error) =>
-                codec.close(normalizeError(error)),
-            );
+            if (promote) {
+                void codec.send({
+                    source: envelope.dest,
+                    dest: envelope.source,
+                    packet: { protocol: "rpc", type: "reply", id: packet.id, message: { promoted: true } },
+                }).catch((error) => codec.close(normalizeError(error)));
+            } else {
+                void this.#dispatch(envelope, codec, channel).catch((error) =>
+                    codec.close(normalizeError(error)),
+                );
+            }
         });
         const offClose = codec.onClose(detach);
         return () => {

@@ -18,6 +18,7 @@ class MemoryChannel implements Channel {
     #closed = false;
     #peer?: MemoryChannel;
     closeCalls = 0;
+    dropWrites = false;
 
     get closed(): boolean {
         return this.#closed;
@@ -29,6 +30,7 @@ class MemoryChannel implements Channel {
 
     async write(data: Uint8Array): Promise<void> {
         if (this.#closed) throw new Error("Memory channel is closed.");
+        if (this.dropWrites) return;
         const peer = this.#peer;
         if (peer === undefined || peer.#closed) throw new Error("Peer is closed.");
         const copy = Uint8Array.from(data);
@@ -138,7 +140,7 @@ test("unverified replacement cannot receive ordinary RPC and only verifier uses 
     const oldRpc = new Rpc(oldServer.bind("core"), { echo: () => "old" });
     const nextRpc = new Rpc(newServer.bind("core"), {
         echo: () => "candidate",
-        "worker.ping": () => ({ pong: true }),
+        probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
     let attempts = 0;
@@ -209,7 +211,7 @@ test("Worker-originated events stay on the old peer until verified cutover", asy
     const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
     const workerRpc = new Rpc(worker.bind("core"), {
         echo: () => "ok",
-        "worker.ping": () => ({ pong: true }),
+        probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
     const client = new Endpoint({
@@ -276,7 +278,7 @@ test("stalled candidate verification aborts and leaves old peer available for a 
     const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
     const serverRpc = new Rpc(worker.bind("core"), {
         echo: (value) => value,
-        "worker.ping": () => ({ pong: true }),
+        probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
     const client = new Endpoint({
@@ -311,7 +313,7 @@ test("stalled candidate verification aborts and leaves old peer available for a 
         preserveExisting: true,
         verify: async (connect) => {
             const rpc = new Rpc(connect("worker", "core"));
-            try { await rpc.request("worker.ping"); } finally { rpc.close(); }
+            try { await rpc.request("probe"); } finally { rpc.close(); }
         },
     });
     const replacement = new Rpc(await client.connect("worker", "core"));
@@ -323,12 +325,10 @@ test("stalled peer cutover acknowledgement aborts without replacing the old gate
     const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
     const serverRpc = new Rpc(worker.bind("core"), {
         echo: (value) => value,
-        "worker.ping": (value) =>
-            (value as { __devshellActivatePeer?: boolean } | undefined)?.__devshellActivatePeer
-                ? new Promise(() => undefined)
-                : { pong: true },
+        probe: () => ({ pong: true }),
     });
     const accepts: Array<Promise<() => void>> = [];
+    const acceptedChannels: MemoryChannel[] = [];
     const client = new Endpoint({
         host: "control",
         connectChannel: async () => {
@@ -336,6 +336,7 @@ test("stalled peer cutover acknowledgement aborts without replacing the old gate
             const right = new MemoryChannel();
             left.connect(right);
             right.connect(left);
+            acceptedChannels.push(right);
             accepts.push(worker.accept(right));
             return left;
         },
@@ -352,7 +353,10 @@ test("stalled peer cutover acknowledgement aborts without replacing the old gate
             signal,
             verify: async (connect) => {
                 const rpc = new Rpc(connect("worker", "core"));
-                try { await rpc.request("worker.ping", undefined, signal); } finally { rpc.close(); }
+                try { await rpc.request("probe", undefined, signal); } finally { rpc.close(); }
+                // Verification succeeded; lose only the Transport promotion
+                // acknowledgement to exercise the rollback path.
+                acceptedChannels.at(-1)!.dropWrites = true;
             },
         }),
         (error: unknown) => error === signal.reason,

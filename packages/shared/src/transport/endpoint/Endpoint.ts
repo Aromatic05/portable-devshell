@@ -4,7 +4,9 @@ import { FrameStreamChannel } from "../frame/Stream.js";
 import { Rpc } from "../packet/Rpc.js";
 import { createTransportId, type Host, type PortName } from "./Address.js";
 import type { Channel } from "./channel/Channel.js";
-import { Connection, Port, Route } from "./route/Route.js";
+import {
+    Connection, Port, Route, PEER_PROMOTION_METHOD, PEER_PROMOTION_PORT,
+} from "./route/Route.js";
 
 const ENVELOPE_SERVICE = "envelope";
 const CONNECT_RETRY_DELAY_MS = [100, 250] as const;
@@ -140,17 +142,16 @@ export class Endpoint {
                 throw new Error("Endpoint candidate closed during verification.");
             this.#route.activateGateway(link.codec);
             this.#gateway = link;
-            // Keep the old inbound gateway alive until the Worker has
-            // acknowledged outbound peer promotion on the new channel. This
-            // reuses worker.ping, which existing Rust Workers already accept.
+            // Confirm promotion on the new channel before retiring the old
+            // gateway. This is a Transport control request, not a Worker RPC.
             if (verifiedHost !== undefined) {
                 const rpc = new Rpc(
-                    this.bind("core").connectVia(
-                        verifiedHost, "core", link.codec, link.channel!,
+                    this.bind(PEER_PROMOTION_PORT).connectVia(
+                        verifiedHost, PEER_PROMOTION_PORT, link.codec, link.channel!,
                     ),
                 );
                 try {
-                    await rpc.request("worker.ping", { __devshellActivatePeer: true }, options.signal);
+                    await rpc.request(PEER_PROMOTION_METHOD, undefined, options.signal);
                 } finally {
                     rpc.close();
                 }

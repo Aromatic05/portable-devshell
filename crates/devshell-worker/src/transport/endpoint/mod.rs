@@ -619,6 +619,9 @@ fn route_rpc(
     method: String,
     message: Option<Value>,
 ) -> RpcResponse {
+    if port == "transport" && method == "transport.peer.promote" {
+        return RpcResponse::success(id, serde_json::json!({ "promoted": true }));
+    }
     if router.is_control_method(&method) {
         if control_port(&method) != port {
             return RpcResponse::failure(

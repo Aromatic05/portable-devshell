@@ -2670,6 +2670,9 @@ test(
         );
         assert.deepEqual(await rpc.request("worker.ping", {}), { pong: true });
         rpc.close();
+        const promotion = new Rpc(await endpoint.connect(`${instanceName}-worker`, "transport"));
+        assert.deepEqual(await promotion.request("transport.peer.promote"), { promoted: true });
+        promotion.close();
         endpoint.close();
         connection.close();
 
