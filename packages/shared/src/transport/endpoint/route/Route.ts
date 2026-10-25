@@ -186,7 +186,11 @@ export class Route {
     readonly #incomingCodecs = new WeakMap<Channel, EnvelopeCodec>();
     // A second channel from the same Host is a candidate until the existing
     // channel actually closes. Verifier replies use their incoming channel.
-    readonly #peerCandidates = new Map<Host, Set<EnvelopeCodec>>();
+    readonly #peerCandidates = new Map<Host, Map<EnvelopeCodec, {
+        channel: Channel;
+        wasActive: boolean;
+    }>>();
+    readonly #acceptedChannels = new WeakMap<EnvelopeCodec, Channel>();
     readonly #reachability = new Set<{
         dest: Address;
         listener: (error?: Error) => void;
@@ -248,12 +252,16 @@ export class Route {
     ): () => void {
         const hosts = new Set<Host>();
         this.#incomingCodecs.set(channel, codec);
+        this.#acceptedChannels.set(codec, channel);
         const detach = (error?: Error) => {
             this.#incomingCodecs.delete(channel);
             for (const host of hosts) {
                 const candidates = this.#peerCandidates.get(host);
                 if (this.#peers.get(host) === codec) {
-                    const replacement = candidates?.values().next().value;
+                    const replacement = [...(candidates ?? [])].find(
+                        ([, entry]) => entry.wasActive ||
+                            authorizePromotion?.(host, entry.channel) === true,
+                    )?.[0];
                     if (replacement !== undefined) {
                         candidates!.delete(replacement);
                         this.#peers.set(host, replacement);
@@ -314,21 +322,30 @@ export class Route {
                 // Retain the old channel for rollback until it closes.
                 let candidates = this.#peerCandidates.get(host);
                 if (candidates === undefined) {
-                    candidates = new Set<EnvelopeCodec>();
+                    candidates = new Map();
                     this.#peerCandidates.set(host, candidates);
                 }
                 candidates.delete(codec);
-                if (active !== undefined) candidates.add(active);
+                if (active !== undefined) {
+                    const oldChannel = this.#acceptedChannels.get(active);
+                    if (oldChannel !== undefined)
+                        candidates.set(active, { channel: oldChannel, wasActive: true });
+                }
                 this.#peers.set(host, codec);
-            } else if (active === undefined) {
+            } else if (active === undefined && this.#peerCandidates.get(host) === undefined) {
+                // An initial Host may bind on first traffic, but a Host with
+                // existing candidates must pass promotion verification.
                 this.#peers.set(host, codec);
             } else if (active !== codec) {
                 let candidates = this.#peerCandidates.get(host);
                 if (candidates === undefined) {
-                    candidates = new Set<EnvelopeCodec>();
+                    candidates = new Map();
                     this.#peerCandidates.set(host, candidates);
                 }
-                candidates.add(codec);
+                candidates.set(codec, {
+                    channel,
+                    wasActive: candidates.get(codec)?.wasActive ?? false,
+                });
             }
             this.#refreshReachability();
             if (promote) {
