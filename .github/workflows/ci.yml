@@ -28,7 +28,7 @@ jobs:
             - name: 安装 Unix 测试依赖
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y tmux fish zsh direnv
+                  sudo apt-get install -y tmux fish zsh direnv ripgrep
             - name: 安装 Rust 工具链
               run: |
                   rustup toolchain install stable --profile minimal
@@ -60,7 +60,7 @@ jobs:
                   node-version: 24
                   cache: pnpm
             - name: 安装 Unix 测试依赖
-              run: brew install tmux fish direnv
+              run: brew install tmux fish direnv ripgrep
             - name: 安装 Rust 工具链
               run: |
                   rustup toolchain install stable --profile minimal
