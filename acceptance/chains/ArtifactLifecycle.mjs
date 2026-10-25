@@ -250,6 +250,22 @@ async function download(url, bytes = expected, options = {}) {
     assert.equal(digest(actual), digest(bytes));
 }
 
+async function downloadAfterControlRestart(url) {
+    // A Node fetch connection pooled before Control stopped may be closed when
+    // the original daemon exits. A fresh idempotent GET must still recover the
+    // persisted Share after the restart, without weakening its bytes/hash checks.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            await download(url);
+            return;
+        } catch (error) {
+            if (!(error instanceof TypeError && error.message === "fetch failed") ||
+                attempt === 2) throw error;
+            await delay(100 * (attempt + 1));
+        }
+    }
+}
+
 export async function runArtifactChain() {
     await mkdir(logRoot, { recursive: true });
     const fixture = new ArtifactAcceptanceFixture();
@@ -349,7 +365,7 @@ export async function runArtifactChain() {
         assert.equal(fixture.json(["transfer", "status", duplicate.transferId]).status, "failed");
         assert.equal(fixture.json(["transfers"]).length, 3);
         assert.equal(fixture.json(["shares"]).length, 1);
-        await download(share.url);
+        await downloadAfterControlRestart(share.url);
         assert.equal(fixture.json(["shares"])[0].downloadCount, 3);
         const reread = await tool(source.client, "file_read", { ctxId: source.ctxId,
             files: [{ path: produced.stdoutPath, view: "content", selector: "2000-2001:raw" }] });
