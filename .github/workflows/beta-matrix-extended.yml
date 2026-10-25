@@ -47,6 +47,16 @@ jobs:
                   rustup toolchain install stable --profile minimal
                   rustup default stable
                   pnpm install --frozen-lockfile
+            - name: Enable isolated Linux Testspace namespaces
+              if: inputs.suite == 'upgrade' || inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement'
+              shell: bash
+              run: |
+                  if ! unshare --user --map-root-user --pid --fork --mount-proc true; then
+                      if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+                          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+                      fi
+                      unshare --user --map-root-user --pid --fork --mount-proc true
+                  fi
             - name: Real release upgrade, migration and rollback
               if: inputs.suite == 'upgrade'
               run: pnpm testspace upgrade-smoke
