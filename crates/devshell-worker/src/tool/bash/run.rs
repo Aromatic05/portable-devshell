@@ -737,12 +737,12 @@ fn wait(
     cancellation: &crate::tool::ToolCancellation,
 ) -> Result<BashWaitOutcome, ToolError> {
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
+        match child_exited_without_reaping(&mut child.child) {
+            Ok(true) => {
                 child.terminate_group()?;
                 return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
             }
-            Ok(None) => {}
+            Ok(false) => {}
             Err(error) => return Err(ToolError::new("bash.ioFailed", error.to_string())),
         }
         if cancellation.is_cancelled() {
@@ -757,6 +757,39 @@ fn wait(
         thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
 }
+
+#[cfg(unix)]
+fn child_exited_without_reaping(child: &mut Child) -> std::io::Result<bool> {
+    use nix::libc;
+
+    // Child::try_wait() reaps the group leader. Its PID could then be reused
+    // before terminate_group() cleans up shell descendants, making killpg()
+    // target an unrelated group. WNOWAIT holds the leader until wait_and_reap().
+    loop {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id() as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            return Ok(unsafe { info.si_pid() != 0 });
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn child_exited_without_reaping(child: &mut Child) -> std::io::Result<bool> {
+    Ok(child.try_wait()?.is_some())
+}
+
 #[cfg(unix)]
 trait ExitSignal {
     fn signal(&self) -> Option<i32>;
@@ -778,5 +811,27 @@ trait ExitSignal {
 impl ExitSignal for std::process::ExitStatus {
     fn signal(&self) -> Option<i32> {
         None
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    use super::child_exited_without_reaping;
+
+    #[test]
+    fn completed_shell_remains_waitable_after_exit_probe() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 7"])
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !child_exited_without_reaping(&mut child).unwrap() {
+            assert!(Instant::now() < deadline, "shell did not exit");
+            std::thread::yield_now();
+        }
+        assert_eq!(child.wait().unwrap().code(), Some(7));
     }
 }
