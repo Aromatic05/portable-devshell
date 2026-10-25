@@ -127,7 +127,15 @@ pub fn remove(name: &str) -> std::io::Result<()> {
 }
 
 fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
-    let deadline = Instant::now() + SNAPSHOT_RETRY_TIMEOUT;
+    snapshot_mapping_with_retry(mapping, SNAPSHOT_RETRY_TIMEOUT, || {})
+}
+
+fn snapshot_mapping_with_retry(
+    mapping: &SharedMapping,
+    retry_timeout: Duration,
+    mut on_odd_sequence: impl FnMut(),
+) -> std::io::Result<RingSnapshot> {
+    let deadline = Instant::now() + retry_timeout;
     loop {
         let before = sequence(mapping).load(Ordering::SeqCst);
         if before.is_multiple_of(2) {
@@ -147,6 +155,8 @@ fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
                     Err(error) => return Err(error),
                 }
             }
+        } else {
+            on_odd_sequence();
         }
         if Instant::now() >= deadline {
             break;
@@ -494,7 +504,10 @@ fn shared_memory_unsupported() -> std::io::Error {
 
 #[cfg(all(test, any(windows, all(unix, not(target_os = "android")))))]
 mod tests {
-    use super::{RingWriter, begin_write, finish_write, remove, snapshot};
+    use super::{
+        RingWriter, begin_write, finish_write, map_shared, open_shared, remove, shared_len,
+        snapshot, snapshot_mapping_with_retry,
+    };
     use std::sync::mpsc;
     use std::time::Duration;
     use uuid::Uuid;
@@ -547,22 +560,29 @@ mod tests {
         let mut writer = RingWriter::open(&name, 64, 0).unwrap();
         writer.append(0, b"before").unwrap();
         let writing = begin_write(&writer.mapping);
-        let (started, ready) = mpsc::channel();
+        let (observed, ready) = mpsc::channel();
         let reader_name = name.clone();
         let reader = std::thread::spawn(move || {
-            started.send(()).unwrap();
-            snapshot(&reader_name)
+            let file = open_shared(&reader_name, false).unwrap();
+            let mapping = map_shared(&file, shared_len(&file).unwrap(), false).unwrap();
+            let mut signal = Some(observed);
+            // Wait for the reader to actually observe the odd sequence.
+            // A fixed sleep can deschedule the writer beyond the production
+            // 100 ms retry budget on a busy CI runner.
+            snapshot_mapping_with_retry(&mapping, Duration::from_secs(5), || {
+                if let Some(signal) = signal.take() {
+                    signal.send(()).unwrap();
+                }
+            })
         });
-        ready.recv().unwrap();
-        std::thread::sleep(Duration::from_millis(15));
-        assert!(
-            !reader.is_finished(),
-            "a concurrent snapshot must wait for the writer's sequence to become stable",
-        );
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reader did not observe the in-progress write");
         finish_write(&writer.mapping, writing);
 
-        let result = reader.join().unwrap().unwrap().unwrap();
+        let result = reader.join().unwrap().unwrap();
         assert_eq!(result.bytes_from(0), b"before");
+        assert_eq!(snapshot(&name).unwrap().unwrap().bytes_from(0), b"before");
         remove(&name).unwrap();
     }
 }
