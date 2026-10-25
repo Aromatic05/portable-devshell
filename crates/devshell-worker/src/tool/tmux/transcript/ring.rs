@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::{fs, os::windows::fs::OpenOptionsExt, os::windows::io::AsRawHandle};
 
@@ -19,7 +20,7 @@ const SEQUENCE_OFFSET: usize = 8;
 const BASE_OFFSET: usize = 16;
 const END_OFFSET: usize = 24;
 const CAPACITY_OFFSET: usize = 32;
-const SNAPSHOT_RETRIES: usize = 64;
+const SNAPSHOT_RETRY_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct RingSnapshot {
@@ -126,33 +127,33 @@ pub fn remove(name: &str) -> std::io::Result<()> {
 }
 
 fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
-    for _ in 0..SNAPSHOT_RETRIES {
+    let deadline = Instant::now() + SNAPSHOT_RETRY_TIMEOUT;
+    loop {
         let before = sequence(mapping).load(Ordering::SeqCst);
-        if !before.is_multiple_of(2) {
-            std::hint::spin_loop();
-            continue;
-        }
-        let fields = read_header_fields(mapping.as_slice());
-        let after_header = sequence(mapping).load(Ordering::SeqCst);
-        if before != after_header || !after_header.is_multiple_of(2) {
-            std::hint::spin_loop();
-            continue;
-        }
-        let (base, end, capacity) = match fields {
-            Ok(fields) => fields,
-            Err(_) if before == 0 => {
-                std::hint::spin_loop();
-                continue;
+        if before.is_multiple_of(2) {
+            let fields = read_header_fields(mapping.as_slice());
+            let after_header = sequence(mapping).load(Ordering::SeqCst);
+            if before == after_header && after_header.is_multiple_of(2) {
+                match fields {
+                    Ok((base, end, capacity)) => {
+                        validate_range(mapping.as_slice(), base, end, capacity)?;
+                        let data = read_wrapped(mapping.as_slice(), base, end - base, capacity);
+                        let after = sequence(mapping).load(Ordering::SeqCst);
+                        if before == after && after.is_multiple_of(2) {
+                            return Ok(RingSnapshot { base, end, data });
+                        }
+                    }
+                    Err(_) if before == 0 => {}
+                    Err(error) => return Err(error),
+                }
             }
-            Err(error) => return Err(error),
-        };
-        validate_range(mapping.as_slice(), base, end, capacity)?;
-        let data = read_wrapped(mapping.as_slice(), base, end - base, capacity);
-        let after = sequence(mapping).load(Ordering::SeqCst);
-        if before == after && after.is_multiple_of(2) {
-            return Ok(RingSnapshot { base, end, data });
         }
-        std::hint::spin_loop();
+        if Instant::now() >= deadline {
+            break;
+        }
+        // The writer can be descheduled while its sequence is odd. Spinning
+        // only a few dozen times exhausts the retries before it can finish.
+        std::thread::yield_now();
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::WouldBlock,
@@ -493,7 +494,9 @@ fn shared_memory_unsupported() -> std::io::Error {
 
 #[cfg(all(test, any(windows, all(unix, not(target_os = "android")))))]
 mod tests {
-    use super::{RingWriter, remove, snapshot};
+    use super::{RingWriter, begin_write, finish_write, remove, snapshot};
+    use std::sync::mpsc;
+    use std::time::Duration;
     use uuid::Uuid;
 
     fn ring_name() -> String {
@@ -535,6 +538,31 @@ mod tests {
         let snapshot = snapshot(&name).unwrap().unwrap();
         assert_eq!((snapshot.base, snapshot.end), (15, 20));
         assert_eq!(snapshot.bytes_from(15), b"56789");
+        remove(&name).unwrap();
+    }
+
+    #[test]
+    fn snapshot_waits_for_a_concurrent_writer_instead_of_failing_after_a_short_spin() {
+        let name = ring_name();
+        let mut writer = RingWriter::open(&name, 64, 0).unwrap();
+        writer.append(0, b"before").unwrap();
+        let writing = begin_write(&writer.mapping);
+        let (started, ready) = mpsc::channel();
+        let reader_name = name.clone();
+        let reader = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            snapshot(&reader_name)
+        });
+        ready.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(15));
+        assert!(
+            !reader.is_finished(),
+            "a concurrent snapshot must wait for the writer's sequence to become stable",
+        );
+        finish_write(&writer.mapping, writing);
+
+        let result = reader.join().unwrap().unwrap().unwrap();
+        assert_eq!(result.bytes_from(0), b"before");
         remove(&name).unwrap();
     }
 }
