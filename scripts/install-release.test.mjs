@@ -29,6 +29,26 @@ const allTargets = [
 ];
 
 test(
+    "Unix installer rejects Worker-owned self-upgrades before touching release assets",
+    { skip: process.platform === "win32" },
+    () => {
+        const result = runInstallerRaw(
+            {
+                ...process.env,
+                DEVSHELL_MODEL_CTX_ID: "ctx-self-upgrade-test",
+                DEVSHELL_MODEL_PARENT_CALL_ID: "call-self-upgrade-test",
+                PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-self-upgrade-release",
+            },
+            false,
+        );
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /不支持从 DevShell bash_run\/tmux_run 自升级/u);
+        assert.match(result.stderr, /独立终端或 SSH/u);
+        assert.doesNotMatch(result.stdout, /\[1\/6\]/u);
+    },
+);
+
+test(
     "Unix release installer activates the manifest-declared CLI and supports replacement",
     {
         skip: process.platform === "win32",

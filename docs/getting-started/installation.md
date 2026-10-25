@@ -49,6 +49,8 @@ powershell -ExecutionPolicy Bypass -File .\install-release.ps1
 
 升级已有安装时，安装器会保留运行态：若安装前 Control 正在运行，则记录非 Reverse 且处于 `running`、`starting` 或 `stale` 的实例，在新版本激活后重新启动 Control 并恢复这些实例。安装前 Control 若已停止，则安装完成后仍保持停止。安装在切换版本后失败时，会在回滚旧版本后尝试恢复原运行态。
 
+**自升级边界**：不可通过待升级 DevShell 的 `bash_run` 或 `tmux_run` 调用安装器或 `devshell update`。安装器需要停止 Control/Worker，而 Worker 会终止自身管理的命令进程组，可能中途截断安装流程。请在独立终端或 SSH 会话中使用原安装命令升级；新安装器会在开始下载或停机前拒绝带 DevShell ToolCall 上下文的执行。
+
 安装指定版本：
 
 ```bash
