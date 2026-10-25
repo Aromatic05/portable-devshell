@@ -28,10 +28,11 @@ jobs:
         if: inputs.suite != 'windows-psmux'
         runs-on: ubuntu-24.04
         timeout-minutes: 60
-        env:
-            DEVSHELL_TESTSPACE_ROOT: ${{ runner.temp }}/beta-matrix-${{ github.run_id }}-${{ github.run_attempt }}
         steps:
             - uses: actions/checkout@v5
+            - name: Set isolated Testspace root
+              shell: bash
+              run: echo "DEVSHELL_TESTSPACE_ROOT=$RUNNER_TEMP/beta-matrix-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
             - uses: pnpm/action-setup@v5
               with:
                   version: 10.13.1
