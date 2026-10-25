@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asInstanceName, Endpoint, Rpc, type ApprovalRequest, type GoalSnapshot, type ToolCallRecord, type WaitRecord } from "@portable-devshell/shared";
+import { asInstanceName, Endpoint, Rpc, Stream, type ApprovalRequest, type GoalSnapshot, type ToolCallRecord, type WaitRecord } from "@portable-devshell/shared";
 import { createMcpAppViewModel, mcpAppEventAffectsContext, projectMcpAppSnapshot } from "../../src/mcpapp/ViewModel.ts";
 
 test("MCP App ViewModel ignores unrelated Context events but observes global and unknown events", () => {
@@ -15,6 +15,46 @@ test("MCP App ViewModel ignores unrelated Context events but observes global and
     }
     assert.equal(mcpAppEventAffectsContext(event("other.changed", { ctxId: "other" }), "ctx-a"), true);
     assert.equal(mcpAppEventAffectsContext(event("instance.started"), "ctx-a"), true);
+});
+
+test("MCP App watch recovers a resolved Wait with no delivered Audit event", async (t) => {
+    const endpoint = new Endpoint({ host: "mcpapp-test" });
+    endpoint.connect = async (host, port) => endpoint.bind(`client-${port}`).connect(host, port);
+    let status: WaitRecord["status"] = "detached";
+    let reads = 0;
+    const task = new Rpc(endpoint.bind("task", "test"), {
+        getGoal: () => ({ goal: null, lastSeq: 10 }),
+        getWaits: () => {
+            reads++;
+            return { lastSeq: 10, waits: [{
+                waitId: "wait-a", ctxId: "ctx-a", callId: "call-a",
+                instance: "test", source: "mcp", targetId: "task-a",
+                toolName: "tmux_run", createdAt: "", updatedAt: "", status,
+            }] };
+        },
+    });
+    const approval = new Rpc(endpoint.bind("approval", "test"), {
+        snapshot: () => ({ approvals: [], lastSeq: 10 }),
+    });
+    const tool = new Rpc(endpoint.bind("tool", "test"), { listCalls: () => [] });
+    const events = new Stream(endpoint.bind("instance", "test"));
+    events.onOpen((_stream, name) => { assert.equal(name, "subscribeEvents"); });
+    const timeout = globalThis.setTimeout;
+    t.mock.method(globalThis, "setTimeout", (
+        callback: Parameters<typeof setTimeout>[0], ms?: number, ...args: unknown[]
+    ) => timeout(callback, ms === 20_000 ? 5 : ms, ...args));
+    t.after(() => {
+        t.mock.restoreAll();
+        events.close(); tool.close(); approval.close(); task.close(); endpoint.close();
+    });
+    const view = createMcpAppViewModel(endpoint);
+    const initial = await view.snapshot("test", "ctx-a");
+    assert.equal(initial.presentation.background[0]?.badge, "Wait · detached");
+    status = "resolved";
+    const refreshed = await view.watch("test", "ctx-a", undefined, initial.cursor);
+    assert.equal(refreshed.changed, true);
+    assert.equal(refreshed.snapshot?.presentation.background[0]?.badge, "Wait · resolved");
+    assert.ok(reads >= 2, "polling must read the authoritative Wait state without a new event");
 });
 
 test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goal", () => {

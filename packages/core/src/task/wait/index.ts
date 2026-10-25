@@ -34,6 +34,19 @@ export interface WaitServiceOptions {
     waitId?: () => string;
 }
 
+type WaitEventType = "wait.detached" | "wait.resolved" | "wait.failed";
+
+interface WaitNotification {
+    type: WaitEventType;
+    record: WaitRecord;
+}
+
+interface WaitDocument {
+    version: 1;
+    waits: WaitRecord[];
+    notifications: WaitNotification[];
+}
+
 export class WaitService {
     readonly #appendEvent: WaitServiceOptions["appendEvent"];
     readonly #filePath: string;
@@ -41,16 +54,16 @@ export class WaitService {
     readonly #now: () => string;
     readonly #waitId: () => string;
     #records = new Map<string, WaitRecord>();
+    #notifications: WaitNotification[] = [];
     readonly #monitors = new Map<string, AbortController>();
     readonly #monitorTasks = new Map<string, Promise<void>>();
     readonly #monitorFailures: unknown[] = [];
     #operation: Promise<void> = Promise.resolve();
     #pending?: {
-        records: WaitRecord[];
-        type: string;
-        record: WaitRecord;
-        start: boolean;
+        document: WaitDocument;
+        start?: WaitRecord;
     };
+    #retryTimer?: ReturnType<typeof setTimeout>;
     #closed = false;
     #closePromise?: Promise<void>;
 
@@ -60,8 +73,10 @@ export class WaitService {
         this.#invoke = options.invoke;
         this.#now = options.now ?? (() => new Date().toISOString());
         this.#waitId = options.waitId ?? (() => `wait-${randomUUID()}`);
-        for (const record of readDocument(this.#filePath))
+        const document = readDocument(this.#filePath);
+        for (const record of document.waits)
             this.#records.set(record.waitId, record);
+        this.#notifications = document.notifications;
     }
 
     async list(ctxId?: string): Promise<WaitRecord[]> {
@@ -100,9 +115,11 @@ export class WaitService {
             };
             const next = new Map(this.#records);
             next.set(record.waitId, record);
-            const warning = await this.#persist(next, "wait.detached", record, true);
+            const warning = await this.#persist(next, [
+                ...this.#notifications, { type: "wait.detached", record },
+            ], record);
             this.#start(record);
-            await this.#emit("wait.detached", record);
+            await this.#deliverNotifications();
             if (warning !== undefined) throw warning;
             return structuredClone(record);
         });
@@ -113,6 +130,7 @@ export class WaitService {
         void this.#exclusive(async () => {
             for (const record of this.#records.values())
                 if (record.status === "detached") this.#start(record);
+            await this.#deliverNotifications();
         }).catch((error: unknown) =>
             console.warn("Wait recovery could not read committed state:", error));
     }
@@ -120,6 +138,7 @@ export class WaitService {
     close(): Promise<void> {
         if (this.#closePromise !== undefined) return this.#closePromise;
         this.#closed = true;
+        if (this.#retryTimer !== undefined) clearTimeout(this.#retryTimer);
         for (const controller of this.#monitors.values()) controller.abort();
         this.#closePromise = (async () => {
             await Promise.allSettled(this.#monitorTasks.values());
@@ -184,21 +203,37 @@ export class WaitService {
                 );
                 if (signal.aborted) return;
                 if (readString(result, "waitReason") !== "terminal") continue;
-                await this.#settle(waitId, "resolved", { result });
+                await this.#settleObserved(waitId, "resolved", { result }, signal);
                 return;
             } catch (error) {
                 if (signal.aborted) return;
                 if (toRemoteErrorBody(error)?.code === "tmux.taskExpired") {
-                    try {
-                        await this.#settle(waitId, "failed", {
-                            error: errorMessage(error),
-                        });
-                        return;
-                    } catch {
-                        // Keep the monitor alive until the terminal state commits.
-                    }
+                    await this.#settleObserved(waitId, "failed", {
+                        error: errorMessage(error),
+                    }, signal);
+                    return;
                 }
-                await delay(1_000);
+                await delay(1_000, signal);
+            }
+        }
+    }
+
+    async #settleObserved(
+        waitId: string,
+        status: "resolved" | "failed",
+        terminal: { result?: JsonValue; error?: string },
+        signal: AbortSignal,
+    ): Promise<void> {
+        // A terminal observation is a fact. A failed state commit must never
+        // cause another tmux_read that could report taskExpired instead.
+        while (!signal.aborted) {
+            try {
+                await this.#settle(waitId, status, terminal);
+                return;
+            } catch (error) {
+                if (signal.aborted) return;
+                console.warn("Wait terminal state commit failed; retrying:", errorMessage(error));
+                await delay(1_000, signal);
             }
         }
     }
@@ -222,9 +257,10 @@ export class WaitService {
             const next = new Map(this.#records);
             next.set(waitId, record);
             this.#pruneTerminal(next);
-            const type = `wait.${status}`;
-            const warning = await this.#persist(next, type, record, false);
-            await this.#emit(type, record);
+            const warning = await this.#persist(next, [
+                ...this.#notifications, { type: `wait.${status}`, record },
+            ]);
+            await this.#deliverNotifications();
             if (warning !== undefined)
                 console.warn("Wait terminal commit durability unconfirmed:", warning);
         });
@@ -240,18 +276,21 @@ export class WaitService {
 
     async #persist(
         next: Map<string, WaitRecord>,
-        type: string,
-        record: WaitRecord,
-        start: boolean,
+        notifications: WaitNotification[],
+        start?: WaitRecord,
     ): Promise<Error | undefined> {
-        const rows = [...next.values()];
+        const document: WaitDocument = {
+            version: 1,
+            waits: [...next.values()],
+            notifications,
+        };
         const directory = dirname(this.#filePath);
         await mkdir(directory, { mode: 0o700, recursive: true });
         const temporary = `${this.#filePath}.tmp.${process.pid}.${randomUUID()}`;
         try {
             const handle = await open(temporary, "wx", 0o600);
             try {
-                await handle.writeFile(`${JSON.stringify({ version: 1, waits: rows })}\n`, "utf8");
+                await handle.writeFile(`${JSON.stringify(document)}\n`, "utf8");
                 await handle.sync();
             } finally {
                 await handle.close();
@@ -264,11 +303,14 @@ export class WaitService {
             await rename(temporary, this.#filePath);
         } catch (error) {
             await unlink(temporary).catch(() => undefined);
-            let stored: WaitRecord[];
+            let stored: WaitDocument;
             try {
                 stored = readDocument(this.#filePath);
             } catch (probeError) {
-                this.#pending = { records: rows, type, record, start };
+                this.#pending = {
+                    document,
+                    ...(start === undefined ? {} : { start }),
+                };
                 throw createRemoteError({
                     code: "wait.commitUncertain",
                     cause: new AggregateError([error, probeError]),
@@ -276,8 +318,8 @@ export class WaitService {
                     retryable: false,
                 });
             }
-            this.#records = new Map(stored.map((entry) => [entry.waitId, entry]));
-            if (!isDeepStrictEqual(stored, rows)) throw error;
+            this.#accept(stored);
+            if (!isDeepStrictEqual(stored, document)) throw error;
             return createRemoteError({
                 code: "wait.commitDurabilityUnconfirmed",
                 cause: error,
@@ -286,6 +328,7 @@ export class WaitService {
             });
         }
         this.#records = next;
+        this.#notifications = notifications;
         if (process.platform !== "win32") {
             try {
                 const handle = await open(directory, "r");
@@ -314,12 +357,11 @@ export class WaitService {
             const pending = this.#pending;
             if (pending !== undefined) {
                 const stored = readDocument(this.#filePath);
-                this.#records = new Map(stored.map((record) => [record.waitId, record]));
+                this.#accept(stored);
                 this.#pending = undefined;
-                if (isDeepStrictEqual(stored, pending.records)) {
-                    if (pending.start) this.#start(pending.record);
-                    await this.#emit(pending.type, pending.record);
-                }
+                if (isDeepStrictEqual(stored, pending.document) && pending.start !== undefined)
+                    this.#start(pending.start);
+                await this.#deliverNotifications();
             }
             return await operation();
         } finally {
@@ -327,23 +369,57 @@ export class WaitService {
         }
     }
 
-    async #emit(type: string, record: WaitRecord): Promise<void> {
-        try {
-            await this.#appendEvent(type, record as unknown as JsonValue);
-        } catch (error) {
-            // The Wait snapshot is authoritative; an Audit failure must not
-            // prevent monitoring or make a terminal Wait appear detached.
-            console.warn("Wait event publication failed:", error);
+    #accept(document: WaitDocument): void {
+        this.#records = new Map(document.waits.map((record) => [record.waitId, record]));
+        this.#notifications = document.notifications;
+    }
+
+    async #deliverNotifications(): Promise<void> {
+        while (!this.#closed && this.#notifications.length > 0) {
+            const notification = this.#notifications[0]!;
+            try {
+                await this.#appendEvent(notification.type, notification.record as unknown as JsonValue);
+                const warning = await this.#persist(this.#records, this.#notifications.slice(1));
+                if (warning !== undefined)
+                    console.warn("Wait event acknowledgement durability unconfirmed:", errorMessage(warning));
+            } catch (error) {
+                // An event is acknowledged only after its durable queue entry
+                // is removed. A crash between append and ack may redeliver it;
+                // consumers observe authoritative Wait state, not event counts.
+                console.warn("Wait notification delivery failed; retrying:", errorMessage(error));
+                this.#scheduleDelivery();
+                return;
+            }
         }
+    }
+
+    #scheduleDelivery(): void {
+        if (this.#closed || this.#retryTimer !== undefined) return;
+        this.#retryTimer = setTimeout(() => {
+            this.#retryTimer = undefined;
+            if (this.#closed) return;
+            void this.#exclusive(async () => await this.#deliverNotifications())
+                .catch((error: unknown) => {
+                    console.warn("Wait notification reconciliation failed:", errorMessage(error));
+                    this.#scheduleDelivery();
+                });
+        }, 1_000);
+        this.#retryTimer.unref?.();
     }
 }
 
-function readDocument(filePath: string): WaitRecord[] {
-    if (!existsSync(filePath)) return [];
+function readDocument(filePath: string): WaitDocument {
+    if (!existsSync(filePath)) return { version: 1, waits: [], notifications: [] };
     const value = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
     if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.waits))
         throw new Error(`Wait state is invalid: ${filePath}`);
-    return value.waits as unknown as WaitRecord[];
+    if (value.notifications !== undefined && !Array.isArray(value.notifications))
+        throw new Error(`Wait notifications are invalid: ${filePath}`);
+    return {
+        version: 1,
+        waits: value.waits as unknown as WaitRecord[],
+        notifications: (value.notifications ?? []) as unknown as WaitNotification[],
+    };
 }
 
 function readString(value: JsonValue, field: string): string | undefined {
@@ -356,6 +432,15 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function delay(ms: number): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+async function delay(ms: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, ms);
+        function done() {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", done);
+            resolve();
+        }
+        signal?.addEventListener("abort", done, { once: true });
+    });
 }

@@ -181,11 +181,9 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             const result = await Promise.race([stream.next(), interrupted]);
             if (result === "aborted") return { changed: false, cursor };
             if (result === "timeout") {
-                // Time alone can make an Instance Goal due, without an event.
-                // React receives the server's decision, not a local timer.
+                // A Wait can commit while Audit delivery is temporarily
+                // unavailable. Poll authoritative state even without events.
                 const due = await snapshot(instance, ctxId, workspace);
-                if (due.reentry.schedule === undefined && !due.reentry.pending)
-                    return { changed: false, cursor };
                 due.cursor = Math.max(due.cursor, cursor);
                 return { changed: true, cursor: due.cursor, snapshot: due };
             }
