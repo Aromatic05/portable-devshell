@@ -4,13 +4,15 @@ import { McpAppCall } from "../../src/mcpapp/Call.ts";
 import { McpAppActionStore } from "../../src/mcpapp/ActionStore.ts";
 import { McpNativeToolResult } from "../../src/protocol/Public.ts";
 
-function fixture(ownsPresentation?: (toolName: string) => boolean) {
+function fixture(ownsPresentation?: (toolName: string) => boolean, inlineToolCalls = false) {
     const actions = new McpAppActionStore();
     const called: string[] = [];
     const instance = "alpha";
     const ctxId = "ctx-one";
     const endpoint = new McpAppCall({ actions, instance,
-        toolCallResourceUriForTool: (name) => "ui://widget/toolcall.html?widgetRevision=1&toolName=" + name,
+        toolCallResourceUriForTool: (name) => inlineToolCalls &&
+            ["artifact_viewImage", "bash_run", "file_edit", "file_read", "tmux_run"].includes(name)
+            ? "ui://widget/toolcall.html?widgetRevision=1&toolName=" + name : undefined,
         ...(ownsPresentation === undefined ? {} : { ownsPresentation }),
         bootstrap: async () => ({ ctxId, token: "private-valid-capability-01", liveBaseUrl: "https://example.test/api/live" }),
         context: { resolve: async () => ({ status: "active", ctxId,
@@ -57,13 +59,15 @@ test("mcpapp_open returns private capability in protocol result", async () => {
         (response._meta["portable-devshell/mcpapp"] as Record<string, unknown>).ctxId, f.ctxId);
 });
 
-test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary calls to inline", async () => {
+test("MCP tool catalog keeps Fullscreen while restricting optional Inline to selected tools", async () => {
     const { McpEndpointCatalog } = await import("../../src/protocol/tool/Catalog.ts");
     const { McpExtensionRegistry } = await import("../../src/protocol/extension/Registry.ts");
     const { createMcpAppMcpExtension } = await import("../../src/mcpapp/Extension.ts");
     const { mcpAppOpenDefinition } =
         await import("../../../core/src/instance/mcpapp/Definition.ts");
-    const extensions = new McpExtensionRegistry([createMcpAppMcpExtension("https://example.test")]);
+    const extensions = new McpExtensionRegistry([createMcpAppMcpExtension("https://example.test", {
+        inlineToolCalls: true,
+    })]);
     const definitions = [
         mcpAppOpenDefinition(),
         { name: "environ_info", group: "environ", description: "Get environment",
@@ -71,6 +75,8 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
         { name: "file_read", group: "file", description: "Read file",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
         { name: "tmux_read", group: "tmux", description: "Read a task transcript",
+            requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+        { name: "progress_report", group: "progress", description: "Report progress",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
     ];
     const catalog = new McpEndpointCatalog({
@@ -91,9 +97,9 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
     for (const resource of [workspace, interaction, toolCall])
         assert.equal(resource?.mimeType, "text/html;profile=mcp-app");
     const tools = catalog.listTools();
-    assert.equal(tools.length, 4);
+    assert.equal(tools.length, 5);
     for (const tool of tools) {
-        if (tool.name === "tmux_read") {
+        if (["tmux_read", "progress_report", "environ_info"].includes(tool.name)) {
             const meta = tool._meta as Record<string, unknown> | undefined;
             assert.equal(meta?.["openai/outputTemplate"], undefined);
             continue;
@@ -150,8 +156,55 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
         assert.equal(resource?.text?.includes("private-valid-capability-01"), false);
 });
 
-test("MCP App tags ordinary ToolCall results for an inline card without altering execution", async () => {
+test("Inline is disabled by default while historical resources and Fullscreen remain available", async () => {
+    const { createMcpAppMcpExtension } = await import("../../src/mcpapp/Extension.ts");
+    const { McpEndpointCatalog } = await import("../../src/protocol/tool/Catalog.ts");
+    const extension = createMcpAppMcpExtension("https://example.test");
+    assert.equal(extension.presentation?.toolCallResourceUriForTool?.("bash_run"), undefined);
+    assert.ok(extension.presentation?.resourceUri);
+    assert.equal(extension.resources?.length, 3);
+    const definitions = ["environ_info", "bash_run", "progress_report", "file_read"].map((name) => ({
+        name, group: "test", description: "Test tool", requiredCapabilities: [],
+        inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    }));
+    const catalog = new McpEndpointCatalog({
+        instanceName: "alpha",
+        bootstrapPresentationResourceUri: extension.presentation?.resourceUri,
+        toolCallPresentationResourceUriForTool: extension.presentation?.toolCallResourceUriForTool,
+        source: {
+            list: () => definitions.map((definition) => ({ scope: "*", definition })),
+            get: (_instance, name) => {
+                const definition = definitions.find((item) => item.name === name);
+                return definition ? { scope: "*", definition } : undefined;
+            },
+        },
+    });
+    for (const tool of catalog.listTools()) {
+        assert.equal((tool._meta as Record<string, unknown>)?.["openai/outputTemplate"], undefined);
+        assert.equal((tool._meta as Record<string, unknown>)?.["ui/resourceUri"], undefined);
+    }
     const f = fixture();
+    for (const name of ["bash_run", "file_read", "progress_report", "environ_info"]) {
+        const presented = await f.endpoint.present(name, { ok: true, ctxId: f.ctxId }, f.request);
+        assert.ok(presented instanceof McpNativeToolResult);
+        assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
+        assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
+    }
+});
+
+test("Inline opt-in still excludes frequent background and reporting tools", async () => {
+    const f = fixture(undefined, true);
+    for (const name of ["progress_report", "environ_info", "tmux_read", "tmux_input",
+        "tmux_manage", "file_grep", "file_glob", "workspace_goal"]) {
+        const presented = await f.endpoint.present(name, { ok: true }, f.request);
+        assert.ok(presented instanceof McpNativeToolResult);
+        assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
+        assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
+    }
+});
+
+test("MCP App tags ordinary ToolCall results for an inline card without altering execution", async () => {
+    const f = fixture(undefined, true);
     const input = { command: "pwd", output: "ok" };
     const presented = await f.endpoint.present("bash_run", input, f.request);
     assert.ok(presented instanceof McpNativeToolResult);
@@ -187,7 +240,7 @@ test("A foreign MCP App resource cannot receive the DevShell Live bearer capabil
 });
 
 test("per-tool Widget metadata is self-contained and bounded without changing the original result", async () => {
-    const f = fixture();
+    const f = fixture(undefined, true);
     const input = { command: "printf ready", purpose: "Check output", apiKey: "private-input-key" };
     const output = { stdout: "ready\n" + "x".repeat(80_000), exitCode: 0,
         nested: { token: "private-output-token" } };

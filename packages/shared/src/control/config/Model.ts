@@ -50,6 +50,7 @@ export interface ControlInstanceExtensionsConfig {
 }
 export interface ControlInstanceWorkspaceConfig {
     enabled: boolean;
+    inlineToolCalls?: boolean;
 }
 export interface ControlInstanceSecurityConfig {
     mode: ControlSecurityMode;
@@ -348,6 +349,7 @@ export interface ConfigInstanceDraft {
     tools?: ControlInstanceToolsConfig;
     workspace?: {
         enabled?: boolean;
+        inlineToolCalls?: boolean;
     };
 }
 
@@ -429,6 +431,7 @@ export interface ConfigInstancePatch {
     tools?: ConfigNullable<ControlInstanceToolsConfig>;
     workspace?: {
         enabled?: boolean;
+        inlineToolCalls?: boolean;
     };
 }
 

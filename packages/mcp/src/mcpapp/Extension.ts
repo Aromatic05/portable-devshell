@@ -18,8 +18,13 @@ import {
     mcpAppIsHashedInteractionResourceUri,
 } from "./app/App.js";
 
+const inlineToolCalls = new Set([
+    "artifact_viewImage", "bash_run", "file_edit", "file_read", "tmux_run",
+]);
+
 export function createMcpAppMcpExtension(
     publicBaseUrl?: string,
+    options: { inlineToolCalls?: boolean } = {},
 ): McpExtension {
     const workspaceMeta = mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl, "workspace");
     const interactionMeta = mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl, "interaction");
@@ -30,8 +35,10 @@ export function createMcpAppMcpExtension(
             bootstrap: "environment",
             resourceUri: mcpAppResourceUri,
             interactionResourceUri: mcpAppInteractionResourceUri,
-            toolCallResourceUri: mcpAppToolCallResourceUri,
-            toolCallResourceUriForTool: mcpAppToolCallResourceUriForTool,
+            // Returning undefined suppresses the environment bootstrap's
+            // Fullscreen fallback when Inline ToolCall UI is disabled.
+            toolCallResourceUriForTool: (name) => options.inlineToolCalls === true &&
+                inlineToolCalls.has(name) ? mcpAppToolCallResourceUriForTool(name) : undefined,
         },
         resources: [
             Object.freeze({

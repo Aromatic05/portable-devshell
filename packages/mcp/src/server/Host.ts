@@ -15,6 +15,7 @@ import type { McpModelOutputBudget } from "../protocol/call/ModelOutput.js";
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
     contextMode?: ControlMcpContextMode;
+    inlineToolCalls?: boolean;
     name: string;
     modelOutput?: McpModelOutputBudget;
     path?: string;
@@ -169,7 +170,9 @@ export class McpHost {
         if (mountOAuth) this.#oauthUninstall = this.#oauth!.attach(this.#httpServer);
         const mountApp = this.#appRoute !== undefined && !this.#appRoute.has(instance.name);
         const path = instance.path ?? `/${instance.name}/mcp`;
-        const mcpAppExtension = createMcpAppMcpExtension(this.#config.publicBaseUrl);
+        const mcpAppExtension = createMcpAppMcpExtension(this.#config.publicBaseUrl, {
+            inlineToolCalls: instance.inlineToolCalls === true,
+        });
         try {
             if (mountApp) this.#appRoute?.register(instance.name);
             this.#protocol.registerInstance(

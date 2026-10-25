@@ -807,6 +807,7 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     const capability = { ctxId: "ctx-activity", token: "private-activity-test-token",
         liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
     const activityRequests: Array<{ url: string; auth: string | null }> = [];
+    const timelineRequests: Array<{ url: string; auth: string | null }> = [];
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.includes("/activity?")) {
@@ -819,19 +820,24 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
                 ...(first ? { nextSeq: 4 } : {}),
             }), { status: 200 }));
         }
+        if (url.includes("/timeline")) {
+            timelineRequests.push({ url, auth: new Headers(init?.headers).get("Authorization") });
+            return Promise.resolve(new Response(JSON.stringify({ ctxId: capability.ctxId,
+                activity: [{ callId: "call-1", name: "bash_run", state: "completed",
+                    exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
+                    target: "git status --short", output: { exitCode: 0, stdoutBytes: 12, stderrBytes: 8 } },
+                    { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
+                        taskId: "task-1", target: "pnpm build", summary: "exit 0",
+                        output: { task: { id: "task-1", status: "running" }, output: ["Starting build"] } },
+                    { callId: "call-3", name: "tmux_read", state: "completed", at: "2026-10-12T16:02:00Z",
+                        taskId: "task-1", target: "task-1",
+                        output: { task: { id: "task-1", status: "0" }, output: ["Build complete"] } },
+                    { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
+            }), { status: 200 }));
+        }
         if (url.includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
             ctxId: capability.ctxId, instance: "demo", cursor: 19, agentBusy: false,
             presentation: { work: [], background: [] },
-            activity: [{ callId: "call-1", name: "bash_run", state: "completed",
-                exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
-                target: "git status --short", output: { exitCode: 0, stdoutBytes: 12, stderrBytes: 8 } },
-                { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
-                    taskId: "task-1", target: "pnpm build", summary: "exit 0",
-                    output: { task: { id: "task-1", status: "running" }, output: ["Starting build"] } },
-                { callId: "call-3", name: "tmux_read", state: "completed", at: "2026-10-12T16:02:00Z",
-                    taskId: "task-1", target: "task-1",
-                    output: { task: { id: "task-1", status: "0" }, output: ["Build complete"] } },
-                { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
         }), { status: 200 }));
         return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -845,8 +851,13 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
         _meta: { "portable-devshell/mcpapp": capability },
     }); });
     await vi.waitFor(() => expect(container!.textContent).toContain("Workspace ready"));
+    expect(timelineRequests).toHaveLength(0);
     const activity = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Activity");
     await act(async () => { activity?.click(); });
+    await vi.waitFor(() => expect(container!.textContent).toContain("bash_run"));
+    expect(timelineRequests).toHaveLength(1);
+    expect(timelineRequests[0]?.url).toContain("/timeline?ctxId=ctx-activity");
+    expect(timelineRequests[0]?.auth).toBe("Bearer private-activity-test-token");
     expect(container!.textContent).toContain("Recent ToolCalls");
     expect(container!.textContent).toContain("bash_run");
     expect(container!.textContent).toContain("exit 0");
@@ -863,6 +874,12 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     await vi.waitFor(() => expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("latest"));
     expect(activityRequests[1]?.url).toContain("fromSeq=4");
     expect(container!.textContent).toContain("warning");
+    await act(async () => { container!.querySelector<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")?.click(); });
+    expect(container!.querySelector(".dashboard-timeline .tc-terminal")).toBeNull();
+    await act(async () => { container!.querySelector<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")?.click(); });
+    await vi.waitFor(() => expect(activityRequests).toHaveLength(3));
+    expect(activityRequests[2]?.url).toContain("fromSeq=1");
+    await vi.waitFor(() => expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("main"));
     expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(2);
     expect(container!.textContent).not.toContain("1 transcript reads");
     await act(async () => { container!.querySelectorAll<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")[1]?.click(); });

@@ -279,8 +279,12 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     cursor = undefined;
                     await new Promise<void>((resolve) => {
                         const delay = Math.min(1_000 * 2 ** Math.min(retries++, 4), 15_000);
-                        const timer = setTimeout(resolve, delay);
-                        controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+                        const onAbort = () => { clearTimeout(timer); resolve(); };
+                        const timer = setTimeout(() => {
+                            controller.signal.removeEventListener("abort", onAbort);
+                            resolve();
+                        }, delay);
+                        controller.signal.addEventListener("abort", onAbort, { once: true });
                     });
                 }
             }
@@ -507,7 +511,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     </div> : <p>{liveError ?? "Waiting for interaction state…"}</p>}
                 </> : snapshot ? <>
                     {actionError && <p role="alert">{actionError}</p>}
-                    <WorkspaceDashboard snapshot={snapshot} session={session}
+                    <WorkspaceDashboard key={snapshot.ctxId} snapshot={snapshot} session={session}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" || liveError !== undefined || status !== "connected" ? undefined : act}
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}

@@ -2534,6 +2534,26 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
         assert.equal(draft.workspace?.enabled, false);
     });
 
+    test("config exposes Inline ToolCall UI as an explicit disabled-by-default choice", async () => {
+        const harness = createHarness();
+        harness.store.setSelectedPage("config");
+        openEditorForBox(harness, "config", "workspace");
+        const workspace = expandBox(harness, "workspace");
+        const inline = workspace.expandedLines.find((line) =>
+            line.id?.includes(":field:workspace.inlineToolCalls"),
+        );
+        assert.equal(inline?.editableValue?.value, "false");
+        assert.ok(inline?.id);
+        harness.store.setMainFocusId("workspace");
+        harness.store.setFocusScope("form");
+        harness.store.setSelectedDetailLine(workspace.expandedKey, inline.id);
+        await harness.dispatch({ direction: "right", type: "editor.cursorMove" });
+        const draft = harness.store.getState().ui.formDrafts["config:alpha"] as {
+            workspace?: { inlineToolCalls?: boolean };
+        };
+        assert.equal(draft.workspace?.inlineToolCalls, true);
+    });
+
     test("MCP context mode is selectable in create and config editors", async () => {
         const harness = createHarness();
         await openCreateWizard(harness);

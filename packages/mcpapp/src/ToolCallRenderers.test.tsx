@@ -151,7 +151,15 @@ test("Activity fetches an audited image only after expanding its card", async ()
             bytes: 68, content: imageData,
         }) } as Response;
     });
-    globalThis.fetch = fetchImage as unknown as typeof fetch;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).includes("/timeline")
+            ? Promise.resolve(new Response(JSON.stringify({ ctxId: "ctx-a", activity: [{
+                callId: "image-a", name: "artifact_viewImage", state: "completed",
+                at: "2026-10-14T07:08:36Z",
+                output: { imageRef: "stored.png", name: "map-marker-pending.png",
+                    mediaType: "image/png", bytes: 68 },
+            }] }), { status: 200 }))
+            : fetchImage(String(input), init!)) as typeof fetch;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);

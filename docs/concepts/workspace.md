@@ -22,7 +22,7 @@ Context / Instance authoritative state
        └── per-tool Inline ToolCall
 ```
 
-MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投影 `primary / work / background`、`modelContext`、`reentry` 和 Activity。UI 不修改 Goal 或 Approval 的权威状态，也不将 iframe 本地缓存作为事实来源。
+MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投影 `primary / work / background`、`modelContext` 和 `reentry`；Activity 在打开对应标签时单独读取。UI 不修改 Goal 或 Approval 的权威状态，也不将 iframe 本地缓存作为事实来源。
 
 ## Bootstrap 与重新呈现
 
@@ -37,9 +37,12 @@ MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投�
 ```toml
 [workspace]
 enabled = false
+inlineToolCalls = false
 ```
 
 启用后才提供 Workspace 的展示与自动恢复能力。关闭时回收当前 Instance 的 App presence/capability、Wait recovery 和相关 Goal continuation/re-entry 资格；它不停止 Worker、不删除 Context、不关闭 MCP endpoint，也不移除 bash/file/tmux 等基本工具。TUI 的 Instance Config 页面可以修改该设置。
+
+`inlineToolCalls` 默认关闭，只影响普通工具调用的嵌入式结果 UI，**不影响 Fullscreen Workspace、必要的交互 UI 或 Audit**。如需在 Workspace 已启用的 Instance 上展示 Inline，可显式将其设为 `true`；目前仅 `bash_run`、`file_read`、`file_edit`、`tmux_run`、`artifact_viewImage` 会获得 Inline 资源。尤其 `progress_report`、`environ_info`、`tmux_read` 等不会创建额外 iframe。历史 ToolCall 的 UI 资源仍可读取。
 
 App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知道 `ctxId` 不是授权；审批状态属于 Core，MCP App 只调用经过验证的审批操作。
 
@@ -55,7 +58,7 @@ ToolCall 的完整记录由 Audit 持久化；Activity 在原始 Inline 卡片�
 
 资源提供内容哈希 URI 及历史兼容别名，使旧会话在升级与 iframe remount 后仍可读取。建立 MCP App bridge 后，单次工具调用或 Host 消息失败只重试原会话；只有真正的 App 关闭或初次握手失败才重建 SDK 生命周期。
 
-App 从受鉴权的 Live Workspace HTTP route 读取 `snapshot / watch`。Watch 使用 instance event sequence 和相关变化通知，无变化时返回 heartbeat，不在客户端循环全量读取。
+App 从受鉴权的 Live Workspace HTTP route 读取 `snapshot / watch`。Watch 使用 instance event sequence 和相关变化通知，无变化时返回 heartbeat，不在客户端循环全量读取。历史 ToolCall 通过独立的 `timeline` 路由按需加载，Overview 不再重复拉取大量 Audit 数据；图片和终端详情仍在对应卡片展开后读取。
 
 临时 Watch 网络错误只暂停需要最新快照的操作，并保留同一 Context 上次成功读取的快照供用户查看；只有 Context 身份或授权发生变化时才清除原快照。若有多个待审批请求，Workspace 会显示总数并依次呈现待处理项。
 

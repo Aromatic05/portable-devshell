@@ -386,6 +386,7 @@ export class TuiCommandDispatcherEditor {
             case "enabled":
             case "mcp.enabled":
             case "workspace.enabled":
+            case "workspace.inlineToolCalls":
                 return [true, false];
             case "mcp.contextMode":
                 return ["explicit", "openai-session"];

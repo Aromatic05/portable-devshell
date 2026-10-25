@@ -21,7 +21,7 @@ export interface McpExtensionPresentation {
     readonly resourceUri: string;
     readonly interactionResourceUri?: string;
     readonly toolCallResourceUri?: string;
-    readonly toolCallResourceUriForTool?: (toolName: string) => string;
+    readonly toolCallResourceUriForTool?: (toolName: string) => string | undefined;
 }
 
 /**

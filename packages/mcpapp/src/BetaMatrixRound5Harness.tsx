@@ -99,9 +99,18 @@ export function hold(signal?: AbortSignal | null) {
     });
 }
 export function serve(read: (url: URL, init?: RequestInit) => Response | Promise<Response>) {
-    globalThis.fetch = vi.fn((input, init) => {
+    globalThis.fetch = vi.fn(async (input, init) => {
         const url = new URL(String(input));
-        return Promise.resolve(read(url, init));
+        if (url.pathname.endsWith("/timeline")) {
+            // These legacy UI fixtures keep Activity alongside their snapshot
+            // input. Adapt their mocked HTTP boundary to the separate route.
+            const snapshotUrl = new URL(url);
+            snapshotUrl.pathname = snapshotUrl.pathname.replace(/\/timeline$/u, "/snapshot");
+            const previous = await read(snapshotUrl, init);
+            const state = await previous.json() as McpAppSnapshot;
+            return response({ ctxId: state.ctxId, activity: state.activity ?? [] });
+        }
+        return await read(url, init);
     }) as typeof fetch;
 }
 export function serveSnapshot(state: McpAppSnapshot) {

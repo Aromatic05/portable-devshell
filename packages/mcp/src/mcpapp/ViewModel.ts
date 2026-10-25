@@ -148,19 +148,10 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             approvals, ctxId, goal, instance, waits, directives, agentBusy,
             ...(workspace === undefined ? {} : { workspace }),
         });
-        // Activity is a read-only projection of Instance-owned ToolCall audit.
-        // It can be rebuilt after an iframe remount or a retained-event gap.
-        // Audit failure must not block Approval or Wait.
-        try {
-            projected.activity = await readMcpAppActivity(
-                tools,
-                ctxId,
-            );
-        } catch {
-            projected.activity = [];
-        }
         return projected;
     };
+    const activity = (instance: string, ctxId: string) =>
+        readMcpAppActivity(createToolTransport(endpoint, instance), ctxId);
     const watch = async (
         instance: string, ctxId: string, workspace: string | undefined,
         cursor: number, signal?: AbortSignal,
@@ -209,5 +200,5 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
     const activityImage = (instance: string, ctxId: string, callId: string) =>
         readMcpAppActivityImage(createToolTransport(endpoint, instance),
             createArtifactTransport(endpoint), ctxId, callId);
-    return { snapshot, watch, activityOutput, activityImage };
+    return { snapshot, watch, activity, activityOutput, activityImage };
 }

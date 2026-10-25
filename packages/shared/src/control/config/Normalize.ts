@@ -135,6 +135,7 @@ export function normalizeConfigInstanceDraft(
         tools: cloneTools(draft.tools),
         workspace: {
             enabled: draft.workspace?.enabled ?? false,
+            inlineToolCalls: draft.workspace?.inlineToolCalls ?? false,
         },
     };
 
@@ -296,6 +297,8 @@ export function applyConfigInstancePatch(
                 : {
                       enabled:
                           patch.workspace.enabled ?? base.workspace?.enabled,
+                      inlineToolCalls:
+                          patch.workspace.inlineToolCalls ?? base.workspace?.inlineToolCalls,
                   },
     };
 }

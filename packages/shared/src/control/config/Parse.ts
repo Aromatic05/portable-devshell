@@ -773,9 +773,10 @@ function parseWorkspaceDraft(
     path: readonly ConfigPathSegment[],
 ): NonNullable<ConfigInstanceDraft["workspace"]> {
     const record = readRecord(value, path);
-    assertKnownKeys(record, ["enabled"], path);
+    assertKnownKeys(record, ["enabled", "inlineToolCalls"], path);
     return {
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        inlineToolCalls: readOptionalBoolean(record.inlineToolCalls, [...path, "inlineToolCalls"]),
     };
 }
 

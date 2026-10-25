@@ -491,6 +491,18 @@ export function Config({
                                     updateDraft("workspace.enabled", value)
                                 }
                             />
+                            <Check
+                                checked={booleanValue(
+                                    parsed.value,
+                                    "workspace.inlineToolCalls",
+                                    false,
+                                )}
+                                disabled={!interactive || parsed.value === undefined}
+                                label="Inline ToolCall UI (optional)"
+                                onChange={(value) =>
+                                    updateDraft("workspace.inlineToolCalls", value)
+                                }
+                            />
                         </div>
                     </article>
 

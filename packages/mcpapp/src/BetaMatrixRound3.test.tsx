@@ -161,6 +161,10 @@ test("round3: retained Audit output survives dashboard remount through a fresh a
     globalThis.fetch = vi.fn((input, init) => {
         requests.push(String(input));
         expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer private-round3-bearer-token");
+        if (String(input).includes("/timeline")) return Promise.resolve(response({
+            ctxId: "context-a", activity: [{ callId: "retained-call", name: "bash_run",
+                state: "completed", at: "2026-10-20T00:00:00Z", target: "echo retained" }],
+        }));
         return Promise.resolve(response({ callId: "retained-call", stdout: "persisted audit output", stderr: "" }));
     }) as typeof fetch;
     const state: McpAppSnapshot = { ...snapshot(), activity: [{ callId: "retained-call", name: "bash_run",
@@ -169,7 +173,8 @@ test("round3: retained Audit output survives dashboard remount through a fresh a
     const view = <WorkspaceDashboard snapshot={state} session={capability("context-a")} renderItem={() => null} />;
     await act(async () => { root!.render(view); });
     await act(async () => { button("Activity").click(); });
-    expect(requests).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain("/timeline?ctxId=context-a");
     await act(async () => { container!.querySelector<HTMLButtonElement>(".toolcall-compact")!.click(); });
     expect(container!.textContent).toContain("persisted audit output");
     await act(async () => { root!.unmount(); }); root = createRoot(container);
@@ -178,9 +183,10 @@ test("round3: retained Audit output survives dashboard remount through a fresh a
     expect(container!.textContent).not.toContain("persisted audit output");
     await act(async () => { container!.querySelector<HTMLButtonElement>(".toolcall-compact")!.click(); });
     expect(container!.textContent).toContain("persisted audit output");
-    expect(requests).toHaveLength(2);
-    expect(requests[0]).toContain("callId=retained-call&fromSeq=1&ctxId=context-a");
-    expect(requests[1]).toBe(requests[0]);
+    const outputs = requests.filter((url) => url.includes("/activity?"));
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0]).toContain("callId=retained-call&fromSeq=1&ctxId=context-a");
+    expect(outputs[1]).toBe(outputs[0]);
 });
 
 test("round3: delivered recovery receipt is reclaimed after Host remount without duplicate delivery", async () => {

@@ -17,7 +17,7 @@ export class McpAppCall {
     readonly #dispatch: Pick<McpEndpointDispatch, 'callTool'>;
     readonly #view?: ReturnType<typeof createMcpAppViewModel>;
     readonly #ownsPresentation?: (toolName: string) => boolean;
-    readonly #toolCallResourceUriForTool?: (toolName: string) => string;
+    readonly #toolCallResourceUriForTool?: (toolName: string) => string | undefined;
     readonly #bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
         ctxId: string; token: string; liveBaseUrl?: string;
     } | undefined>;
@@ -30,7 +30,7 @@ export class McpAppCall {
         instance: string;
         view?: ReturnType<typeof createMcpAppViewModel>;
         ownsPresentation?: (toolName: string) => boolean;
-        toolCallResourceUriForTool?: (toolName: string) => string;
+        toolCallResourceUriForTool?: (toolName: string) => string | undefined;
         bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
             ctxId: string; token: string; liveBaseUrl?: string;
         } | undefined>;
@@ -66,21 +66,20 @@ export class McpAppCall {
         const native = result instanceof McpNativeToolResult;
         const owned = this.#ownsPresentation?.(toolName) !== false;
         const output = native ? result.structuredContent : result;
-        const widget = owned && toolName !== "tmux_read" && !toolName.startsWith("mcpapp_");
+        const widgetUri = owned && !toolName.startsWith("mcpapp_")
+            ? this.#toolCallResourceUriForTool?.(toolName) : undefined;
         const presented = toolName.startsWith("mcpapp_") ? result : new McpNativeToolResult({
             ...(native
                 ? { content: result.content, isError: result.isError } : { content: [] }),
             _meta: {
                 ...(native ? result._meta : {}),
                 "portable-devshell/toolcall": { name: toolName },
-                ...(widget ? {
+                ...(widgetUri === undefined ? {} : {
                     [mcpAppWidgetPayloadKey]: mcpAppToolCallWidgetPayload(
                         toolName, input, output, native && result.isError,
                     ),
-                    ...(this.#toolCallResourceUriForTool === undefined ? {} : {
-                        "openai/outputTemplate": this.#toolCallResourceUriForTool(toolName),
-                    }),
-                } : {}),
+                    "openai/outputTemplate": widgetUri,
+                }),
             },
             structuredContent: output,
         });

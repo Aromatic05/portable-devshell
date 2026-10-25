@@ -38,7 +38,7 @@ export interface McpEndpointCatalogOptions {
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
-    toolCallPresentationResourceUriForTool?: (toolName: string) => string;
+    toolCallPresentationResourceUriForTool?: (toolName: string) => string | undefined;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
     source: McpToolSource;
@@ -53,7 +53,7 @@ export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
     readonly #bootstrapPresentationResourceUri?: string;
     readonly #toolCallPresentationResourceUri?: string;
-    readonly #toolCallPresentationResourceUriForTool?: (toolName: string) => string;
+    readonly #toolCallPresentationResourceUriForTool?: (toolName: string) => string | undefined;
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
@@ -182,12 +182,10 @@ function withBootstrapPresentation(
     tool: ToolDefinition,
     workspaceResourceUri: string | undefined,
     toolCallResourceUri: string | undefined,
-    toolCallResourceUriForTool: ((toolName: string) => string) | undefined,
+    toolCallResourceUriForTool: ((toolName: string) => string | undefined) | undefined,
 ): ToolDefinition {
     if (!isModelFacingTool(tool)) return tool;
-    // tmux_read is a background transcript poll. Its output belongs to the
-    // tmux_run task terminal, not an additional Inline widget on every poll.
-    // The ToolCall itself remains fully audited and available in Workspace.
+    // A transcript poll is part of tmux_run, not another presentation.
     if (tool.name === "tmux_read") return tool;
     const meta = asRecord(tool._meta);
     const ui = asRecord(meta.ui);
@@ -195,8 +193,10 @@ function withBootstrapPresentation(
     if (typeof ui.resourceUri === "string" || typeof meta["openai/outputTemplate"] === "string")
         return tool;
     const resourceUri = tool.name === "mcpapp_open" ? workspaceResourceUri
-        : toolCallResourceUriForTool?.(tool.name) ?? toolCallResourceUri ??
-            (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined);
+        : toolCallResourceUriForTool === undefined
+            ? toolCallResourceUri ??
+                (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined)
+            : toolCallResourceUriForTool(tool.name);
     if (resourceUri === undefined) return tool;
     return {
         ...tool,

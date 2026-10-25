@@ -156,6 +156,12 @@ export function buildConfigPageBoxes(
                     "workspace.enabled",
                     readPath(draft, "workspace.enabled"),
                 ),
+                choiceLine(
+                    "workspace.inlineToolCalls",
+                    "workspace.inlineToolCalls",
+                    readPath(draft, "workspace.inlineToolCalls") ?? false,
+                ),
+                "Inline ToolCall UI is off by default; only selected tools can render their own cards.",
                 "Disabling Workspace retires app presence, wait recovery, and Goal continuation without stopping the Worker.",
                 ...editorErrorLine(state, "config", "workspace", ["workspace"]),
             ],
@@ -168,10 +174,10 @@ export function buildConfigPageBoxes(
                     : "normal",
             ),
             summaryLines: [
-                compactSummary([
-                    "enabled",
-                    stringValue(readPath(draft, "workspace.enabled"), "false"),
-                ]),
+                compactSummary(
+                    ["enabled", stringValue(readPath(draft, "workspace.enabled"), "false")],
+                    ["inline", stringValue(readPath(draft, "workspace.inlineToolCalls"), "false")],
+                ),
             ],
             title: "Workspace",
         }),

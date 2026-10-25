@@ -27,7 +27,7 @@ export function installMcpAppLive(options: {
         return 200;
     };
     const read = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity" | "image") => {
+        operation: "snapshot" | "watch" | "activity" | "timeline" | "image") => {
         const watch = operation === "watch";
         setHeaders(response);
         const url = new URL(request.url ?? "/", "http://localhost");
@@ -55,6 +55,13 @@ export function installMcpAppLive(options: {
             return;
         }
         options.presence.touch(options.instance, ctxId);
+        if (operation === "timeline") {
+            const activity = await options.view.activity(options.instance, ctxId);
+            const access = await revalidate(ctxId, token, workspace);
+            if (access !== 200) reply(response, access, { error: "MCP App authorization expired" });
+            else reply(response, 200, { ctxId, activity });
+            return;
+        }
         if (operation === "activity") {
             const callId = url.searchParams.get("callId") ?? "";
             const rawFromSeq = url.searchParams.get("fromSeq") ?? "1";
@@ -119,7 +126,7 @@ export function installMcpAppLive(options: {
         }
     };
     const safe = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity" | "image") => {
+        operation: "snapshot" | "watch" | "activity" | "timeline" | "image") => {
         try { await read(request, response, operation); }
         catch (error) {
             // Never return internal RPC failures or bearer tokens to callers,
@@ -142,10 +149,12 @@ export function installMcpAppLive(options: {
         releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, "snapshot")));
         releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, "watch")));
         releases.push(options.host.registerRawRoute("get", `${base}/activity`, (req, res) => safe(req, res, "activity")));
+        releases.push(options.host.registerRawRoute("get", `${base}/timeline`, (req, res) => safe(req, res, "timeline")));
         releases.push(options.host.registerRawRoute("get", `${base}/image`, (req, res) => safe(req, res, "image")));
         releases.push(options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/activity`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
+        releases.push(options.host.registerRawRoute("options", `${base}/timeline`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/image`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
     } catch (error) {
         try { releaseRoutes(); }

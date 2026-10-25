@@ -118,7 +118,7 @@ test("Workspace switch defaults disabled without restoring persistent workspace 
         provider: "local",
     });
 
-    assert.deepEqual(instance.workspace, { enabled: false });
+    assert.deepEqual(instance.workspace, { enabled: false, inlineToolCalls: false });
     const parsed = parseConfigDraft({
         instances: [
             {
@@ -139,6 +139,14 @@ test("Workspace switch defaults disabled without restoring persistent workspace 
         normalizeConfigInstanceDraft(patched).workspace.enabled,
         false,
     );
+    const optedIn = parseConfigDraft({
+        instances: [{ name: "inline-allowed", provider: "local",
+            workspace: { enabled: true, inlineToolCalls: true } }],
+    });
+    assert.equal(normalizeConfigDraft(optedIn).instances[0]?.workspace.inlineToolCalls, true);
+    assert.equal(normalizeConfigInstanceDraft(applyConfigInstancePatch(instance, {
+        workspace: { inlineToolCalls: true },
+    })).workspace.inlineToolCalls, true);
     assertConfigIssue(
         () =>
             parseConfigDraft({

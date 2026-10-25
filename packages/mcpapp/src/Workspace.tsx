@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { readMcpAppActivityImage, readMcpAppActivityOutput, type McpAppActivityImage, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
+import { readMcpAppActivityImage, readMcpAppActivityOutput, readMcpAppTimeline, type McpAppActivity, type McpAppActivityImage, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
 import type { McpAppSession } from "./Session.js";
 import { ToolCallCard } from "./ToolCall.js";
 import { record } from "./ToolCallModel.js";
 
 type Tab = "overview" | "activity";
-type Activity = NonNullable<McpAppSnapshot["activity"]>[number];
+type Activity = McpAppActivity;
+const emptyTerminal = { stdout: "", stderr: "", loaded: false, loading: false };
+const internalActivity = new Set([
+    "environ_info", "progress_report", "workspace_goal",
+    "tmux_read", "tmux_input", "tmux_inspect", "tmux_manage",
+]);
 
 function taskTranscript(item: Activity, reads: readonly Activity[]): unknown {
     const base = record(item.output) ?? {};
@@ -29,7 +34,7 @@ function ActivityCard({ item, reads, session }: {
     const [terminal, setTerminal] = useState<{
         stdout: string; stderr: string; nextSeq?: number;
         loaded: boolean; loading: boolean; error?: string;
-    }>({ stdout: "", stderr: "", loaded: false, loading: false });
+    }>(emptyTerminal);
     const [image, setImage] = useState<McpAppActivityImage>();
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState<string>();
@@ -106,6 +111,15 @@ function ActivityCard({ item, reads, session }: {
         onExpandedChange={(open) => {
             if (open && isShell && session && !terminal.loading && !terminal.loaded) load(1);
             if (open && isImage && session && !imageLoading && !image) loadImage();
+            if (!open && isShell) {
+                controller.current?.abort();
+                setTerminal(emptyTerminal);
+            }
+            if (!open && isImage) {
+                imageController.current?.abort();
+                setImage(undefined);
+                setImageLoading(false);
+            }
         }}
         expandedFooter={isImage && session && imageError
             ? <div className="tc-activity-actions">
@@ -129,14 +143,30 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     const [tab, setTab] = useState<Tab>("overview");
     const [showHistory, setShowHistory] = useState(true);
     const [showInternalCalls, setShowInternalCalls] = useState(false);
+    const [activity, setActivity] = useState<Activity[]>();
+    const [activityError, setActivityError] = useState<string>();
     const { primary, work, background } = snapshot.presentation;
     const pendingCount = snapshot.presentation.pendingApprovals ?? (primary ? 1 : 0);
-    const visibleActivity = showInternalCalls ? snapshot.activity : snapshot.activity?.filter((item) => {
-        if (item.name === "tmux_read" || item.name === "mcpapp_open") return false;
+    useEffect(() => {
+        if (tab !== "activity" || !showHistory || session === undefined) return;
+        const controller = new AbortController();
+        setActivityError(undefined);
+        void readMcpAppTimeline(session, controller.signal).then((next) => {
+            if (!controller.signal.aborted) setActivity(next);
+        }).catch((error: unknown) => {
+            if (!controller.signal.aborted) setActivityError(
+                error instanceof Error ? error.message : "Unable to read ToolCall activity",
+            );
+        });
+        return () => controller.abort();
+    }, [tab, showHistory, snapshot.cursor, session]);
+    const history = session ? activity : snapshot.activity;
+    const visibleActivity = showInternalCalls ? history : history?.filter((item) => {
+        if (internalActivity.has(item.name) || item.name.startsWith("mcpapp_")) return false;
         return true;
     });
     const pollsByTask = new Map<string, Activity[]>();
-    for (const item of snapshot.activity ?? []) {
+    for (const item of history ?? []) {
         if (item.name !== "tmux_read" || !item.taskId) continue;
         pollsByTask.set(item.taskId, [...(pollsByTask.get(item.taskId) ?? []), item]);
     }
@@ -195,6 +225,8 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                     Include polling and workspace events
                 </label>}
                 {!showHistory ? <p className="dashboard-empty">ToolCall history is hidden.</p> :
+                    activityError ? <p role="alert">{activityError}</p> :
+                    visibleActivity === undefined ? <p className="dashboard-empty">Loading ToolCall history…</p> :
                     visibleActivity?.length ? <ol className="dashboard-timeline">
                         {visibleActivity.map((item) => {
                             const reads = item.taskId ? pollsByTask.get(item.taskId) ?? [] : [];

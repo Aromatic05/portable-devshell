@@ -44,6 +44,8 @@ export interface McpAppSnapshot {
     };
 }
 
+export type McpAppActivity = NonNullable<McpAppSnapshot["activity"]>[number];
+
 export interface McpAppActivityOutput {
     callId: string;
     stdout: string;
@@ -94,6 +96,18 @@ export async function readMcpAppSnapshot(session: McpAppSession, signal: AbortSi
     const result = await request(session, "/snapshot", signal);
     if (!isSnapshot(result) || result.ctxId !== session.ctxId) throw new Error("Invalid MCP App snapshot");
     return result;
+}
+
+/** Activity is fetched only while the user views the Workspace Activity tab. */
+export async function readMcpAppTimeline(session: McpAppSession, signal: AbortSignal): Promise<McpAppActivity[]> {
+    const result = record(await request(session, "/timeline", signal));
+    if (result?.ctxId !== session.ctxId || !Array.isArray(result.activity) ||
+        result.activity.length > 50 || !result.activity.every((item) => {
+            const entry = record(item);
+            return typeof entry?.callId === "string" && typeof entry.name === "string" &&
+                typeof entry.state === "string" && typeof entry.at === "string";
+        })) throw new Error("Invalid MCP App activity");
+    return result.activity as McpAppActivity[];
 }
 
 export async function watchMcpApp(

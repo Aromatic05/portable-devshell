@@ -109,6 +109,7 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
         createdAt: "", updatedAt: "", lastAgentActivityAt: "", lastProgressAt: "", revision: 1,
     };
     let calls: ToolCallRecord[] = [];
+    let activityReads = 0;
     let executionUnavailable = false;
     const task = new Rpc(endpoint.bind("task", "test"), {
         getGoal: () => ({ goal, lastSeq: 12 }),
@@ -121,7 +122,10 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
         listCalls: (request) => {
             const query = request as { ctxId: string; status?: string; limit: number };
             assert.equal(query.ctxId, "ctx-a");
-            if (query.status === undefined) return [];
+            if (query.status === undefined) {
+                activityReads++;
+                return [];
+            }
             assert.deepEqual(request, {
                 ctxId: "ctx-a", status: "running", limit: 64, includeInput: false, includeOutput: false,
             });
@@ -148,7 +152,10 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
     calls = [call("ctx-a", "running")];
     const busy = await view.snapshot("test", "ctx-a");
     assert.equal(busy.agentBusy, true);
-    assert.deepEqual(busy.activity, []);
+    assert.equal(busy.activity, undefined);
+    assert.equal(activityReads, 0, "Live snapshots must not query historical ToolCalls");
+    assert.deepEqual(await view.activity("test", "ctx-a"), []);
+    assert.equal(activityReads, 1, "Activity history is requested separately");
     assert.deepEqual(busy.presentation.work, idle.presentation.work);
     assert.equal(busy.reentry.schedule, undefined, "An active ToolCall prevents duplicate Goal recovery");
     calls = [{ ...call("ctx-a", "running"), toolName: "mcpapp_open" }];
