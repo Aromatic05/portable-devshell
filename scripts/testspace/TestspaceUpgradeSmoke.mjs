@@ -388,7 +388,7 @@ async function runCase(name, { current, legacy, testRoot }) {
                 "Existing newer Comment preserved",
             );
         }
-        assert.equal(readSchemaVersion(newMessagePath), 2);
+        assert.equal(readSchemaVersion(newMessagePath), 3);
         assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
         const extensions = execute(cli, ["extension", "list"], env).stdout;
         for (const id of ["access", "comment", "instance", "mcp"]) {
@@ -399,7 +399,7 @@ async function runCase(name, { current, legacy, testRoot }) {
         assert.match(overview, new RegExp(TESTSPACE_INSTANCE, "u"));
         const instance = execute(cli, ["instance", "list"], env).stdout;
         assert.match(instance, new RegExp(TESTSPACE_INSTANCE, "u"));
-        return { name, passed: true, version: candidateVersion, migration: "audit-2-to-3,context-1-to-2,comment-1-to-2,agent-json-to-sqlite" };
+        return { name, passed: true, version: candidateVersion, migration: "audit-2-to-3,context-1-to-2,comment-1-to-3,agent-json-to-sqlite" };
     } finally {
         if (started && existsSync(cli)) execute(cli, ["stop"], env, { allowFailure: true });
         await stopLeftoverTestWorker(

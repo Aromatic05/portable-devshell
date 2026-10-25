@@ -58,11 +58,12 @@ test("MCP App closes all installed assets and Live routes and remains idempotent
     const route = new McpAppRoute(port.http, runtime(), contexts, "https://example.test/prefix/");
     route.register("first");
     route.register("second");
-    assert.equal(port.routes().length, 18);
+    assert.equal(port.routes().length, 22);
     assert.equal(port.routes().filter((name) => name.includes("/activity")).length, 4);
+    assert.equal(port.routes().filter((name) => name.includes("/timeline")).length, 4);
     assert.equal(port.routes().filter((name) => name.includes("/image")).length, 4);
     route.unregister("first");
-    assert.equal(port.routes().length, 10);
+    assert.equal(port.routes().length, 12);
     route.close();
     route.close();
     assert.deepEqual(port.routes(), []);

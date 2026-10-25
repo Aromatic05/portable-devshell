@@ -207,8 +207,9 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         }
         const tools = await request("tools/list");
         const bootstrap = tools.result?.tools?.find((tool) => tool.name === "environ_info");
-        assert.equal(bootstrap?._meta?.ui?.resourceUri,
-            mcpAppToolCallResourceUri + "?widgetRevision=1&toolName=environ_info");
+        // Default ToolCall presentation is read from the Workspace timeline;
+        // the Inline asset remains a resource but is not bound by default.
+        assert.equal(bootstrap?._meta?.ui?.resourceUri, undefined);
         // This minimal HTTP host only registers environ_info. The full MCP
         // catalog's model-facing open binding is verified separately.
         assert.equal(tools.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);

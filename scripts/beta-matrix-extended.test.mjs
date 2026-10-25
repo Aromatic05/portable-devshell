@@ -12,7 +12,9 @@ test("extended beta verification is explicit, not a pull request gate", () => {
 });
 
 test("extended Testspace commands use private root and always attempt shutdown", () => {
-    assert.match(workflow, /DEVSHELL_TESTSPACE_ROOT:\s*\$\{\{ runner\.temp \}\}\/beta-matrix-/u);
+    assert.match(workflow, /DEVSHELL_TESTSPACE_ROOT=\$RUNNER_TEMP\/beta-matrix-\$GITHUB_RUN_ID-\$GITHUB_RUN_ATTEMPT/u);
+    assert.match(workflow, />> "\$GITHUB_ENV"/u);
+    assert.doesNotMatch(workflow, /DEVSHELL_TESTSPACE_ROOT:\s*\$\{\{ runner\.temp \}\}/u);
     for (const subcommand of [
         "upgrade-smoke", "extension-smoke", "workflow-smoke", "approval-smoke", "mailing-smoke", "recovery-smoke", "retirement-smoke",
     ]) assert.ok(workflow.includes("pnpm testspace " + subcommand));
