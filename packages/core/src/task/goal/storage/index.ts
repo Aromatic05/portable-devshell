@@ -40,7 +40,7 @@ export class GoalCommitError extends RemoteError {
 export class GoalStore {
     readonly #activityHydrated = new Set<string>();
     readonly #activityStore: GoalActivityStore;
-    #activityAvailable = true;
+    readonly #structuralHashes = new Map<string, string>();
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: GoalState;
@@ -82,8 +82,6 @@ export class GoalStore {
     }
 
     writeActivity(record: GoalRecord): void {
-        if (!this.#activityAvailable)
-            throw new Error("Goal activity sidecar is unavailable.");
         const current = this.#current();
         const index = current.goals.findIndex(
             (goal) => goal.goalId === record.goalId,
@@ -92,15 +90,13 @@ export class GoalStore {
             throw new Error(
                 `Workspace Goal ${record.goalId} is no longer stored.`,
             );
-        try {
-            this.#activityStore.write(record.goalId, {
-                ...goalActivity(record),
-                structureHash: goalStructureHash(current.goals[index]!),
-            });
-        } catch (error) {
-            this.#activityAvailable = false;
-            throw error;
-        }
+        const structureHash = this.#structuralHashes.get(record.goalId);
+        if (structureHash === undefined)
+            throw new Error(`Workspace Goal ${record.goalId} has no structural generation.`);
+        this.#activityStore.write(record.goalId, {
+            ...goalActivity(record),
+            structureHash,
+        });
         current.goals[index] = structuredClone(record);
         this.#activityHydrated.add(record.goalId);
     }
@@ -114,6 +110,7 @@ export class GoalStore {
         this.#pruneActivity(stored);
         this.#activityHydrated.clear();
         this.#document = stored;
+        this.#rememberStructure(stored);
         this.#pendingCommit = undefined;
         if (isDeepStrictEqual(stored, pending.document))
             await pending.onCommitted?.();
@@ -140,6 +137,7 @@ export class GoalStore {
         this.#pruneActivity(normalized);
         this.#activityHydrated.clear();
         this.#document = normalized;
+        this.#rememberStructure(normalized);
         await onCommitted?.();
         if (failure !== undefined) throw failure;
         return structuredClone(normalized);
@@ -150,19 +148,17 @@ export class GoalStore {
         const pending = document.goals.filter(
             (goal) => !this.#activityHydrated.has(goal.goalId),
         );
-        if (pending.length === 0 || !this.#activityAvailable) return;
-        let activities: Map<string, GoalActivityRecord>;
-        try {
-            activities = this.#activityStore.readAll();
-        } catch {
-            this.#activityAvailable = false;
-            return;
-        }
+        if (pending.length === 0) return;
+        // A missing SQLite heartbeat is not proof that execution has been
+        // idle. Surface the read error; the next read retries the sidecar.
+        const activities = this.#activityStore.readAll();
         for (const goal of pending) {
             const activity = activities.get(goal.goalId);
             // Structural progress may have committed after the last sidecar
             // heartbeat. Never replace that newer state with a stale row.
-            if (activity !== undefined && shouldHydrateActivity(goal, activity))
+            if (activity !== undefined && shouldHydrateActivity(
+                goal, activity, this.#structuralHashes.get(goal.goalId),
+            ))
                 applyGoalActivity(goal, activity);
             this.#activityHydrated.add(goal.goalId);
         }
@@ -174,20 +170,13 @@ export class GoalStore {
         );
         if (
             goal === undefined ||
-            this.#activityHydrated.has(goal.goalId) ||
-            !this.#activityAvailable
+            this.#activityHydrated.has(goal.goalId)
         )
             return;
-        let activity: GoalActivityRecord | undefined;
-        try {
-            activity = this.#activityStore.read(goal.goalId);
-        } catch {
-            this.#activityAvailable = false;
-            return;
-        }
+        const activity = this.#activityStore.read(goal.goalId);
         if (
             activity !== undefined &&
-            shouldHydrateActivity(goal, activity)
+            shouldHydrateActivity(goal, activity, this.#structuralHashes.get(goal.goalId))
         ) {
             applyGoalActivity(goal, activity);
         }
@@ -224,6 +213,7 @@ export class GoalStore {
         if (this.#document === undefined) {
             cleanupStaleAtomicStateTemps(this.#filePath);
             this.#document = this.#load();
+            this.#rememberStructure(this.#document);
         }
         return this.#document;
     }
@@ -231,6 +221,13 @@ export class GoalStore {
     #invalidate(): void {
         this.#document = undefined;
         this.#activityHydrated.clear();
+        this.#structuralHashes.clear();
+    }
+
+    #rememberStructure(document: GoalDocument): void {
+        this.#structuralHashes.clear();
+        for (const goal of document.goals)
+            this.#structuralHashes.set(goal.goalId, goalStructureHash(goal));
     }
 
     #load(): GoalDocument {
@@ -310,16 +307,28 @@ function applyGoalActivity(
     record.noActionStreak = activity.noActionStreak;
 }
 
-function shouldHydrateActivity(goal: GoalRecord, activity: GoalActivityRecord): boolean {
+function shouldHydrateActivity(
+    goal: GoalRecord,
+    activity: GoalActivityRecord,
+    structuralHash: string | undefined,
+): boolean {
     if (goal.status !== "active") return false;
-    // A matching structural generation establishes causality even for events
-    // in the same millisecond or after a wall-clock adjustment.
-    return activity.structureHash === undefined
-        ? activity.lastAgentActivityAt > goal.lastAgentActivityAt
-        : activity.structureHash === goalStructureHash(goal);
+    if (activity.structureHash === structuralHash && structuralHash !== undefined)
+        return true;
+    // A previous Sidecar version hashed only non-activity fields. Accept an
+    // old heartbeat only when the clock proves that it followed the JSON.
+    // An old equal/earlier timestamp cannot safely override newer JSON.
+    return (activity.structureHash === undefined ||
+        activity.structureHash === legacyGoalStructureHash(goal)) &&
+        activity.lastAgentActivityAt > goal.lastAgentActivityAt;
 }
 
 function goalStructureHash(record: GoalRecord): string {
+    const canonical = Object.entries(record).sort(([a], [b]) => a.localeCompare(b));
+    return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function legacyGoalStructureHash(record: GoalRecord): string {
     const { lastAgentActivityAt: _activity, lastExecutionAt: _execution,
         noActionStreak: _streak, ...structure } = record;
     const canonical = Object.entries(structure).sort(([a], [b]) => a.localeCompare(b));

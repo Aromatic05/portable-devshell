@@ -214,10 +214,12 @@ test("GoalService falls back to structural persistence when the activity sidecar
     now += 1_000;
     await service.touch("ctx-goal", "execution");
     assert.notEqual(await readFile(filePath, "utf8"), before);
-    assert.equal(
-        (await service.read("ctx-goal"))?.lastExecutionAt,
-        "2026-09-05T12:00:01.000Z",
-    );
+    // The structural fallback is durable, but an unreadable Sidecar cannot
+    // establish whether a more recent execution was recorded there.
+    // A Goal read must not silently declare automatic continuation due.
+    const stored = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(stored.goals[0].lastExecutionAt, "2026-09-05T12:00:01.000Z");
+    await assert.rejects(service.read("ctx-goal"), /not a database/u);
 });
 
 test("concurrent Goal claims have one owner and a persisted human pause prevents reacquisition", async () => {

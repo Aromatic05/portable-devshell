@@ -67,6 +67,62 @@ test("wall-clock rollback does not discard later Activity writes", async () => {
     assert.equal((await new GoalService(options).read("ctx-a"))?.lastExecutionAt, now);
 });
 
+test("transient Sidecar read failure never declares an overdue Goal and recovers in the same service", {
+    skip: process.platform === "win32",
+}, async (t) => {
+    const root = await createTestTempDirectory("goal-sidecar-recovery-");
+    const filePath = join(root, "goals.json");
+    const sidecar = join(root, "goals.activity.sqlite3");
+    let now = "2026-10-25T00:00:00.000Z";
+    const options = {
+        filePath, instanceName: "alpha", appendEvent: async () => undefined,
+        state: new GoalState({ now: () => now }),
+    };
+    const initial = new GoalService(options);
+    await initial.manage("ctx-a", { action: "start", objective: "Do not resume early" });
+    now = "2026-10-25T00:00:30.000Z";
+    await initial.touch("ctx-a", "execution");
+    now = "2026-10-25T00:01:05.000Z";
+    await fs.promises.chmod(sidecar, 0);
+    t.after(async () => await fs.promises.chmod(sidecar, 0o600));
+    const recovered = new GoalService(options);
+    await assert.rejects(recovered.read("ctx-a"), /unable to open database|permission|SQLITE_CANTOPEN/ui);
+    await fs.promises.chmod(sidecar, 0o600);
+    const goal = await recovered.read("ctx-a");
+    assert.equal(goal?.lastExecutionAt, "2026-10-25T00:00:30.000Z");
+    assert.equal(goal?.continuationDue, false);
+    assert.equal(goal?.continuationDueAt, "2026-10-25T00:01:30.000Z");
+});
+
+test("a structural fallback heartbeat is not overwritten by older Sidecar activity after recovery", {
+    skip: process.platform === "win32",
+}, async (t) => {
+    const root = await createTestTempDirectory("goal-fallback-causality-");
+    const filePath = join(root, "goals.json");
+    const sidecar = join(root, "goals.activity.sqlite3");
+    let now = "2026-10-25T00:00:00.000Z";
+    const options = {
+        filePath, instanceName: "alpha", appendEvent: async () => undefined,
+        state: new GoalState({ now: () => now }),
+    };
+    const service = new GoalService(options);
+    await service.manage("ctx-a", { action: "start", objective: "Structural fallback wins" });
+    now = "2026-10-25T00:00:10.000Z";
+    await service.touch("ctx-a", "execution");
+    await fs.promises.chmod(sidecar, 0);
+    t.after(async () => await fs.promises.chmod(sidecar, 0o600));
+    now = "2026-10-25T00:00:20.000Z";
+    await service.touch("ctx-a", "execution");
+    await fs.promises.chmod(sidecar, 0o600);
+    const restored = new GoalService(options);
+    assert.equal((await restored.read("ctx-a"))?.lastExecutionAt, now);
+    assert.equal((await service.read("ctx-a"))?.lastExecutionAt, now);
+    now = "2026-10-25T00:00:21.000Z";
+    await service.touch("ctx-a", "execution");
+    assert.equal((await new GoalService(options).read("ctx-a"))?.lastExecutionAt, now,
+        "Sidecar must become writable again after a transient failure");
+});
+
 test("older Activity SQLite tables are upgraded without discarding rows", async () => {
     const root = await createTestTempDirectory("goal-activity-schema-");
     const filePath = join(root, "goals.json");
