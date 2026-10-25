@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const CURRENT_DEVELOPMENT_VERSION = "1.0.0-beta.2"; // version-state:current-development
+const CURRENT_DEVELOPMENT_VERSION = "1.0.0-beta.3"; // version-state:current-development
 
 test("install-local prepares Worker payloads and rollback aliases before Control shutdown", async () => {
     const source = await readFile(resolve(repositoryRoot, "scripts", "install-local.mjs"), "utf8");
