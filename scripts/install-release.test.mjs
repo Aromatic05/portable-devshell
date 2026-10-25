@@ -393,7 +393,8 @@ test(
 );
 
 test("Unix release installer stages workers and backs up aliases before shutdown, then atomically switches links", async () => {
-    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.sh"), "utf8");
+    const source = (await readFile(resolve(repositoryRoot, "scripts", "install-release.sh"), "utf8"))
+        .replace(/\r\n/gu, "\n");
     const workerPreparation = source.indexOf('    prepare_worker "$target"');
     const backupPreparation = source.indexOf("\nbackup_worker_aliases\n", workerPreparation);
     const shutdown = source.indexOf('if ! stop_installed_control "$current_cli"; then', backupPreparation);
