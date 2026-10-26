@@ -181,7 +181,7 @@ describe("authenticated application shell", () => {
             await screen.findByRole("heading", { name: "Overview" }),
         ).toBeInTheDocument();
         await waitFor(() => expect(createDomains).toHaveBeenCalledOnce());
-        expect(request).toHaveBeenCalledOnce();
+        expect(request).toHaveBeenCalledTimes(2);
     });
 
     it("boots auth=none anonymously before creating domains", async () => {
@@ -200,6 +200,30 @@ describe("authenticated application shell", () => {
         ).toBeInTheDocument();
         expect(session.establish).toHaveBeenCalledWith();
         expect(createDomains).toHaveBeenCalledOnce();
+    });
+
+    it("hides logout for an already authenticated auth=none session using the runtime mode", async () => {
+        const session = fakeSession({ authMode: "none", check: true });
+        const domains = new WebTestDomains();
+        // The saved config can differ from the currently running auth mode.
+        domains.setConfig({ web: { auth: "token" } });
+        render(<App createDomains={() => domains.domains} session={session} />);
+        await screen.findByRole("heading", { name: "Overview" });
+        expect(session.authMode).toHaveBeenCalledOnce();
+        expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+    });
+
+    it("offers anonymous recovery when auth=none session establishment fails", async () => {
+        const session = fakeSession({ authMode: "none", check: false, establish: false });
+        const domains = new WebTestDomains();
+        render(<App createDomains={() => domains.domains} session={session} />);
+        const reconnect = await screen.findByRole("button", { name: "Reconnect" });
+        expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+        session.establish.mockResolvedValueOnce(true);
+        fireEvent.click(reconnect);
+        await screen.findByRole("heading", { name: "Overview" });
+        expect(session.establish).toHaveBeenLastCalledWith(undefined);
     });
 
     it("shows token login without submitting an empty bearer token", async () => {
@@ -313,6 +337,31 @@ describe("authenticated application shell", () => {
         await waitFor(() => expect(session.logout).toHaveBeenCalledOnce());
     });
 
+    it("keeps OAuth logged out until the user chooses to sign in again", async () => {
+        const session = fakeSession({ authMode: "oauth2", check: true });
+        const domains = new WebTestDomains();
+        render(<App createDomains={() => domains.domains} session={session} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+        const signin = await screen.findByRole("button", { name: "Continue with OAuth" });
+        expect(session.startOAuth).not.toHaveBeenCalled();
+        expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+        fireEvent.click(signin);
+        await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
+    });
+
+    it("restores anonymously if the actual mode changes to none before logout", async () => {
+        const session = fakeSession({ authMode: "token", check: true, establish: true });
+        const domains = new WebTestDomains();
+        render(<App createDomains={() => domains.domains} session={session} />);
+        const logout = await screen.findByRole("button", { name: "Log out" });
+        session.authMode.mockResolvedValueOnce("none");
+        fireEvent.click(logout);
+        await waitFor(() => expect(session.establish).toHaveBeenCalledWith());
+        await screen.findByRole("heading", { name: "Overview" });
+        expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+    });
+
     it("returns to login when reconnect finds an expired session", async () => {
         const session = fakeSession({ check: true });
         const domains = new WebTestDomains();
@@ -346,7 +395,7 @@ describe("authenticated application shell", () => {
         session.check.mockResolvedValue(false);
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
         await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
-        expect(session.authMode).toHaveBeenCalledOnce();
+        expect(session.authMode).toHaveBeenCalledTimes(2);
         expect(session.establish).not.toHaveBeenCalled();
         expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
         expect(close).toHaveBeenCalledOnce();

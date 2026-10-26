@@ -213,3 +213,18 @@ it("reconnect cancels validation with its real reason; retry succeeds and the de
     expect(screen.getByText("Configuration is valid.")).toBeInTheDocument(); expect(store.state.error).toBeUndefined();
     expect(retention()).toHaveValue(30);
 });
+
+it("keeps the trailing comma while typing model extensions and persists both entries", async () => {
+    const { domains } = setupConfig();
+    const update = vi.spyOn(domains.config, "update");
+    const extensions = screen.getByRole("textbox", { name: "Model extensions" });
+    fireEvent.change(extensions, { target: { value: "instance," } });
+    expect(extensions).toHaveValue("instance,");
+    fireEvent.change(extensions, { target: { value: "instance,comment" } });
+    fireEvent.blur(extensions);
+    expect(extensions).toHaveValue("instance, comment");
+    fireEvent.click(screen.getByRole("button", { name: "Save Only" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        instance: expect.objectContaining({ patch: expect.objectContaining({ extensions: { model: ["instance", "comment"] } }) }),
+    })));
+});

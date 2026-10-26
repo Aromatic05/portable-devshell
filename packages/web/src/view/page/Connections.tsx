@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { generateOAuth2ApprovalToken } from "@portable-devshell/shared";
 import type {
     ConfigDraft,
@@ -13,6 +13,7 @@ import type {
 
 import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
+import { ListInput } from "../component/ListInput.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 import { useNow } from "../Clock.js";
 import { formatDuration } from "../Presentation.js";
@@ -52,7 +53,15 @@ export function Connections({
         () => connectionDrafts(configView, selectedName),
         [configView, selectedName],
     );
-    const [drafts, setDrafts] = useState<ConnectionDrafts>(base);
+    const baseText = JSON.stringify(base);
+    const [editor, setEditor] = useState({ baseline: baseText, drafts: base });
+    const drafts = editor.drafts;
+    function setDrafts(value: ConnectionDrafts | ((current: ConnectionDrafts) => ConnectionDrafts)): void {
+        setEditor((current) => ({ ...current, drafts: typeof value === "function" ? value(current.drafts) : value }));
+    }
+    const [saving, setSaving] = useState(false);
+    const working = useRef(false);
+    const operations = useSyncExternalStore(store.subscribe, () => store.state.operations, () => store.state.operations);
     const [feedback, setFeedback] = useState<{
         kind: "error" | "success";
         text: string;
@@ -64,11 +73,15 @@ export function Connections({
     const [restartingControl, setRestartingControl] = useState(false);
 
     useEffect(() => {
-        setDrafts(base);
+        setEditor({ baseline: baseText, drafts: base });
         setFeedback(undefined);
         setEnrollment(undefined);
         setCopyFeedback(undefined);
-    }, [base]);
+    }, [selectedName]);
+    useEffect(() => {
+        setEditor((current) => JSON.stringify(current.drafts) === current.baseline
+            ? { baseline: baseText, drafts: base } : current);
+    }, [baseText]);
 
     const selectedEntry = instances.find(
         (entry) => entry.name === selectedName,
@@ -82,8 +95,9 @@ export function Connections({
               instancesState.instances.find(
                   (entry) => entry.name === selectedName,
               )?.snapshot);
-    const dirty = JSON.stringify(drafts) !== JSON.stringify(base);
-    const pending = store.state.operations["config:update"] !== undefined;
+    const dirty = JSON.stringify(drafts) !== editor.baseline;
+    const conflict = dirty && editor.baseline !== baseText;
+    const pending = saving || operations["config:update"] !== undefined || operations["config:validate"] !== undefined;
     const interactive = server.status === "online" && !disabled && !pending;
     const mcpStatus = mcp.status;
     const oauthApproval = globalOAuthApproval(configView);
@@ -166,37 +180,50 @@ export function Connections({
     }
 
     async function save(): Promise<void> {
-        if (!(await validate())) return;
-        const succeeded = await store.updateConfig({
-            ...(selectedName === undefined
-                ? {}
-                : {
-                      instance: {
-                          instanceName: selectedName,
-                          patch: { mcp: drafts.instanceMcp },
-                      },
-                  }),
-            mcp: drafts.mcp,
-            web: drafts.web,
-        });
-        if (!succeeded) {
-            setFeedback({
-                kind: "error",
-                text:
-                    store.state.error ??
-                    "Connection configuration could not be saved.",
+        if (!interactive || working.current || conflict) return;
+        working.current = true;
+        setSaving(true);
+        try {
+            if (!(await validate())) return;
+            if (JSON.stringify(connectionDrafts(domains.config.state.view, selectedName)) !== baseText) {
+                setFeedback({ kind: "error", text: "Connection settings changed during validation. Your draft was not saved. Cancel to load the latest settings." });
+                return;
+            }
+            const succeeded = await store.updateConfig({
+                ...(selectedName === undefined
+                    ? {}
+                    : {
+                          instance: {
+                              instanceName: selectedName,
+                              patch: { mcp: drafts.instanceMcp },
+                          },
+                      }),
+                mcp: drafts.mcp,
+                web: drafts.web,
             });
-            return;
+            if (!succeeded) {
+                setFeedback({
+                    kind: "error",
+                    text:
+                        store.state.error ??
+                        "Connection configuration could not be saved.",
+                });
+                return;
+            }
+            const savedView = domains.config.state.view;
+            const savedDrafts = connectionDrafts(savedView, selectedName);
+            setEditor({ baseline: JSON.stringify(savedDrafts), drafts: savedDrafts });
+            setFeedback({
+                kind: "success",
+                text:
+                    savedView?.restartControlRequired === true
+                        ? "Saved. Restart Control to apply endpoint changes."
+                        : "Connection configuration saved.",
+            });
+        } finally {
+            working.current = false;
+            setSaving(false);
         }
-        const savedView = domains.config.state.view;
-        setDrafts(connectionDrafts(savedView, selectedName));
-        setFeedback({
-            kind: "success",
-            text:
-                savedView?.restartControlRequired === true
-                    ? "Saved. Restart Control to apply endpoint changes."
-                    : "Connection configuration saved.",
-        });
     }
 
     return (
@@ -211,6 +238,7 @@ export function Connections({
                 </div>
             </div>
 
+            <fieldset disabled={!interactive} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <div className="control-grid">
                 <article className="card connection-status-card">
                     <h3>Connection endpoints</h3>
@@ -440,8 +468,11 @@ export function Connections({
                 </article>
             </div>
 
+            </fieldset>
+
             <article className="detail connection-actions">
                 <h3>Configuration actions</h3>
+                {conflict ? <p role="alert">Connection settings changed on the server. Your unsaved draft is preserved. Cancel to load the latest settings before editing again.</p> : null}
                 {feedback === undefined ? null : (
                     <p
                         className={
@@ -455,7 +486,7 @@ export function Connections({
                 <div className="actions">
                     <button
                         disabled={!interactive || !dirty}
-                        onClick={() => setDrafts(base)}
+                        onClick={() => { setEditor({ baseline: baseText, drafts: base }); setFeedback(undefined); }}
                         type="button"
                     >
                         Cancel
@@ -469,7 +500,7 @@ export function Connections({
                     </button>
                     <button
                         className="primary"
-                        disabled={!interactive || !dirty}
+                        disabled={!interactive || !dirty || conflict}
                         onClick={() => void save()}
                         type="button"
                     >
@@ -761,15 +792,13 @@ function AuthFields({
                         />
                     </Field>
                     <Field label="OAuth scopes">
-                        <input
-                            onChange={(event) =>
+                        <ListInput
+                            onChange={(raw) =>
                                 onChange({
                                     oauth2: {
                                         documentationUrl:
                                             oauth2?.documentationUrl,
-                                        requiredScopes: splitList(
-                                            event.target.value,
-                                        ),
+                                        requiredScopes: splitList(raw),
                                         resourceName:
                                             oauth2?.resourceName ?? "",
                                     },

@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -8,6 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { asInstanceName, type ConfigView } from "@portable-devshell/shared";
 
+import { deferred } from "../../support/BetaMatrixHarness.js";
 import { Connections } from "../../../src/view/page/Connections.js";
 import { WebStore } from "../../../src/state/Store.js";
 import { WebTestDomains, withWebDomains } from "../../support/DomainHarness.js";
@@ -86,6 +88,98 @@ describe("Web Connections", () => {
         expect(
             screen.getByRole("button", { name: "Restart Control" }),
         ).toBeEnabled();
+    });
+
+    it("locks all connection fields throughout Save validation and persists exactly the validated draft", async () => {
+        const { domains, store } = setup();
+        const validation = deferred<boolean>();
+        const validate = vi.spyOn(store, "validateConfig").mockReturnValue(validation.promise);
+        const persistence = deferred<boolean>();
+        const update = vi.spyOn(store, "updateConfig").mockReturnValue(persistence.promise);
+        renderConnections(store, domains, "reverse-one");
+        const card = screen.getByRole("heading", { name: "[Global] MCP listener" }).parentElement!;
+        const port = within(card).getByLabelText("Listen port");
+        fireEvent.change(port, { target: { value: "3200" } });
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        expect(port).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+        expect(update).not.toHaveBeenCalled();
+        await act(async () => validation.resolve(true));
+        await waitFor(() => expect(update).toHaveBeenCalledOnce());
+        expect(validate.mock.calls[0]![0].mcp).toEqual(expect.objectContaining({ listenPort: 3200 }));
+        expect(update.mock.calls[0]![0].mcp).toEqual(expect.objectContaining({ listenPort: 3200 }));
+        expect(port).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+        await act(async () => persistence.resolve(true));
+        await waitFor(() => expect(port).toBeEnabled());
+    });
+
+    it("preserves the draft and blocks a stale Save when server connection settings change during validation", async () => {
+        const { domains, store } = setup();
+        const validation = deferred<boolean>();
+        vi.spyOn(store, "validateConfig").mockReturnValue(validation.promise);
+        const update = vi.spyOn(store, "updateConfig");
+        renderConnections(store, domains, "reverse-one");
+        const card = screen.getByRole("heading", { name: "[Global] MCP listener" }).parentElement!;
+        const port = within(card).getByLabelText("Listen port");
+        fireEvent.change(port, { target: { value: "3200" } });
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        const server = connectionView();
+        server.mcp.listenPort = 3300;
+        act(() => domains.setConfig(server));
+        await act(async () => validation.resolve(true));
+        expect(update).not.toHaveBeenCalled();
+        expect(port).toHaveValue("3200");
+        expect(screen.getByText(/changed during validation/u)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(port).toHaveValue("3300");
+    });
+
+    it("preserves drafts through unrelated revisions and exposes relevant conflicts with a Cancel recovery", () => {
+        const { domains, store } = setup();
+        renderConnections(store, domains, "reverse-one");
+        const card = screen.getByRole("heading", { name: "[Global] MCP listener" }).parentElement!;
+        const port = within(card).getByLabelText("Listen port");
+        fireEvent.change(port, { target: { value: "3200" } });
+        const unrelated = connectionView();
+        unrelated.control.logLevel = "debug";
+        act(() => domains.setConfig(unrelated));
+        expect(port).toHaveValue("3200");
+        expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+        expect(screen.queryByText(/settings changed on the server/u)).not.toBeInTheDocument();
+        const changed = connectionView();
+        changed.mcp.listenPort = 3300;
+        act(() => domains.setConfig(changed));
+        expect(port).toHaveValue("3200");
+        expect(screen.getByRole("alert")).toHaveTextContent("Your unsaved draft is preserved");
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(port).toHaveValue("3300");
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        changed.mcp.listenPort = 3400;
+        act(() => domains.setConfig(structuredClone(changed)));
+        expect(port).toHaveValue("3400");
+    });
+
+    it("allows typing OAuth scopes a separator at a time and saves the parsed list", async () => {
+        const { domains, store } = setup();
+        const update = vi.spyOn(store, "updateConfig");
+        renderConnections(store, domains);
+        const card = screen.getByRole("heading", { name: "[Global] Web UI" }).parentElement!;
+        fireEvent.change(within(card).getByLabelText("Auth"), { target: { value: "oauth2" } });
+        fireEvent.change(within(card).getByLabelText("OAuth resource"), { target: { value: "web" } });
+        const scopes = within(card).getByLabelText("OAuth scopes");
+        fireEvent.change(scopes, { target: { value: "read" } });
+        fireEvent.change(scopes, { target: { value: "read," } });
+        expect(scopes).toHaveValue("read,");
+        fireEvent.change(scopes, { target: { value: "read,write" } });
+        fireEvent.blur(scopes);
+        expect(scopes).toHaveValue("read, write");
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
+            web: expect.objectContaining({ oauth2: expect.objectContaining({ requiredScopes: ["read", "write"] }) }),
+        })));
     });
 
     it("keeps OAuth approval controls out of Connections and exposes reverse enrollment and token actions", async () => {

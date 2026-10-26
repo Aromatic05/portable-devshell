@@ -1,9 +1,13 @@
 import { type FormEvent, useState } from "react";
 
+import type { WebAuthMode } from "./Session.js";
+
 export function Login({
+    authMode,
     error,
     onLogin,
 }: {
+    authMode?: WebAuthMode;
     error?: string;
     onLogin(token: string): Promise<boolean>;
 }) {
@@ -19,6 +23,21 @@ export function Login({
         } finally {
             setSubmitting(false);
         }
+    }
+
+    if (authMode !== "token") {
+        return (
+            <main className="session">
+                <form onSubmit={(event) => void submit(event)}>
+                    <h1>portable-devshell</h1>
+                    <p>{authMode === "none" ? "Authentication is disabled. Reconnect to restore this session." : "Retry connecting to the Web UI."}</p>
+                    {error === undefined ? null : <p className="error" role="alert">{error}</p>}
+                    <button disabled={submitting} type="submit">
+                        {submitting ? "Connecting…" : authMode === "oauth2" ? "Continue with OAuth" : "Reconnect"}
+                    </button>
+                </form>
+            </main>
+        );
     }
 
     return (

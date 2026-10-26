@@ -10,6 +10,7 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
+import { ListInput } from "../component/ListInput.js";
 import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
 
@@ -510,15 +511,15 @@ export function Config({
                         <h3>Model & Security</h3>
                         <div className="form-grid">
                             <Field label="Model extensions" wide>
-                                <input
+                                <ListInput
                                     disabled={
                                         !interactive ||
                                         parsed.value === undefined
                                     }
-                                    onChange={(event) =>
+                                    onChange={(raw) =>
                                         updateDraft(
                                             "extensions.model",
-                                            splitList(event.target.value),
+                                            splitList(raw),
                                         )
                                     }
                                     value={stringListValue(

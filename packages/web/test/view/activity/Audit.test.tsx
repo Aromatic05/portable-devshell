@@ -14,6 +14,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { WebRoute } from "../../../src/app/Route.js";
 import { WebStore } from "../../../src/state/Store.js";
+import { deferred } from "../../support/BetaMatrixHarness.js";
+import { ContextBatchDisableDialog } from "../../../src/view/page/activity/audit/Context.js";
 import { Audit } from "../../../src/view/page/activity/audit/Page.js";
 import {
     WebTestDomains,
@@ -123,7 +125,7 @@ interface RenderAuditOptions {
     error?: string;
     instances?: readonly unknown[];
     logs?: Record<string, readonly unknown[]>;
-    navigate?: ReturnType<typeof vi.fn>;
+    navigate?: ReturnType<typeof vi.fn<(route: WebRoute) => void>>;
     operations?: Record<string, "pending">;
     route?: Extract<WebRoute, { page: "audit" }>;
     toolCalls?: Record<string, readonly unknown[]>;
@@ -175,6 +177,92 @@ function renderAudit({
 }
 
 describe("Audit", () => {
+    it("Refresh and Refresh all reread archived call details outside the instance preview", async () => {
+        const archived = { ...alphaCall, callId: "archived-call", output: { stdout: "Original archived output" } };
+        const read = vi.fn().mockResolvedValueOnce([archived])
+            .mockResolvedValueOnce([{ ...archived, output: { stdout: "Updated archived output" } }])
+            .mockResolvedValueOnce([{ ...archived, output: { stdout: "Refreshed all archived output" } }]);
+        renderAudit({
+            route: { page: "audit", view: "call", instance: "alpha", callId: "archived-call" },
+            configureDomains: (domains) => { Object.assign(domains.toolCalls, { readDetail: read }); },
+        });
+        await screen.findByText(/Original archived output/u);
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await screen.findByText(/Updated archived output/u);
+        expect(read).toHaveBeenCalledTimes(2);
+        fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+        await screen.findByText(/Refreshed all archived output/u);
+        expect(read).toHaveBeenCalledTimes(3);
+        expect(read).toHaveBeenLastCalledWith("alpha", "archived-call");
+    });
+
+    it.each([false, true])("fences an old Context refresh after navigation (return to A: %s)", async (returnToA) => {
+        const request = deferred<void>();
+        const view = renderAudit({ route: alphaContextRoute,
+            configure: (store) => { vi.spyOn(store, "refreshAudit").mockReturnValue(request.promise); },
+        });
+        const load = vi.spyOn(view.domains.toolCalls, "loadContext");
+        fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+        const b: Extract<WebRoute, { page: "audit" }> = { page: "audit", view: "timeline",
+            scope: { kind: "context", instance: "beta", ctxId: "ctx-beta" } };
+        view.rerender(withWebDomains(view.domains, <Audit route={b} store={view.store} navigate={view.navigate} />));
+        const destination = returnToA ? alphaContextRoute : b;
+        view.rerender(withWebDomains(view.domains, <Audit route={destination} store={view.store} navigate={view.navigate} />));
+        const loadsBeforeCompletion = load.mock.calls.length;
+        await act(async () => request.resolve());
+        expect(load).toHaveBeenCalledTimes(loadsBeforeCompletion);
+        expect(view.domains.toolCalls.state.context?.instance).toBe(returnToA ? "alpha" : "beta");
+        expect(screen.getByRole("button", { name: "Refresh all" })).toBeEnabled();
+    });
+
+    it("does not reopen Context history when an old refresh finishes after Audit unmounts", async () => {
+        const request = deferred<void>();
+        const view = renderAudit({ route: alphaContextRoute,
+            configure: (store) => { vi.spyOn(store, "refreshAudit").mockReturnValue(request.promise); },
+        });
+        const load = vi.spyOn(view.domains.toolCalls, "loadContext");
+        fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+        view.unmount();
+        await act(async () => request.resolve());
+        expect(load).not.toHaveBeenCalled();
+        expect(view.domains.toolCalls.state.context).toBeUndefined();
+    });
+
+    it("traps Tab in batch disable selection, confirmation and busy states, then restores the opener", () => {
+        const close = vi.fn();
+        const now = Date.now();
+        const contexts = [{ ...baseContexts()[0]!, lastAccessedAt: new Date(now - 120 * 60_000).toISOString() }];
+        const opener = document.createElement("button");
+        document.body.append(opener);
+        opener.focus();
+        const view = render(<ContextBatchDisableDialog busy={false} contexts={contexts} now={now}
+            onClose={close} onDisable={vi.fn(async () => true)} />);
+        const dialog = screen.getByRole("dialog");
+        const first = within(dialog).getByRole("button", { name: "Close" });
+        expect(first).toHaveFocus();
+        fireEvent.click(within(dialog).getByRole("checkbox", { name: "Select ctx-alpha" }));
+        const last = within(dialog).getByRole("button", { name: "Review disable" });
+        last.focus();
+        fireEvent.keyDown(last, { key: "Tab" });
+        expect(first).toHaveFocus();
+        fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+        expect(last).toHaveFocus();
+        fireEvent.click(last);
+        expect(dialog).toHaveFocus();
+        fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+        expect(within(dialog).getByRole("button", { name: "Disable 1 Context" })).toHaveFocus();
+        view.rerender(<ContextBatchDisableDialog busy contexts={contexts} now={now}
+            onClose={close} onDisable={vi.fn(async () => true)} />);
+        expect(dialog).toHaveFocus();
+        fireEvent.keyDown(dialog, { key: "Tab" });
+        expect(dialog).toHaveFocus();
+        fireEvent.keyDown(dialog, { key: "Escape" });
+        expect(close).not.toHaveBeenCalled();
+        view.unmount();
+        expect(opener).toHaveFocus();
+        opener.remove();
+    });
+
     it("shows offline rather than an endless Context loading state when preview calls remain cached", () => {
         renderAudit({
             route: alphaContextRoute,

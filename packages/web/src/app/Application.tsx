@@ -9,6 +9,7 @@ import { PageSwitcher } from "../view/component/Navigation.js";
 import { PartialFailures } from "../view/component/Feedback.js";
 import { useHashRoute, type WebRoute } from "./Route.js";
 import type { WebStore } from "../state/Store.js";
+import type { WebAuthMode } from "./session/Session.js";
 import type { ApplicationBusy } from "./session/Hook.js";
 import { Audit } from "../view/page/activity/audit/Page.js";
 import { Instances } from "../view/page/Instances.js";
@@ -18,12 +19,14 @@ import { Goals } from "../view/page/Goals.js";
 import { ExtensionPage } from "../view/page/Extension.js";
 
 export function Application({
+    authMode,
     busy,
     error,
     store,
     onLogout,
     onReconnect,
 }: {
+    authMode?: WebAuthMode;
     busy?: ApplicationBusy;
     error?: string;
     store: WebStore;
@@ -33,6 +36,7 @@ export function Application({
     return (
         <WebDomainProvider domains={store.domains}>
             <ApplicationBody
+                authMode={authMode}
                 busy={busy}
                 error={error}
                 onLogout={onLogout}
@@ -44,12 +48,14 @@ export function Application({
 }
 
 function ApplicationBody({
+    authMode,
     busy,
     error,
     store,
     onLogout,
     onReconnect,
 }: {
+    authMode?: WebAuthMode;
     busy?: ApplicationBusy;
     error?: string;
     store: WebStore;
@@ -141,13 +147,13 @@ function ApplicationBody({
                         </button>
                     )}
                 </div>
-                <button
+                {authMode === undefined || authMode === "none" ? null : <button
                     className="header-logout"
                     disabled={busy !== undefined}
                     onClick={() => void onLogout()}
                 >
                     {busy === "logout" ? "Logging out…" : "Log out"}
-                </button>
+                </button>}
             </header>
             <main className={`page page-${route.page}`}>
                 <PartialFailures failures={failures} />

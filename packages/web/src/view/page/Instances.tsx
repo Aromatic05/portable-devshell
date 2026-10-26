@@ -168,6 +168,9 @@ export function Instances({
                             ))}
                         </div>
                     )}
+                    {instances.instances.length === 0 ? (
+                        <Connections disabled={disabled} store={store} />
+                    ) : null}
                     {entry === undefined ? null : (
                         <InstanceDetail
                             artifactActivity={artifactActivity}

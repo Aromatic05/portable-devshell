@@ -84,6 +84,11 @@ export const MessageHistory = memo(function MessageHistory({
                                     </span>
                                 ) : null}
                             </div>
+                            {entry.status === "failed" ? <div className="error" role="alert">
+                                <p>Delivery failed{entry.error === undefined ? "." : `: ${entry.error}`}</p>
+                                {entry.failedAt === undefined ? null : <time dateTime={entry.failedAt}>{formatMessageDate(entry.failedAt)}</time>}
+                                <p>Check that the Context is active and the instance is available before sending again. A disabled Context requires a new Context.</p>
+                            </div> : null}
                             {parsed.body.length === 0 ? null : (
                                 <p>{parsed.body}</p>
                             )}

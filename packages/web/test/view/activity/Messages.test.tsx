@@ -18,6 +18,7 @@ import {
 import type { WebRoute } from "../../../src/app/Route.js";
 import type { WebState } from "../../../src/state/Model.js";
 import { WebStore } from "../../../src/state/Store.js";
+import * as MessageExport from "../../../src/view/page/activity/messages/Export.js";
 import { buildMessageMarkdown } from "../../../src/view/page/activity/messages/Export.js";
 import { formatMessageDate } from "../../../src/view/page/activity/messages/message/History.js";
 import { Messages } from "../../../src/view/page/activity/messages/Page.js";
@@ -204,8 +205,109 @@ const threadRoute: Extract<WebRoute, { page: "messages" }> = {
 
 describe("Messages", () => {
     afterEach(() => {
+        vi.restoreAllMocks();
         localStorage.clear();
         vi.useRealTimers();
+    });
+
+    it("restores text and controls on A→B→A and protects a newer A draft from a late queue result", async () => {
+        const domains = twoActiveDomains();
+        const request = deferred<boolean>();
+        const queue = vi.fn(() => request.promise);
+        const store = messageStore({ queueContextMessage: queue });
+        const a = { ...threadRoute, ctxId: "ctx-first" };
+        const b = { ...threadRoute, ctxId: "ctx-second" };
+        const view = await renderMessages(domains, a, store);
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Draft A" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        fireEvent.click(screen.getByRole("button", { name: /^Push/u }));
+        fireEvent.click(screen.getByRole("button", { name: "Send Comment" }));
+        view.rerender(messagesElement(domains, b, store));
+        expect(screen.getByLabelText("Comment")).toHaveValue("");
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Draft B" } });
+        view.rerender(messagesElement(domains, a, store));
+        expect(screen.getByLabelText("Comment")).toHaveValue("Draft A");
+        expect(screen.getByText("#push")).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Newer A" } });
+        await act(async () => request.resolve(true));
+        expect(screen.getByLabelText("Comment")).toHaveValue("Newer A");
+        view.rerender(messagesElement(domains, b, store));
+        expect(screen.getByLabelText("Comment")).toHaveValue("Draft B");
+        view.rerender(messagesElement(domains, a, store));
+        expect(screen.getByLabelText("Comment")).toHaveValue("Newer A");
+        fireEvent.click(screen.getByRole("button", { name: "Send Comment" }));
+        await waitFor(() => expect(screen.getByLabelText("Comment")).toHaveValue(""));
+        expect(queue).toHaveBeenLastCalledWith("alpha", "ctx-first", "#push Newer A");
+        view.rerender(messagesElement(domains, b, store));
+        expect(screen.getByLabelText("Comment")).toHaveValue("Draft B");
+    });
+
+    it("clears a previous Load older failure on successful retry", async () => {
+        const domains = alphaDomains();
+        vi.spyOn(domains.messageHistory, "loadContext").mockImplementation(async (instance, ctxId) => {
+            domains.messageHistory.patch({ context: { instance, ctxId, entries: baseMessageEntries,
+                historyBefore: "comment-1", historyExhausted: false, loading: false } });
+        });
+        const older = vi.spyOn(domains.messageHistory, "loadOlderContext")
+            .mockRejectedValueOnce(new Error("Page temporarily unavailable"))
+            .mockResolvedValueOnce(1);
+        await renderMessages(domains, threadRoute, messageStore());
+        fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("Page temporarily unavailable");
+        fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));
+        await waitFor(() => expect(older).toHaveBeenCalledTimes(2));
+        expect(screen.queryByText("Page temporarily unavailable")).not.toBeInTheDocument();
+    });
+
+    it("labels a 400-message partial export in UI and Markdown, then includes the older page", async () => {
+        const domains = alphaDomains();
+        const entries = Array.from({ length: 400 }, (_, i) => ({ ...baseMessageEntries[0]!, id: `comment-${i}`, text: `Loaded ${i}` }));
+        vi.spyOn(domains.messageHistory, "loadContext").mockImplementation(async (instance, ctxId) => {
+            domains.messageHistory.patch({ context: { instance, ctxId, entries,
+                historyBefore: "comment-0", historyExhausted: false, loading: false } });
+        });
+        vi.spyOn(domains.messageHistory, "loadOlderContext").mockImplementation(async (instance, ctxId) => {
+            domains.messageHistory.patch({ context: { instance, ctxId,
+                entries: [{ ...baseMessageEntries[0]!, id: "oldest", text: "The missing oldest message" }, ...entries],
+                historyExhausted: true, loading: false } });
+            return 1;
+        });
+        const download = vi.spyOn(MessageExport, "downloadMarkdown").mockImplementation(() => undefined);
+        await renderMessages(domains, threadRoute, messageStore());
+        expect(screen.getByText(/Markdown export includes loaded messages only/u)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+        expect(download.mock.calls[0]![1]).toContain("Exported messages: 400");
+        expect(download.mock.calls[0]![1]).toContain("Earlier history may be missing");
+        expect(screen.getByRole("status")).toHaveTextContent("Exported 400 loaded messages only");
+        fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));
+        await waitFor(() => expect(screen.queryByRole("button", { name: "Load older Comments and Reports" })).not.toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+        expect(download.mock.calls[1]![1]).toContain("Exported messages: 401");
+        expect(download.mock.calls[1]![1]).toContain("The missing oldest message");
+        expect(download.mock.calls[1]![1]).not.toContain("Earlier history may be missing");
+        expect(screen.queryByText(/Markdown export includes loaded messages only/u)).not.toBeInTheDocument();
+    });
+
+    it("shows asynchronous delivery error and failure time after a Comment was queued", async () => {
+        const domains = alphaDomains();
+        const store = messageStore();
+        await renderMessages(domains, threadRoute, store);
+        fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Queued successfully" } });
+        fireEvent.click(screen.getByRole("button", { name: "Send Comment" }));
+        await screen.findByText("Message queued.");
+        const failedAt = "2026-09-02T10:02:00Z";
+        const failed = { ...baseMessageEntries[0]!, status: "failed",
+            text: "Queued successfully", error: "Context has been disabled", failedAt };
+        act(() => domains.messageHistory.patch({ context: {
+            ...domains.messageHistory.state.context, entries: [failed],
+        } }));
+        const error = within(screen.getByRole("log")).getByRole("alert");
+        expect(error).toHaveTextContent("Context has been disabled");
+        expect(error).toHaveTextContent("A disabled Context requires a new Context");
+        expect(error.querySelector("time")).toHaveAttribute("datetime", failedAt);
+        expect(selectWebMessageEntries(projection(domains), "alpha", "ctx-old-active")[0]).toEqual(expect.objectContaining({
+            error: "Context has been disabled", failedAt,
+        }));
     });
 
     it("reads Context history instead of the bounded Instance preview and offers older pages", async () => {
@@ -363,6 +465,7 @@ describe("Messages", () => {
         const domains = alphaDomains();
         expect(
             buildMessageMarkdown({
+                historyComplete: true,
                 ctxId: "ctx-old-active",
                 entries: selectWebMessageEntries(
                     projection(domains),
@@ -378,6 +481,8 @@ describe("Messages", () => {
                 "",
                 "- Instance: `alpha`",
                 "- Context: `ctx-old-active`",
+                "- Exported messages: 2",
+                "- Range: all loaded Context history.",
                 "",
                 "## You",
                 "",

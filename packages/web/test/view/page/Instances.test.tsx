@@ -565,3 +565,18 @@ function artifactTransfers() {
         },
     ];
 }
+
+it("exposes usable global Connections directly on the empty Instances page", async () => {
+    const { domains, store } = setup({ config: {
+        instances: [], mcp: { listenPort: 3100 }, web: { auth: "none", listenPort: 3101 },
+    } });
+    const update = vi.spyOn(store, "updateConfig");
+    renderInstances(domains, store);
+    const card = screen.getByRole("heading", { name: "[Global] Web UI" }).parentElement!;
+    fireEvent.change(within(card).getByLabelText("Listen port"), { target: { value: "3201" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        web: expect.objectContaining({ listenPort: 3201 }),
+    })));
+    expect(update.mock.calls[0]![0]).not.toHaveProperty("instance");
+});

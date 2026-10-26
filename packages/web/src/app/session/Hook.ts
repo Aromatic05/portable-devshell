@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 import type { WebDomainSession } from "../domain/Session.js";
 import { WebStore } from "../../state/Store.js";
-import type { WebSession } from "./Session.js";
+import type { WebAuthMode, WebSession } from "./Session.js";
 
 export type ApplicationBusy = "login" | "logout" | "reconnect";
 export type SessionState = "checking" | "login" | "ready";
 
 export interface WebApplicationSession {
+    authMode?: WebAuthMode;
     busy?: ApplicationBusy;
     error?: string;
     login(token: string): Promise<boolean>;
@@ -21,6 +22,7 @@ export function useWebApplicationSession(
     activeSession: WebSession,
     createDomains: () => WebDomainSession,
 ): WebApplicationSession {
+    const [authMode, setAuthMode] = useState<WebAuthMode>();
     const [sessionState, setSessionState] = useState<SessionState>("checking");
     const [store, setStore] = useState<WebStore>();
     const [storeContext, setStoreContext] = useState<{
@@ -43,6 +45,7 @@ export function useWebApplicationSession(
         setStoreContext(undefined);
         setError(undefined);
         setBusy(undefined);
+        setAuthMode(undefined);
         setSessionState("checking");
         void bootstrap();
         return () => {
@@ -57,11 +60,15 @@ export function useWebApplicationSession(
 
         async function bootstrap(): Promise<void> {
             try {
-                if (await activeSession.check()) {
+                const available = await activeSession.check();
+                const mode = await activeSession.authMode();
+                if (!current()) return;
+                setAuthMode(mode);
+                if (available) {
                     if (current()) activateStore(generation);
                     return;
                 }
-                await authenticate(current);
+                await authenticate(current, mode);
             } catch {
                 if (current()) {
                     setError("Unable to establish a session.");
@@ -71,10 +78,11 @@ export function useWebApplicationSession(
         }
     }, [activeSession, createDomains]);
 
-    async function authenticate(current: () => boolean): Promise<void> {
+    async function authenticate(current: () => boolean, knownMode?: WebAuthMode): Promise<void> {
         const generation = lifecycle.current;
-        const mode = await activeSession.authMode();
+        const mode = knownMode ?? await activeSession.authMode();
         if (!current()) return;
+        setAuthMode(mode);
         if (mode === "oauth2") {
             activeSession.startOAuth();
             return;
@@ -113,9 +121,20 @@ export function useWebApplicationSession(
         const request = (async () => {
             setBusy("login");
             try {
-                if (!(await activeSession.establish(token))) {
+                const mode = authMode ?? await activeSession.authMode();
+                if (lifecycle.current !== generation) return false;
+                setAuthMode(mode);
+                if (mode === "token" && token.length === 0) {
+                    setSessionState("login");
+                    return false;
+                }
+                if (mode === "oauth2") {
+                    activeSession.startOAuth();
+                    return false;
+                }
+                if (!(await activeSession.establish(mode === "none" ? undefined : token))) {
                     if (lifecycle.current === generation) {
-                        setError("Sign-in was not accepted.");
+                        setError(mode === "none" ? "Unable to restore the session. Retry reconnecting." : "Sign-in was not accepted.");
                     }
                     return false;
                 }
@@ -154,9 +173,15 @@ export function useWebApplicationSession(
                 discardStore();
                 setStore(undefined);
                 setError(undefined);
-                setSessionState("login");
+                setSessionState("checking");
+                const mode = await activeSession.authMode();
+                if (lifecycle.current !== generation) return;
+                setAuthMode(mode);
+                if (mode === "none") await authenticate(() => lifecycle.current === generation, mode);
+                else setSessionState("login");
             } catch (logoutError) {
                 if (lifecycle.current === generation) {
+                    if (storeRef.current === undefined) setSessionState("login");
                     setError(
                         logoutError instanceof Error
                             ? logoutError.message
@@ -231,6 +256,7 @@ export function useWebApplicationSession(
             storeContext?.session !== activeSession);
 
     return {
+        authMode,
         busy,
         error,
         login,

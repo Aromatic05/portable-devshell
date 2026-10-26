@@ -39,10 +39,11 @@ export function App({
         application.sessionState === "login" ||
         application.store === undefined
     ) {
-        return <Login error={application.error} onLogin={application.login} />;
+        return <Login authMode={application.authMode} error={application.error} onLogin={application.login} />;
     }
     return (
         <Application
+            authMode={application.authMode}
             busy={application.busy}
             error={application.error}
             onLogout={application.logout}

@@ -170,7 +170,7 @@ export class WebTestDomains {
                     this.messageHistory.state.context.ctxId === ctxId)
                     this.messageHistory.patch({ context: undefined });
             },
-            loadOlderContext: async () => 0,
+            loadOlderContext: async (_instance: string, _ctxId: string) => 0,
         },
     );
     readonly messagePreferences = Object.assign(

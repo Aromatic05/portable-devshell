@@ -1,11 +1,13 @@
 import type { WebMessageEntry } from "./Model.js";
 
 export function buildMessageMarkdown({
+    historyComplete,
     ctxId,
     entries,
     instance,
     title,
 }: {
+    historyComplete: boolean;
     ctxId: string;
     entries: readonly WebMessageEntry[];
     instance: string;
@@ -17,6 +19,11 @@ export function buildMessageMarkdown({
         `- Instance: \`${instance}\``,
         `- Context: \`${ctxId}\``,
     ];
+
+    lines.push(
+        `- Exported messages: ${entries.length}`,
+        historyComplete ? "- Range: all loaded Context history." : "- Range: loaded messages only. Earlier history may be missing.",
+    );
 
     for (const entry of entries) {
         lines.push(

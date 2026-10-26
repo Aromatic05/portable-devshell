@@ -70,6 +70,7 @@ export function Audit({
     const allApprovals = approvalSnapshots.approvals;
     const [review, setReview] = useState<ApprovalReviewSelection>();
     const routeKey = JSON.stringify(route);
+    const routeEpoch = useRef(0);
     useEffect(() => { setReview(undefined); }, [routeKey]);
     useEffect(() => {
         if (review === undefined) return;
@@ -84,6 +85,11 @@ export function Audit({
     const [toolCallPage, setToolCallPage] = useState(0);
     const [batchDisableOpen, setBatchDisableOpen] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    useEffect(() => {
+        routeEpoch.current += 1;
+        setRefreshing(false);
+        return () => { routeEpoch.current += 1; };
+    }, [routeKey]);
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [olderError, setOlderError] = useState<string>();
     const olderRequest = useRef(0);
@@ -282,14 +288,17 @@ export function Audit({
 
     async function refreshAll(): Promise<void> {
         if (!interactive || refreshing) return;
+        const epoch = routeEpoch.current;
         setRefreshing(true);
         approvalSnapshots.retry();
         try {
             await store.refreshAudit();
+            if (epoch !== routeEpoch.current) return;
+            if (route.view === "call") setDetailRetry((value) => value + 1);
             if (route.view === "timeline" && scope.kind === "context")
                 await domains.toolCalls.loadContext(scope.instance, scope.ctxId);
         } finally {
-            setRefreshing(false);
+            if (epoch === routeEpoch.current) setRefreshing(false);
         }
     }
 
@@ -469,9 +478,12 @@ export function Audit({
                                 )[0]
                             }
                             onLoadImage={domains.artifactTransport.readImage}
-                            onRefresh={async () =>
-                                await store.refreshToolCall(call.instance)
-                            }
+                            onRefresh={async () => {
+                                const epoch = routeEpoch.current;
+                                await store.refreshToolCall(call.instance);
+                                if (epoch === routeEpoch.current && route.view === "call" && inMemoryCall === undefined)
+                                    setDetailRetry((value) => value + 1);
+                            }}
                         />
                     ))}
                 </ol>

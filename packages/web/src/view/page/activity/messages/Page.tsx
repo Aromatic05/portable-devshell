@@ -10,7 +10,7 @@ import {
     useWebDomains,
 } from "../../../../app/domain/Context.js";
 import type { WebStore } from "../../../../state/Store.js";
-import { MessageComposer } from "./message/Composer.js";
+import { MessageComposer, type MessageDraft } from "./message/Composer.js";
 import { MessageHistory } from "./message/History.js";
 import { MessageSidebar } from "./message/Sidebar.js";
 import {
@@ -53,6 +53,7 @@ export function Messages({
     >(() => new Set());
     const drawerTriggerRef = useRef<HTMLButtonElement>(null);
     const preferenceOrderSyncRef = useRef(false);
+    const [drafts, setDrafts] = useState<Record<string, MessageDraft>>({});
     const [olderError, setOlderError] = useState<string>();
     const olderRequest = useRef(0);
 
@@ -277,6 +278,7 @@ export function Messages({
                                 <button type="button" disabled={selectedHistory.loading}
                                     onClick={() => {
                                         const request = ++olderRequest.current;
+                                        setOlderError(undefined);
                                         void domains.messageHistory.loadOlderContext(route.instance, route.ctxId)
                                             .catch((error: unknown) => {
                                                 if (request === olderRequest.current)
@@ -294,6 +296,12 @@ export function Messages({
                             threadKey={threadKey!}
                         />
                         <MessageComposer
+                            draft={drafts[threadKey!] ?? emptyDraft}
+                            onDraftChange={(update) => {
+                                const key = threadKey!;
+                                setDrafts((current) => ({ ...current, [key]: update(current[key] ?? emptyDraft) }));
+                            }}
+                            historyComplete={selectedHistory?.historyExhausted === true && selectedHistory.failure === undefined && !selectedHistory.loading}
                             entries={entries}
                             key={threadKey}
                             onActivity={() => setDrawerOpen(false)}
@@ -307,3 +315,5 @@ export function Messages({
         </section>
     );
 }
+
+const emptyDraft: MessageDraft = { text: "" };

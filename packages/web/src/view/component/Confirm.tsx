@@ -42,24 +42,7 @@ export function ConfirmationDialog({
             onCancel();
             return;
         }
-        if (event.key !== "Tab") return;
-        const controls = [cancelRef.current, confirmRef.current].filter(
-            (control): control is HTMLButtonElement => control !== null,
-        );
-        if (controls.length === 0) {
-            event.preventDefault();
-            dialogRef.current?.focus();
-            return;
-        }
-        const first = controls[0]!;
-        const last = controls[controls.length - 1]!;
-        if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-        }
+        trapDialogTab(event);
     }
 
     return (
@@ -133,4 +116,25 @@ const progressLabels: Record<string, string> = {
 
 function actionProgressLabel(actionLabel: string): string {
     return progressLabels[actionLabel] ?? `${actionLabel}…`;
+}
+
+/** Keep keyboard focus in the active dialog, including when all controls are disabled. */
+export function trapDialogTab(event: React.KeyboardEvent<HTMLElement>): void {
+    if (event.key !== "Tab") return;
+    const dialog = event.currentTarget;
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+    )).filter((control) => !control.hidden);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (first === undefined || last === undefined) {
+        event.preventDefault();
+        dialog.focus();
+    } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+        event.preventDefault();
+        first.focus();
+    }
 }

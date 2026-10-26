@@ -15,6 +15,8 @@ import {
 import { workspaceFolderName } from "../../../Presentation.js";
 
 export interface WebMessageEntry {
+    error?: string;
+    failedAt?: string;
     at: string;
     id: string;
     kind: "comment" | "report";
@@ -180,6 +182,8 @@ export function selectWebMessageEntries(
             id: `${entry.kind}:${entry.id}`,
             kind: entry.kind,
             ...(entry.status === undefined ? {} : { status: entry.status }),
+            error: entry.error,
+            failedAt: entry.failedAt,
             text: entry.text,
         }))
         .sort(

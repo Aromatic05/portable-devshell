@@ -13,7 +13,7 @@ import {
     useWebDomains,
 } from "../../../../app/domain/Context.js";
 import type { WebStore } from "../../../../state/Store.js";
-import { ConfirmationDialog } from "../../../component/Confirm.js";
+import { ConfirmationDialog, trapDialogTab } from "../../../component/Confirm.js";
 
 type InactivityPreset = "20" | "60" | "360" | "1440" | "custom";
 
@@ -87,10 +87,12 @@ export function ContextBatchDisableDialog({
     }, [selected.size]);
 
     useEffect(() => {
-        if (busy) dialogRef.current?.focus();
-    }, [busy]);
+        if (busy || confirming) dialogRef.current?.focus();
+        else closeRef.current?.focus();
+    }, [busy, confirming]);
 
     function keyDown(event: React.KeyboardEvent<HTMLElement>): void {
+        trapDialogTab(event);
         if (event.key !== "Escape" || busy) return;
         event.preventDefault();
         if (confirming) {

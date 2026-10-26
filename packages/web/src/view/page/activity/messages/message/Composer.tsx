@@ -19,13 +19,24 @@ import {
 } from "../Export.js";
 import type { WebMessageEntry } from "../Model.js";
 
+export interface MessageDraft {
+    text: string;
+    directive?: ContextMessageDirective;
+}
+
 export function MessageComposer({
+    draft: messageDraft,
+    onDraftChange,
+    historyComplete,
     entries,
     onActivity,
     route,
     store,
     title,
 }: {
+    draft: MessageDraft;
+    onDraftChange(update: (draft: MessageDraft) => MessageDraft): void;
+    historyComplete: boolean;
     entries: readonly WebMessageEntry[];
     onActivity(): void;
     route: Extract<WebRoute, { page: "messages"; view: "thread" }>;
@@ -37,9 +48,8 @@ export function MessageComposer({
         () => store.state.operations,
         () => store.state.operations,
     );
-    const [draft, setDraft] = useState("");
-    const [messageDirective, setMessageDirective] =
-        useState<ContextMessageDirective>();
+    const draft = messageDraft.text;
+    const messageDirective = messageDraft.directive;
     const [controlMenuOpen, setControlMenuOpen] = useState(false);
     const [feedback, setFeedback] = useState<{
         kind: "error" | "success";
@@ -76,6 +86,7 @@ export function MessageComposer({
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
+        const submittedDraft = messageDraft;
         const submittedRevision = draftRevision.current;
         const text = composeMessageText(messageDirective, draft);
         if (text.length === 0) return;
@@ -87,8 +98,7 @@ export function MessageComposer({
         );
         if (queued && draftRevision.current !== submittedRevision) return;
         if (queued) {
-            setDraft("");
-            setMessageDirective(undefined);
+            onDraftChange((current) => current === submittedDraft ? { text: "" } : current);
             setControlMenuOpen(false);
             setFeedback({ kind: "success", text: "Message queued." });
             const textarea = textareaRef.current;
@@ -109,8 +119,12 @@ export function MessageComposer({
                 entries,
                 instance: route.instance,
                 title,
+                historyComplete,
             }),
         );
+        setFeedback({ kind: "success", text: historyComplete
+            ? `Exported ${entries.length} loaded messages.`
+            : `Exported ${entries.length} loaded messages only. Earlier history may be missing; load older messages before exporting again.` });
     }
 
     const operation = `context-message:${route.instance}:${route.ctxId}`;
@@ -127,7 +141,7 @@ export function MessageComposer({
                             aria-label="Remove message control"
                             onClick={() => {
                                 draftRevision.current += 1;
-                                setMessageDirective(undefined);
+                                onDraftChange((current) => ({ ...current, directive: undefined }));
                             }}
                             type="button"
                         >
@@ -158,7 +172,7 @@ export function MessageComposer({
                                 key={option.directive}
                                 onClick={() => {
                                     draftRevision.current += 1;
-                                    setMessageDirective(option.directive);
+                                    onDraftChange((current) => ({ ...current, directive: option.directive }));
                                     setControlMenuOpen(false);
                                 }}
                                 type="button"
@@ -180,7 +194,8 @@ export function MessageComposer({
                     onActivity();
                     setFeedback(undefined);
                     draftRevision.current += 1;
-                    setDraft(event.target.value);
+                    const text = event.target.value;
+                    onDraftChange((current) => ({ ...current, text }));
                     growComposerTextarea(event.target);
                 }}
                 onFocus={onActivity}
@@ -203,7 +218,7 @@ export function MessageComposer({
                 aria-label="Export Markdown"
                 className="messages-export"
                 onClick={exportMarkdown}
-                title="Export Markdown"
+                title={historyComplete ? "Export Markdown" : "Export loaded messages only; earlier history may be missing"}
                 type="button"
             >
                 ↓
@@ -220,6 +235,7 @@ export function MessageComposer({
             >
                 {operations[operation] !== undefined ? "…" : "➤"}
             </button>
+            {historyComplete ? null : <p className="hint">Markdown export includes loaded messages only. Load older Comments and Reports to include earlier history.</p>}
             {draft.length > composerLengthHintThreshold ? (
                 <p aria-live="off" className="messages-composer-length">
                     {draft.length} / {composerMaxLength}
