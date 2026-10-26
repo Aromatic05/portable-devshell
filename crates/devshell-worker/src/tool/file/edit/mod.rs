@@ -47,7 +47,7 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file edit. Existing target content must first be covered by file_read or file_grep; keep related mutations in one change set and inspect any failed operation before retrying.".to_string(),
+            "Apply an ordered multi-file edit. Existing files require read coverage from file_read, file_grep, or recognized bash_run/tmux output; keep related mutations in one change set and inspect any failed operation before retrying.".to_string(),
             [ToolCapability::Write],
             serde_json::json!({
                 "devshell": { "mcp": {
