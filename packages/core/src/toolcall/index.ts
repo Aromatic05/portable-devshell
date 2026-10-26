@@ -32,12 +32,19 @@ export function createToolCallExecutionRuntime(
     const sessions = new Map<string, string>();
     let closed = false;
     let closePromise: Promise<void> | undefined;
+    let sessionTail = Promise.resolve();
+    const serializeSession = <T>(operation: () => Promise<T>): Promise<T> => {
+        const result = sessionTail.then(operation);
+        sessionTail = result.then(() => undefined, () => undefined);
+        return result;
+    };
     const releaseSession = async (connectionId: string): Promise<void> => {
         const workspace = sessions.get(connectionId);
         if (workspace === undefined) return;
+        if (![...sessions].some(([id, value]) => id !== connectionId && value === workspace))
+            await options.releaseWorkspace(workspace);
+        // Failed release keeps the owner and Workspace available for retry.
         sessions.delete(connectionId);
-        if ([...sessions.values()].includes(workspace)) return;
-        await options.releaseWorkspace(workspace);
     };
     const refreshTools = async () => {
         if (closed)
@@ -58,7 +65,7 @@ export function createToolCallExecutionRuntime(
             tool.readToolCallFailureSummary(sinceMs, untilMs),
         invokeInternal: (toolName, input, context, signal) =>
             tool.invokeInternal(toolName, input, context, signal),
-        openSession: async (workspace, connectionId) => {
+        openSession: (workspace, connectionId) => serializeSession(async () => {
             if (closed)
                 throw new Error("Tool call execution runtime is closed.");
             await releaseSession(connectionId);
@@ -66,8 +73,8 @@ export function createToolCallExecutionRuntime(
             sessions.set(connectionId, prepared.workspace);
             await refreshTools();
             return prepared;
-        },
-        releaseSession,
+        }),
+        releaseSession: (connectionId) => serializeSession(() => releaseSession(connectionId)),
         refreshTools,
         close: async () => {
             if (closePromise !== undefined) return await closePromise;
@@ -76,7 +83,7 @@ export function createToolCallExecutionRuntime(
                 const failures: unknown[] = [];
                 await scheduler.close().catch((error) => failures.push(error));
                 for (const connectionId of [...sessions.keys()])
-                    await releaseSession(connectionId).catch((error) =>
+                    await serializeSession(() => releaseSession(connectionId)).catch((error) =>
                         failures.push(error),
                     );
                 catalog.clear();
@@ -86,7 +93,10 @@ export function createToolCallExecutionRuntime(
                         failures,
                         "Tool call execution runtime failed to close cleanly.",
                     );
-            })();
+            })().catch((error: unknown) => {
+                closePromise = undefined;
+                throw error;
+            });
             await closePromise;
         },
     };

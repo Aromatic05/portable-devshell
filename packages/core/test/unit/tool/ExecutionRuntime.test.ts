@@ -74,3 +74,60 @@ test("tool execution close attempts every session cleanup", async () => {
     await assert.rejects(runtime.close(), /broken cleanup/);
     assert.deepEqual(released, ["/broken", "/healthy"]);
 });
+
+test("failed final Workspace release keeps its session owner and retries without releasing other owners", async () => {
+    const released: string[] = [];
+    const attempts: string[] = [];
+    let release: (workspace: string) => Promise<void> = async (_workspace) => { throw new Error("temporary release failure"); };
+    const runtime = createRuntime({ released, releaseWorkspace: async (workspace) => {
+        attempts.push(workspace);
+        await release(workspace);
+        released.push(workspace);
+    } });
+    await runtime.openSession("/workspace", "a");
+    await runtime.openSession("/workspace", "b");
+    await runtime.releaseSession("a");
+    await assert.rejects(runtime.releaseSession("b"), /temporary release failure/u);
+    assert.deepEqual(released, []);
+    release = async () => {};
+    await runtime.releaseSession("b");
+    await runtime.releaseSession("b");
+    await runtime.close();
+    assert.deepEqual(attempts, ["/workspace", "/workspace"]);
+    assert.deepEqual(released, ["/workspace"]);
+});
+
+test("runtime close retries retained release debt without repeating successful Workspace releases", async () => {
+    const released: string[] = [];
+    let release: (workspace: string) => Promise<void> = async (_workspace) => { throw new Error("close release debt"); };
+    const runtime = createRuntime({ released, releaseWorkspace: async (workspace) => {
+        await release(workspace);
+        released.push(workspace);
+    } });
+    await runtime.openSession("/workspace", "session");
+    await assert.rejects(runtime.close(), /close release debt/u);
+    assert.deepEqual(released, []);
+    release = async () => {};
+    await runtime.close();
+    await runtime.close();
+    assert.deepEqual(released, ["/workspace"]);
+});
+
+test("concurrent final releases serialize Workspace ownership and retain only the failed owner", async () => {
+    const released: string[] = [];
+    let attempts = 0;
+    let release: () => Promise<void> = async () => { attempts++; throw new Error("last owner debt"); };
+    const runtime = createRuntime({ released, releaseWorkspace: async (workspace) => {
+        await release(); released.push(workspace);
+    } });
+    await runtime.openSession("/shared", "a");
+    await runtime.openSession("/shared", "b");
+    const first = runtime.releaseSession("a");
+    const second = assert.rejects(runtime.releaseSession("b"), /last owner debt/u);
+    await Promise.all([first, second]);
+    assert.equal(attempts, 1);
+    release = async () => { attempts++; };
+    await runtime.close();
+    assert.equal(attempts, 2);
+    assert.deepEqual(released, ["/shared"]);
+});

@@ -7,7 +7,9 @@ import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import {
     routeModule,
     type ControlPortDefinition,
+    type ControlPortContext,
 } from "../../control/server/Route.js";
+import type { ToolSessionBinding } from "./SessionTransport.js";
 import type { ToolCallApi, ToolCallIngressPort } from "./Api.js";
 import type { ToolCallContext, ToolCallPresentation } from "./Type.js";
 import {
@@ -19,6 +21,7 @@ import {
 /** Control-owned callers enter the Instance pipeline before Review/Rewrite. */
 export function createToolCallIngressTransport(
     endpoint: Endpoint,
+    session?: ToolSessionBinding,
 ): ToolCallIngressPort {
     return {
         call: async (
@@ -33,6 +36,7 @@ export function createToolCallIngressTransport(
             recording = "host",
         ) => {
             await endpoint.connect(asInstanceName(instance), "tool", signal);
+            signal?.throwIfAborted();
             const stream = await createPortClient(
                 endpoint,
                 asInstanceName(instance),
@@ -42,6 +46,7 @@ export function createToolCallIngressTransport(
                     invocationInput: invocationInput !== undefined,
                     transformResult: transformResult !== undefined,
                 },
+                ...(session === undefined ? {} : { session }),
                 context,
                 input,
                 recording,
@@ -61,6 +66,7 @@ export function createToolCallIngressTransport(
 export function createToolCallIngressTransportRoute(
     ingress: ToolCallIngressPort,
     controlHost: string,
+    validateSession?: (binding: unknown, context: ToolCallContext, recording: "host" | "caller", route: ControlPortContext) => { signal: AbortSignal; release(): void },
 ): ControlPortDefinition {
     return routeModule(
         "tool",
@@ -80,10 +86,16 @@ export function createToolCallIngressTransportRoute(
                     });
                 }
                 const opened = readIngress(request.payload);
+                const binding = record(request.payload)?.session;
+                const sessionLease = binding === undefined ? undefined
+                    : validateSession?.(binding, opened.context, opened.recording, route);
+                if (binding !== undefined && sessionLease === undefined)
+                    throw new Error("Worker session owner is unavailable.");
                 const callbacks = new ToolCallCallbackServer(stream);
                 const signal = AbortSignal.any([
                     route.signal,
                     callbacks.signal,
+                    ...(sessionLease === undefined ? [] : [sessionLease.signal]),
                 ]);
                 let progressTail = Promise.resolve();
                 const onProgress = (progress: JsonValue) => {
@@ -134,6 +146,7 @@ export function createToolCallIngressTransportRoute(
                     await stream.close(toolCallFailureEnvelope(error));
                 } finally {
                     callbacks.close();
+                    sessionLease?.release();
                 }
             },
         },

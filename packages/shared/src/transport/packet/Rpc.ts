@@ -256,10 +256,10 @@ export class Rpc {
                 id: packet.id,
                 ...(message === undefined ? {} : { message }),
             } satisfies RpcPacket);
-            for (const action of afterReply)
-                queueMicrotask(() => void action());
         } finally {
             this.#active.delete(key);
+            for (const action of afterReply)
+                queueMicrotask(() => void action());
         }
     }
 }

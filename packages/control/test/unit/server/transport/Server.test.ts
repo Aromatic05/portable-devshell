@@ -32,6 +32,7 @@ import {
     attachToolCallErrorPayload,
     type ToolCallContext,
     createToolRouteModule,
+    routeModule,
     controlErrorCodes,
     type Channel,
     type ControlPortContext,
@@ -1395,3 +1396,46 @@ test("Control ingress preserves Context and owner fences of the MCP Reentry clai
     assert.equal((await goal.read("claim-context"))!.continuationPending, false);
     assert.equal((await goal.read("claim-context"))!.continuationCount, 1);
 });
+
+for (const outcome of ["success", "failure"] as const) {
+    test(`withdrawn port sends its accepted RPC ${outcome} terminal before disposal`, { timeout: 5_000 }, async (t) => {
+        const provider = new MemoryControlTransportListener();
+        const client = createClient(provider, "cli");
+        const entered = barrier();
+        const finish = barrier();
+        let visible = true;
+        const listeners = new Set<() => void>();
+        const server = new ControlTransportServer({
+            listeners: [provider],
+            routes: {
+                hosts: () => [
+                    ...createRouteHosts(),
+                    ...(visible ? [{ host: "alpha", ports: [routeModule("owned", {
+                        release: async () => {
+                            entered.resolve();
+                            await finish.promise;
+                            if (outcome === "failure") throw new Error("retained release failed");
+                            return { released: true };
+                        },
+                    })] }] : []),
+                ],
+                onChange(handler) { listeners.add(handler); return () => listeners.delete(handler); },
+            },
+        });
+        t.after(async () => { finish.resolve(); client.close(); await server.close(); });
+        await server.start();
+        await negotiate(client, "cli");
+        const request = client.request("alpha", "owned", "release");
+        const settled = Promise.allSettled([request]);
+        await entered.promise;
+        visible = false;
+        for (const listener of listeners) listener();
+        finish.resolve();
+        const [result] = await settled;
+        assert.equal(result!.status, outcome === "success" ? "fulfilled" : "rejected");
+        const value = result as { status: string; value: unknown; reason: Error };
+        assert.deepEqual(outcome === "success" ? value.value : value.reason.message,
+            outcome === "success" ? { released: true } : "retained release failed");
+        await assert.rejects(client.request("alpha", "owned", "release"), /No route/u);
+    });
+}

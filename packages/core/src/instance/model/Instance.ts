@@ -35,6 +35,7 @@ import { resolveWorkerInstanceConfig, type WorkerInstanceConfig } from "../runti
 import { WorkerRuntimeFactory, type WorkerRuntimeFactoryOptions } from "../runtime/provision/Factory.js";
 import { InstancePaths } from "./Paths.js";
 import { containerAdoptionOwner } from "../runtime/provision/container/Adoption.js";
+import { InstanceToolSessions } from "./ToolSessions.js";
 import { InstanceLifecycle } from "./Lifecycle.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
 import { createInstanceEventLog, type InstanceEventLog } from "./EventLog.js";
@@ -59,6 +60,7 @@ export class Instance {
     readonly #worker: WorkerInstance;
     readonly #state: InstanceState;
     readonly #lifecycle: InstanceLifecycle;
+    readonly workerSessions: InstanceToolSessions;
     #closePromise?: Promise<void>;
     #config: InstanceConfig;
     #executionConfig?: ControlExecutionConfig;
@@ -134,6 +136,7 @@ export class Instance {
         this.#config = fields.config;
         this.#executionConfig = fields.executionConfig;
         this.#lifecycle = new InstanceLifecycle(this);
+        this.workerSessions = new InstanceToolSessions(this);
     }
 
     get config(): InstanceConfig {
@@ -330,6 +333,8 @@ export class Instance {
             failures.push(error);
         }
         await this.#lifecycle.drain();
+        // Preserve the session authority and execution runtime on release failure.
+        await this.workerSessions.retire();
         await this.#state.retire().catch((error) => failures.push(error));
         if (failures.length === 0) {
             this.#lifecycle.completeRetirement();
@@ -343,8 +348,9 @@ export class Instance {
     }
 
     async #close(): Promise<void> {
+        // Keep Worker release facilities alive while owned sessions still owe cleanup.
+        await this.retire();
         const failures: unknown[] = [];
-        await this.retire().catch((error) => failures.push(error));
         const supervision = this.#worker.supervision;
         if (supervision.ownership.owned) {
             try {

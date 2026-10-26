@@ -89,13 +89,19 @@ export function createInstanceHost(
             subscriptions,
         ),
         ...(options.controlIngressHost === undefined ? [] : [
-            createToolCallIngressTransportRoute(state.toolCalls.api, options.controlIngressHost),
+            createToolCallIngressTransportRoute(
+                state.toolCalls.api, options.controlIngressHost,
+                (binding, context, recording, route) => descriptor.workerSessions.validate(binding, context, recording, route),
+            ),
         ]),
         ...(options.extensionPorts ?? []),
     ]);
     return {
         host: asInstanceName(name),
-        ports: fenceGeneration(ports, descriptor),
+        ports: mergeControlPortsByName([
+            ...fenceGeneration(ports, descriptor),
+            ...(options.controlIngressHost === undefined ? [] : [descriptor.workerSessions.route(options.controlIngressHost)]),
+        ]),
     };
 }
 

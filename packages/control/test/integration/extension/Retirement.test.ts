@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { EXTENSION_API_VERSION, EXTENSION_MANIFEST_SCHEMA_VERSION } from "@portable-devshell/extension";
-import { asInstanceName, createToolCallRuntime, type ControlPortContext, type InstanceRuntimeTransport, type MessageStream } from "@portable-devshell/shared";
+import { asInstanceName, createToolCallRuntime, createRemoteError, type ControlPortContext, type InstanceRuntimeTransport, type MessageStream } from "@portable-devshell/shared";
 
 import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/api/cap/instance/index.ts";
 import { ExtensionWorkerCapabilityControl } from "../../../src/extension/api/cap/worker/index.ts";
@@ -19,6 +19,7 @@ import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
 import { ExtensionChangeHub } from "../../../src/extension/manager/Change.ts";
 import { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import { createTestInstance } from "../../support/ControlFixtures.ts";
+import { workerSessionTransport } from "../../support/WorkerSessionTransport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { deferred } from "./Round3Harness.ts";
 
@@ -36,7 +37,8 @@ function worker(name: string, onCall?: (name: string, input: unknown) => Promise
         },
     }) });
     const instance = createTestInstance({
-        supervision: { handshake: {
+        execution: { environment: {} },
+        supervision: { snapshot: () => ({ lastSeq: 0 }), state: { subscribe() {} }, handshake: {
             homeDirectory: `/home/${name}`,
             platform: { arch: "x86_64", os: "linux" },
         } },
@@ -44,6 +46,9 @@ function worker(name: string, onCall?: (name: string, input: unknown) => Promise
         config: { enabled: true, name, provider: "local" } as never,
         state: {
             toolCalls: runtime,
+            toolDefinitions: { list: () => [] },
+            approval: { api: {} }, task: { api: { goal: {}, wait: {} } },
+            terminal: { api: {}, sessions: { api: {} } },
             tools: {
                 async openSession(workspace: string, id: string) {
                     opened.push(id);
@@ -76,7 +81,7 @@ async function harness(t: test.TestContext, runtime?: InstanceRuntimeTransport, 
             instances, paths, points: createControlExtensionPointRegistry(),
             readToolCalls: async () => [],
             instanceRuntime: () => { assert.ok(runtime); return runtime; },
-            workerExecuteFactory: ({ allowed, extensionId }) => new ExtensionWorkerCapabilityControl({ allowed, extensionId, instances, recording: "host" }),
+            workerExecuteFactory: ({ allowed, extensionId }) => new ExtensionWorkerCapabilityControl({ endpoint, allowed, extensionId, instances, recording: "host" }),
             instanceFactory: ({ observeAllowed, extensionId }) => ({
                 manage: {} as never,
                 observe: new ExtensionInstanceObserveCapabilityControl({
@@ -93,6 +98,7 @@ async function harness(t: test.TestContext, runtime?: InstanceRuntimeTransport, 
         beta.runtime.close();
         await rm(root, { recursive: true, force: true });
     });
+    const { endpoint } = await workerSessionTransport(t, [alpha.instance, beta.instance]);
     await host.start();
     return { alpha, beta, host, paths, root, installer: new ExtensionInstallService({ host, paths }) };
 }
@@ -176,7 +182,7 @@ test("installed Worker release failing once is retried by Instance retirement an
     });
     await assert.rejects(h.host.retireInstanceGeneration("alpha"), {
         message: "Extensions failed to retire host-managed resources for instance alpha.",
-        errors: [new Error("Extension probe failed to retire host-managed resources for instance alpha.", { cause: failure })],
+        errors: [new Error("Extension probe failed to retire host-managed resources for instance alpha.", { cause: createRemoteError({ code: "error.unknown", message: failure.message, retryable: false }) })],
     });
     assert.equal(h.alpha.released.includes(alphaSession), false);
     await assert.rejects(invoke("alpha"), /closed/u);

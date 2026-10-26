@@ -326,6 +326,7 @@ export class ControlFactory {
                 toolCallDecorator: mcp.toolProvenance,
                 workerDelegateFactory: ({ allowed, extensionId }) =>
                     new ExtensionWorkerCapabilityControl({
+                        endpoint: internalEndpoint,
                         allowed,
                         extensionId,
                         instances: options.instances.registry,
@@ -334,6 +335,7 @@ export class ControlFactory {
                     }),
                 workerExecuteFactory: ({ allowed, extensionId }) =>
                     new ExtensionWorkerCapabilityControl({
+                        endpoint: internalEndpoint,
                         allowed,
                         extensionId,
                         instances: options.instances.registry,

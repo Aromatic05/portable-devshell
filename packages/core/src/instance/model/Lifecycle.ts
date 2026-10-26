@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Instance } from "./Instance.js";
 
 export interface InstanceLease {
@@ -6,6 +7,7 @@ export interface InstanceLease {
 }
 
 export class InstanceLifecycle {
+    readonly generation = randomUUID();
     #admitted = 0;
     #phase: "active" | "retiring" | "retired" | "closed" = "active";
     readonly #waiters = new Set<() => void>();

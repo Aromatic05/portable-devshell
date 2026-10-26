@@ -116,3 +116,5 @@ export { WORKER_PROTOCOL_RANGE, WORKER_PROTOCOL_VERSION } from "./types/Worker.j
 
 export { ReverseSseChannel } from "./transport/endpoint/channel/ReverseSse.js";
 export { createToolCallIngressTransport, createToolCallIngressTransportRoute } from "./execution/toolcall/IngressTransport.js";
+
+export { openToolSessionTransport, type OwnedToolSession, type ToolSessionBinding, type ToolSessionOpenInput } from "./execution/toolcall/SessionTransport.js";

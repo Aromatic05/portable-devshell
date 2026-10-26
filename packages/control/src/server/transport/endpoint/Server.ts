@@ -41,6 +41,7 @@ export interface ControlTransportServerOptions {
 interface Session {
     readonly admission: ControlTransportAdmission;
     readonly connectionId: string;
+    readonly disconnected: AbortController;
     peer?: ControlClientKind;
     pending?: {
         peer: ControlClientKind;
@@ -61,6 +62,7 @@ interface BoundPort {
     readonly stream: Stream;
     readonly offOpen: () => void;
     update(definition: ControlPortDefinition): void;
+    withdraw(): void;
 }
 
 interface ActiveConnection {
@@ -260,6 +262,7 @@ export class ControlTransportServer {
         const detached = (host: string) => {
             const session = sessions.get(host);
             if (session === undefined) return;
+            session.disconnected.abort(new Error("Control connection closed."));
             sessions.delete(host);
             this.#onConnectionDetached(session.connectionId);
         };
@@ -274,6 +277,7 @@ export class ControlTransportServer {
                     sessions.set(host, {
                         admission,
                         connectionId: randomUUID(),
+                        disconnected: new AbortController(),
                     });
                 },
                 detached,
@@ -300,11 +304,7 @@ export class ControlTransportServer {
 
         for (const [key, bound] of this.#ports)
             if (!definitions.has(key)) {
-                bound.offOpen();
-                bound.stream.close();
-                bound.rpc.close();
-                bound.port.close();
-                this.#ports.delete(key);
+                bound.withdraw();
             }
 
         for (const [key, definition] of definitions) {
@@ -325,6 +325,16 @@ export class ControlTransportServer {
             let streamHandlers = new Map(
                 (definition.port.streams ?? []).map((operation) => [operation.name, operation.handle]),
             );
+            let active = 0;
+            let withdrawn = false;
+            const disposeWithdrawn = () => {
+                if (!withdrawn || active !== 0) return;
+                offOpen();
+                stream.close();
+                rpc.close();
+                port.close();
+                this.#ports.delete(key);
+            };
             const registered = new Map<string, () => void>();
             const register = (name: string) => {
                 registered.set(name, rpc.handle(name, async (payload: unknown, rpc: RpcContext) => {
@@ -336,6 +346,11 @@ export class ControlTransportServer {
                         payload as JsonValue | undefined,
                         rpc,
                     );
+                    active += 1;
+                    rpc.afterReply(() => {
+                        active -= 1;
+                        disposeWithdrawn();
+                    });
                     try {
                         const result = await operation(
                             {
@@ -376,6 +391,10 @@ export class ControlTransportServer {
                         messageStream,
                         controller.signal,
                     );
+                    active += 1;
+                    const disconnect = () => messageStream.acceptCancel({ message: "Control connection closed." });
+                    context.signal.addEventListener("abort", disconnect, { once: true });
+                    if (context.signal.aborted) disconnect();
                     try {
                         await handle(
                             messageStream,
@@ -402,12 +421,25 @@ export class ControlTransportServer {
                                       retryable: body.retryable,
                                   },
                         );
+                    } finally {
+                        context.signal.removeEventListener("abort", disconnect);
+                        active -= 1;
+                        disposeWithdrawn();
                     }
                 },
             );
             this.#ports.set(key, {
                 port, rpc, stream, offOpen,
+                withdraw: () => {
+                    withdrawn = true;
+                    operations.clear();
+                    streamHandlers.clear();
+                    for (const release of registered.values()) release();
+                    registered.clear();
+                    disposeWithdrawn();
+                },
                 update: (next) => {
+                    withdrawn = false;
                     const nextOperations = new Map(next.operations.map((operation) => [
                         operation.name, operation.handle,
                     ]));
@@ -542,7 +574,7 @@ export class ControlTransportServer {
                 ? {}
                 : { protocolVersion: session.protocolVersion }),
             requestId: stream.id,
-            signal,
+            signal: AbortSignal.any([signal, session.disconnected.signal]),
             sourceHost: peerHost,
             subject: session.admission.subject,
         };

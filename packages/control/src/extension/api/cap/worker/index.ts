@@ -9,13 +9,17 @@ import type {
     ExtensionWorkerSession,
     ExtensionWorkerToolDefinition,
 } from "@portable-devshell/extension/worker";
-import type { JsonValue } from "@portable-devshell/shared";
+import {
+    createToolCallIngressTransport, openToolSessionTransport,
+    type Endpoint, type JsonValue, type OwnedToolSession, type ToolCallIngressPort,
+} from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../../instance/Api.js";
 import type { ExtensionWorkerRuntime } from "../index.js";
 
 /** Extension generation-owned sessions; execution and Audit remain Instance-owned. */
 export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime {
+    readonly #endpoint: Endpoint;
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
@@ -28,12 +32,14 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
     #closePromise?: Promise<void>;
 
     constructor(options: {
+        endpoint: Endpoint;
         allowed: boolean;
         extensionId: string;
         instances: InstanceRegistry;
         recording: "host" | "caller";
         validateContext?: (ctxId: string, instance: string, workspace: string) => Promise<void>;
     }) {
+        this.#endpoint = options.endpoint;
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
@@ -117,15 +123,23 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
 
     async #open(instance: Instance, input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
         const sessionId = randomUUID();
-        const opened = await instance.openToolSession(input.workspace, sessionId);
+        const opened = await openToolSessionTransport(this.#endpoint, instance.config.name, {
+            generation: instance.lifecycle.generation,
+            sessionId,
+            context: {
+                source: "extension", extensionId: this.#extensionId, workspace: input.workspace,
+                ...(input.ctxId === undefined ? {} : { ctxId: input.ctxId }),
+            },
+            recording: this.#recording,
+        });
         const session = new ExtensionWorkerSessionControl({
             ctxId: input.ctxId,
             extensionId: this.#extensionId,
             instance,
             opened,
+            ingress: createToolCallIngressTransport(this.#endpoint, opened.binding),
             onClosed: (closed) => this.#sessions.delete(closed),
             recording: this.#recording,
-            sessionId,
         });
         this.#sessions.add(session);
         try {
@@ -134,6 +148,9 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
                     throw new Error("Worker Context binding cannot be validated.");
                 await this.#validateContext(input.ctxId, instance.config.name, opened.workspace);
             }
+            if (this.#closed || this.#retiring.has(instance.config.name) || !instance.lifecycle.active)
+                throw new Error(`Worker Instance ${instance.config.name} retired while opening a session.`);
+            await opened.activate();
             if (this.#closed || this.#retiring.has(instance.config.name) || !instance.lifecycle.active)
                 throw new Error(`Worker Instance ${instance.config.name} retired while opening a session.`);
         } catch (error) {
@@ -154,7 +171,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
     readonly #ctxId?: string;
     readonly #extensionId: string;
     readonly #recording: "host" | "caller";
-    readonly #sessionId: string;
+    readonly #release: () => Promise<void>;
+    readonly #ingress: ToolCallIngressPort;
     readonly #tools: readonly ExtensionWorkerToolDefinition[];
     readonly #controller = new AbortController();
     readonly #closedSignal: Promise<void>;
@@ -167,10 +185,10 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         ctxId?: string;
         extensionId: string;
         instance: Instance;
-        opened: Awaited<ReturnType<Instance["openToolSession"]>>;
+        opened: OwnedToolSession & { close(): Promise<void> };
+        ingress: ToolCallIngressPort;
         onClosed(session: ExtensionWorkerSessionControl): void;
         recording: "host" | "caller";
-        sessionId: string;
     }) {
         let resolveClosed: () => void = () => undefined;
         this.#closedSignal = new Promise<void>((resolve) => { resolveClosed = resolve; });
@@ -184,7 +202,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         this.#ctxId = options.ctxId;
         this.#extensionId = options.extensionId;
         this.#recording = options.recording;
-        this.#sessionId = options.sessionId;
+        this.#release = options.opened.close;
+        this.#ingress = options.ingress;
     }
 
     get closed(): Promise<void> {
@@ -212,7 +231,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         const signal = options.signal === undefined
             ? this.#controller.signal
             : AbortSignal.any([this.#controller.signal, options.signal]);
-        const running = this.#instance.toolCallIngress.call(
+        signal.throwIfAborted();
+        const running = this.#ingress.call(
             this.instance,
             toolName,
             input as JsonValue,
@@ -247,7 +267,9 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         if (this.#closePromise !== undefined) return this.#closePromise;
         this.#closePromise = Promise.resolve().then(async () => {
             await Promise.allSettled([...this.#calls]);
-            await this.#instance.closeToolSession(this.#sessionId);
+            // Retirement completes only after this exact generation releases all sessions.
+            // Its acknowledgement remains authoritative if the owning Channel was lost.
+            if (!this.#instance.lifecycle.retired) await this.#release();
             this.#onClosed(this);
             this.#resolveClosed();
         }).catch((error: unknown) => {
