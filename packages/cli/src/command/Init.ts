@@ -133,7 +133,7 @@ export async function executeInit(
     };
     context.writeValue(result, renderInitResult(result));
     if (freshLike && isInteractive(context) && (await hasAccessCommand(context)))
-        await offerRemoteAccess(context);
+        await offerRemoteAccess(context, localInstance.mcp.path);
     return true;
 }
 
@@ -171,41 +171,52 @@ function renderInitResult(result: CliInitResult): string {
     return lines.join("\n");
 }
 
-async function offerRemoteAccess(context: CliDispatchContext): Promise<void> {
+async function offerRemoteAccess(context: CliDispatchContext, endpointPath: string): Promise<void> {
     const readline = createInterface({ input: context.stdin });
-    let answer = "";
+    const lines = readline[Symbol.asyncIterator]();
+    async function readLine(prompt: string): Promise<string> {
+        context.stdout.write(prompt);
+        const next = await lines.next();
+        return next.done ? "" : next.value.trim();
+    }
+    let answer: string;
     try {
-        context.stdout.write(
-            [
-                "MCP access",
-                "1. Already public",
-                "2. Cloudflare Tunnel",
-                "3. SSH reverse",
-                "4. Configure later",
-                "selection [4]: ",
-            ].join("\n"),
-        );
-        const next = await readline[Symbol.asyncIterator]().next();
-        answer = next.done ? "" : next.value.trim().toLowerCase();
+        answer = (await readLine([
+            "MCP access", "1. Already public", "2. Cloudflare Tunnel",
+            "3. SSH reverse", "4. Configure later", "selection [4]: ",
+        ].join("\n"))).toLowerCase();
+        if (answer === "1" || answer === "public") {
+            while (true) {
+                const value = await readLine("Public base URL (e.g. https://devshell.example, without the Instance MCP path; blank to skip): ");
+                if (value.length === 0) return;
+                let url: URL;
+                try {
+                    url = new URL(value);
+                } catch {
+                    context.stdout.write("Enter an absolute HTTP(S) base URL.\n");
+                    continue;
+                }
+                if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+                    context.stdout.write("Use an HTTP(S) base URL without credentials, query or fragment.\n");
+                    continue;
+                }
+                const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
+                if (url.pathname.replace(/\/+$/u, "").endsWith("/mcp") || base.endsWith(endpointPath)) {
+                    context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
+                    continue;
+                }
+                await context.clients.config.update({ mcp: { publicBaseUrl: base } });
+                context.stdout.write(`MCP public base URL configured: ${base}\nMCP endpoint: ${joinEndpoint(base, endpointPath)}\n`);
+                return;
+            }
+        }
     } finally {
         readline.close();
     }
-
-    if (answer === "" || answer === "4" || answer === "later") return;
-    if (answer === "1" || answer === "public") {
-        const publicUrl = await readInitLine(context, "Public MCP URL: ");
-        if (publicUrl.length === 0) return;
-        await context.clients.config.update({ mcp: { publicBaseUrl: publicUrl } });
-        context.stdout.write(`MCP public URL configured: ${publicUrl}\n`);
-        return;
-    }
-    if (answer === "2" || answer === "cloudflare") {
+    if (answer === "2" || answer === "cloudflare")
         await runAccessCommand(context, ["cloudflare"]);
-        return;
-    }
-    if (answer === "3" || answer === "ssh") {
+    if (answer === "3" || answer === "ssh")
         await runAccessCommand(context, ["ssh"]);
-    }
 }
 
 async function runAccessCommand(
@@ -235,20 +246,6 @@ async function hasAccessCommand(context: CliDispatchContext): Promise<boolean> {
         );
     } catch {
         return false;
-    }
-}
-
-async function readInitLine(
-    context: CliDispatchContext,
-    prompt: string,
-): Promise<string> {
-    const readline = createInterface({ input: context.stdin });
-    try {
-        context.stdout.write(prompt);
-        const next = await readline[Symbol.asyncIterator]().next();
-        return next.done ? "" : next.value.trim();
-    } finally {
-        readline.close();
     }
 }
 

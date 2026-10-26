@@ -155,14 +155,15 @@ async function configureSsh(
     context: CliNativeCommandInvocationContext,
 ): Promise<CliCommandResult> {
     expectLength(argv, 0, "access ssh");
-    const host = await readLine(context, "SSH host: ");
-    const user = await readLine(context, "SSH user [current]: ", true);
-    const port = readPort(await readLine(context, "SSH port [22]: ", true), 22);
+    const input = createLineReader(context);
+    const host = await input.readLine("SSH host: ");
+    const user = await input.readLine("SSH user [current]: ", true);
+    const port = await input.readPort("SSH port [22]: ", 22);
     const remoteBindHost =
-        (await readLine(context, "Remote bind host [127.0.0.1]: ", true)) ||
+        (await input.readLine("Remote bind host [127.0.0.1]: ", true)) ||
         "127.0.0.1";
-    const remotePort = readPort(await readLine(context, "Remote MCP port: "));
-    const publicUrl = await readLine(context, "Public MCP URL [optional]: ", true);
+    const remotePort = await input.readPort("Remote MCP port: ");
+    const publicUrl = await input.readLine("Public MCP URL [optional]: ", true);
     const record = await runtime.upsert({
         enabled: true,
         host,
@@ -175,10 +176,19 @@ async function configureSsh(
         target: "mcp",
         ...(user.length === 0 ? {} : { user }),
     });
+    if (record.state === "error") {
+        throw new Error(
+            `SSH reverse access configuration saved, but the tunnel failed to connect.\nState: ${record.state}\n${record.error ?? "Unknown tunnel error."}\nInspect: devshell access show ${record.id}\nCheck SSH host, credentials and port forwarding, then retry: devshell access reload`,
+        );
+    }
     return {
         kind: "text",
         text: [
             "SSH reverse access configured.",
+            `Tunnel state: ${record.state}${record.state === "running" ? " (SSH process running)" : " (not connected yet)"}`,
+            ...(record.error === undefined ? [] : [record.error]),
+            `Inspect: devshell access show ${record.id}`,
+            "Retry after fixing SSH settings: devshell access reload",
             "",
             `Service URL: ${record.origin ?? "waiting for the MCP endpoint"}`,
             ...(record.publicUrl === undefined
@@ -224,44 +234,60 @@ async function readSecret(
     return value;
 }
 
-async function readLine(
-    context: CliNativeCommandInvocationContext,
-    label: string,
-    optional = false,
-): Promise<string> {
+function createLineReader(context: CliNativeCommandInvocationContext) {
     const io = context.io;
     if (io === undefined)
-        throw usageError(`${label.trim()} requires interactive CLI input.`);
-    await io.writeStderr(label);
-    await io.requestInput({ raw: false });
-    const bytes: number[] = [];
-    while (true) {
-        context.signal.throwIfAborted();
-        const chunk = await io.readInput();
-        if (chunk === undefined) break;
-        for (const byte of chunk) {
+        throw usageError("SSH setup requires interactive CLI input.");
+    let buffered: Uint8Array = new Uint8Array(0);
+    let offset = 0;
+    let skipLf = false;
+    let ended = false;
+    async function readLine(label: string, optional = false): Promise<string> {
+        await io!.writeStderr(label);
+        await io!.requestInput({ raw: false });
+        const line: number[] = [];
+        while (true) {
+            context.signal.throwIfAborted();
+            if (offset >= buffered.length && !ended) {
+                const chunk = await io!.readInput();
+                if (chunk === undefined) ended = true;
+                else {
+                    buffered = chunk;
+                    offset = 0;
+                }
+            }
+            const byte = buffered[offset++];
+            if (byte === undefined && !ended) continue;
+            if (skipLf) {
+                skipLf = false;
+                if (byte === 10) continue;
+            }
             if (byte === 3) throw new Error("Input cancelled.");
-            if (byte === 10 || byte === 13) {
-                const value = Buffer.from(bytes).toString("utf8").trim();
+            if (byte === undefined || byte === 10 || byte === 13) {
+                skipLf = byte === 13;
+                const value = Buffer.from(line).toString("utf8").trim();
                 if (!optional && value.length === 0)
                     throw usageError(`${label.trim()} is required.`);
                 return value;
             }
-            bytes.push(byte);
+            line.push(byte);
         }
     }
-    const value = Buffer.from(bytes).toString("utf8").trim();
-    if (!optional && value.length === 0)
-        throw usageError(`${label.trim()} is required.`);
-    return value;
-}
-
-function readPort(value: string, fallback?: number): number {
-    if (value.length === 0 && fallback !== undefined) return fallback;
-    const port = Number.parseInt(value, 10);
-    if (!Number.isInteger(port) || port < 1 || port > 65535)
-        throw usageError("Port must be an integer between 1 and 65535.");
-    return port;
+    return {
+        readLine,
+        async readPort(label: string, fallback?: number): Promise<number> {
+            while (true) {
+                const value = await readLine(label, true);
+                if (value.length === 0 && fallback !== undefined) return fallback;
+                const port = Number(value);
+                if (/^[0-9]+$/u.test(value) && Number.isInteger(port) && port >= 1 && port <= 65535)
+                    return port;
+                const message = "Port must be an integer between 1 and 65535.";
+                if (ended) throw usageError(message);
+                await io!.writeStderr(`${message} Please try again.\n`);
+            }
+        },
+    };
 }
 
 function recordToJson(record: AccessEndpointRecord): ExtensionJsonValue {

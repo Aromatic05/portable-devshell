@@ -1,3 +1,5 @@
+import { CliRenderError } from "../../../app/Failure.js";
+
 export interface CliRenderedControlStatus {
     instanceCount: number;
     pid?: number;
@@ -65,8 +67,16 @@ export async function executeControlLifecycle(
         case "control.restart": {
             const lifecycle = await context.lifecycle();
             const current = await lifecycle.status();
-            if (current.running && !context.controlNegotiated)
-                await context.negotiate();
+            if (current.running && !context.controlNegotiated) {
+                try {
+                    await context.negotiate();
+                } catch (error) {
+                    if (!(error instanceof CliRenderError) || error.code !== "control.protocolVersionMismatch")
+                        throw error;
+                    throw new CliRenderError(error.code,
+                        `${error.message}\nRestart cannot safely discover which Instances to restore with this Control version.\nUse the CLI version matching the running Control to inspect Instances and finish active work. When ready, run devshell stop, then devshell start with the new CLI, and devshell instance start <name> for each local Instance you want to resume. Manual stop interrupts running Instances. No services were stopped by this restart attempt.`);
+                }
+            }
             // Control lists configured Instances only; its snapshots are
             // inactive placeholders. Check each Instance's own live Process.
             const restore = current.running

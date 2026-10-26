@@ -521,3 +521,31 @@ function readySnapshot(name: string) {
         status: "ready" as const,
     };
 }
+
+test("interactive init validates a public base URL and displays the complete endpoint", async () => {
+    let view = configView({ instances: [], token: undefined });
+    const saved: ConfigMcpPatch[] = [];
+    let output = "";
+    const stdin = Readable.from(["1\nnot-a-url\nftp://example.test\nhttps://user:pass@example.test\nhttps://example.test/?token=bad\nhttps://example.test/local-pc/mcp\nhttps://example.test/proxy/?\n"]) as Readable & { isTTY: boolean };
+    stdin.isTTY = true;
+    await executeInit({ kind: "init" }, {
+        controlNegotiated: true, outputFormat: "text", stdin,
+        stdout: { write(text: string) { output += text; } }, stderr: { write() {} },
+        writeValue() {},
+        clients: {
+            config: {
+                async get() { return view; },
+                async update(patch: { mcp: ConfigMcpPatch }) { saved.push(patch.mcp); return {}; },
+            },
+            instance: { async createInstance() { view = configView({ token: "masked" }); } },
+            runtime() { return { async start() { return readySnapshot("local-pc"); } }; },
+            cli: { async commands() { return [{ id: "access" }]; } },
+        },
+    } as unknown as CliDispatchContext);
+    assert.deepEqual(saved.at(-1), { publicBaseUrl: "https://example.test/proxy" });
+    assert.equal(saved.filter((patch) => patch.publicBaseUrl !== undefined).length, 1);
+    assert.match(output, /Public base URL/u);
+    assert.match(output, /without the Instance endpoint/u);
+    assert.match(output, /MCP endpoint: https:\/\/example\.test\/proxy\/local-pc\/mcp/u);
+    assert.doesNotMatch(output, /mcp\/local-pc\/mcp/u);
+});
