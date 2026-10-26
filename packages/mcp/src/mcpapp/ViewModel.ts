@@ -112,7 +112,7 @@ export function projectMcpAppSnapshot(input: {
 export function mcpAppEventAffectsContext(event: InstanceEventRecord, ctxId: string): boolean {
     // These event families are emitted with their owning Context ID. Unknown
     // and Instance-global events conservatively trigger an authoritative read.
-    if (event.type !== "goal.updated" && !event.type.startsWith("wait.") &&
+    if (event.type !== "goal.updated" && event.type !== "log.appended" && !event.type.startsWith("wait.") &&
         !event.type.startsWith("toolCall.")) return true;
     const data = event.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) return true;
@@ -129,28 +129,23 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
         ]);
         const tools = createToolTransport(endpoint, instance);
         let agentBusy = true;
-        // Only actual running work suppresses automatic Goal continuation.
         // UI, Goal control and reporting calls are not Agent execution.
+        // Continue automatically only when the running set proves idle.
         try {
-            let before: string | undefined;
-            while (true) {
-                const running = await tools.listCalls({
-                    ctxId, status: "running", limit: 64, includeInput: false,
-                    includeOutput: false,
-                    ...(before === undefined ? {} : { before }),
-                });
-                if (running.some((call) =>
-                    call.ctxId === ctxId && call.status === "running" &&
-                    call.source !== "extension" &&
-                    !["workspace_goal", "progress_report", "environ_info"].includes(call.toolName) &&
-                    !call.toolName.startsWith("mcpapp_"))) break;
-                const oldest = running[0]?.callId;
-                if (oldest === undefined) {
-                    agentBusy = false;
-                    break;
-                }
-                before = oldest;
-            }
+            const running = await tools.listCalls({
+                ctxId, status: "running", limit: 64, includeInput: false,
+                includeOutput: false,
+            });
+            // This is a mutable active set, not a stable history snapshot. A
+            // page boundary can finish and disappear before the next read.
+            // A full page cannot prove idle, even if it contains only UI calls.
+            // A later snapshot/watch restores ready only once an unfilled
+            // authoritative page contains no Agent execution.
+            agentBusy = running.length >= 64 || running.some((call) =>
+                call.ctxId === ctxId && call.status === "running" &&
+                call.source !== "extension" &&
+                !["workspace_goal", "progress_report", "environ_info"].includes(call.toolName) &&
+                !call.toolName.startsWith("mcpapp_"));
         } catch {
             // An unavailable execution authority cannot prove recovery is safe.
         }

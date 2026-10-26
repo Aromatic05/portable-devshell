@@ -4,6 +4,29 @@ import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentatio
 export const mcpAppWidgetPayloadKey = "portable-devshell/widgetPayload";
 export const mcpAppWidgetPayloadSchema = "portable-devshell.toolcall.v1";
 
+/** Compute batch outcomes before any presentation truncation. */
+export function mcpAppFileEditSummary(output: unknown): Record<string, JsonValue> | undefined {
+    if (typeof output !== "object" || output === null || !("operations" in output) ||
+        !Array.isArray(output.operations)) return undefined;
+    const operations = output.operations.filter((item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null && !Array.isArray(item));
+    const failures = operations.filter((item) => item.status === "failed");
+    const lines = (key: string) => operations.reduce((sum, item) =>
+        sum + (typeof item[key] === "number" && Number.isFinite(item[key]) ? item[key] : 0), 0);
+    return {
+        totalOperations: operations.length,
+        failedOperations: failures.length,
+        addedLines: lines("addedLines"),
+        removedLines: lines("removedLines"),
+        failures: failures.slice(0, 5).map((item) => {
+            const error = typeof item.error === "object" && item.error !== null
+                ? item.error as Record<string, unknown> : {};
+            return [item.path, error.message ?? error.code ?? "This operation failed"]
+                .filter((value): value is string => typeof value === "string")
+                .map((value) => redactPresentationText(value).slice(0, 300)).join(": ");
+        }),
+    };
+}
 
 /** A bounded presentation snapshot, independent of Live Context leases.
  * It must never copy native image blobs or credentials into result metadata. */
@@ -39,11 +62,14 @@ function widgetPreview(value: JsonValue, limit: number): JsonValue {
 export function mcpAppToolCallWidgetPayload(
     toolName: string, input: JsonValue | undefined, output: JsonValue, isError: boolean,
 ): Record<string, JsonValue> {
+    const editSummary = toolName === "file_edit" ? mcpAppFileEditSummary(output) : undefined;
     return {
         schema: mcpAppWidgetPayloadSchema,
         toolName,
         isError,
         ...(input === undefined ? {} : { input: widgetPreview(input, 3_000) }),
-        output: widgetPreview(output, 32_000),
+        output: widgetPreview(editSummary === undefined ? output : {
+            editSummary, ...output as Record<string, JsonValue>,
+        }, 32_000),
     };
 }

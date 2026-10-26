@@ -1,5 +1,6 @@
 import { resolveToolOutput, type ArtifactImageContent, type ArtifactTransport, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
 import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentationText } from "./Presentation.js";
+import { mcpAppFileEditSummary } from "./WidgetPayload.js";
 
 const ACTIVITY_OUTPUT_PAGE_BYTES = 256 * 1024;
 const ACTIVITY_OUTPUT_PAGE_ENTRIES = 32;
@@ -148,27 +149,33 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
     return records.filter((record) => record.ctxId === ctxId)
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
         .slice(0, 50)
-        .map((record) => ({
-            callId: record.callId,
-            name: record.toolName,
-            state: record.status,
-            at: record.completedAt ?? record.startedAt,
-            ...(typeof record.exitCode === "number" ? { exitCode: record.exitCode } : {}),
-            ...(record.purpose ? { purpose: protect(record.purpose, 200) } : {}),
-            ...(target(record) === undefined ? {} : { target: target(record) }),
-            ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
-            ...(summary(record) === undefined ? {} : { summary: summary(record) }),
-            ...(record.input === undefined ? {} : { input: presentationValue(record.input, 2_000) }),
-            ...(record.toolName === "bash_run" ? {
-                output: presentationValue({
-                    ...(object(record.output) ?? {}),
-                    ...(record.stdoutBytes === undefined ? {} : { stdoutBytes: record.stdoutBytes }),
-                    ...(record.stderrBytes === undefined ? {} : { stderrBytes: record.stderrBytes }),
-                }, 8_000),
-            } : record.output === undefined ? {} : { output: presentationValue(record.output, 8_000) }),
-            ...(detail(record.toolName, record.output) === undefined ? {}
-                : { detail: detail(record.toolName, record.output) }),
-        }));
+        .map((record) => {
+            const editSummary = record.toolName === "file_edit" ? mcpAppFileEditSummary(record.output) : undefined;
+            return {
+                callId: record.callId,
+                name: record.toolName,
+                state: record.status,
+                at: record.completedAt ?? record.startedAt,
+                ...(typeof record.exitCode === "number" ? { exitCode: record.exitCode } : {}),
+                ...(record.purpose ? { purpose: protect(record.purpose, 200) } : {}),
+                ...(target(record) === undefined ? {} : { target: target(record) }),
+                ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
+                ...(summary(record) === undefined ? {} : { summary: summary(record) }),
+                ...(record.input === undefined ? {} : { input: presentationValue(record.input, 2_000) }),
+                ...(record.toolName === "bash_run" ? {
+                    output: presentationValue({
+                        ...(object(record.output) ?? {}),
+                        ...(record.stdoutBytes === undefined ? {} : { stdoutBytes: record.stdoutBytes }),
+                        ...(record.stderrBytes === undefined ? {} : { stderrBytes: record.stderrBytes }),
+                    }, 8_000),
+                } : record.output === undefined ? {} : { output: presentationValue(
+                    editSummary === undefined ? record.output : {
+                        editSummary, ...object(record.output),
+                    }, 8_000) }),
+                ...(detail(record.toolName, record.output) === undefined ? {}
+                    : { detail: detail(record.toolName, record.output) }),
+            };
+        });
 }
 
 export async function readMcpAppActivity(transport: Pick<ToolTransport, "listCalls">, ctxId: string): Promise<McpAppActivity[]> {

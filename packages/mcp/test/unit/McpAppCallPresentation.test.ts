@@ -192,6 +192,36 @@ test("Inline is disabled by default while historical resources and Fullscreen re
     }
 });
 
+test("the production Endpoint exposes a reachable fullscreen Workspace with Inline ToolCalls disabled", async () => {
+    const { McpEndpoint } = await import("../../src/protocol/Endpoint.ts");
+    const { McpExtensionRegistry } = await import("../../src/protocol/extension/Registry.ts");
+    const { createMcpAppMcpExtension } = await import("../../src/mcpapp/Extension.ts");
+    const { mcpAppOpenDefinition } = await import("../../../core/src/instance/mcpapp/Definition.ts");
+    const definitions = [mcpAppOpenDefinition(), { name: "bash_run", group: "bash",
+        description: "Run command", requiredCapabilities: [], inputSchema: { type: "object" },
+        outputSchema: { type: "object" } }];
+    const extension = createMcpAppMcpExtension("https://example.test");
+    const endpoint = new McpEndpoint({
+        instanceName: "alpha", extensions: new McpExtensionRegistry([extension]),
+        context: { resolve: async () => { throw new Error("Unexpected Context read"); } },
+        tools: { call: async () => { throw new Error("Unexpected tool execution"); } },
+        toolSource: {
+            list: () => definitions.map((definition) => ({ scope: "*", definition })),
+            get: (_instance, name) => {
+                const definition = definitions.find((entry) => entry.name === name);
+                return definition ? { scope: "*", definition } : undefined;
+            },
+        },
+    });
+    const [open, shell] = endpoint.listTools();
+    const workspaceUri = extension.presentation!.resourceUri;
+    assert.equal((open?._meta as Record<string, unknown>)?.["openai/outputTemplate"], workspaceUri);
+    assert.equal((shell?._meta as Record<string, unknown>)?.["openai/outputTemplate"], undefined);
+    const resource = await endpoint.readResource(workspaceUri);
+    assert.match(resource?.text ?? "", /data-mcpapp-view="workspace"/u);
+    assert.deepEqual(resource?._meta?.["openai/ui"], { availableDisplayModes: ["fullscreen"] });
+});
+
 test("Inline opt-in still excludes frequent background and reporting tools", async () => {
     const f = fixture(undefined, true);
     for (const name of ["progress_report", "environ_info", "tmux_read", "tmux_input",
@@ -255,4 +285,29 @@ test("per-tool Widget metadata is self-contained and bounded without changing th
     assert.match(JSON.stringify(payload), /\[redacted\]/u);
     assert.equal(presented._meta?.["openai/outputTemplate"],
         "ui://widget/toolcall.html?widgetRevision=1&toolName=bash_run");
+});
+
+test("file_edit Widget retains the complete batch outcome before the 40 operation preview limit", async () => {
+    const f = fixture(undefined, true);
+    const output = { operations: [
+        ...Array.from({ length: 40 }, (_, index) => ({
+            path: `file-${index}.ts`, status: "applied", addedLines: 2, removedLines: 1,
+            diff: "+" + "x".repeat(3_000),
+        })),
+        { path: "failed.ts", status: "failed", error: { message: "File changed since read; token=private-value" } },
+    ] };
+    const presented = await f.endpoint.present("file_edit", output, f.request);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.deepEqual(presented.structuredContent, output, "The complete model/audit result is preserved");
+    const widget = presented._meta?.["portable-devshell/widgetPayload"] as {
+        output: { operations: unknown[]; editSummary: Record<string, unknown> };
+    };
+    assert.equal(widget.output.operations.length, 40);
+    assert.equal(widget.output.editSummary.totalOperations, 41);
+    assert.equal(widget.output.editSummary.failedOperations, 1);
+    assert.equal(widget.output.editSummary.addedLines, 80);
+    assert.equal(widget.output.editSummary.removedLines, 40);
+    assert.match(JSON.stringify(widget.output.editSummary.failures), /failed.ts.*File changed since read/u);
+    assert.doesNotMatch(JSON.stringify(widget), /private-value/u);
+    assert.ok(JSON.stringify(widget).length < 37_000);
 });

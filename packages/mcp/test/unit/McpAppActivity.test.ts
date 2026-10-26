@@ -12,6 +12,20 @@ function call(id: string, ctxId: string, toolName: string, index: number,
     };
 }
 
+test("file_edit Activity preserves failures outside its bounded operation details", () => {
+    const [card] = projectMcpAppActivity([call("edit", "ctx-a", "file_edit", 1, {
+        output: { operations: [
+            ...Array.from({ length: 40 }, () => ({ path: "ok.ts", status: "applied" })),
+            { path: "failed.ts", status: "failed", error: { message: "Revision mismatch" } },
+        ] },
+    })], "ctx-a");
+    const output = card?.output as { operations: unknown[]; editSummary: Record<string, unknown> };
+    assert.equal(output.editSummary.totalOperations, 41);
+    assert.equal(output.editSummary.failedOperations, 1);
+    assert.match(JSON.stringify(output.editSummary.failures), /failed.ts.*Revision mismatch/u);
+    assert.ok(output.operations.length < 41);
+});
+
 test("Workspace history projects useful cards for every audited tool, isolating the Context and secrets", () => {
     const items = [
         call("a", "ctx-target", "bash_run", 1, { input: { command: "printf ok" }, purpose: "Check shell",

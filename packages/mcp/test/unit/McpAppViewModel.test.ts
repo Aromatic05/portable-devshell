@@ -8,13 +8,52 @@ test("MCP App ViewModel ignores unrelated Context events but observes global and
         at: "", instanceName: asInstanceName("demo"), seq: 17, type,
         ...(data === undefined ? {} : { data }),
     });
-    for (const type of ["goal.updated", "wait.resolved", "toolCall.completed"]) {
+    for (const type of ["goal.updated", "wait.resolved", "toolCall.completed", "log.appended"]) {
         assert.equal(mcpAppEventAffectsContext(event(type, { ctxId: "other" }), "ctx-a"), false);
         assert.equal(mcpAppEventAffectsContext(event(type, { ctxId: "ctx-a" }), "ctx-a"), true);
         assert.equal(mcpAppEventAffectsContext(event(type), "ctx-a"), true);
     }
     assert.equal(mcpAppEventAffectsContext(event("other.changed", { ctxId: "other" }), "ctx-a"), true);
     assert.equal(mcpAppEventAffectsContext(event("instance.started"), "ctx-a"), true);
+});
+
+test("MCP App watch advances unrelated log cursors without reading state or Activity, and refreshes owned logs", async (t) => {
+    const endpoint = new Endpoint({ host: "mcpapp-log-test" });
+    endpoint.connect = async (host, port) => endpoint.bind(`client-${port}`).connect(host, port);
+    let owner = "ctx-other";
+    let seq = 12;
+    let stateReads = 0;
+    let activityReads = 0;
+    const task = new Rpc(endpoint.bind("task", "test"), {
+        getGoal: () => { stateReads++; return { goal: null, lastSeq: seq }; },
+        getWaits: () => ({ waits: [], lastSeq: seq }),
+    });
+    const approval = new Rpc(endpoint.bind("approval", "test"), {
+        snapshot: () => ({ approvals: [], lastSeq: seq }),
+    });
+    const tool = new Rpc(endpoint.bind("tool", "test"), {
+        listCalls: (request) => {
+            if ((request as { status?: string }).status === undefined) activityReads++;
+            return [];
+        },
+    });
+    const events = new Stream(endpoint.bind("instance", "test"));
+    events.onOpen(async (stream, name) => {
+        assert.equal(name, "subscribeEvents");
+        await stream.send({ name: "event", payload: {
+            at: "", instanceName: "test", seq, type: "log.appended", data: { ctxId: owner },
+        } });
+    });
+    t.after(() => { events.close(); tool.close(); approval.close(); task.close(); endpoint.close(); });
+    const view = createMcpAppViewModel(endpoint);
+    assert.deepEqual(await view.watch("test", "ctx-a", undefined, 11), { changed: false, cursor: 12 });
+    assert.equal(stateReads, 0);
+    assert.equal(activityReads, 0, "No history/detail read is needed for another Context's logs");
+    owner = "ctx-a"; seq = 13;
+    const owned = await view.watch("test", "ctx-a", undefined, 12);
+    assert.equal(owned.changed, true);
+    assert.equal(owned.snapshot?.cursor, 13);
+    assert.equal(stateReads, 1, "Owned output still updates the Workspace");
 });
 
 test("MCP App watch recovers a resolved Wait with no delivered Audit event", async (t) => {
@@ -111,6 +150,7 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
     let calls: ToolCallRecord[] = [];
     let activityReads = 0;
     let executionUnavailable = false;
+    let finishBoundary = false;
     const task = new Rpc(endpoint.bind("task", "test"), {
         getGoal: () => ({ goal, lastSeq: 12 }),
         getWaits: () => ({ waits: [], lastSeq: 12 }),
@@ -131,12 +171,18 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
                 ...(query.before === undefined ? {} : { before: query.before }),
             });
             if (executionUnavailable) throw new Error("Execution authority unavailable");
+            assert.equal(query.before, undefined, "Mutable running sets must not use history cursors");
             const before = query.before === undefined
                 ? calls.length
                 : calls.findIndex((call) => call.callId === query.before);
-            return calls.slice(0, before < 0 ? 0 : before)
+            const page = calls.slice(0, before < 0 ? 0 : before)
                 .filter((call) => call.ctxId === query.ctxId && call.status === query.status)
                 .slice(-query.limit);
+            if (finishBoundary && page[0]) {
+                calls = calls.filter((call) => call.callId !== page[0]!.callId);
+                finishBoundary = false;
+            }
+            return page;
         },
     });
     t.after(() => {
@@ -173,9 +219,17 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
     const paginatedBusy = await view.snapshot("test", "ctx-a");
     assert.equal(paginatedBusy.agentBusy, true, "A running Agent outside the newest 64 calls must not be hidden");
     assert.equal(paginatedBusy.reentry.schedule, undefined);
+    finishBoundary = true;
+    assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, true,
+        "A full page remains busy when its boundary finishes and moves to persisted history");
+    assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, true,
+        "The older Agent remains busy after the boundary disappears");
+    calls = calls.slice(1);
+    assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, true,
+        "64 UI calls leave execution unknown and conservatively busy");
     calls = calls.slice(1);
     assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, false,
-        "All 65 UI calls must be inspected before marking a Context idle");
+        "A later authoritative page below 64 with no Agent restores ready and reentry eligibility");
     calls = [call("ctx-a", "completed")];
     assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, false);
     executionUnavailable = true;
