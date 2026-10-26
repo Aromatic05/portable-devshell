@@ -34,6 +34,7 @@ export interface TuiInteractionState {
 }
 
 export type TuiUiIntent =
+    | { delta: number; type: "overlay.scroll" }
     | { type: "app.quit" }
     | { type: "app.requestQuit" }
     | { page: TuiPageId; type: "page.select" }

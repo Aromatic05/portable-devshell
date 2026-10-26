@@ -1,3 +1,4 @@
+import { renderExpandableBoxLines } from "../../../view/component/content/Box.js";
 import type { TuiAppStore } from "../../../state/store/App.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
 import { overviewInstanceViewportRows, tuiMessagesHistoryRows, tuiBlockHeight } from "../../../terminal/Public.js";
@@ -120,9 +121,19 @@ export class TuiCommandDispatcherFocus {
             state,
             this.#mainFlowColumns(state),
         );
-        const range = metrics.boxRanges[boxId];
+        let range = metrics.boxRanges[boxId];
         if (range === undefined) {
             return;
+        }
+
+        if (state.interaction.focusScope === "form" || state.interaction.focusScope === "wizard") {
+            const box = this.#projection.selectMainScreenModel(state).boxes.find((item) => item.id === boxId);
+            if (box !== undefined) {
+                const selected = state.interaction.selectedDetailLineIds[box.expandedKey];
+                const row = renderExpandableBoxLines(box, this.#mainFlowColumns(state))
+                    .findIndex((line) => line.lineId === selected);
+                if (row >= 0) range = { start: range.start + row, end: range.start + row + 1 };
+            }
         }
 
         const viewportRows = this.boxViewportRows();

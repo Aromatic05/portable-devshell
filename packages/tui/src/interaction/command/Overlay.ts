@@ -1,3 +1,5 @@
+import type { TuiInteractionProjection } from "../Projection.js";
+import { tuiApprovalFields, tuiConfirmationBodyText, tuiOverlayBodyLayout } from "../../view/overlay/Presentation.js";
 import type { TuiUiIntent } from "../../state/Interaction.js";
 import { errorMessage } from "@portable-devshell/shared";
 import type { TuiAppStore } from "../../state/store/App.js";
@@ -12,6 +14,7 @@ import type { TuiFocusManager } from "../focus/Manager.js";
 import type { TuiCommandDispatcherFocus } from "./navigation/Focus.js";
 
 export interface TuiCommandDispatcherOverlayOptions {
+    projection: TuiInteractionProjection;
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
     focus: TuiCommandDispatcherFocus;
     focusManager: TuiFocusManager;
@@ -19,12 +22,14 @@ export interface TuiCommandDispatcherOverlayOptions {
 }
 
 export class TuiCommandDispatcherOverlay {
+    readonly #projection: TuiInteractionProjection;
     readonly #dispatch?: (intent: TuiUiIntent) => Promise<boolean>;
     readonly #focus: TuiCommandDispatcherFocus;
     readonly #focusManager: TuiFocusManager;
     readonly #store: TuiAppStore;
 
     constructor(options: TuiCommandDispatcherOverlayOptions) {
+        this.#projection = options.projection;
         this.#dispatch = options.dispatch;
         this.#focus = options.focus;
         this.#focusManager = options.focusManager;
@@ -33,6 +38,8 @@ export class TuiCommandDispatcherOverlay {
 
     async dispatch(intent: TuiUiIntent): Promise<boolean | undefined> {
         switch (intent.type) {
+            case "overlay.scroll":
+                return this.#scrollOverlay(intent.delta);
             case "search.open":
                 return this.#openSearch();
             case "search.append":
@@ -72,6 +79,29 @@ export class TuiCommandDispatcherOverlay {
         if (overlay === undefined) return false;
         if (overlay.kind === "confirmation") return this.#closeConfirmation();
         return this.#closeOverlay(overlay.kind);
+    }
+
+    #scrollOverlay(delta: number): boolean {
+        const overlay = topTuiOverlay(this.#store.getState().interaction.overlays);
+        if (overlay?.kind !== "approval" && overlay?.kind !== "confirmation") return false;
+        let body: string;
+        if (overlay.kind === "confirmation") {
+            body = tuiConfirmationBodyText(overlay);
+        } else {
+            const approval = this.#projection.domains.approval(overlay.instance).approvals
+                .find((item) => item.approvalId === overlay.approvalId);
+            if (approval === undefined) return false;
+            const call = this.#projection.domains.toolCalls.instances[overlay.instance]?.calls
+                .find((item) => item.callId === approval.callId);
+            body = tuiApprovalFields(approval, call).map(([label, value]) => `${label}: ${value}`).join("\n");
+        }
+        const layout = tuiOverlayBodyLayout(body, this.#focus.mainContentColumns(),
+            this.#focus.mainViewportRows(), overlay.scrollOffset,
+            overlay.kind === "confirmation"
+                ? wrapTerminalText(overlay.title, Math.max(1, this.#focus.mainContentColumns() - 4)).length : 1);
+        const scrollOffset = Math.max(0, Math.min(layout.offset + delta, layout.total - layout.rows));
+        this.#store.replaceTopOverlay({ ...overlay, scrollOffset });
+        return true;
     }
 
     #openSearch(): boolean {

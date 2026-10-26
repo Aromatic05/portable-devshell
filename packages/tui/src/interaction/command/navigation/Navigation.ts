@@ -58,6 +58,7 @@ export class TuiCommandDispatcherNavigation {
         this.#projection = options.projection;
         this.#store = options.store;
         this.#overlay = new TuiCommandDispatcherOverlay({
+            projection: options.projection,
             dispatch: options.dispatch,
             focus: options.focus,
             focusManager: options.focusManager,

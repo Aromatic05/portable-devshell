@@ -33,11 +33,16 @@ export class TuiRuntimeTmuxOperations {
     ) {}
 
     async listPanes(instance: string): Promise<TuiTmuxListPane[]> {
-        const workspace = this.#lookupWorkspace(instance);
-        if (workspace === undefined) return [];
-        // tmux_manage list already reads every pane on this Instance.
-        const result = await this.call(instance, workspace, "tmux_manage", { command: "list" });
-        return readPanes(result, workspace).sort(comparePanes);
+        const workspace = this.options.domains.instances.state.instances.find((item) =>
+            item.name === instance)?.homeDirectory;
+        if (!workspace) {
+            throw new Error(`Instance ${instance} has no home directory for tmux discovery`);
+        }
+        const result = await this.call(instance, workspace, "tmux_manage", {
+            command: "list",
+            scope: "instance",
+        });
+        return readPanes(result).sort(comparePanes);
     }
 
     async inspectPane(
@@ -123,31 +128,22 @@ export class TuiRuntimeTmuxOperations {
         }
         return feedback;
     }
-
-    #lookupWorkspace(instance: string): string | undefined {
-        const home = this.options.domains.instances.state.instances.find((item) =>
-            item.name === instance)?.homeDirectory;
-        if (home) return home;
-        for (const context of this.options.domains.context.state.contexts) {
-            const environment = context.environments.find((item) =>
-                item.instance === instance && item.workspace);
-            if (environment?.workspace) return environment.workspace;
-        }
-        return this.options.domains.toolCalls.state.instances[instance]?.calls.find((call) =>
-            call.workspace)?.workspace;
-    }
 }
 
 function readPanes(
     result: Record<string, JsonValue>,
-    workspace: string,
 ): TuiTmuxListPane[] {
     return readRecordArray(result, "panes").map((pane) => {
+        const workspace = readString(pane, "workspace");
+        if (!workspace) {
+            throw new Error("tmux_manage scope=instance returned a pane without its owning workspace");
+        }
         const base = {
             id: readRequiredString(pane, "id"),
             name: readRequiredString(pane, "name"),
             status: readRequiredString(pane, "status"),
-            workspace: readString(pane, "cwd") ?? workspace,
+            ...(readString(pane, "cwd") === undefined ? {} : { cwd: readString(pane, "cwd") }),
+            workspace,
         };
         const taskId = readNestedString(pane, "task", "id");
         if (taskId === undefined) {
@@ -171,7 +167,8 @@ function comparePanes(left: TuiTmuxListPane, right: TuiTmuxListPane): number {
     return (
         leftRank - rightRank ||
         left.workspace.localeCompare(right.workspace) ||
-        left.name.localeCompare(right.name)
+        left.name.localeCompare(right.name) ||
+        left.id.localeCompare(right.id)
     );
 }
 

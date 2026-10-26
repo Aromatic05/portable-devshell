@@ -14,6 +14,8 @@ import {
  * ViewModels directly; it holds no refresh API of its own.
  */
 export class TuiRouteDataLoader {
+    #auditSelection?: symbol;
+    #messageSelection?: symbol;
     constructor(
         private readonly options: {
             domains: TuiDomainSession;
@@ -58,8 +60,13 @@ export class TuiRouteDataLoader {
                     await refreshTuiAudit(domains, instance);
                     if (!signal.aborted && route.view === "context" &&
                         route.scope === "context") {
+                        const selection = this.#auditSelection = Symbol();
                         await domains.toolCalls.loadContext(instance, route.ctxId);
-                        return () => domains.toolCalls.clearContext(instance, route.ctxId);
+                        return () => {
+                            if (this.#auditSelection !== selection) return;
+                            this.#auditSelection = undefined;
+                            domains.toolCalls.clearContext(instance, route.ctxId);
+                        };
                     }
                 } else {
                     if (signal.aborted) return;
@@ -77,8 +84,13 @@ export class TuiRouteDataLoader {
                 if (signal.aborted) return;
                 await refreshTuiMessages(domains);
                 if (!signal.aborted && route.view === "thread") {
+                    const selection = this.#messageSelection = Symbol();
                     await domains.messageHistory.loadContext(route.instance, route.ctxId);
-                    return () => domains.messageHistory.clearContext(route.instance, route.ctxId);
+                    return () => {
+                        if (this.#messageSelection !== selection) return;
+                        this.#messageSelection = undefined;
+                        domains.messageHistory.clearContext(route.instance, route.ctxId);
+                    };
                 }
                 return;
             case "goals":

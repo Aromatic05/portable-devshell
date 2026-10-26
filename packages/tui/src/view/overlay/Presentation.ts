@@ -18,6 +18,7 @@ export interface TuiOverlayActionLayout<Action extends string> {
 }
 
 export interface TuiOverlayFrame {
+    height?: number;
     width: number;
     x: number;
     y: number;
@@ -71,11 +72,9 @@ export function projectTuiConfirmationActions(
     frame: TuiOverlayFrame,
 ): readonly TuiOverlayActionLayout<TuiConfirmationAction>[] {
     const innerWidth = Math.max(1, frame.width - 4);
-    const y =
-        frame.y +
-        1 +
-        wrappedRows(overlay.title, innerWidth) +
-        wrappedRows(tuiConfirmationBodyText(overlay), innerWidth);
+    const y = frame.y + 1 + wrappedRows(overlay.title, innerWidth) +
+        tuiOverlayBodyLayout(tuiConfirmationBodyText(overlay), frame.width,
+            frame.height, overlay.scrollOffset, wrappedRows(overlay.title, innerWidth)).rows + 1;
     const labels: readonly (readonly [TuiConfirmationAction, string])[] = [
         ["cancel", overlay.cancelLabel],
         ["confirm", overlay.confirmLabel],
@@ -95,13 +94,8 @@ export function projectTuiApprovalActions(
     toolCall: ToolCallRecord | undefined,
     frame: TuiOverlayFrame,
 ): readonly TuiOverlayActionLayout<TuiApprovalAction>[] {
-    const innerWidth = Math.max(1, frame.width - 4);
-    const fieldRows = tuiApprovalFields(approval, toolCall).reduce(
-        (rows, [label, value]) =>
-            rows + wrappedRows(`${label}: ${value}`, innerWidth),
-        0,
-    );
-    const y = frame.y + 1 + wrappedRows("Approval", innerWidth) + fieldRows + 1;
+    const body = tuiApprovalFields(approval, toolCall).map(([label, value]) => `${label}: ${value}`).join("\n");
+    const y = frame.y + 2 + tuiOverlayBodyLayout(body, frame.width, frame.height).rows + 1;
     let x = frame.x + 2;
     return tuiApprovalActions.map((action) => {
         const width = stringWidth(tuiApprovalActionText(action));
@@ -113,4 +107,17 @@ export function projectTuiApprovalActions(
 
 function wrappedRows(text: string, width: number): number {
     return Math.max(1, wrapTerminalText(text, width).length);
+}
+
+export function tuiOverlayBodyLayout(
+    body: string,
+    width: number,
+    height?: number,
+    scrollOffset = 0,
+    titleRows = 1,
+): { lines: string[]; offset: number; rows: number; total: number } {
+    const lines = wrapTerminalText(body, Math.max(1, width - 4));
+    const rows = Math.min(lines.length, Math.max(1, (height ?? Infinity) - titleRows - 4));
+    const offset = Math.max(0, Math.min(scrollOffset, lines.length - rows));
+    return { lines: lines.slice(offset, offset + rows), offset, rows, total: lines.length };
 }

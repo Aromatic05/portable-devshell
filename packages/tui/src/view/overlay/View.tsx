@@ -13,6 +13,7 @@ import {
     tuiApprovalActions,
     tuiApprovalActionText,
     tuiApprovalFields,
+    tuiOverlayBodyLayout,
     tuiConfirmationBodyText,
 } from "./Presentation.js";
 
@@ -39,6 +40,8 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                     confirmLabel={overlay.confirmLabel}
                     open={true}
                     title={overlay.title}
+                    scrollOffset={overlay.scrollOffset}
+                    viewportRows={props.viewportRows}
                     width={props.width}
                 />
             );
@@ -74,6 +77,8 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                 <ApprovalOverlay
                     approval={approval}
                     selectedAction={overlay.selectedAction}
+                    scrollOffset={overlay.scrollOffset}
+                    viewportRows={props.viewportRows}
                     toolCall={toolCall}
                     width={props.width}
                 />
@@ -103,6 +108,8 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
 
 function ApprovalOverlay(props: {
     approval?: ApprovalRequest;
+    scrollOffset?: number;
+    viewportRows: number;
     selectedAction: "back" | "input" | "deny" | "approve";
     toolCall?: ToolCallRecord;
     width: number;
@@ -117,7 +124,9 @@ function ApprovalOverlay(props: {
         );
     }
 
-    const fields = tuiApprovalFields(props.approval, props.toolCall);
+    const body = tuiApprovalFields(props.approval, props.toolCall)
+        .map(([label, value]) => `${label}: ${value}`).join("\n");
+    const layout = tuiOverlayBodyLayout(body, props.width, props.viewportRows, props.scrollOffset);
 
     return (
         <Box
@@ -128,10 +137,11 @@ function ApprovalOverlay(props: {
             width={props.width}
         >
             <Text bold>Approval</Text>
-            {fields.map(([label, value]) => (
-                <Text key={label}>{`${label}: ${value}`}</Text>
-            ))}
-            <Box marginTop={1}>
+            <Box flexDirection="column" height={layout.rows} flexShrink={0}>
+                {layout.lines.map((line, index) => <Text key={index}>{line}</Text>)}
+            </Box>
+            <Text dimColor>{`PgUp/PgDn scroll · ${layout.offset + 1}-${layout.offset + layout.rows}/${layout.total}`}</Text>
+            <Box flexShrink={0}>
                 {tuiApprovalActions.map((action) => (
                     <Text
                         backgroundColor={

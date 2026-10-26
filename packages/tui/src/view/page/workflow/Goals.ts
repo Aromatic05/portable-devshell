@@ -9,6 +9,7 @@ function goalBox(state: TuiAppState, instance: string, goal: GoalSnapshot): BoxM
     return makeBox(state, "goals", instance, {
         detailLines: [
             formatField("Goal", goal.goalId),
+            formatField("Objective", goal.objective),
             formatField("Revision", String(goal.revision)),
             formatField("Status", goal.status),
             formatField("Workspace", workspaceFolderName(goal.workspace)),

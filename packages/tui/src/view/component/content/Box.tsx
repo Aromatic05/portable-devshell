@@ -167,6 +167,7 @@ function renderEditableBodyLine(
                     value,
                     line.cursor ?? value.length,
                     line.cursorVisible === true,
+                    Math.max(1, innerWidth - stringWidth(editable.prefix) - stringWidth(editable.suffix ?? "")),
                 )
               : [{ text: displayValue, underline: true }];
     const content = fitStyledSegments(
@@ -185,12 +186,24 @@ function editCursorSegments(
     value: string,
     requestedCursor: number,
     visible: boolean,
+    width: number,
 ): Array<{ text: string; underline?: boolean }> {
+    const parts = [...graphemeSegmenter.segment(value)];
     const cursor = Math.min(Math.max(0, requestedCursor), value.length);
+    const current = parts.find((part) => part.index >= cursor);
+    const cursorIndex = current?.index ?? value.length;
+    const cursorText = current?.segment ?? " ";
+    let start = cursorIndex;
+    let used = stringWidth(cursorText);
+    for (const part of parts.filter((part) => part.index < cursorIndex).reverse()) {
+        if (used + stringWidth(part.segment) > width - 1) break;
+        start = part.index;
+        used += stringWidth(part.segment);
+    }
     return [
-        { text: value.slice(0, cursor) },
-        { text: value[cursor] ?? " ", underline: visible || undefined },
-        { text: value.slice(cursor + (cursor < value.length ? 1 : 0)) },
+        { text: `${start > 0 ? "‹" : ""}${value.slice(start, cursorIndex)}` },
+        { text: cursorText, underline: visible || undefined },
+        { text: value.slice(cursorIndex + cursorText.length) },
     ];
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { type JsonValue } from "@portable-devshell/shared";
 import { TuiRuntimeTmuxOperations } from "../../../src/app/operation/Tmux.ts";
+import { TuiTmuxPaneTerminalSession } from "../../../src/terminal/tmux/Session.ts";
 import { TuiControlSession } from "../../../src/testing.ts";
 import { TuiTestDomains } from "../../support/DomainHarness.ts";
 
@@ -54,17 +55,19 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
     test("listPanes records a tmux_manage list call and preserves each task's actual status", async () => {
         const harness = createHarness((): JsonValue => ({
             panes: [
-                { id: "%0", name: "main", status: "idle" },
+                { id: "%0", name: "main", status: "idle", workspace: "/home/alpha" },
                 {
                     id: "%1",
                     name: "server",
                     status: "running",
+                    workspace: "/home/alpha",
                     task: { id: "task-9", status: "running" },
                 },
                 {
                     id: "%2",
                     name: "done",
                     status: "0",
+                    workspace: "/home/alpha",
                     task: { id: "task-5", status: "0" },
                 },
             ],
@@ -86,7 +89,7 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
 
         assert.deepEqual(harness.calls, [
             {
-                input: { command: "list" },
+                input: { command: "list", scope: "instance" },
                 instance: "alpha",
                 toolName: "tmux_manage",
                 workspace: "/home/alpha",
@@ -116,54 +119,78 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
         ]);
     });
 
-    test("listPanes finds older tmux panes through a single Instance-wide list regardless of ToolCall history", async () => {
-        const harness = createHarness((): JsonValue => ({
-            panes: [{
-                id: "%7", name: "task-pane", status: "running",
-                cwd: "/work/project", task: { id: "task-project", status: "running" },
-            }],
-        }));
-        harness.domains.setToolCalls("alpha", Array.from({ length: 200 }, (_, i) => ({
-            callId: `read-${i}`, instance: "alpha", inputSummary: "{}", source: "mcp",
-            startedAt: "2026-08-29T08:00:00.000Z", status: "completed",
-            toolName: "file_read", workspace: "/recent",
-        } as never)));
-
-        const panes = await harness.operations.listPanes("alpha");
-
-        assert.deepEqual(
-            harness.calls.map((call) => call.workspace),
-            ["/home/alpha"],
-        );
-        assert.equal(panes[0]?.task?.id, "task-project");
-        assert.equal(panes[0]?.workspace, "/work/project");
+    test("instance discovery survives Context exit and history pruning; identical pane ids retain backend routing after cwd changes", async () => {
+        let cwd = "/work/project/changed";
+        const harness = createHarness((call): JsonValue => {
+            if (call.toolName === "tmux_manage") {
+                assert.deepEqual(call.input, { command: "list", scope: "instance" });
+                assert.equal(call.workspace, "/home/alpha");
+                return { panes: [
+                    { id: "%0", name: "home", status: "running", workspace: "/home/alpha",
+                        task: { id: "task-home", status: "running" } },
+                    { id: "%0", name: "project", status: "running", workspace: "/work/project", cwd,
+                        task: { id: "task-project", status: "running" } },
+                ] };
+            }
+            if (call.toolName === "tmux_inspect") {
+                return { panes: [{ id: "%0", name: "project", status: "running", cwd,
+                    lines: ["project output"], task: { id: "task-project", status: "running" } }] };
+            }
+            assert.equal(call.toolName, "tmux_input");
+            return { task: { id: "task-project", status: "running" }, output: [] };
+        });
+        harness.domains.setContexts([{ ctxId: "ctx-project", environments: [
+            { instance: "alpha", workspace: "/work/project" },
+            { instance: "beta", workspace: "/other" },
+        ] } as never]);
+        harness.domains.setToolCalls("alpha", [{ workspace: "/work/project" } as never]);
+        const terminal = new TuiTmuxPaneTerminalSession({ operations: harness.operations });
+        await terminal.bind("alpha");
+        assert.deepEqual(terminal.getSnapshot().panes.map(({ id, workspace }) => ({ id, workspace })), [
+            { id: "%0", workspace: "/home/alpha" },
+            { id: "%0", workspace: "/work/project" },
+        ]);
+        assert.equal(harness.calls.length, 1);
+        terminal.selectIndex(1);
+        await terminal.activate();
+        assert.equal(terminal.getSnapshot().active?.workspace, "/work/project");
+        assert.equal(terminal.getSnapshot().active?.cwd, cwd);
+        assert.equal(terminal.getSnapshot().active?.attached, true);
+        assert.equal(harness.calls.at(-1)?.workspace, "/work/project");
+        harness.domains.setContexts([]);
+        harness.domains.setToolCalls("alpha", []);
+        cwd = "/elsewhere";
+        await terminal.refresh();
+        assert.equal(terminal.getSnapshot().panes.length, 2);
+        assert.equal(terminal.getSnapshot().selectedIndex, 1);
+        assert.equal(terminal.getSnapshot().active?.cwd, "/elsewhere");
+        assert.equal(terminal.getSnapshot().active?.workspace, "/work/project");
+        await terminal.handleInput("hello\r");
+        assert.deepEqual(harness.calls.at(-1), {
+            input: { input: "hello^M", task: "task-project", timeMs: 0 },
+            instance: "alpha", toolName: "tmux_input", workspace: "/work/project",
+        });
+        terminal.dispose();
+        const cold = await harness.operations.listPanes("alpha");
+        assert.deepEqual(cold.map((pane) => pane.workspace), ["/home/alpha", "/work/project"]);
     });
 
-    test("listPanes queries the Instance home even when the ToolCall preview has no tmux evidence", async () => {
+    test("instance discovery rejects missing ownership instead of routing through home or cwd", async () => {
         const harness = createHarness((): JsonValue => ({
-            panes: [{ id: "%0", name: "main", status: "idle" }],
+            panes: [{ id: "%0", name: "project", status: "idle", cwd: "/work/project/changed" }],
         }));
-        harness.domains.setContexts([
-            {
-                createdAt: "2026-08-29T08:00:00.000Z",
-                ctxId: "ctx-ordinary",
-                environments: [
-                    { instance: "alpha", workspace: "/work/ordinary" },
-                ],
-                expiresAt: "2026-08-31T08:00:00.000Z",
-                instance: "alpha",
-                lastAccessedAt: "2026-08-29T08:00:00.000Z",
-                principal: "subject",
-                status: "active",
-                workspace: "/work/ordinary",
-            } as never,
-        ]);
+        await assert.rejects(() => harness.operations.listPanes("alpha"), /without its owning workspace/u);
+    });
 
-        const panes = await harness.operations.listPanes("alpha");
-
-        assert.equal(panes.length, 1);
-        assert.equal(panes[0]?.workspace, "/home/alpha");
-        assert.deepEqual(harness.calls.map((call) => call.workspace), ["/home/alpha"]);
+    test("instance discovery surfaces unmapped legacy workspace errors without guessing from Contexts", async () => {
+        const harness = createHarness((): JsonValue => ({
+            error: { code: "tmux.workspaceUnresolved", message: "original workspace identity is missing" },
+        }));
+        harness.domains.setContexts([{ ctxId: "ctx-project", environments: [
+            { instance: "alpha", workspace: "/work/project" },
+        ] } as never]);
+        await assert.rejects(() => harness.operations.listPanes("alpha"), /tmux\.workspaceUnresolved/u);
+        assert.equal(harness.calls.length, 1);
     });
 
     test("inspectPane records a tmux_inspect call scoped to the requested pane and line window", async () => {

@@ -1,9 +1,12 @@
 import { Box, Text } from "ink";
+import { wrapTerminalText } from "../../terminal/Public.js";
 
-import { tuiConfirmationActionText } from "./Presentation.js";
+import { tuiConfirmationActionText, tuiOverlayBodyLayout } from "./Presentation.js";
 
 export interface TuiComponentConfirmDialogProps {
     body: string;
+    scrollOffset?: number;
+    viewportRows?: number;
     cancelFocused: boolean;
     cancelLabel: string;
     confirmFocused: boolean;
@@ -20,6 +23,8 @@ export function TuiComponentConfirmDialog(
         return null;
     }
 
+    const layout = tuiOverlayBodyLayout(props.body, props.width, props.viewportRows, props.scrollOffset,
+        wrapTerminalText(props.title, Math.max(1, props.width - 4)).length);
     return (
         <Box
             borderStyle="double"
@@ -28,8 +33,11 @@ export function TuiComponentConfirmDialog(
             width={props.width}
         >
             <Text bold>{props.title}</Text>
-            <Text>{props.body}</Text>
-            <Box gap={1}>
+            <Box flexDirection="column" height={layout.rows} flexShrink={0}>
+                {layout.lines.map((line, index) => <Text key={index}>{line}</Text>)}
+            </Box>
+            <Text dimColor>{`PgUp/PgDn scroll · ${layout.offset + 1}-${layout.offset + layout.rows}/${layout.total}`}</Text>
+            <Box gap={1} flexShrink={0}>
                 <Text
                     backgroundColor={props.cancelFocused ? "cyan" : undefined}
                     color={props.cancelFocused ? "black" : undefined}

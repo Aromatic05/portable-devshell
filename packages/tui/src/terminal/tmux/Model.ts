@@ -20,6 +20,7 @@ export function nextTuiTerminalTab(tab: TuiTerminalTab): TuiTerminalTab {
 }
 
 export interface TuiTmuxListPane {
+    cwd?: string;
     id: string;
     name: string;
     status: string;
@@ -30,6 +31,7 @@ export interface TuiTmuxListPane {
 export type TuiTmuxPaneMode = "view" | "attach";
 
 export interface TuiTmuxPaneViewModel {
+    cwd?: string;
     id: string;
     mode: TuiTmuxPaneMode;
     name: string;
@@ -44,6 +46,7 @@ export function projectTmuxPanes(
     return panes.map((pane) => {
         const task = pane.task;
         return {
+            ...(pane.cwd === undefined ? {} : { cwd: pane.cwd }),
             id: pane.id,
             mode:
                 task !== undefined && task.status === "running"

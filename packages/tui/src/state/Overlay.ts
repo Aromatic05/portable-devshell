@@ -10,6 +10,7 @@ export type TuiOverlay =
     | TuiToolFormOverlay;
 
 export interface TuiConfirmationOverlay {
+    readonly scrollOffset?: number;
     readonly body: string;
     readonly busy?: boolean;
     readonly cancelLabel: string;
@@ -22,6 +23,7 @@ export interface TuiConfirmationOverlay {
 }
 
 export interface TuiApprovalOverlay {
+    readonly scrollOffset?: number;
     readonly approvalId: string;
     readonly instance: string;
     readonly kind: "approval";

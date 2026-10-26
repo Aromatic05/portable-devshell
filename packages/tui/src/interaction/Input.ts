@@ -3,6 +3,7 @@ import { pageFromShortcut } from "../state/route/Navigation.js";
 
 export interface TuiKeyPress {
     input: string;
+    paste?: boolean;
     key: {
         backspace?: boolean;
         ctrl?: boolean;
@@ -26,6 +27,16 @@ export class TuiKeyDispatcher {
     dispatch(mode: TuiMode, press: TuiKeyPress): TuiUiIntent[] {
         if (mode === "terminal") {
             return [];
+        }
+        if (press.paste) {
+            switch (mode) {
+                case "contextMessage": return [{ text: press.input, type: "contextMessage.append" }];
+                case "form":
+                case "wizard": return [{ text: press.input, type: "editor.append" }];
+                case "search": return [{ text: press.input, type: "search.append" }];
+                case "toolForm": return [{ text: press.input, type: "toolForm.append" }];
+                default: return [];
+            }
         }
         return normalizeKeyPresses(press).flatMap((normalized) =>
             this.#dispatchNormalized(mode, normalized),
@@ -110,6 +121,8 @@ export class TuiKeyDispatcher {
     }
 
     #forConfirm(press: TuiKeyPress): TuiUiIntent[] {
+        const scroll = overlayScroll(press);
+        if (scroll !== undefined) return [scroll];
         if (press.key.tab && press.key.shift) {
             return [{ direction: "previous", type: "focus.move" }];
         }
@@ -126,6 +139,8 @@ export class TuiKeyDispatcher {
     }
 
     #forApprovalDetail(press: TuiKeyPress): TuiUiIntent[] {
+        const scroll = overlayScroll(press);
+        if (scroll !== undefined) return [scroll];
         if (press.key.tab && press.key.shift) {
             return [{ direction: "previous", type: "focus.move" }];
         }
@@ -155,6 +170,7 @@ export class TuiKeyDispatcher {
     }
 
     #forContextMessage(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.ctrl && press.input.toLowerCase() === "r") return [{ type: "page.reload" }];
         if (press.key.backspace || press.key.delete) {
             return [{ type: "contextMessage.backspace" }];
         }
@@ -364,4 +380,12 @@ function shiftedInstanceIndex(press: TuiKeyPress): number | undefined {
     const symbols = "!@#$%^&*()";
     const index = symbols.indexOf(press.input);
     return index === -1 ? undefined : index;
+}
+
+function overlayScroll(press: TuiKeyPress): TuiUiIntent | undefined {
+    if (press.key.pageUp) return { delta: -10, type: "overlay.scroll" };
+    if (press.key.pageDown) return { delta: 10, type: "overlay.scroll" };
+    if (press.key.home) return { delta: -1_000_000, type: "overlay.scroll" };
+    if (press.key.end) return { delta: 1_000_000, type: "overlay.scroll" };
+    return undefined;
 }

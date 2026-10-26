@@ -277,7 +277,7 @@ function isTuiRouteResourceValid(
                 ? ({ kind: "unscoped" } as const)
                 : ({ ctxId: route.ctxId, kind: "context" } as const);
         const context = findAuditContext(domains, instance, key);
-        return context !== undefined && context.calls.length > 0;
+        return context !== undefined;
     }
     return true;
 }

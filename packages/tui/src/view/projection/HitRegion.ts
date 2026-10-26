@@ -380,6 +380,7 @@ function buildTuiOverlayHitRegions(
     if (overlay === undefined) return [];
     const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
     const frame = {
+        height: geometry.contentHeight - tuiBlockHeight(selectErrorMessage(state)) - (state.connection.status === "connecting" ? 1 : 0),
         width: geometry.contentWidth,
         x: geometry.contentX,
         y: geometry.contentY + tuiBlockHeight(selectErrorMessage(state)),

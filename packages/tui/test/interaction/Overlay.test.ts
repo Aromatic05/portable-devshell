@@ -317,6 +317,7 @@ test("a false decision result leaves the owned confirmation retryable and cannot
     const attempts = [pending, retryPending];
     const calls: TuiUiIntent[] = [];
     const overlay = new TuiCommandDispatcherOverlay({
+        projection: harness.domains.projection,
         dispatch: async (intent) => {
             calls.push(intent);
             entered.resolve();

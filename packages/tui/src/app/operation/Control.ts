@@ -341,9 +341,13 @@ export class TuiRuntimeControlOperations {
                     this.options.domains.mcp.refresh(),
                 ]);
                 return;
-            case "messages":
+            case "messages": {
                 await refreshTuiMessages(this.options.domains);
+                const route = currentTuiRoute(this.options.store.getState());
+                if (route.page === "messages" && route.view === "thread")
+                    await this.options.domains.messageHistory.loadContext(route.instance, route.ctxId);
                 return;
+            }
             case "audit":
                 if (instance !== undefined) {
                     await refreshTuiAudit(this.options.domains, instance);

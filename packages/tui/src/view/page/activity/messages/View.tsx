@@ -14,6 +14,7 @@ import {
     selectTuiMessageHistorySessions,
     selectTuiMessageSessions,
     tuiMessagesHistoryRows,
+    tuiMessageHistoryNotice,
 } from "./Projection.js";
 
 export function TuiMessagesView(props: {
@@ -54,7 +55,8 @@ export function TuiMessagesView(props: {
         route.ctxId,
         props.width,
     );
-    const historyRows = tuiMessagesHistoryRows(props.viewportRows);
+    const notice = tuiMessageHistoryNotice(props.reader, instance, route.ctxId);
+    const historyRows = Math.max(0, tuiMessagesHistoryRows(props.viewportRows) - (notice === undefined ? 0 : 1));
     const maxOffset = Math.max(0, history.length - historyRows);
     const scrollKey = currentTuiRouteScrollKey(props.state);
     const requestedOffset =
@@ -75,8 +77,9 @@ export function TuiMessagesView(props: {
 
     return (
         <Box flexDirection="column" flexGrow={1}>
-            <Box flexDirection="column" height={historyRows} overflow="hidden">
-                {visible.length === 0 ? (
+            <Box flexDirection="column" height={tuiMessagesHistoryRows(props.viewportRows)} overflow="hidden">
+                {notice === undefined ? null : <Text color="yellow" wrap="truncate-end">{notice}</Text>}
+                {visible.length === 0 && notice === undefined ? (
                     <Text dimColor>No messages yet.</Text>
                 ) : null}
                 {visible.map((line, index) => (

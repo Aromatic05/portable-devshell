@@ -733,6 +733,16 @@ export class TuiRuntime {
                     );
                     continue;
                 }
+                if (frame.type === "paste") {
+                    await this.#enqueueInput(async () => {
+                        this.selection.clearSelection();
+                        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(
+                            this.store.getState().interaction.focusScope,
+                            { input: frame.data, key: {}, paste: true },
+                        ));
+                    });
+                    continue;
+                }
                 this.#inkStdin.write(frame.data);
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 await this.#inputQueue;

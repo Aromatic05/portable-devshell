@@ -39,9 +39,10 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
     const paneLabel =
         pane === undefined
             ? "no pane"
-            : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status} · ${workspaceLabel(pane.workspace)}`;
+            : `${snapshot.selectedIndex + 1}/${snapshot.panes.length} · ${pane.name} · ${pane.status} · ${workspaceLabel(pane.cwd ?? pane.workspace)}`;
     const header = `tmux · ${props.instance ?? "no instance"} · ${snapshot.status} · ${paneLabel}`;
     const bodyRows = tuiTmuxPaneContentRows(props.rows);
+    const listStart = Math.max(0, snapshot.selectedIndex - bodyRows + 1);
     const position =
         active === undefined
             ? ""
@@ -92,23 +93,23 @@ export function TuiComponentTmuxPanes(props: TuiComponentTmuxPanesProps) {
                         <Text dimColor>no panes</Text>
                     ) : (
                         snapshot.panes
-                            .slice(0, bodyRows)
-                            .map((candidate, index) => (
+                            .slice(listStart, listStart + bodyRows)
+                            .map((candidate, row) => (
                                 <Text
                                     backgroundColor={
-                                        index === snapshot.selectedIndex
+                                        listStart + row === snapshot.selectedIndex
                                             ? "cyan"
                                             : undefined
                                     }
                                     color={
-                                        index === snapshot.selectedIndex
+                                        listStart + row === snapshot.selectedIndex
                                             ? "black"
                                             : undefined
                                     }
                                     key={`${candidate.workspace}:${candidate.id}`}
                                     wrap="truncate-end"
                                 >
-                                    {`${index === snapshot.selectedIndex ? "▶" : " "} ${candidate.name} · ${candidate.status}${candidate.taskId === undefined ? "" : ` · ${candidate.taskId}`} · ${workspaceLabel(candidate.workspace)}`}
+                                    {`${listStart + row === snapshot.selectedIndex ? "▶" : " "} ${candidate.name} · ${candidate.status}${candidate.taskId === undefined ? "" : ` · ${candidate.taskId}`} · ${workspaceLabel(candidate.cwd ?? candidate.workspace)}`}
                                 </Text>
                             ))
                     )

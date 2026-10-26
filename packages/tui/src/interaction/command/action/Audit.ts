@@ -174,11 +174,12 @@ export class TuiCommandDispatcherAudit {
         instance: string,
         callId: string,
     ): Promise<ToolCallRecord | undefined> {
-        const compact = (
-            this.#projection.domains.toolCalls.instances[instance]?.calls ?? []
-        ).find((candidate: ToolCallRecord) => candidate.callId === callId);
-        if (compact === undefined) return undefined;
-        if (compact.input !== undefined && compact.output !== undefined)
+        const history = this.#projection.domains.toolCalls;
+        const compact = [
+            ...(history.context?.instance === instance ? history.context.calls : []),
+            ...(history.instances[instance]?.calls ?? []),
+        ].find((candidate: ToolCallRecord) => candidate.callId === callId);
+        if (compact?.input !== undefined && compact.output !== undefined)
             return compact;
         return (await this.#onToolCallDetail?.(instance, callId)) ?? compact;
     }

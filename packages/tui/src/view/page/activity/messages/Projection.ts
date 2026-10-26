@@ -24,6 +24,7 @@ import { wrapTerminalText } from "../../../../terminal/Public.js";
 import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 
 export interface TuiMessageEntry {
+    error?: string;
     at: string;
     id: string;
     kind: "comment" | "report";
@@ -447,6 +448,7 @@ function selectTuiMessageEntriesFromSource(
     return entries
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): TuiMessageEntry => ({
+            ...(entry.error === undefined ? {} : { error: entry.error }),
             at: entry.createdAt,
             id: `${entry.kind}:${entry.id}`,
             kind: entry.kind,
@@ -458,6 +460,21 @@ function selectTuiMessageEntriesFromSource(
                 left.at.localeCompare(right.at) ||
                 left.id.localeCompare(right.id),
         );
+}
+
+export function tuiMessageHistoryNotice(
+    reader: TuiDomainReader,
+    instance: string,
+    ctxId: string,
+): string | undefined {
+    const context = reader.messageHistory.context;
+    const selected = context?.instance === instance && context.ctxId === ctxId ? context : undefined;
+    const failure = selected !== undefined ? selected.failure
+        : reader.messageHistory.failures[`message-history:${instance}`];
+    if (failure !== undefined)
+        return `Message history could not be loaded: ${failure.message} · Ctrl+R retry`;
+    if (selected?.loading === true) return "Loading message history…";
+    return undefined;
 }
 
 export function renderTuiMessageHistoryLines(
@@ -491,6 +508,9 @@ export function renderTuiMessageHistoryLines(
                 kind: "meta" as const,
                 text: `${entry.kind === "comment" ? "You" : "Agent"}  ${formatMessageTime(entry.at)}${entry.kind === "comment" && entry.status !== "delivered" ? `  ${entry.status ?? ""}` : ""}`,
             },
+            ...(entry.error === undefined ? [] : wrapTerminalText(
+                `Delivery failed: ${entry.error}. Check Context status before retrying.`, innerWidth,
+            ).map((text) => ({ kind: "meta" as const, text }))),
             ...wrapTerminalText(entry.text, innerWidth).map((line) => ({
                 kind: "text" as const,
                 text: `  ${line}`,
