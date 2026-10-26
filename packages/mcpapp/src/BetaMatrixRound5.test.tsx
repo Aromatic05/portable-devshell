@@ -220,7 +220,8 @@ test("round5: refused fullscreen does not loop and failed Close permits explicit
     await click("Activity"); await click("Overview"); expect(host.modes).toEqual(["fullscreen"]);
     await click("Open fullscreen"); expect(host.modes).toEqual(["fullscreen", "fullscreen"]);
     host.teardownError = new Error("Host cannot close this surface"); await click("Close");
-    expect(container.querySelector('[role="alert"]')!.textContent).toBe("Host cannot close this surface");
+    expect(Array.from(container.querySelectorAll('[role="alert"]'), (item) => item.textContent))
+        .toContain("Host cannot close this surface");
     expect(button("Close").disabled).toBe(false);
     host.teardownError = undefined; await click("Close"); expect(button("Closing…").disabled).toBe(true);
     expect(host.teardown).toBe(2); expect(host.calls).toEqual([]);

@@ -47,11 +47,30 @@ test("Workspace history queries audited active and completed calls, with bounded
     }, "ctx-target");
     assert.equal(requested.length, 2);
     assert.equal(requested[0]?.ctxId, "ctx-target");
-    assert.equal(requested[0]?.includeOutput, true);
-    assert.equal(requested[1]?.includeOutput, false);
+    assert.equal(requested[0]?.includeOutput, false);
+    assert.equal(requested[1]?.includeOutput, true);
     assert.deepEqual(cards.map((item) => item.name), ["file_edit"]);
     assert.equal(cards[0]?.state, "failed");
     assert.match(cards[0]?.summary ?? "", /Invalid patch/u);
+});
+
+test("Workspace activity preserves all 50 metadata cards when full detail returns only a subset", async () => {
+    const records = Array.from({ length: 50 }, (_, i) => call(`card-${i}`, "ctx-a", "file_read", i));
+    const requested: ToolCallQuery[] = [];
+    const cards = await readMcpAppActivity({
+        listCalls: async (query) => {
+            requested.push(query ?? {});
+            if (query?.includeOutput !== true) return records;
+            return records.slice(0, 3).map((item) => ({ ...item, output: { content: "visible" } }));
+        },
+    }, "ctx-a");
+    assert.equal(cards.length, 50);
+    assert.equal(requested[0]?.ctxId, "ctx-a");
+    assert.equal(requested[0]?.includeOutput, false);
+    assert.equal(requested[1]?.callIds?.length, 50);
+    assert.equal(requested[1]?.includeOutput, true);
+    assert.equal(new Set(cards.map((item) => item.callId)).size, 50);
+    assert.ok(cards.some((item) => item.detail?.includes("visible")));
 });
 
 test("Tmux transcript polls share Task ID with the original command and stay audited", () => {
@@ -173,7 +192,7 @@ test("Activity restores retained stdout/stderr for only the owning Context and m
     assert.equal(JSON.stringify(output).includes("example-credential"), false);
     assert.deepEqual(queries[0], {
         ctxId: "ctx-own", callIds: ["call-shell"], limit: 1,
-        includeInput: false, includeOutput: true, maxBytes: 64 * 1024,
+        includeInput: false, includeOutput: false, maxBytes: 64 * 1024,
     });
     assert.deepEqual(queries[1], {
         callId: "call-shell", ctxId: "ctx-own", fromSeq: 1,

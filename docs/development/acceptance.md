@@ -17,7 +17,7 @@ node acceptance/run-chain-matrix.mjs --only L01-L04
 node acceptance/run-chain-matrix.mjs --all
 ```
 
-这套验收走真实临时 Control、Rust Worker、MCP、SQLite，L03 还走 Chromium WebUI；它独立于一般 Package Unit Test。单条失败不跳过其他链，却让汇总结果非零。**当前 L07 Artifact、L05 Workflow 全链通过；L03 受 Comment Todo 前置限流阻断，L01/L04 Reverse 删除后Cleanup Retry留下旧代债务，两项真实红测。** 手动 `beta-matrix-extended` 的 `chains` 专项会测试这四条，但没有进入普通 PR 门禁，尚未在 GitHub Runner 上实跑。不得用现有单元测试全绿替代整链结果。
+这套验收走真实临时 Control、Rust Worker、MCP、SQLite，L03 还走 Chromium WebUI；它独立于一般 Package Unit Test。单条失败不跳过其他链，却让汇总结果非零。**2026-10-26 对 `c4ab5cc8` 的独立本地实跑是四链全部完成（4/4、Exit 0），且测试 fixture 完成清理。** 此前 Comment Todo 限流、Reverse Cleanup Debt 的红测属于历史发现，修复过程与原始失败保留在[完整功能链记录](functional-chain-acceptance.md)。2026-10-25 手动 `beta-matrix-extended` 的 `chains` Job 已在 GitHub Runner 对 `e2482d25` 成功运行；它不属于普通 PR 门禁，也不代表当前 HEAD 的远端结果。后续变更须重新验证；不得用单元测试全绿或另一提交的结果代替完整功能链验收。
 
 ## 完整本地验收
 
@@ -143,6 +143,7 @@ instance version 4 中：
 7. MCP v2 request-scoped SSE keepalive 能让长 `tools/call` 跨过普通 HTTP idle timeout；
 8. `tmux_run(wait=block)` 在 180 秒内可以真实同步返回，超过 180 秒正常 `detached`，task 继续运行；
 9. Control/MCP restart 后 durable Wait 可以恢复，而不会重复执行原 tmux task。
+10. 新 Instance 的 `[workspace].inlineToolCalls` 默认关闭普通 ToolCall iframe，且不影响手动打开的 Fullscreen Workspace、必要的审批交互或 Audit；显式启用后仅允许受支持工具挂载 Inline 卡片。
 
 ## OAuth / 公网门禁
 
@@ -172,7 +173,8 @@ instance version 4 中：
 6. Reverse instance 保持 self-managed，不被本机安装器错误启动；
 7. Linux/macOS 在没有显式 `XDG_RUNTIME_DIR` 时仍能解析同一用户 Control socket；
 8. 六个原生 target 都有对应应用包和 Worker asset；
-9. Unix 与 Windows 安装脚本及校验文件全部随 Release 发布。
+9. Unix 与 Windows 安装脚本及校验文件全部随 Release 发布；
+10. 安装器在开始替换运行态前拒绝从 DevShell 自己的 `bash_run` / `tmux_run` 环境发起自升级，并明确引导用户使用独立终端或 SSH 会话。
 
 ## 文档门禁
 
@@ -185,3 +187,5 @@ instance version 4 中：
 - 不把 `workspace` 写回 instance config；
 - 不把 app-only Workspace helper 推荐给模型；
 - 当前 CLI 示例能在 `devshell --help` / 子命令 help 中找到对应入口。
+- 当前功能链、CI、原生 Worker 和客户端交互的通过状态使用**同一待发布 commit**的证据；其他 commit 的成功记录不代替当前门禁。
+- 安全检查不能仅依赖 Secret 扫描：明确核查 inbound Secret Rewrite 之后的 Audit input/inputSummary 持久化、env 轮换后的 outbound masking 与后续 Hook 结果，记录已知开放风险的处理结论。

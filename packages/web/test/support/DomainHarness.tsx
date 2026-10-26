@@ -151,12 +151,26 @@ export class WebTestDomains {
     );
     readonly messageHistory = Object.assign(
         new TestDomainSource({
+            context: undefined as any,
             failures: {} as Record<string, Error>,
             instances: {} as Record<string, any>,
         }),
         {
             load: asyncVoid,
             refreshInstance: async (_instance: string) => 0,
+            loadContext: async (instance: string, ctxId: string) => {
+                const entries = (this.messageHistory.state.instances[instance]?.entries ?? [])
+                    .filter((entry: any) => entry.ctxId === ctxId);
+                this.messageHistory.patch({ context: {
+                    ctxId, entries, historyExhausted: true, instance, loading: false,
+                } });
+            },
+            clearContext: (instance: string, ctxId: string) => {
+                if (this.messageHistory.state.context?.instance === instance &&
+                    this.messageHistory.state.context.ctxId === ctxId)
+                    this.messageHistory.patch({ context: undefined });
+            },
+            loadOlderContext: async () => 0,
         },
     );
     readonly messagePreferences = Object.assign(
@@ -201,9 +215,33 @@ export class WebTestDomains {
     readonly toolCalls = Object.assign(
         new TestDomainSource({
             instances: {} as Record<string, any>,
+            context: undefined as {
+                calls: any[];
+                ctxId: string;
+                historyBefore?: string;
+                historyExhausted?: boolean;
+                instance: string;
+                loading: boolean;
+            } | undefined,
         }),
         {
             load: asyncVoid,
+            loadContext: async (instance: string, ctxId: string) => {
+                this.toolCalls.patch({ context: {
+                    calls: (this.toolCalls.state.instances[instance]?.calls ?? [])
+                        .filter((call: { ctxId?: string }) => call.ctxId === ctxId),
+                    ctxId,
+                    historyExhausted: true,
+                    instance,
+                    loading: false,
+                } });
+            },
+            clearContext: (instance: string, ctxId: string) => {
+                if (this.toolCalls.state.context?.instance === instance &&
+                    this.toolCalls.state.context.ctxId === ctxId)
+                    this.toolCalls.patch({ context: undefined });
+            },
+            loadOlderContext: async (_instance: string, _ctxId: string) => 0,
             readDetail: async (_instance: string, _callId: string) =>
                 [] as any[],
         },

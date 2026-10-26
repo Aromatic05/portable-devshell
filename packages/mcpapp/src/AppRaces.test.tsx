@@ -14,6 +14,87 @@ function serveContexts() {
         : hold(init?.signal));
 }
 
+async function openFullscreenPending() {
+    const pending = deferred<{ mode: string }>();
+    host.fullscreen = true;
+    host.modeResult = pending.promise;
+    await render(<AppView />);
+    await act(async () => {
+        button("Open fullscreen").click();
+        button("Open fullscreen").click();
+    });
+    expect(host.modes).toEqual(["fullscreen"]);
+    expect(button("Opening fullscreen…").disabled).toBe(true);
+    await click("Opening fullscreen…");
+    expect(host.modes).toEqual(["fullscreen"]);
+    return pending;
+}
+
+test("manual fullscreen shows pending state, blocks duplicate requests and applies success", async () => {
+    const pending = await openFullscreenPending();
+    await act(async () => pending.resolve({ mode: "fullscreen" }));
+    expect(container.querySelector("main")!.getAttribute("data-display-mode")).toBe("fullscreen");
+    expect(container.textContent).not.toContain("Opening fullscreen");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(host.calls).toEqual([]);
+});
+
+test("manual fullscreen refusal is visible and permits an explicit retry", async () => {
+    const pending = await openFullscreenPending();
+    await act(async () => pending.resolve({ mode: "inline" }));
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("The Host declined fullscreen");
+    expect(button("Open fullscreen").disabled).toBe(false);
+    host.modeResult = undefined;
+    await click("Open fullscreen");
+    expect(host.modes).toEqual(["fullscreen", "fullscreen"]);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector("main")!.getAttribute("data-display-mode")).toBe("fullscreen");
+});
+
+test("manual fullscreen failure is visible and permits an explicit retry", async () => {
+    const pending = await openFullscreenPending();
+    await act(async () => pending.reject(new Error("Host request timed out")));
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe("Could not open fullscreen: Host request timed out");
+    expect(button("Open fullscreen").disabled).toBe(false);
+    host.modeResult = undefined;
+    await click("Open fullscreen");
+    expect(host.modes).toEqual(["fullscreen", "fullscreen"]);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
+test("an automatic fullscreen request also prevents a concurrent manual request", async () => {
+    const pending = deferred<{ mode: string }>();
+    host.fullscreen = true;
+    host.modeResult = pending.promise;
+    serveSnapshot(snapshot());
+    await render(<AppView />);
+    await authorize();
+    expect(button("Opening fullscreen…").disabled).toBe(true);
+    await click("Opening fullscreen…");
+    expect(host.modes).toEqual(["fullscreen"]);
+    await act(async () => pending.resolve({ mode: "inline" }));
+    expect(button("Open fullscreen").disabled).toBe(false);
+});
+
+test.each([401, 403])("expired initial Live capability (%s) stops retrying and recovers with fresh authorization", async (status) => {
+    vi.useFakeTimers();
+    serve(() => new Response("{}", { status }));
+    await render(<AppView />);
+    await authorize();
+    expect(container.querySelector(".workspace-status")!.textContent).toContain("Authorization expired");
+    expect(container.querySelector("main")!.getAttribute("data-status")).toBe("disconnected");
+    expect(container.textContent).not.toContain("Live reconnecting");
+    expect(container.textContent).not.toContain("Workspace connected");
+    expect(container.textContent).toContain("Reopen Workspace from the active DevShell Context");
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    serveSnapshot(snapshot());
+    await authorize();
+    expect(container.textContent).toContain("Goal ctx-a");
+    expect(container.querySelector(".workspace-status")!.textContent).toContain("Connected");
+    expect(container.textContent).not.toContain("authorization expired");
+});
+
 test.each(["claim", "validate", "context", "attempt"] as const)(
     "recovery suspended at %s cannot deliver into a replacement Context and settles the original claim",
     async (phase) => {
@@ -270,7 +351,9 @@ test("old Close failure and fullscreen result cannot modify a replacement Contex
     serveContexts(); await render(<AppView />); await authorize(); await click("Close");
     host.modeResult = undefined; host.acceptFullscreen = false; await authorize("ctx-b", "beta");
     await act(async () => { close.reject(new Error("old close failed")); fullscreen.resolve({ mode: "fullscreen" }); });
-    expect(container.querySelector('[role="alert"]')).toBeNull(); expect(button("Close").disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe("The Host declined fullscreen. You can try again.");
+    expect(container.textContent).not.toContain("old close failed");
+    expect(button("Close").disabled).toBe(false);
     expect(container.querySelector("main")!.getAttribute("data-display-mode")).toBe("inline");
     expect(container.textContent).toContain("Goal ctx-b");
 });

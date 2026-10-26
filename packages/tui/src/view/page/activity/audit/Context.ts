@@ -32,6 +32,10 @@ export function buildAuditContextBoxes(
 ): BoxModel[] {
     const context = findAuditContext(reader, instance, key);
     if (context === undefined) return [];
+    const history = reader.toolCalls.context;
+    const scopedHistory = key.kind === "context" &&
+        history?.instance === instance && history.ctxId === key.ctxId
+        ? history : undefined;
 
     return [
         ...context.calls.map((call) => ({
@@ -44,7 +48,30 @@ export function buildAuditContextBoxes(
         })),
     ]
         .sort((left, right) => right.at.localeCompare(left.at))
-        .map((entry) => entry.box);
+        .map((entry) => entry.box)
+        .concat(
+            scopedHistory?.loading && scopedHistory.calls.length === 0
+                ? [makeBox(state, "audit", instance, {
+                    id: "audit-context-loading",
+                    title: "Loading Context Tool Calls…",
+                    summaryLines: ["Reading scoped history"],
+                    detailLines: [],
+                })] : [],
+            scopedHistory?.failure === undefined ? [] : [makeBox(state, "audit", instance, {
+                id: "audit-context-error",
+                title: "Context Tool Calls unavailable",
+                summaryLines: ["r retry"],
+                detailLines: [scopedHistory.failure.message],
+                status: "failed",
+            })],
+            scopedHistory?.historyBefore === undefined || scopedHistory.historyExhausted
+                ? [] : [makeBox(state, "audit", instance, {
+                    id: "audit-context-older",
+                    title: "Older Tool Calls",
+                    summaryLines: [`${scopedHistory.calls.length} loaded`, "l load older"],
+                    detailLines: [],
+                })],
+        );
 }
 
 function callBox(

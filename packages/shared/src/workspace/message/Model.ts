@@ -162,7 +162,7 @@ export function humanMessageTitle(
  * keeping the newest identity while preserving messages that are still in
  * flight (`pending`/`sent`) when a server list no longer reports them.
  */
-function mergeMessageEntry(
+export function mergeMessageEntry(
     current: readonly MessageEntry[],
     incoming: MessageEntry,
 ): MessageEntry[] {

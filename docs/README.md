@@ -1,6 +1,6 @@
 # portable-devshell 文档
 
-这套文档以当前 `1.0.0-beta.1` 代码与运行模型为基线。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
+这套文档以当前开发源码 `1.0.0-beta.3` 的运行模型为基线，**尚未提升 RC**。Beta 早期缺陷报告、测试矩阵和历史 Release Note 保留原始版本与日期，不能代替当前 HEAD 的验收结论。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
 
 ## 从这里开始
 
@@ -39,6 +39,8 @@
 - [Beta 缺陷与最小复现](development/beta-bug-findings.md)：第三轮负例、独立红测、已修复问题和待 E2E 确认的风险。
 - [Testspace](development/testspace.md)：完整本地 DevShell + MCP connector 测试环境。
 - [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
+- [RC 前收口状态](development/rc-preflight.md)：区分历史提交和当前工作树的功能链证据、交互修复与未解除的发布门禁。
+- [Beta.2 Release Note](releases/v1.0.0-beta.2.md)：beta.2 历史变更说明；当前开发版本与 RC 进度以此文档上方的收口状态为准。
 - [Version 与 Compatibility Lifecycle](development/compatibility.md)：产品版本、Protocol、Extension API、persistent schema、update 与 migrate 的独立版本和兼容边界。
 - [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
 - [Extension Database Capability](development/extension-database.md)：由 Host 持有的 SQLite 连接、事务租约、数据库路径隔离与 Generation 退役。
@@ -52,4 +54,4 @@
 4. **长任务与长 HTTP 请求分离。** `tmux_run(wait=block)` 可以同步等待一段时间，超过产品同步窗口后由 durable Wait/Workspace 接管，但 task 本身继续运行。
 5. **旧名称不代表现行协议支持。** MCP endpoint 拒绝 legacy 协议；少量隐藏 stale-recipient 转换不重新进入 catalog。当前 catalog 包含 Worker、Control primitive 与 Extension `mcp.tools`，shell command ACL 是另一条边界。
 6. **fresh 默认与旧配置默认分开。** fresh init 使用 OAuth token 审批和 `openai-session`；通用 client 应显式配置 `explicit`。
-7. **安全目标与现状分开。** Execute、发布与 Audit 不是统一 Commit；已知执行后 adapter retry 偏差见 [架构](concepts/architecture.md)。
+7. **安全目标与现状分开。** Execute、发布与 Audit 不是统一 Commit；执行后 adapter retry 历史缺陷已有回归，但 Secret 在 inbound Rewrite 后可能进入 Audit 的风险仍需明确处理，见 [安全说明](operations/security.md)和 [RC 前收口状态](development/rc-preflight.md)。

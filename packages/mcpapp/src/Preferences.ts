@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 const key = "portable-devshell:mcpapp:toolcall-display:v1";
 const eventName = "portable-devshell:mcpapp:toolcall-display";
+// Show cards the Host has already provided by default. This does not enable
+// server-side inlineToolCalls or control Workspace fullscreen presentation.
 let fallback = true;
 
 export function readToolCallDisplay(): boolean {

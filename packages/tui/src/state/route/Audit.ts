@@ -37,6 +37,7 @@ let auditProjectionCache:
           contexts: TuiDomainReader["context"]["contexts"];
           instance: string;
           result: TuiAuditContextSummary[];
+          contextHistory: TuiDomainReader["toolCalls"]["context"];
           toolCalls: readonly ToolCallRecord[];
       }
     | undefined;
@@ -46,11 +47,13 @@ export function projectAuditContexts(
     instance: string,
 ): TuiAuditContextSummary[] {
     const toolCalls = reader.toolCalls.instances[instance]?.calls ?? [];
+    const contextHistory = reader.toolCalls.context;
     const approvals = reader.approval(instance).approvals;
     const contexts = reader.context.contexts;
     if (
         auditProjectionCache?.instance === instance &&
         auditProjectionCache.contexts === contexts &&
+        auditProjectionCache.contextHistory === contextHistory &&
         auditProjectionCache.toolCalls === toolCalls &&
         auditProjectionCache.approvals === approvals
     )
@@ -78,6 +81,16 @@ export function projectAuditContexts(
     for (const call of toolCalls) {
         resolve(call.ctxId).calls.push(call);
     }
+    // Wait for the first instance ledger read before exposing registry-only
+    // entries. Otherwise the sidebar becomes navigable during route hydration.
+    if (reader.toolCalls.instances[instance] !== undefined) {
+        for (const record of contexts) {
+            if (record.environments.some((environment) => environment.instance === instance))
+                resolve(record.ctxId);
+        }
+    }
+    if (contextHistory?.instance === instance)
+        resolve(contextHistory.ctxId).calls = [...contextHistory.calls];
     for (const approval of approvals) {
         if (approval.recording === "caller") continue;
         resolve(approval.ctxId).approvals.push(approval);
@@ -90,6 +103,7 @@ export function projectAuditContexts(
     auditProjectionCache = {
         approvals,
         contexts,
+        contextHistory,
         instance,
         result,
         toolCalls,

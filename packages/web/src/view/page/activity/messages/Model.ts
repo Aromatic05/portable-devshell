@@ -169,9 +169,10 @@ export function selectWebMessageEntries(
     instance: string,
     ctxId: string,
 ): WebMessageEntry[] {
-    const source =
-        input.message.instances[instance]?.entries ??
-        emptyMessageEntries;
+    const context = input.message.context;
+    const source = context?.instance === instance && context.ctxId === ctxId
+        ? context.entries
+        : input.message.instances[instance]?.entries ?? emptyMessageEntries;
     return source
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): WebMessageEntry => ({

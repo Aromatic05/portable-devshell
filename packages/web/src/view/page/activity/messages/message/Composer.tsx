@@ -45,6 +45,7 @@ export function MessageComposer({
         kind: "error" | "success";
         text: string;
     }>();
+    const draftRevision = useRef(0);
     const controlMenuRef = useRef<HTMLDivElement>(null);
     const controlTriggerRef = useRef<HTMLButtonElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,6 +76,7 @@ export function MessageComposer({
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
+        const submittedRevision = draftRevision.current;
         const text = composeMessageText(messageDirective, draft);
         if (text.length === 0) return;
         setFeedback(undefined);
@@ -83,6 +85,7 @@ export function MessageComposer({
             route.ctxId,
             text,
         );
+        if (queued && draftRevision.current !== submittedRevision) return;
         if (queued) {
             setDraft("");
             setMessageDirective(undefined);
@@ -122,7 +125,10 @@ export function MessageComposer({
                         <strong>#{messageDirective}</strong>
                         <button
                             aria-label="Remove message control"
-                            onClick={() => setMessageDirective(undefined)}
+                            onClick={() => {
+                                draftRevision.current += 1;
+                                setMessageDirective(undefined);
+                            }}
                             type="button"
                         >
                             ×
@@ -151,6 +157,7 @@ export function MessageComposer({
                             <button
                                 key={option.directive}
                                 onClick={() => {
+                                    draftRevision.current += 1;
                                     setMessageDirective(option.directive);
                                     setControlMenuOpen(false);
                                 }}
@@ -172,6 +179,7 @@ export function MessageComposer({
                 onChange={(event) => {
                     onActivity();
                     setFeedback(undefined);
+                    draftRevision.current += 1;
                     setDraft(event.target.value);
                     growComposerTextarea(event.target);
                 }}

@@ -220,9 +220,9 @@ Reverse connector 将整条字节连接桥接到 daemon transport endpoint，使
 
 预期安全契约：验证失败或超时的候选应留下仍可工作的前驱，只有成功 promotion 才退休旧链路。
 
-**KNOWN 未解决偏差（beta.1）**：`ReverseIngress.#acceptedWss` 按 descriptor 保存 reliable session/generation watermark，并在候选应用握手完成前更新；候选失败未回滚此 watermark。有效的更高 generation 候选先发送被接受的 reliable record、再拒绝握手时，旧连接可能仍显示 ready，但下一次 RPC reply 会被 `Stale reverse generation frame.` 拒绝，并产生 `rpc.resultUncertain`。不能把“保留前驱对象”描述成已经保证前驱 RPC 可用。
+**历史 beta.1 缺陷（已纳入普通回归）**：失败的更高 generation 候选曾提前污染 `ReverseIngress` 的 reliable watermark，令仍显示 ready 的前驱 RPC 出现 `Stale reverse generation frame.`。目前候选需要完成应用握手和 peer promotion 才能替换活动链路。注意：真正的网络断线仍可能让已执行但未确认的 RPC 返回 `rpc.resultUncertain`。
 
-可追踪复现入口为 [ReverseCandidateFailurePoisonsPreviousRound6.test.ts](../../test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts)，配套 `ReverseNetworkRound6Fixture.ts`。无 MemorySocketBoundary 时测试会使用 localhost TCP；受限 sandbox 可能因 EPERM 无法创建监听。本次文档修订只核对源码，未重新运行该红测。此偏差不是目标行为。
+可追踪回归入口为 [ReverseCandidateFailurePoisonsPreviousRound6.test.ts](../../packages/control/test/integration/ReverseCandidateFailurePoisonsPreviousRound6.test.ts)，配套 `ReverseNetworkRound6Fixture.ts`。测试使用 localhost TCP 验证失败候选后仍能继续前驱调用；受限 sandbox 可能因 EPERM 无法创建监听。它不能替代实际远端反向连接的发布验收。
 
 ## 当前默认参数
 

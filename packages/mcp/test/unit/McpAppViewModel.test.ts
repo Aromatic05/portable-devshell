@@ -120,7 +120,7 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
     });
     const tool = new Rpc(endpoint.bind("tool", "test"), {
         listCalls: (request) => {
-            const query = request as { ctxId: string; status?: string; limit: number };
+            const query = request as { ctxId: string; status?: string; limit: number; before?: string };
             assert.equal(query.ctxId, "ctx-a");
             if (query.status === undefined) {
                 activityReads++;
@@ -128,10 +128,15 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
             }
             assert.deepEqual(request, {
                 ctxId: "ctx-a", status: "running", limit: 64, includeInput: false, includeOutput: false,
+                ...(query.before === undefined ? {} : { before: query.before }),
             });
             if (executionUnavailable) throw new Error("Execution authority unavailable");
-            return calls.filter((call) => call.ctxId === query.ctxId && call.status === query.status)
-                .slice(0, query.limit);
+            const before = query.before === undefined
+                ? calls.length
+                : calls.findIndex((call) => call.callId === query.before);
+            return calls.slice(0, before < 0 ? 0 : before)
+                .filter((call) => call.ctxId === query.ctxId && call.status === query.status)
+                .slice(-query.limit);
         },
     });
     t.after(() => {
@@ -162,10 +167,21 @@ test("MCP App busy state follows live Context ToolCalls independently of Goals, 
     const uiOnly = await view.snapshot("test", "ctx-a");
     assert.equal(uiOnly.agentBusy, false);
     assert.equal(uiOnly.reentry.schedule?.sourceId, goal.goalId);
+    calls = [call("ctx-a", "running"), ...Array.from({ length: 65 }, (_, i) => ({
+        ...call("ctx-a", "running"), callId: `ui-${i}`, toolName: "mcpapp_open",
+    }))];
+    const paginatedBusy = await view.snapshot("test", "ctx-a");
+    assert.equal(paginatedBusy.agentBusy, true, "A running Agent outside the newest 64 calls must not be hidden");
+    assert.equal(paginatedBusy.reentry.schedule, undefined);
+    calls = calls.slice(1);
+    assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, false,
+        "All 65 UI calls must be inspected before marking a Context idle");
     calls = [call("ctx-a", "completed")];
     assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, false);
     executionUnavailable = true;
-    assert.equal((await view.snapshot("test", "ctx-a")).agentBusy, false);
+    const uncertain = await view.snapshot("test", "ctx-a");
+    assert.equal(uncertain.agentBusy, true);
+    assert.equal(uncertain.reentry.schedule, undefined);
 });
 
 test("MCP App ViewModel rejects a goal with a different Context workspace", () => {

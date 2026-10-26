@@ -69,10 +69,12 @@ export async function listMessageRows(
                 SELECT created_at AS createdAt, id, kind, seq
                 FROM message_entries
                 WHERE id = ? ${kind === undefined ? "" : "AND kind = ?"}
+                    ${input.ctxId === undefined ? "" : "AND ctx_id = ?"}
                 ORDER BY created_at ASC, seq ASC
                 LIMIT 1
             `,
-            [input.before, ...(kind === undefined ? [] : [kind])],
+            [input.before, ...(kind === undefined ? [] : [kind]),
+                ...(input.ctxId === undefined ? [] : [input.ctxId])],
         )) as
             | {
                   createdAt: string;
@@ -81,14 +83,10 @@ export async function listMessageRows(
                   seq: number;
               }
             | undefined;
-        if (boundary !== undefined) {
-            predicates.push("(created_at < ? OR (created_at = ? AND seq < ?))");
-            parameters.push(
-                boundary.createdAt,
-                boundary.createdAt,
-                boundary.seq,
-            );
-        }
+        if (boundary === undefined)
+            throw new Error("Message history cursor is unavailable in the requested Context.");
+        predicates.push("(created_at < ? OR (created_at = ? AND seq < ?))");
+        parameters.push(boundary.createdAt, boundary.createdAt, boundary.seq);
     }
     const limit =
         input.limit === undefined
@@ -197,7 +195,11 @@ export function applyByteBudget<T>(
         const recordBytes =
             Buffer.byteLength(JSON.stringify(record), "utf8") +
             (accepted.length === 0 ? 0 : 1);
-        if (bytes + recordBytes > maxBytes) break;
+        if (bytes + recordBytes > maxBytes) {
+            if (accepted.length === 0)
+                throw new RangeError(`Message entry exceeds maxBytes ${maxBytes}.`);
+            break;
+        }
         accepted.unshift(record);
         bytes += recordBytes;
     }

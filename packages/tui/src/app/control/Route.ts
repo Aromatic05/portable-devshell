@@ -56,6 +56,11 @@ export class TuiRouteDataLoader {
                 if (instance !== undefined) {
                     if (signal.aborted) return;
                     await refreshTuiAudit(domains, instance);
+                    if (!signal.aborted && route.view === "context" &&
+                        route.scope === "context") {
+                        await domains.toolCalls.loadContext(instance, route.ctxId);
+                        return () => domains.toolCalls.clearContext(instance, route.ctxId);
+                    }
                 } else {
                     if (signal.aborted) return;
                     await domains.instances.refresh();
@@ -71,6 +76,10 @@ export class TuiRouteDataLoader {
             case "messages":
                 if (signal.aborted) return;
                 await refreshTuiMessages(domains);
+                if (!signal.aborted && route.view === "thread") {
+                    await domains.messageHistory.loadContext(route.instance, route.ctxId);
+                    return () => domains.messageHistory.clearContext(route.instance, route.ctxId);
+                }
                 return;
             case "goals":
                 if (instance !== undefined && !signal.aborted)

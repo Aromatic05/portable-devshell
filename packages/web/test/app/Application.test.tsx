@@ -336,6 +336,22 @@ describe("authenticated application shell", () => {
         expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
 
+    it("reuses OAuth sign-in when reconnect finds an expired OAuth session", async () => {
+        const session = fakeSession({ authMode: "oauth2", check: true });
+        const domains = new WebTestDomains();
+        setServerStatus(domains, "offline");
+        const close = vi.spyOn(domains.domains, "close");
+        render(<App createDomains={() => domains.domains} session={session} />);
+        await screen.findByRole("button", { name: "Reconnect" });
+        session.check.mockResolvedValue(false);
+        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+        await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
+        expect(session.authMode).toHaveBeenCalledOnce();
+        expect(session.establish).not.toHaveBeenCalled();
+        expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+        expect(close).toHaveBeenCalledOnce();
+    });
+
     it("makes reconnect single-flight while checking the session", async () => {
         let releaseCheck!: (available: boolean) => void;
         const session = fakeSession({ check: true });

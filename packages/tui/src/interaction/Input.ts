@@ -291,6 +291,9 @@ export class TuiKeyDispatcher {
         if (press.input === "m" || press.input === "M") {
             return [{ type: "contextMessage.openCurrent" }];
         }
+        if (press.input === "l" || press.input === "L") {
+            return [{ type: "history.loadOlder" }];
+        }
         if (press.input === "/") {
             return [{ type: "search.open" }];
         }

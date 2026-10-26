@@ -175,7 +175,7 @@ ToolCall 默认由 host 记录；`recording=caller` 将记录责任交给 caller
 
 Outbound hook 失败时，target 不暴露 raw result，不重跑已失败的 Rewrite；执行已完成时返回 `core.toolResultDeliveryFailed`，`executionCompleted=true`、`failureStage=outboundHook`、`retryable=false`。
 
-**KNOWN BUG：** `transformResult` 在执行后失败标为 `postExecution`，但当前保留原错误的 `retryable=true`。已有回归用例要求这类已有副作用的失败不可重试，当前实现仍有缺口。不要仅凭 failed status 或该 retryable 标记自动重复操作；取消也不代表回滚。详细源码与回归证据见 [ToolCall Boundary](../development/toolcall-boundary.md)。
+**历史缺陷已纳入回归：**早期 `transformResult` 在执行后失败时保留原错误的 `retryable=true`。当前 [ToolCall Adapter 回归](../../packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts) 会产生实际副作用再触发适配失败，验证最终不可重试、执行完成标记和 Audit 归属。本轮在 2026-10-26 独立运行该回归通过。调用方仍不能只凭 failed 状态推断操作没有副作用；取消也不代表回滚。详情参见 [ToolCall Boundary](../development/toolcall-boundary.md)。
 
 ## Runtime Debug Patch
 

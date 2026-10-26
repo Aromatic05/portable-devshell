@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
     WebPageAction,
@@ -26,7 +26,12 @@ export function ExtensionPage({
     const [busy, setBusy] = useState<string>();
     const [pending, setPending] = useState<PendingAction>();
 
+    const generation = useRef(0);
+
     useEffect(() => {
+        generation.current += 1;
+        setBusy(undefined);
+        setPending(undefined);
         const pageId = descriptor?.id;
         if (pageId === undefined) return;
         let active = true;
@@ -42,6 +47,7 @@ export function ExtensionPage({
         );
         return () => {
             active = false;
+            generation.current += 1;
         };
     }, [descriptor?.id, extension]);
 
@@ -57,19 +63,16 @@ export function ExtensionPage({
         const operation = `${rowId}:${action.id}`;
         setBusy(operation);
         setError(undefined);
+        const requestGeneration = generation.current;
         try {
-            setSnapshot(
-                await extension.webAction(
-                    descriptor!.id,
-                    action.id,
-                    rowId,
-                ),
-            );
+            const next = await extension.webAction(descriptor!.id, action.id, rowId);
+            if (generation.current !== requestGeneration) return;
+            setSnapshot(next);
             setPending(undefined);
         } catch (failure) {
-            setError(message(failure));
+            if (generation.current === requestGeneration) setError(message(failure));
         } finally {
-            setBusy(undefined);
+            if (generation.current === requestGeneration) setBusy(undefined);
         }
     }
 
@@ -188,6 +191,7 @@ export function ExtensionPage({
                     actionLabel={pending.action.label}
                     busy={busy !== undefined}
                     description={`${pending.action.label} ${pending.rowId}?`}
+                    error={error}
                     onCancel={() => setPending(undefined)}
                     onConfirm={() => void invoke(pending.action, pending.rowId)}
                     variant="destructive"

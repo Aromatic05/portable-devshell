@@ -434,7 +434,11 @@ function applyByteLimit(
         const recordBytes =
             Buffer.byteLength(JSON.stringify(record), "utf8") +
             (accepted.length === 0 ? 0 : 1);
-        if (bytes + recordBytes > query.maxBytes) break;
+        if (bytes + recordBytes > query.maxBytes) {
+            if (accepted.length === 0)
+                throw new RangeError(`ToolCall ${record.callId} exceeds maxBytes ${query.maxBytes}.`);
+            break;
+        }
         if (newestFirst) accepted.unshift(record);
         else accepted.push(record);
         bytes += recordBytes;

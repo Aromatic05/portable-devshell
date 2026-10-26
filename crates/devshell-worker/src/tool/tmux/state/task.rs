@@ -150,6 +150,7 @@ pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>) -> TmuxPaneSu
         id: pane.id.clone(),
         name: pane.name.clone(),
         status: pane_status(pane, task),
+        cwd: (!pane.cwd.is_empty()).then(|| pane.cwd.clone()),
         task: active_task(task),
     }
 }

@@ -1,11 +1,11 @@
 # Version 与 Compatibility Lifecycle
 
-源码审计基线提交 `2287310a` 的产品版本为 **`1.0.0-beta.1`**。历史 `0.x.y` 中的 `y` 是同一开发世代的发布序号，不承担 SemVer patch 语义；`0.7.x` 是当时面向 1.0.0 的收敛阶段，不是当前开发版本。历史 release note 与 release interval 保持原有语境。
+原始源码审计基线提交 `2287310a` 的产品版本为 **`1.0.0-beta.1`**；当前工作树的开发版本为 **`1.0.0-beta.3`**，尚未提升 RC。历史 `0.x.y` 中的 `y` 是同一开发世代的发布序号，不承担 SemVer patch 语义；`0.7.x` 是当时面向 1.0.0 的收敛阶段，不是当前开发版本。历史 release note 与 release interval 保持原有语境。
 
 产品版本不能替代各 public contract 自己的版本。一个 DevShell release 同时依赖多个彼此独立的 compatibility surface：
 
 ```text
-DevShell release        1.0.0-beta.1
+DevShell release        1.0.0-beta.3
     Control Protocol    x.y.z
     Worker Protocol     x.y.z
     Frame Protocol      x.y.z
@@ -16,11 +16,11 @@ DevShell release        1.0.0-beta.1
 
 这些版本只在对应 contract 发生变化时推进，不随 DevShell release 同步 bump。
 
-### 当前实现（1.0.0-beta.1）
+### 当前实现（1.0.0-beta.3 开发版）
 
 | Surface | 当前 representation | 源码 owner |
 | --- | --- | --- |
-| DevShell release | `1.0.0-beta.1` | 根 `package.json` |
+| DevShell release | `1.0.0-beta.3` | 根 `package.json` |
 | Control Protocol | semantic range `1.0.0`–`1.0.0` | `shared/src/control/server/Model.ts` |
 | Worker Protocol | semantic range `1.0.0`–`1.0.0` | `shared/src/types/Worker.ts` / Rust RPC codec |
 | Frame Protocol | semantic range `1.0.0`–`1.0.0`；wire format v1 | `shared/src/transport/frame/Codec.ts` |
@@ -30,7 +30,7 @@ DevShell release        1.0.0-beta.1
 
 表中 TS owner 路径相对 `packages/`。当前不再承诺 legacy Control integer `1`、Worker `7` 或 Frame no-negotiation adapter；不能从旧发布记录推导当前 admission。Extension manifest 的 `apiVersion` / `schemaVersion` 必须为 `x.y.z` 字符串，同 major 且 requested 不高于 Host，不接受旧整数写法。
 
-历史 `0.7.6` release note 描述当时的 integer Control / Frame contract；`0.7.7` interval 记录当时的语义版本冻结工作。这些历史结论不应被改写成 beta.1 现状，也不意味着当前重新接受已删除 adapter。下文 release interval 规则与 live compatibility checker 仍有效。
+历史 `0.7.6` release note 描述当时的 integer Control / Frame contract；`0.7.7` interval 记录当时的语义版本冻结工作。这些历史结论不应被改写成当前版本现状，也不意味着重新接受已删除 adapter。下文 release interval 规则与 live compatibility checker 仍有效。
 
 ## Release interval version rule
 
@@ -162,7 +162,7 @@ Extension host dependency ranges
 rollback feasibility
 ```
 
-`0.7.6` 发布时的 `devshell update` preflight 已检查 persistent config migration requirement、已安装 Extension generation 的 manifest/API/schema compatibility，以及 Extension `hostDependencies`。该工作在历史 `0.7.7` interval 继续扩展；beta.1 当前会读取 application generation 的 Control / Worker / Frame contract，与 candidate supported range 做交集检查，不根据产品版本猜测协议，也不承诺已删除的 legacy adapter。range 不相交是 live peer 兼容性诊断，不直接否决已停机程序的替换；未提供 current generation range 时返回 `current: null`，不能把它当成已验证两代可同时通信。
+`0.7.6` 发布时的 `devshell update` preflight 已检查 persistent config migration requirement、已安装 Extension generation 的 manifest/API/schema compatibility，以及 Extension `hostDependencies`。该工作在历史 `0.7.7` interval 继续扩展；当前 beta.3 会读取 application generation 的 Control / Worker / Frame contract，与 candidate supported range 做交集检查，不根据产品版本猜测协议，也不承诺已删除的 legacy adapter。range 不相交是 live peer 兼容性诊断，不直接否决已停机程序的替换；未提供 current generation range 时返回 `current: null`，不能把它当成已验证两代可同时通信。
 
 Preflight 现在也显式返回 rollback feasibility。若 candidate 需要 persistent migration，则结果标记 `rollback.feasible = false` 并给出 `persistentMigrationRequired` blocker：这不会阻止升级本身，但表示 migration 一旦提交，installer 不再自动降级到旧 generation。Release installer transaction 仍单独负责 artifact validation、backup、candidate install/start validation 和失败 rollback 的实际执行。
 
@@ -170,7 +170,7 @@ Preflight 现在也显式返回 rollback feasibility。若 candidate 需要 pers
 
 ## 1.0.0 稳定版目标
 
-以下是稳定版的冻结目标，当前 beta.1 不能仅凭产品版本就宣称全部验收完成：
+以下是稳定版的冻结目标，当前 beta.3 不能仅凭产品版本就宣称全部验收完成：
 
 ```text
 Control Protocol versioning rules frozen
@@ -182,4 +182,4 @@ Persistent migration policy frozen
 Update / migrate transaction boundary frozen
 ```
 
-历史 `0.7.x` 曾允许通过多个发布版本逐步收敛 contract；当前 beta.1 不再属于该版本线。此前已声明冻结的 contract 在 beta 与后续发布中仍必须遵守各自的 compatibility rule。
+历史 `0.7.x` 曾允许通过多个发布版本逐步收敛 contract；当前 beta.3 不再属于该版本线。此前已声明冻结的 contract 在 beta 与后续发布中仍必须遵守各自的 compatibility rule。

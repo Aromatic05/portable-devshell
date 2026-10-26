@@ -219,4 +219,4 @@ You have performed too many useless operations. Use other tools.
 
 **E7-02 / L01-L04 — 自管理Reverse已停止后删除提交仍留永久Cleanup Debt。** `acceptance/run-provider-chain-smoke.mjs` 在全新临时控制端创建Reverse Instance/Device Code，真Rust Worker enroll并WSS连接，MCP `bash_run`写文件并由SQLite确认；再真实Stop，工具不可用，重新启动后副作用不重播，均通过。但控制侧`deleteInstance`提交配置删除后返回`cleanupPending=true`，错误`Instance ... is self-managed; start it on the remote machine.`；公开`retryCleanupDebt`后`listCleanupDebts`仍有旧Generation `state=pending`。源码的`packages/control/src/instance/editor/retirement/Runtime.ts`在`daemonState=stopped`时不跳过远程退休，而`packages/core/src/instance/runtime/execution/provider/Reverse.ts`严格拒绝自管理远端由Control执行Stop/Start；职责未分离。它阻断同名重建，与前轮本机Local Worker显式Stop可顺利退休不是同一场景。**未修改生产实现或直接放弃Debt**；完整链脚本保留原断言可复现。
 
-参照 [完整功能链验收](functional-chain-acceptance.md) 及 `test/known-bugs/README.md` 独立运行。当前`acceptance/run-chain-matrix.mjs --all`在上述产品缺陷修复前应返回非零，不得通过普通包级测试绿灯覆盖这一结果。
+以上记录属于缺陷发现时的实跑结果，不应被解释为当前 HEAD 仍然失败。2026-10-26 在 `c4ab5cc8` 上重新运行 `acceptance/run-chain-matrix.mjs --all`，L07/L05/L03/L01-L04 四链均已成功且清理完成。后续提交的判断请参照 [RC 前收口状态](rc-preflight.md) 和同一提交的独立验收；不得用普通包级测试替代功能链。

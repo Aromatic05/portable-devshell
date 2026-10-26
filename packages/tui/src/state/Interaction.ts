@@ -38,6 +38,7 @@ export type TuiUiIntent =
     | { type: "app.requestQuit" }
     | { page: TuiPageId; type: "page.select" }
     | { type: "page.reload" }
+    | { type: "history.loadOlder" }
     | { type: "control.restart" }
     | { index: number; type: "instance.selectIndex" }
     | {

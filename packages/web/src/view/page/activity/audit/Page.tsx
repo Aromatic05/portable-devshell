@@ -1,6 +1,7 @@
 import {
     useEffect,
     useMemo,
+    useRef,
     useState,
     useSyncExternalStore,
 } from "react";
@@ -85,6 +86,13 @@ export function Audit({
     const [refreshing, setRefreshing] = useState(false);
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [olderError, setOlderError] = useState<string>();
+    const olderRequest = useRef(0);
+    useEffect(() => {
+        olderRequest.current += 1;
+        setLoadingOlder(false);
+        setOlderError(undefined);
+        setToolCallPage(0);
+    }, [routeKey]);
     const [detailRetry, setDetailRetry] = useState(0);
     const [directCall, setDirectCall] = useState<{
         key: string;
@@ -100,15 +108,29 @@ export function Audit({
         [toolCallsState],
     );
     const scope = auditScope(route);
+    const contextInstance = route.view === "timeline" && scope.kind === "context"
+        ? scope.instance : undefined;
+    const contextId = route.view === "timeline" && scope.kind === "context"
+        ? scope.ctxId : undefined;
+    const contextHistory = scope.kind === "context" &&
+        toolCallsState.context?.instance === contextInstance &&
+        toolCallsState.context?.ctxId === contextId ? toolCallsState.context : undefined;
+    useEffect(() => {
+        if (server.status !== "online" || contextInstance === undefined || contextId === undefined) return;
+        void domains.toolCalls.loadContext(contextInstance, contextId);
+        return () => domains.toolCalls.clearContext(contextInstance, contextId);
+    }, [domains, server.status, contextInstance, contextId]);
     const scopedInstanceNames = scope.kind === "all"
         ? instancesState.instances.map((entry) => entry.name)
         : [scope.instance];
-    const failingInstances = scopedInstanceNames.filter((instance) =>
+    const failingInstances = (scope.kind === "context" ? [] : scopedInstanceNames).filter((instance) =>
         toolCallsState.instances[instance]?.failure !== undefined);
-    const historyInstances = scopedInstanceNames.filter((instance) => {
+    const historyInstances = (scope.kind === "context" ? [] : scopedInstanceNames).filter((instance) => {
         const ledger = toolCallsState.instances[instance];
         return ledger?.historyBefore !== undefined && ledger.historyExhausted !== true;
     });
+    const contextHasOlder = contextHistory?.historyBefore !== undefined &&
+        contextHistory.historyExhausted !== true;
     const inMemoryCall = route.view === "call" ? allCalls.find((call) =>
         call.instance === route.instance && call.callId === route.callId &&
         (route.ctxId === undefined || call.ctxId === route.ctxId)) : undefined;
@@ -175,15 +197,15 @@ export function Audit({
             scope,
         ],
     );
-    const scopedCalls = useMemo(
-        () => calls.filter((call) => callMatchesScope(call, scope)),
-        [calls, scope],
-    );
+    const scopedCalls = scope.kind === "context"
+        ? (contextHistory?.calls ?? []).filter((call) => callMatchesScope(call, scope))
+        : calls.filter((call) => callMatchesScope(call, scope));
     const scopedApprovals = allApprovals.filter((approval) => callMatchesScope(approval, scope) &&
         callMatchesContextFilter(approval, scope, contextRecords, contextStatus, now) &&
         (route.view !== "call" || approval.callId === route.callId));
     const standaloneApprovals = scopedApprovals.filter((approval) =>
         !allCalls.some((call) => call.instance === approval.instance && call.callId === approval.callId) &&
+        !scopedCalls.some((call) => call.instance === approval.instance && call.callId === approval.callId) &&
         approvalMatchesFilters(approval, filters, now));
     const tools = [...new Set([...scopedCalls, ...scopedApprovals].map((item) => item.toolName))].sort();
     const filteredSelection = useMemo(() => {
@@ -222,18 +244,27 @@ export function Audit({
               : `Showing ${currentPage * toolCallPageSize + 1}-${currentPage * toolCallPageSize + selection.items.length} of ${selection.total} loaded matching tool calls.`;
 
     async function loadOlder(): Promise<void> {
-        if (!interactive || loadingOlder || historyInstances.length === 0) return;
+        if (!interactive || loadingOlder || (!contextHasOlder && historyInstances.length === 0)) return;
+        const request = ++olderRequest.current;
         setLoadingOlder(true);
         setOlderError(undefined);
         try {
+            if (scope.kind === "context") {
+                await domains.toolCalls.loadOlderContext(scope.instance, scope.ctxId);
+                return;
+            }
             const results = await Promise.allSettled(historyInstances.map((instance) =>
                 domains.toolCalls.loadOlder(instance)));
             const failed = results.map((result, index) => result.status === "rejected"
                 ? `${historyInstances[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
                 : undefined).filter((message): message is string => message !== undefined);
-            if (failed.length > 0) setOlderError(failed.join("; "));
+            if (failed.length > 0 && request === olderRequest.current)
+                setOlderError(failed.join("; "));
+        } catch (error) {
+            if (request === olderRequest.current)
+                setOlderError(error instanceof Error ? error.message : String(error));
         } finally {
-            setLoadingOlder(false);
+            if (request === olderRequest.current) setLoadingOlder(false);
         }
     }
 
@@ -255,6 +286,8 @@ export function Audit({
         approvalSnapshots.retry();
         try {
             await store.refreshAudit();
+            if (route.view === "timeline" && scope.kind === "context")
+                await domains.toolCalls.loadContext(scope.instance, scope.ctxId);
         } finally {
             setRefreshing(false);
         }
@@ -362,6 +395,12 @@ export function Audit({
                         onClick={() => void domains.toolCalls.load(instance)}>Retry {instance}</button>
                 </div>
             ))}
+            {scope.kind === "context" && contextHistory?.failure !== undefined ? (
+                <div role="alert">
+                    <p className="error">Could not load Context Tool Calls: {contextHistory.failure.message}</p>
+                    <button disabled={!interactive} type="button" onClick={() => void domains.toolCalls.loadContext(scope.instance, scope.ctxId)}>Retry Context Audit</button>
+                </div>
+            ) : null}
             {route.view === "call" && directCall?.key === routeKey && directCall.error !== undefined ? (
                 <div role="alert">
                     <p className="error">Could not read Tool Call: {directCall.error}</p>
@@ -389,6 +428,11 @@ export function Audit({
                 </p>
             ) : server.status === "connecting" && allCalls.length === 0 ? (
                 <p className="empty">Loading tool calls…</p>
+            ) : route.view === "timeline" && scope.kind === "context" &&
+                (contextHistory === undefined || (contextHistory.loading && contextHistory.calls.length === 0)) ? (
+                <p className="empty">{server.status === "offline"
+                    ? "Context Tool Calls are unavailable while offline."
+                    : "Loading Context Tool Calls…"}</p>
             ) : directLoading ? (
                 <p className="empty">Loading archived Tool Call…</p>
             ) : selection.items.length === 0 ? (
@@ -440,7 +484,7 @@ export function Audit({
                         page={currentPage}
                         pageCount={pageCount(selection.total, toolCallPageSize)}
                     />
-                    {historyInstances.length > 0 && (
+                    {(historyInstances.length > 0 || contextHasOlder) && (
                         <div className="actions">
                             <button disabled={!interactive || loadingOlder} onClick={() => void loadOlder()} type="button">
                                 {loadingOlder ? "Loading older Tool Calls…" : "Load older Tool Calls"}

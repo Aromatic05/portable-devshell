@@ -429,6 +429,10 @@ export class TuiRuntime {
                 }
                 await this.#operations.reloadPage(page, instance);
             },
+            onAuditLoadOlder: async (instance, ctxId) =>
+                await domains.toolCalls.loadOlderContext(instance, ctxId),
+            onMessageLoadOlder: async (instance, ctxId) =>
+                await domains.messageHistory.loadOlderContext(instance, ctxId),
             onQuit: async () => {
                 await this.stop();
             },

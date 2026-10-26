@@ -457,7 +457,7 @@ CLI、Web 与 TUI 因此只共享 Extension lifecycle、Config、generation leas
 
 当前执行链是 Review（含审批）→ inbound Rewrite → target preparation / Audit scope → Scheduler → Execute / adaptation → outbound Rewrite / Review → terminal Audit。Audit input 来自 inbound Rewrite 后，部分 Audit 写失败不会改变调用结果；不能承诺审计落盘是执行前置屏障。
 
-**KNOWN unresolved deviation：**执行已产生副作用后的 result adaptation error 仍可能保留 `retryable: true`（[回归断言](../../test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts)要求 false）。应有的安全契约是执行后失败不可暗示安全重试；当前实现尚未满足这一约束。Outbound hook delivery failure 则固定不可重试。这里记录源码与回归断言的差异，不将 unsafe retry 当作设计目标；本次文档修改未重跑该测试。
+**历史缺陷与当前回归：**beta.1 曾出现执行后 result adaptation 错误仍携带 `retryable: true`。当前[回归断言](../../packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts)会先产生持久化副作用，再触发适配错误，并要求返回 `retryable: false`、正确的 `postExecution` 与 callId；outbound hook delivery failure 也固定不可重试。此修复不代表 Audit 和执行具有原子提交关系。
 
 ### database 与 config.core
 

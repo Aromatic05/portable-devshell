@@ -59,6 +59,8 @@ export async function executeInit(
     }
     if (Object.keys(patch).length > 0) {
         await context.clients.config.update({ mcp: patch });
+        if (approvalToken !== undefined)
+            context.stderr.write(`OAuth2 approval\n  ${approvalToken}\n`);
         config = await readConfig(context);
     }
 
@@ -152,6 +154,8 @@ function renderInitResult(result: CliInitResult): string {
     ];
     if (result.endpoint !== undefined) {
         lines.push("", "MCP endpoint", `  ${result.endpoint}`);
+    } else if (result.mcpEnabled) {
+        lines.push("", "MCP", "  enabled (public URL not configured)");
     } else {
         lines.push("", "MCP", "  disabled (existing configuration preserved)");
     }

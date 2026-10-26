@@ -173,7 +173,13 @@ export class CliMain {
                 controlNegotiated: false,
             };
         }
-        if ((localCliCommands as readonly string[]).includes(commandId)) {
+        if (
+            (localCliCommands as readonly string[]).includes(commandId) ||
+            ((builtinCliCommands as readonly string[]).includes(commandId) &&
+                (argv.at(-1) === "--help" ||
+                    argv.at(-1) === "-h" ||
+                    argv[1] === "help"))
+        ) {
             return {
                 command: this.#parser.parse(argv),
                 controlNegotiated: false,
@@ -345,7 +351,16 @@ const builtinCliCommands = [
     "watch",
 ] as const;
 
-const localCliCommands = ["migrate", "update"] as const;
+const localCliCommands = [
+    "help",
+    "start",
+    "stop",
+    "restart",
+    "status",
+    "logs",
+    "migrate",
+    "update",
+] as const;
 
 function suggestCliCommand(
     command: string,

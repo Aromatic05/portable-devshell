@@ -210,6 +210,11 @@ test("revoked MCP App Lease removes stale UI and private persisted credentials",
             expect(container!.textContent).toContain("MCP App authorization expired");
             expect(container!.textContent).not.toContain("Sensitive approval");
         });
+        expect(container.querySelector(".workspace-status")?.textContent).toContain("Authorization expired");
+        expect(container.querySelector("main")?.getAttribute("data-status")).toBe("disconnected");
+        expect(container.textContent).not.toContain("Live reconnecting");
+        expect(container.textContent).not.toContain("Workspace connected");
+        expect(container.textContent).toContain("Reopen Workspace from the active DevShell Context");
         expect(JSON.stringify(widgetState)).not.toContain("expired-test-bearer-token");
     } finally {
         Object.assign(window, { openai: previousOpenai });
@@ -795,6 +800,9 @@ test("Workspace toggle updates ToolCall presentation preference without changing
     await act(async () => { root?.render(<AppView view="workspace" />); });
     const checkbox = container!.querySelector<HTMLInputElement>(".workspace-setting input");
     expect(checkbox?.checked).toBe(true);
+    expect(checkbox?.parentElement?.textContent).toContain("Show provided ToolCall cards");
+    expect(checkbox?.parentElement?.title).toContain("Only changes the display of cards already provided by the Host");
+    expect(checkbox?.parentElement?.title).toContain("Does not enable server Inline ToolCalls or change fullscreen");
     await act(async () => { checkbox?.click(); });
     expect(checkbox?.checked).toBe(false);
     expect(host.actions).toHaveLength(0);

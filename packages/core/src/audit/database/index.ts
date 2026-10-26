@@ -458,7 +458,11 @@ export class AuditDatabase {
                 const rowBytes =
                     Buffer.byteLength(row.payload, "utf8") +
                     (records.length === 0 ? 0 : 1);
-                if (bytes + rowBytes > query.maxBytes) break;
+                if (bytes + rowBytes > query.maxBytes) {
+                    if (records.length === 0)
+                        throw new RangeError(`ToolCall exceeds maxBytes ${query.maxBytes}.`);
+                    break;
+                }
                 bytes += rowBytes;
             }
             records.push(JSON.parse(row.payload) as ToolCallRecord);

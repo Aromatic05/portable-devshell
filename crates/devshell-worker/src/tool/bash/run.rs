@@ -331,7 +331,7 @@ impl ToolHandler for BashRunTool {
 struct ManagedBashChild {
     child: Child,
     reaped: bool,
-    process_guard: Box<dyn ToolProcessGuard>,
+    process_guard: Option<Box<dyn ToolProcessGuard>>,
 }
 
 impl ManagedBashChild {
@@ -339,17 +339,22 @@ impl ManagedBashChild {
         Self {
             child,
             reaped: false,
-            process_guard,
+            process_guard: Some(process_guard),
         }
     }
 
     fn terminate_group(&self) -> Result<(), ToolError> {
         self.process_guard
+            .as_ref()
+            .expect("unreaped bash child has a process guard")
             .terminate_process_group(true)
             .map_err(|error| ToolError::new("bash.ioFailed", error))
     }
 
     fn wait_and_reap(&mut self) -> std::io::Result<ExitStatus> {
+        // Group cleanup is complete. Unregister while the unreaped leader still
+        // pins its PID, so registry shutdown cannot signal a reused process group.
+        self.process_guard.take();
         let status = self.child.wait()?;
         self.reaped = true;
         Ok(status)
@@ -375,7 +380,10 @@ impl Drop for ManagedBashChild {
         if self.reaped {
             return;
         }
-        let _ = self.process_guard.terminate_process_group(true);
+        if let Some(guard) = self.process_guard.take() {
+            let _ = guard.terminate_process_group(true);
+            drop(guard);
+        }
         let _ = self.child.wait();
         self.reaped = true;
     }
@@ -816,15 +824,54 @@ impl ExitSignal for std::process::ExitStatus {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::process::Command;
+    use std::io::{BufRead, BufReader, Read};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use super::child_exited_without_reaping;
+    use crate::daemon::process::registry::ActiveProcessRegistry;
+    use crate::tool::{ToolCancellation, ToolProcessGuard};
+
+    use super::{BashWaitOutcome, ManagedBashChild, child_exited_without_reaping, wait};
+
+    struct CheckUnreapedGuard {
+        pid: i32,
+        inner: Box<dyn ToolProcessGuard>,
+    }
+
+    impl ToolProcessGuard for CheckUnreapedGuard {
+        fn terminate_process_group(&self, force: bool) -> Result<(), String> {
+            self.inner.terminate_process_group(force)
+        }
+    }
+
+    impl Drop for CheckUnreapedGuard {
+        fn drop(&mut self) {
+            use nix::libc;
+
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            assert_eq!(
+                unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        self.pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                    )
+                },
+                0,
+                "registry guard must be released before reaping"
+            );
+            assert_eq!(unsafe { info.si_pid() }, self.pid);
+        }
+    }
 
     #[test]
     fn completed_shell_remains_waitable_after_exit_probe() {
         let mut child = Command::new("/bin/sh")
             .args(["-c", "exit 7"])
+            .process_group(0)
             .spawn()
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -832,6 +879,91 @@ mod tests {
             assert!(Instant::now() < deadline, "shell did not exit");
             std::thread::yield_now();
         }
-        assert_eq!(child.wait().unwrap().code(), Some(7));
+        let registry = Arc::new(ActiveProcessRegistry::new());
+        let pid = child.id() as i32;
+        let guard = Box::new(CheckUnreapedGuard {
+            pid,
+            inner: Box::new(registry.register(pid).unwrap()),
+        });
+        let mut child = ManagedBashChild::new(child, guard);
+        assert!(matches!(
+            wait(&mut child, deadline, &ToolCancellation::default()).unwrap(),
+            BashWaitOutcome::Termination(super::BashTermination::Exited)
+        ));
+        assert_eq!(child.wait_and_reap().unwrap().code(), Some(7));
+        assert!(child.process_guard.is_none());
+        registry.stop_all(Duration::from_secs(1)).unwrap();
+    }
+
+    fn wait_with_descendant(
+        command: &str,
+        timeout: Duration,
+        cancellation: &ToolCancellation,
+    ) -> BashWaitOutcome {
+        let child = Command::new("/bin/sh")
+            .args(["-c", command])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let registry = Arc::new(ActiveProcessRegistry::new());
+        let guard = registry.register(child.id() as i32).unwrap();
+        let mut child = ManagedBashChild::new(child, Box::new(guard));
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        output.read_line(&mut ready).unwrap();
+        assert_eq!(ready, "ready\n");
+
+        let started = Instant::now();
+        let outcome = wait(&mut child, started + timeout, cancellation).unwrap();
+        child.wait_and_reap().unwrap();
+        let mut remaining = String::new();
+        output.read_to_string(&mut remaining).unwrap();
+        assert!(remaining.is_empty());
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "descendant kept stdout open"
+        );
+        assert!(child.process_guard.is_none());
+        registry.stop_all(Duration::from_secs(1)).unwrap();
+        outcome
+    }
+
+    #[test]
+    fn exited_shell_cleans_its_live_descendant() {
+        assert!(matches!(
+            wait_with_descendant(
+                "sleep 5 & printf 'ready\\n'; exit 7",
+                Duration::from_secs(2),
+                &ToolCancellation::default(),
+            ),
+            BashWaitOutcome::Termination(super::BashTermination::Exited)
+        ));
+    }
+
+    #[test]
+    fn timed_out_shell_cleans_its_live_descendant() {
+        assert!(matches!(
+            wait_with_descendant(
+                "sleep 5 & printf 'ready\\n'; wait",
+                Duration::from_millis(50),
+                &ToolCancellation::default(),
+            ),
+            BashWaitOutcome::Termination(super::BashTermination::Timeout)
+        ));
+    }
+
+    #[test]
+    fn cancelled_shell_cleans_its_live_descendant() {
+        let cancellation = ToolCancellation::default();
+        cancellation.cancel();
+        assert!(matches!(
+            wait_with_descendant(
+                "sleep 5 & printf 'ready\\n'; wait",
+                Duration::from_secs(2),
+                &cancellation,
+            ),
+            BashWaitOutcome::Cancelled
+        ));
     }
 }

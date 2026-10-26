@@ -175,6 +175,15 @@ function renderAudit({
 }
 
 describe("Audit", () => {
+    it("shows offline rather than an endless Context loading state when preview calls remain cached", () => {
+        renderAudit({
+            route: alphaContextRoute,
+            configureDomains: (domains) => domains.server.patch({ status: "offline" }),
+        });
+        expect(screen.getByText("Context Tool Calls are unavailable while offline.")).toBeInTheDocument();
+        expect(screen.queryByText("Loading Context Tool Calls…")).not.toBeInTheDocument();
+    });
+
     it("identifies independent Extension calls by source rather than fabricating a Context", () => {
         const { container } = renderAudit({
             toolCalls: {
@@ -757,6 +766,111 @@ describe("Audit", () => {
         expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
         fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
         expect(screen.getByText(new RegExp(token))).toBeInTheDocument();
+    });
+
+    it("loads a Context's own pages even when the instance preview contains only one matching call", async () => {
+        const retained = Array.from({ length: 23 }, (_, index) => ({
+            ...alphaCall,
+            callId: `context-call-${index}`,
+            startedAt: new Date(Date.UTC(2026, 9, 26, 9, 0, index)).toISOString(),
+        }));
+        const scopedReads = vi.fn(async () => undefined);
+        const olderReads = vi.fn(async () => 3);
+        const view = renderAudit({
+            route: alphaContextRoute,
+            toolCalls: { alpha: [alphaCall], beta: [betaCall] },
+            configureDomains: (domains) => {
+                Object.assign(domains.toolCalls, {
+                    loadContext: async (instance: string, ctxId: string) => {
+                        await scopedReads(instance, ctxId);
+                        domains.toolCalls.patch({ context: {
+                            instance, ctxId, calls: retained.slice(3),
+                            historyBefore: retained[3]!.callId,
+                            historyExhausted: false, loading: false,
+                        } });
+                    },
+                    loadOlderContext: async (instance: string, ctxId: string) => {
+                        await olderReads(instance, ctxId);
+                        domains.toolCalls.patch({ context: {
+                            instance, ctxId, calls: retained,
+                            historyBefore: retained[0]!.callId,
+                            historyExhausted: true, loading: false,
+                        } });
+                        return 3;
+                    },
+                });
+            },
+        });
+        await waitFor(() => expect(scopedReads).toHaveBeenCalledWith("alpha", "ctx-alpha"));
+        await waitFor(() => expect(screen.getByText("Showing 1-20 of 20 loaded matching tool calls.")).toBeInTheDocument());
+        expect(view.domains.toolCalls.state.instances.alpha.calls).toHaveLength(1);
+        fireEvent.click(screen.getByRole("button", { name: "Load older Tool Calls" }));
+        await waitFor(() => expect(olderReads).toHaveBeenCalledWith("alpha", "ctx-alpha"));
+        await waitFor(() => expect(screen.getByText("Showing 1-20 of 23 loaded matching tool calls.")).toBeInTheDocument());
+        expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Load older Tool Calls" })).not.toBeInTheDocument();
+    });
+
+    it("does not duplicate an older Context Tool Call as a standalone approval", async () => {
+        const oldCall = { ...alphaCall, callId: "call-archived-approval" };
+        renderAudit({
+            route: alphaContextRoute,
+            toolCalls: { alpha: [{ ...alphaCall, callId: "call-newer", ctxId: "ctx-other" }], beta: [] },
+            approvals: { alpha: [{
+                approvalId: "approval-archived", callId: oldCall.callId,
+                createdAt: "2026-07-31T08:59:59Z", expiresAt: "2026-07-31T09:10:00Z",
+                ctxId: "ctx-alpha", inputSummary: "{}", instance: asInstanceName("alpha"),
+                reason: "needs review", riskLevel: "high", source: "mcp",
+                status: "pending", toolName: "bash_run", workspace: "/projects/alpha",
+            }] },
+            configureDomains: (domains) => {
+                Object.assign(domains.toolCalls, {
+                    loadContext: async (instance: string, ctxId: string) => {
+                        domains.toolCalls.patch({ context: {
+                            instance, ctxId, calls: [oldCall], historyExhausted: true, loading: false,
+                        } });
+                    },
+                });
+            },
+        });
+        await waitFor(() => expect(screen.getByText("Showing 1-1 of 1 loaded matching tool calls.")).toBeInTheDocument());
+        expect(screen.queryByRole("region", { name: "Pending approvals" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    });
+
+    it("does not show an old Context's page failure after navigating to another Context", async () => {
+        let rejectOld!: (error: Error) => void;
+        const oldRequest = new Promise<number>((_resolve, reject) => { rejectOld = reject; });
+        const view = renderAudit({
+            route: alphaContextRoute,
+            toolCalls: { alpha: [alphaCall], beta: [] },
+            configureDomains: (domains) => {
+                Object.assign(domains.toolCalls, {
+                    loadContext: async (instance: string, ctxId: string) => {
+                        domains.toolCalls.patch({ context: {
+                            instance, ctxId, calls: [{ ...alphaCall, ctxId }],
+                            historyBefore: `head-${ctxId}`, historyExhausted: false, loading: false,
+                        } });
+                    },
+                    loadOlderContext: async () => await oldRequest,
+                });
+            },
+        });
+        await waitFor(() => expect(screen.getByRole("button", { name: "Load older Tool Calls" })).toBeEnabled());
+        fireEvent.click(screen.getByRole("button", { name: "Load older Tool Calls" }));
+
+        view.rerender(withWebDomains(view.domains, <Audit
+            navigate={view.navigate}
+            route={{ page: "audit", view: "timeline", scope: {
+                kind: "context", instance: "alpha", ctxId: "ctx-beta",
+            } }}
+            store={view.store}
+        />));
+        await waitFor(() => expect(view.domains.toolCalls.state.context?.ctxId).toBe("ctx-beta"));
+        await waitFor(() => expect(screen.getByRole("button", { name: "Load older Tool Calls" })).toBeEnabled());
+        await act(async () => { rejectOld(new Error("failure from previous Context")); });
+        expect(screen.queryByText(/failure from previous Context/u)).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Load older Tool Calls" })).toBeEnabled();
     });
 
     it("loads older Tool Calls from the source and pages through newly loaded history", async () => {

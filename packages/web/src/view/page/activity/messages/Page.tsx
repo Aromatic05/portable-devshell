@@ -53,6 +53,16 @@ export function Messages({
     >(() => new Set());
     const drawerTriggerRef = useRef<HTMLButtonElement>(null);
     const preferenceOrderSyncRef = useRef(false);
+    const [olderError, setOlderError] = useState<string>();
+    const olderRequest = useRef(0);
+
+    useEffect(() => {
+        if (route.view !== "thread" || server.status !== "online") return;
+        void domains.messageHistory.loadContext(route.instance, route.ctxId);
+        return () => domains.messageHistory.clearContext(route.instance, route.ctxId);
+    }, [domains, server.status, route.view,
+        route.view === "thread" ? route.instance : undefined,
+        route.view === "thread" ? route.ctxId : undefined]);
 
     const projection = useMemo<WebMessageProjection>(
         () => ({
@@ -94,6 +104,10 @@ export function Messages({
         route.view === "thread"
             ? selectWebMessageEntries(projection, route.instance, route.ctxId)
             : [];
+    const selectedHistory = route.view === "thread" &&
+        messageHistoryState.context?.instance === route.instance &&
+        messageHistoryState.context.ctxId === route.ctxId
+        ? messageHistoryState.context : undefined;
     const threadKey =
         route.view === "thread"
             ? `${route.instance}\u0000${route.ctxId}`
@@ -170,7 +184,9 @@ export function Messages({
     }, [allBaseSessions, messagePreferences, preferencesLoaded]);
 
     useEffect(() => {
+        olderRequest.current++;
         setDrawerOpen(false);
+        setOlderError(undefined);
     }, [route]);
 
     function persistMessagePreferences(
@@ -255,8 +271,26 @@ export function Messages({
                     </div>
                 ) : (
                     <>
+                        {selectedHistory?.historyBefore !== undefined &&
+                        selectedHistory.historyExhausted !== true && (
+                            <div className="actions">
+                                <button type="button" disabled={selectedHistory.loading}
+                                    onClick={() => {
+                                        const request = ++olderRequest.current;
+                                        void domains.messageHistory.loadOlderContext(route.instance, route.ctxId)
+                                            .catch((error: unknown) => {
+                                                if (request === olderRequest.current)
+                                                    setOlderError(error instanceof Error ? error.message : String(error));
+                                            });
+                                    }}>
+                                    Load older Comments and Reports
+                                </button>
+                            </div>
+                        )}
+                        {olderError === undefined ? null : <p className="error" role="alert">{olderError}</p>}
                         <MessageHistory
                             entries={entries}
+                            error={selectedHistory?.failure?.message ?? messageHistoryState.failures[route.instance]?.message}
                             threadKey={threadKey!}
                         />
                         <MessageComposer

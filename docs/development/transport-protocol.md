@@ -231,9 +231,9 @@ Reverse connector 将同一 Frame/Envelope 字节连接桥接到 daemon transpor
 
 新连接创建新的 Frame/Envelope stream。ReverseBridge 清除旧 pending/inflight Frame，重置 session 与序号，不把旧 DATA 片段送入新连接。Carrier 去重不等于 RPC 语义去重，重连也不恢复应用 Stream。
 
-预期安全契约是：候选链路通过应用握手及 peer promotion 后才替换活动链路；候选失败应保留前驱可用性。**KNOWN 未解决偏差**：当前 ReverseIngress 在候选验证期间更新 descriptor 级 WSS reliable watermark，失败后未恢复。有效的更高 generation 候选发送被接受的 reliable record 后握手失败，旧连接可能仍显示 ready，但下一次回复被判 `Stale reverse generation frame.`，RPC 变成 `rpc.resultUncertain`。这不是期望的切换策略。
+安全契约是：候选链路通过应用握手及 peer promotion 后才替换活动链路；候选失败应保留前驱可用性。**历史 beta.1 缺陷**：ReverseIngress 曾在候选验证期间提前更新 descriptor 级 WSS reliable watermark，导致失败候选污染前驱 RPC。当前回归要求失败候选不能触发 peer promotion，原连接保持可用；这与正常断线时未知的 RPC 执行结果是两种不同情形。
 
-仓库内的独立红测为 [ReverseCandidateFailurePoisonsPreviousRound6.test.ts](../../test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts)，使用 `ReverseNetworkRound6Fixture.ts` 构造认证 WSS 候选失败与前代 RPC。未套用 MemorySocketBoundary 时，它以 localhost TCP 执行；在禁止监听的受限 sandbox 中可能遇到 EPERM。本次文档修订仅对照源码，没有重新运行该红测；不能把先前的诊断记录当作本轮网络验收。
+当前回归为 [ReverseCandidateFailurePoisonsPreviousRound6.test.ts](../../packages/control/test/integration/ReverseCandidateFailurePoisonsPreviousRound6.test.ts)，使用 `ReverseNetworkRound6Fixture.ts` 构造认证 WSS 候选失败后继续调用前驱 RPC。其网络行为依赖 localhost TCP，受限环境可能无法监听；该测试在新的提交中仍须运行，不能用旧记录代替。
 
 ## 当前源码定位与验证范围
 

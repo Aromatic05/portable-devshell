@@ -33,28 +33,11 @@ export class TuiRuntimeTmuxOperations {
     ) {}
 
     async listPanes(instance: string): Promise<TuiTmuxListPane[]> {
-        const workspaces = this.#candidateWorkspaces(instance);
-        const panes: TuiTmuxListPane[] = [];
-        let firstError: unknown;
-        let successfulCalls = 0;
-        for (const workspace of workspaces) {
-            try {
-                const result = await this.call(
-                    instance,
-                    workspace,
-                    "tmux_manage",
-                    { command: "list" },
-                );
-                successfulCalls += 1;
-                panes.push(...readPanes(result, workspace));
-            } catch (error) {
-                firstError ??= error;
-            }
-        }
-        if (successfulCalls === 0 && firstError !== undefined) {
-            throw firstError;
-        }
-        return panes.sort(comparePanes);
+        const workspace = this.#lookupWorkspace(instance);
+        if (workspace === undefined) return [];
+        // tmux_manage list already reads every pane on this Instance.
+        const result = await this.call(instance, workspace, "tmux_manage", { command: "list" });
+        return readPanes(result, workspace).sort(comparePanes);
     }
 
     async inspectPane(
@@ -141,29 +124,17 @@ export class TuiRuntimeTmuxOperations {
         return feedback;
     }
 
-    #candidateWorkspaces(instance: string): string[] {
-        const workspaces: string[] = [];
-        const seen = new Set<string>();
-        const add = (workspace: string | undefined) => {
-            if (
-                workspace === undefined ||
-                workspace.length === 0 ||
-                seen.has(workspace)
-            )
-                return;
-            seen.add(workspace);
-            workspaces.push(workspace);
-        };
-
-        const toolCalls = this.options.domains.toolCalls.state.instances[
-            instance
-        ]?.calls ?? [];
-        for (const call of [...toolCalls].sort((left, right) =>
-            right.startedAt.localeCompare(left.startedAt),
-        )) {
-            if (call.toolName.startsWith("tmux_")) add(call.workspace);
+    #lookupWorkspace(instance: string): string | undefined {
+        const home = this.options.domains.instances.state.instances.find((item) =>
+            item.name === instance)?.homeDirectory;
+        if (home) return home;
+        for (const context of this.options.domains.context.state.contexts) {
+            const environment = context.environments.find((item) =>
+                item.instance === instance && item.workspace);
+            if (environment?.workspace) return environment.workspace;
         }
-        return workspaces.slice(0, 32);
+        return this.options.domains.toolCalls.state.instances[instance]?.calls.find((call) =>
+            call.workspace)?.workspace;
     }
 }
 
@@ -176,7 +147,7 @@ function readPanes(
             id: readRequiredString(pane, "id"),
             name: readRequiredString(pane, "name"),
             status: readRequiredString(pane, "status"),
-            workspace,
+            workspace: readString(pane, "cwd") ?? workspace,
         };
         const taskId = readNestedString(pane, "task", "id");
         if (taskId === undefined) {

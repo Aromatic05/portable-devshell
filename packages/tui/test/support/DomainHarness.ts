@@ -89,10 +89,28 @@ export class TuiTestDomains {
     readonly context = new TestDomainSource({
         contexts: [] as any[],
     });
-    readonly messageHistory = new TestDomainSource({
-        failures: {} as Record<string, Error>,
-        instances: {} as Record<string, any>,
-    });
+    readonly messageHistory = Object.assign(
+        new TestDomainSource({
+            context: undefined as any,
+            failures: {} as Record<string, Error>,
+            instances: {} as Record<string, any>,
+        }),
+        {
+            loadContext: async (instance: string, ctxId: string) => {
+                const entries = (this.messageHistory.state.instances[instance]?.entries ?? [])
+                    .filter((entry: any) => entry.ctxId === ctxId);
+                this.messageHistory.patch({ context: {
+                    ctxId, entries, historyExhausted: true, instance, loading: false,
+                } });
+            },
+            clearContext: (instance: string, ctxId: string) => {
+                if (this.messageHistory.state.context?.instance === instance &&
+                    this.messageHistory.state.context.ctxId === ctxId)
+                    this.messageHistory.patch({ context: undefined });
+            },
+            loadOlderContext: async () => 0,
+        },
+    );
     readonly messagePreferences = new TestDomainSource({
         loading: false,
         preferences: createEmptyMessagePreferences(),
@@ -105,6 +123,14 @@ export class TuiTestDomains {
         instances: {} as Record<string, any>,
     });
     readonly toolCalls = new TestDomainSource({
+        context: undefined as {
+            calls: ToolCallRecord[];
+            ctxId: string;
+            historyBefore?: string;
+            historyExhausted?: boolean;
+            instance: string;
+            loading: boolean;
+        } | undefined,
         instances: {} as Record<string, any>,
     });
 

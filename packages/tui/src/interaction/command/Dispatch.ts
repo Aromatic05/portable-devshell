@@ -53,6 +53,8 @@ export interface TuiCommandDispatcherOptions {
     onTerminalKill?(instance: string): Promise<void>;
     mainViewportRows(): number;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
+    onAuditLoadOlder?(instance: string, ctxId: string): Promise<number>;
+    onMessageLoadOlder?(instance: string, ctxId: string): Promise<number>;
     onQuit(): Promise<void>;
     onRedraw(): void;
     onToolCall(
@@ -176,6 +178,41 @@ export class TuiCommandDispatcher {
         }
 
         switch (intent.type) {
+            case "history.loadOlder": {
+                const state = this.#store.getState();
+                const route = currentTuiRoute(state);
+                const instance = state.ui.selectedInstance;
+                if (route.page === "messages" && route.view === "thread" &&
+                    this.#options.onMessageLoadOlder !== undefined) {
+                    try {
+                        const count = await this.#options.onMessageLoadOlder(route.instance, route.ctxId);
+                        const current = currentTuiRoute(this.#store.getState());
+                        if (current.page === "messages" && current.view === "thread" &&
+                            current.instance === route.instance && current.ctxId === route.ctxId)
+                            this.#store.setScreenStatus("messages", count === 0
+                                ? "No older Comments or Reports remain."
+                                : `Loaded ${count} older Comments and Reports.`);
+                    } catch (error) {
+                        const current = currentTuiRoute(this.#store.getState());
+                        if (current.page === "messages" && current.view === "thread" &&
+                            current.instance === route.instance && current.ctxId === route.ctxId)
+                            this.#store.setScreenStatus("messages", `Could not load older messages: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                    return true;
+                }
+                if (instance === undefined || route.page !== "audit" ||
+                    route.view !== "context" || route.scope !== "context" ||
+                    this.#options.onAuditLoadOlder === undefined) return false;
+                try {
+                    const count = await this.#options.onAuditLoadOlder(instance, route.ctxId);
+                    this.#store.setScreenStatus("audit", count === 0
+                        ? "No older Context Tool Calls remain."
+                        : `Loaded ${count} older Context Tool Calls.`);
+                } catch (error) {
+                    this.#store.setScreenStatus("audit", `Could not load older Context Tool Calls: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                return true;
+            }
             case "app.requestQuit":
             case "app.quit":
                 await this.#options.onQuit();

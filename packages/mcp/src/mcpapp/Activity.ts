@@ -172,15 +172,19 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
 }
 
 export async function readMcpAppActivity(transport: Pick<ToolTransport, "listCalls">, ctxId: string): Promise<McpAppActivity[]> {
+    const records = await transport.listCalls({
+        ctxId, limit: 50, includeInput: false, includeOutput: false,
+    });
+    if (records.length === 0) return [];
     try {
-        return projectMcpAppActivity(await transport.listCalls({
-            ctxId, limit: 50, includeInput: true, includeOutput: true, maxBytes: 8 * 1024 * 1024,
-        }), ctxId);
+        const details = await transport.listCalls({
+            ctxId, callIds: records.map((record) => record.callId), limit: records.length,
+            includeInput: true, includeOutput: true, maxBytes: 8 * 1024 * 1024,
+        });
+        const byId = new Map(details.map((record) => [record.callId, record]));
+        return projectMcpAppActivity(records.map((record) => byId.get(record.callId) ?? record), ctxId);
     } catch {
-        // Large output is not a reason to lose the execution timeline.
-        return projectMcpAppActivity(await transport.listCalls({
-            ctxId, limit: 50, includeInput: false, includeOutput: false,
-        }), ctxId);
+        return projectMcpAppActivity(records, ctxId);
     }
 }
 
@@ -217,7 +221,7 @@ export async function readMcpAppActivityOutput(
 ): Promise<McpAppActivityOutput | undefined> {
     const records = await tools.listCalls({
         ctxId, callIds: [callId], limit: 1, includeInput: false,
-        includeOutput: true, maxBytes: 64 * 1024,
+        includeOutput: false, maxBytes: 64 * 1024,
     });
     const audited = records.find((entry) =>
         entry.callId === callId && entry.ctxId === ctxId && entry.toolName === "bash_run");

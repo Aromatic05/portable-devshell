@@ -46,7 +46,20 @@ interface ToolCallInstanceState {
     status: InstanceEventSubscriptionStatus;
 }
 
+export interface ToolCallContextHistoryState {
+    calls: ToolCallRecord[];
+    ctxId: string;
+    failure?: Error;
+    /** Audit insertion-order cursor; independent of the instance preview. */
+    historyBefore?: string;
+    historyExhausted?: boolean;
+    historyLoaded?: boolean;
+    instance: string;
+    loading: boolean;
+}
+
 export interface ToolCallViewModelState {
+    context?: ToolCallContextHistoryState;
     instances: Record<string, ToolCallInstanceState>;
 }
 
@@ -65,6 +78,7 @@ interface ToolCallViewModelOptions {
 }
 
 export class ToolCallViewModel {
+    readonly #contextHistoryLoads = new Map<string, Promise<number>>();
     readonly #cursor: (instance: string) => Promise<number>;
     readonly #listeners = new Set<() => void>();
     readonly #historyLoads = new Map<string, Promise<number>>();
@@ -80,6 +94,7 @@ export class ToolCallViewModel {
     >();
     readonly #transport: (instance: string) => ToolTransport;
     readonly #versions = new Map<string, number>();
+    #contextSelection = 0;
     #epoch = 0;
     #published: ToolCallViewModelState = emptyState();
     #state: ToolCallViewModelState = emptyState();
@@ -156,6 +171,81 @@ export class ToolCallViewModel {
         } finally {
             if (this.#historyLoads.get(instance) === request)
                 this.#historyLoads.delete(instance);
+        }
+    }
+
+    /** Query a Context before pagination; keep it separate from the instance preview. */
+    async loadContext(instance: string, ctxId: string): Promise<void> {
+        const context = this.#state.context;
+        if (context?.instance !== instance || context.ctxId !== ctxId) {
+            if (context !== undefined)
+                this.#contextHistoryLoads.delete(JSON.stringify([context.instance, context.ctxId]));
+            this.#contextSelection += 1;
+            this.#nextVersion("tool:context");
+            this.#state.context = { calls: [], ctxId, instance, loading: true };
+            this.#emit();
+        }
+        await this.#refreshContext(instance, ctxId);
+    }
+
+    clearContext(instance: string, ctxId: string): void {
+        if (this.#state.context?.instance !== instance ||
+            this.#state.context.ctxId !== ctxId) return;
+        this.#contextSelection += 1;
+        this.#nextVersion("tool:context");
+        this.#contextHistoryLoads.delete(JSON.stringify([instance, ctxId]));
+        this.#state.context = undefined;
+        this.#emit();
+    }
+
+    async loadOlderContext(instance: string, ctxId: string): Promise<number> {
+        const key = JSON.stringify([instance, ctxId]);
+        const pending = this.#contextHistoryLoads.get(key);
+        if (pending !== undefined) return await pending;
+        const request = this.#loadOlderContext(instance, ctxId);
+        this.#contextHistoryLoads.set(key, request);
+        try {
+            return await request;
+        } finally {
+            if (this.#contextHistoryLoads.get(key) === request)
+                this.#contextHistoryLoads.delete(key);
+        }
+    }
+
+    async #loadOlderContext(instance: string, ctxId: string): Promise<number> {
+        const initial = this.#state.context;
+        if (initial?.instance !== instance || initial.ctxId !== ctxId ||
+            initial.historyBefore === undefined || initial.historyExhausted)
+            return 0;
+        const before = initial.historyBefore;
+        const epoch = this.#epoch;
+        const selection = this.#contextSelection;
+        try {
+            const calls = await this.#transport(instance).listCalls(listQuery({ ctxId, before }));
+            const current = this.#state.context;
+            if (!this.#current(epoch) || selection !== this.#contextSelection ||
+                current?.instance !== instance ||
+                current.ctxId !== ctxId || current.historyBefore !== before)
+                return 0;
+            this.#state.context = {
+                ...current,
+                calls: orderCalls(mergeCalls(current.calls, calls)),
+                failure: undefined,
+                historyBefore: calls[0]?.callId ?? before,
+                historyExhausted: calls.length === 0,
+                historyLoaded: true,
+            };
+            this.#emit();
+            return calls.length;
+        } catch (error) {
+            const current = this.#state.context;
+            if (this.#current(epoch) && selection === this.#contextSelection &&
+                current?.instance === instance &&
+                current.ctxId === ctxId && current.historyBefore === before) {
+                this.#state.context = { ...current, failure: toError(error) };
+                this.#emit();
+            }
+            throw error;
         }
     }
 
@@ -248,7 +338,17 @@ export class ToolCallViewModel {
         this.stop(instance);
         this.#queries.delete(instance);
         this.#versions.delete(instanceKey(instance));
-        if (!(instance in this.#state.instances)) return;
+        const hadContext = this.#state.context?.instance === instance;
+        if (hadContext) {
+            this.#contextSelection += 1;
+            this.#nextVersion("tool:context");
+            this.#contextHistoryLoads.delete(JSON.stringify([instance, this.#state.context!.ctxId]));
+            this.#state.context = undefined;
+        }
+        if (!(instance in this.#state.instances)) {
+            if (hadContext) this.#emit();
+            return;
+        }
         const instances = { ...this.#state.instances };
         delete instances[instance];
         this.#state = { ...this.#state, instances };
@@ -262,6 +362,7 @@ export class ToolCallViewModel {
         this.#versions.clear();
         this.#queries.clear();
         this.#historyLoads.clear();
+        this.#contextHistoryLoads.clear();
         this.#closeSubscriptions();
         this.#listeners.clear();
         this.#state = emptyState();
@@ -284,12 +385,46 @@ export class ToolCallViewModel {
                 historyExhausted: state.historyLoaded ? state.historyExhausted : calls.length === 0,
             }));
             this.#emit();
+            const context = this.#state.context;
+            if (context?.instance === instance)
+                void this.#refreshContext(instance, context.ctxId);
             return true;
         } catch (error) {
             if (!this.#valid(key, version, epoch)) return false;
             this.#setFailure(instance, error);
             this.#emit();
             return false;
+        }
+    }
+
+    async #refreshContext(instance: string, ctxId: string): Promise<void> {
+        const context = this.#state.context;
+        if (context?.instance !== instance || context.ctxId !== ctxId) return;
+        const key = "tool:context";
+        const version = this.#nextVersion(key);
+        const epoch = this.#epoch;
+        this.#state.context = { ...context, loading: true };
+        this.#emit();
+        try {
+            const calls = await this.#transport(instance).listCalls(listQuery({ ctxId }));
+            const current = this.#state.context;
+            if (!this.#valid(key, version, epoch) || current?.instance !== instance ||
+                current.ctxId !== ctxId) return;
+            this.#state.context = {
+                ...current,
+                calls: orderCalls(current.historyLoaded ? mergeCalls(current.calls, calls) : calls),
+                failure: undefined,
+                historyBefore: current.historyLoaded ? current.historyBefore : calls[0]?.callId,
+                historyExhausted: current.historyLoaded ? current.historyExhausted : calls.length === 0,
+                loading: false,
+            };
+            this.#emit();
+        } catch (error) {
+            const current = this.#state.context;
+            if (!this.#valid(key, version, epoch) || current?.instance !== instance ||
+                current.ctxId !== ctxId) return;
+            this.#state.context = { ...current, failure: toError(error), loading: false };
+            this.#emit();
         }
     }
 

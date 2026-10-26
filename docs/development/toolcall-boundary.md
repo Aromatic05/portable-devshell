@@ -1,6 +1,6 @@
 # ToolCall Boundary
 
-> 当前实现说明，源码审计基线提交：`2287310a`（beta.1）。本文替代旧的“设计已冻结，进入实现阶段”方案；下面的流程、类型和路径以该版本源码为准。标为 **KNOWN BUG / 未解决偏差** 的部分描述当前缺口，不是目标安全契约。
+> 本文按当前 `1.0.0-beta.3` 开发源码更新；原始审计起点为 `2287310a`（beta.1）。历史缺陷仍保留原因与安全目标，但现行行为和测试路径以最新普通回归为准。标为 **KNOWN BUG / 未解决偏差** 的部分必须与当前源码再次核对，不是目标安全契约。
 
 ## 1. 职责与 authority
 
@@ -171,9 +171,9 @@ pre-run failure → failed（存在 active record 时）
 
 执行后的错误阶段只有 `postExecution | outboundHook`。Outbound hook delivery failure 返回安全的结构化错误，不回传 raw result，不重跑已经失败的 Rewrite；已完成执行时使用 `core.toolResultDeliveryFailed`，包含 callId、executionCompleted、failureStage，固定 `retryable=false`。
 
-**KNOWN BUG：postExecution adapter retry。** `transformResult` 抛错后，`withExecutionOutcome` 当前仍保留原 error 的 `retryable=true`。这违反“已有副作用的执行后失败不能被标为可安全重试”的期望；不能把该行为当作目标契约，也不能只凭 retryable 自动重放此类调用。回归用例 [ToolCallAdapterRetryAfterCommitRound6](../../test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts) 先写入副作用再使 adapter 失败，并要求 retryable=false；源码仍保留缺口。本次文档修订未运行该用例。
+**历史缺陷已纳入回归：postExecution adapter retry。** beta.1 中 `transformResult` 抛错会错误保留原 error 的 `retryable=true`。当前 [ToolCallAdapterRetryAfterCommitRound6](../../packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts) 使用真实写入副作用、适配失败和持久化 Audit 断言 `retryable=false`、`postExecution` 及 callId 归属。客户端仍不能因为失败就自动重放有副作用的调用。
 
-**KNOWN 未解决偏差：Audit 丢失与归属。** 当前尽力记录允许执行成功而缺少完整 Audit。另有 [duplicate callId 回归](../../test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts)：history.started 在 Scheduler duplicate 检查前按 callId 覆盖 active entry，可能破坏原调用归属。该风险有源码链路支持，但本次未动态验证最终 durable record，不能写成已复现的持久化结论。期望仍是保留原调用归属和执行证据。
+**Audit 与执行仍不原子提交；duplicate callId 归属已有回归。** 尽力记录允许执行成功而缺少完整 Audit，这是与 duplicate callId 身份覆盖不同的问题。原历史覆盖漏洞现在由 [duplicate callId 回归](../../packages/control/test/integration/server/transport/ToolCallDuplicateAuditOwnershipRound6.test.ts) 验证：拒绝并发和历史重复 ID，同时保留原调用的 durable Audit 身份、状态与唯一副作用。
 
 ## 8. Secret 的 scoped Rewrite
 
@@ -226,6 +226,6 @@ Control 外部 tool transport 的 `call` RPC 与 `callStream` stream 都进入�
 
 - [Hook 顺序单元测试](../../packages/core/test/unit/tool/Hook.test.ts)：两个方向均为升序；
 - [Pipeline 单元测试](../../packages/core/test/unit/tool/Pipeline.test.ts)：Audit 失败保留执行结果；
-- [Audit/delivery 边界回归](../../test/known-bugs/ToolCallAuditBoundary.test.ts)：call/callStream 在已执行副作用后保留 delivery failure 的执行标记。
+- [Audit/delivery 边界回归](../../packages/control/test/integration/server/transport/ToolCallDeliveryFailure.test.ts)：call/callStream 在已执行副作用后保留 delivery failure 的执行标记和不可重试语义。
 
-测试文件放在 `known-bugs` 下不代表它当前必然失败。本次仅核对这些用例源码与实现；已知安全偏差仍待代码修复，不能通过文档更新视为解决。
+历史发现记录保留原始红测条件；当前测试路径由对应 Domain 的普通回归套件持有。每次发布仍须在同一提交上运行上述断言，不能仅凭测试文件存在就认为已验收。

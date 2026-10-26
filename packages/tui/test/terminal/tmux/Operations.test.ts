@@ -116,44 +116,30 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
         ]);
     });
 
-    test("listPanes discovers tmux task workspaces from recent tool calls instead of only querying the instance home", async () => {
-        const harness = createHarness((call): JsonValue => ({
-            panes:
-                call.workspace === "/work/project"
-                    ? [
-                          {
-                              id: "%7",
-                              name: "task-pane",
-                              status: "running",
-                              task: { id: "task-project", status: "running" },
-                          },
-                      ]
-                    : [{ id: "%0", name: "main", status: "idle" }],
+    test("listPanes finds older tmux panes through a single Instance-wide list regardless of ToolCall history", async () => {
+        const harness = createHarness((): JsonValue => ({
+            panes: [{
+                id: "%7", name: "task-pane", status: "running",
+                cwd: "/work/project", task: { id: "task-project", status: "running" },
+            }],
         }));
-        harness.domains.setToolCalls("alpha", [
-            {
-                callId: "call-tmux",
-                inputSummary: "{}",
-                instance: "alpha",
-                source: "mcp",
-                startedAt: "2026-08-29T08:00:00.000Z",
-                status: "completed",
-                toolName: "tmux_run",
-                workspace: "/work/project",
-            } as never,
-        ]);
+        harness.domains.setToolCalls("alpha", Array.from({ length: 200 }, (_, i) => ({
+            callId: `read-${i}`, instance: "alpha", inputSummary: "{}", source: "mcp",
+            startedAt: "2026-08-29T08:00:00.000Z", status: "completed",
+            toolName: "file_read", workspace: "/recent",
+        } as never)));
 
         const panes = await harness.operations.listPanes("alpha");
 
         assert.deepEqual(
             harness.calls.map((call) => call.workspace),
-            ["/work/project"],
+            ["/home/alpha"],
         );
         assert.equal(panes[0]?.task?.id, "task-project");
         assert.equal(panes[0]?.workspace, "/work/project");
     });
 
-    test("listPanes does not probe ordinary Context workspaces or home without tmux evidence", async () => {
+    test("listPanes queries the Instance home even when the ToolCall preview has no tmux evidence", async () => {
         const harness = createHarness((): JsonValue => ({
             panes: [{ id: "%0", name: "main", status: "idle" }],
         }));
@@ -175,8 +161,9 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
 
         const panes = await harness.operations.listPanes("alpha");
 
-        assert.deepEqual(panes, []);
-        assert.deepEqual(harness.calls, []);
+        assert.equal(panes.length, 1);
+        assert.equal(panes[0]?.workspace, "/home/alpha");
+        assert.deepEqual(harness.calls.map((call) => call.workspace), ["/home/alpha"]);
     });
 
     test("inspectPane records a tmux_inspect call scoped to the requested pane and line window", async () => {

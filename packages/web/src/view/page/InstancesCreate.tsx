@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type {
     InstanceCreateDraft,
     InstanceCreateProvider,
@@ -33,6 +33,7 @@ export function InstanceCreate({
     onCreated(enrollment?: string): void;
     store: WebStore;
 }) {
+    const generation = useRef(0);
     const [schema, setSchema] = useState<InstanceCreateSchema>();
     const [form, setForm] = useState<CreateFormState>(() => emptyForm());
     const [schemaError, setSchemaError] = useState<string>();
@@ -41,21 +42,21 @@ export function InstanceCreate({
     const busy = store.state.operations[operation] !== undefined;
 
     useEffect(() => {
-        let active = true;
+        const requestGeneration = ++generation.current;
         void store
             .getInstanceCreateSchema()
             .then((next) => {
-                if (!active) return;
+                if (generation.current !== requestGeneration) return;
                 setSchema(next);
                 setForm(formFromSchema(next));
                 setSchemaError(undefined);
             })
             .catch((error: unknown) => {
-                if (!active) return;
+                if (generation.current !== requestGeneration) return;
                 setSchemaError(readError(error));
             });
         return () => {
-            active = false;
+            generation.current += 1;
         };
     }, [store]);
 
@@ -80,9 +81,11 @@ export function InstanceCreate({
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
+        const requestGeneration = generation.current;
         try {
             const draft = buildDraft(form, schema);
             const result = await store.createInstance(draft);
+            if (generation.current !== requestGeneration) return;
             if (!result.succeeded) {
                 setValidationError(
                     store.state.error ?? "Instance could not be created.",
@@ -92,7 +95,7 @@ export function InstanceCreate({
             setValidationError(undefined);
             onCreated(result.enrollment);
         } catch (error) {
-            setValidationError(readError(error));
+            if (generation.current === requestGeneration) setValidationError(readError(error));
         }
     }
 
@@ -283,7 +286,7 @@ export function InstanceCreate({
                     </p>
                 )}
                 <div className="actions">
-                    <button disabled={busy} onClick={onCancel} type="button">
+                    <button onClick={onCancel} type="button">
                         Cancel
                     </button>
                     <button

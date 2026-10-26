@@ -374,6 +374,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
                     "enter expand",
                     "space expand",
                     ...(isAuditContextRoute(route) ? ["m comment"] : []),
+                    ...(isAuditContextRoute(route) ? ["l older calls"] : []),
                     "/",
                     "esc back",
                 ];

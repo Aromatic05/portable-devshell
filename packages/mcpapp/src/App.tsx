@@ -39,6 +39,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     const errorOwnerRef = useRef<object | string | symbol>();
     const closeRef = useRef<symbol>();
     const displayRequestRef = useRef<symbol>();
+    const [fullscreenPending, setFullscreenPending] = useState(false);
+    const [fullscreenError, setFullscreenError] = useState<string>();
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
     const [liveError, setLiveError] = useState<string>();
     const [actionError, setActionError] = useState<string>();
@@ -62,6 +64,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         errorOwnerRef.current = undefined;
         closeRef.current = undefined;
         displayRequestRef.current = undefined;
+        setFullscreenPending(false);
+        setFullscreenError(undefined);
         clearSnapshot();
         setBusyAction(undefined);
         setCloseRequested(false);
@@ -136,7 +140,6 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     applyDocumentTheme(context.theme);
                 if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
                 if (context.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
-                displayRequestRef.current = undefined;
                 const hostContext = app.getHostContext();
                 setDisplayMode(hostContext?.displayMode ?? "inline");
                 setFullscreenAvailable(hostContext?.availableDisplayModes?.includes("fullscreen") === true);
@@ -226,19 +229,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         const app = hostRef.current;
         if (!app || !currentScope(app) || fullscreenAttempted.current.has(session.ctxId) ||
             hasMcpAppFullscreenClaim(session.ctxId)) return;
-        fullscreenAttempted.current.add(session.ctxId);
-        saveMcpAppFullscreenClaim(session.ctxId);
         // Only explicitly presented Workspaces may request fullscreen.
-        let active = true;
-        const operation = Symbol();
-        displayRequestRef.current = operation;
-        void app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 }).then((result) => {
-            if (active && currentScope(app) && displayRequestRef.current === operation && result.mode === "fullscreen")
-                setDisplayMode("fullscreen");
-        }).catch(() => {
-            // The Host may refuse fullscreen; no automatic reopen loop.
-        });
-        return () => { active = false; };
+        void requestFullscreen();
     }, [view, session, status, epoch, fullscreenAvailable, displayMode]);
 
     useEffect(() => {
@@ -431,18 +423,29 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
 
     const requestFullscreen = async () => {
         const app = hostRef.current;
-        if (view !== "workspace" || !app || !currentScope(app) || !fullscreenAvailable) return;
+        if (view !== "workspace" || status !== "connected" || !app || !currentScope(app) ||
+            !fullscreenAvailable || displayMode === "fullscreen" || displayRequestRef.current) return;
         const operation = Symbol();
         displayRequestRef.current = operation;
+        setFullscreenPending(true);
+        setFullscreenError(undefined);
         if (session) {
             fullscreenAttempted.current.add(session.ctxId);
             saveMcpAppFullscreenClaim(session.ctxId);
         }
         try {
             const result = await app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 });
-            if (currentScope(app) && displayRequestRef.current === operation && result?.mode === "fullscreen") setDisplayMode("fullscreen");
-        } catch {
-            // A Host may decline the requested presentation mode.
+            if (!currentScope(app) || displayRequestRef.current !== operation) return;
+            if (result?.mode === "fullscreen") setDisplayMode("fullscreen");
+            else setFullscreenError("The Host declined fullscreen. You can try again.");
+        } catch (error) {
+            if (currentScope(app) && displayRequestRef.current === operation)
+                setFullscreenError(error instanceof Error ? `Could not open fullscreen: ${error.message}` : "Could not open fullscreen. Try again.");
+        } finally {
+            if (currentScope(app) && displayRequestRef.current === operation) {
+                displayRequestRef.current = undefined;
+                setFullscreenPending(false);
+            }
         }
     };
 
@@ -467,31 +470,35 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         }
     };
 
+    const authorizationExpired = liveError === "MCP App authorization expired";
     return (
-        <main className="workspace" data-status={status} data-view={view} data-display-mode={displayMode}>
+        <main className="workspace" data-status={authorizationExpired ? "disconnected" : status} data-view={view} data-display-mode={displayMode}>
             <header className="workspace-head">
                 <span className="workspace-name">DevShell <span>{view === "workspace" ? "Workspace" : view === "interaction" ? "Interaction" : "ToolCall"}</span></span>
                 <span className="workspace-toolbar">
-                    {view === "workspace" && <label className="workspace-setting">
+                    {view === "workspace" && <label className="workspace-setting" title="Only changes the display of cards already provided by the Host. Does not enable server Inline ToolCalls or change fullscreen.">
                         <input type="checkbox" checked={toolCallEnabled}
                             onChange={(event) => setToolCallEnabled(event.target.checked)} />
-                        Inline ToolCall
+                        Show provided ToolCall cards
                     </label>}
                     {view === "workspace" && status === "connected" && fullscreenAvailable &&
                         displayMode !== "fullscreen" &&
-                        <button type="button" onClick={() => { void requestFullscreen(); }}>Open fullscreen</button>}
+                        <button type="button" disabled={fullscreenPending} onClick={() => { void requestFullscreen(); }}>
+                            {fullscreenPending ? "Opening fullscreen…" : "Open fullscreen"}
+                        </button>}
                     {view === "workspace" && <button type="button" aria-label="Close workspace"
                         disabled={closeRequested} onClick={() => { void closeWorkspace(); }}>
                         {closeRequested ? "Closing…" : "Close"}
                     </button>}
                     <span className="workspace-status" role="status">
                         <span className="workspace-indicator" aria-hidden="true" />
-                        {status === "connected" && liveError !== undefined ? "Live reconnecting"
+                        {authorizationExpired ? "Authorization expired" : status === "connected" && liveError !== undefined ? "Live reconnecting"
                             : status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
                     </span>
                 </span>
             </header>
             <section className="workspace-content">
+                {fullscreenError && <p className="workspace-notice" role="alert">{fullscreenError}</p>}
                 {liveError !== undefined && snapshot && <p className="workspace-notice" role="status">
                     Live updates interrupted: {liveError}. Showing last known state; actions are paused until reconnect.
                 </p>}
@@ -517,8 +524,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />} />
                 </> : <div className="workspace-landing">
-                    <h1>{ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>
-                    <p>{liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Open an active DevShell Context to inspect its Tasks, Goals and background activity.")}</p>
+                    <h1>{authorizationExpired ? "Workspace authorization expired" : ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>
+                    <p>{authorizationExpired ? "MCP App authorization expired. Reopen Workspace from the active DevShell Context to obtain fresh authorization." : liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Open an active DevShell Context to inspect its Tasks, Goals and background activity.")}</p>
                     {(ctxId || session?.ctxId) && <p className="workspace-context">Context · {ctxId ?? session?.ctxId}</p>}
                 </div>}
             </section>

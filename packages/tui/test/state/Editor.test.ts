@@ -7,6 +7,12 @@ import {
 } from "@portable-devshell/shared";
 import { TuiAppStore } from "../../src/state/store/App.ts";
 import { createDefaultInstanceDraft } from "../../src/state/editor/Instance.ts";
+import {
+    coerceTuiEditorRecord,
+    parseTuiInstanceDraft,
+    parseTuiInstancePatch,
+    tuiEditorRecordsEqual,
+} from "../../src/state/editor/Config.ts";
 import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.ts";
 import { TuiTestDomains } from "../support/DomainHarness.js";
 
@@ -258,3 +264,40 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         );
     }
 }
+
+for (const name of ["true", "false"]) {
+    test(`instance editor preserves the string name ${name} while coercing boolean fields`, () => {
+        const draft = {
+            ...createDefaultInstanceDraft(),
+            enabled: "false",
+            env: { FLAG: name },
+            mcp: { auth: "none", enabled: "true" },
+            name,
+        };
+        const parsed = parseTuiInstanceDraft(draft);
+        assert.equal(parsed.name, name);
+        assert.equal(parsed.enabled, false);
+        assert.equal(parsed.mcp?.enabled, true);
+        assert.equal(parsed.env?.FLAG, name);
+        assert.equal(parseTuiInstancePatch(draft).enabled, false);
+        assert.equal(tuiEditorRecordsEqual(draft, {
+            ...draft,
+            enabled: false,
+            mcp: { auth: "none", enabled: true },
+        }, true), true);
+    });
+}
+
+test("editor coerces only known boolean fields and preserves other literal strings", () => {
+    assert.deepEqual(coerceTuiEditorRecord({
+        control: { artifactDirectTransfer: "true" },
+        container: { adoptLifecycle: "false", containerName: "true" },
+        alerts: { enabled: "false", inlineToolCalls: "true" },
+        token: "false",
+    }), {
+        control: { artifactDirectTransfer: true },
+        container: { adoptLifecycle: false, containerName: "true" },
+        alerts: { enabled: false, inlineToolCalls: true },
+        token: "false",
+    });
+});

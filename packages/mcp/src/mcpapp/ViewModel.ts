@@ -128,21 +128,31 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             actions?.pendingDirectives(ctxId, instance) ?? Promise.resolve([]),
         ]);
         const tools = createToolTransport(endpoint, instance);
-        let agentBusy = false;
+        let agentBusy = true;
         // Only actual running work suppresses automatic Goal continuation.
         // UI, Goal control and reporting calls are not Agent execution.
         try {
-            const running = await tools.listCalls({
-                ctxId, status: "running", limit: 64, includeInput: false, includeOutput: false,
-            });
-            agentBusy = running.some((call) =>
-                call.ctxId === ctxId && call.status === "running" &&
-                call.source !== "extension" &&
-                !["workspace_goal", "progress_report", "environ_info"].includes(call.toolName) &&
-                !call.toolName.startsWith("mcpapp_"));
+            let before: string | undefined;
+            while (true) {
+                const running = await tools.listCalls({
+                    ctxId, status: "running", limit: 64, includeInput: false,
+                    includeOutput: false,
+                    ...(before === undefined ? {} : { before }),
+                });
+                if (running.some((call) =>
+                    call.ctxId === ctxId && call.status === "running" &&
+                    call.source !== "extension" &&
+                    !["workspace_goal", "progress_report", "environ_info"].includes(call.toolName) &&
+                    !call.toolName.startsWith("mcpapp_"))) break;
+                const oldest = running[0]?.callId;
+                if (oldest === undefined) {
+                    agentBusy = false;
+                    break;
+                }
+                before = oldest;
+            }
         } catch {
-            // Unavailable execution state is not evidence of activity; the
-            // Instance Goal heartbeat independently maintains the due lease.
+            // An unavailable execution authority cannot prove recovery is safe.
         }
         const projected = projectMcpAppSnapshot({
             approvals, ctxId, goal, instance, waits, directives, agentBusy,

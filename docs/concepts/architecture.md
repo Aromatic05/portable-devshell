@@ -1,6 +1,6 @@
 # 系统架构
 
-这份文档以当前 `1.0.0-beta.1` 代码和运行时边界为基线，不保留已经被替换的早期方案。
+这份文档以当前 `1.0.0-beta.3` 开发源码和运行时边界为基线，不保留已经被替换的早期方案；RC 尚未发布。
 
 ## 总体结构
 
@@ -150,7 +150,7 @@ Review 只有 `continue` / `reject`；人工审批由 Review hook 自行等待�
 
 Execute 完成、结果发布完成与 Audit 持久化完成是不同事实，没有统一原子 Commit。Audit input 来自 inbound Rewrite 后的值；部分审计失败会 abandon 记录并保留执行结果，不能把审计成功当作执行前提。`recording = "caller"` 时 Target 不承担 host Audit。
 
-**KNOWN 未解决偏差：** `test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts` 覆盖“真实副作用已写入，随后 adapter 抛出 `retryable: true`”的链路，要求最终不可重试；当前 `ExecutionTarget.ts` 的 `postExecution` 错误仍保留该标志，违背执行后失败不应诱导盲目重试的安全目标。文档修订未修复或重跑该红测。outbound hook delivery failure 则明确为 `outboundHook`、`retryable: false`。调用方不能凭 failed 推断无副作用，也不能自动重试已完成执行。
+**执行后错误与回归：**早期 `postExecution` 错误可能错误保留 `retryable: true`，该历史偏差已由 [ToolCallAdapterRetryAfterCommitRound6](../../packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts) 在当前普通测试路径检查：真实副作用写入后适配失败应标记 `executionCompleted=true`、`failureStage=postExecution` 和 `retryable=false`。outbound hook delivery failure 也应为 `outboundHook`、`retryable: false`。调用方不能凭 failed 推断无副作用，也不能自动重试已完成执行。
 
 Secret Extension 使用 Rewrite 展开输入引用并 mask 输出；Host interface 仅向 Secret 提供当前 instance、当前 payload 引用与本次已使用名字对应的 env，不提供任意枚举能力。每次 interface 请求读取当时配置，并非调用全程固定 snapshot；Audit 不能被描述为必然只记录展开前 secret 引用。Comment advice/delivery 写入结果 `payload.comment`，不使用旧 `feedback[]` side-channel。outbound 遇到已退休 Rewrite generation 时可重新绑定同 owner registration，已开始的 hook 不重放。
 
@@ -296,7 +296,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 ## 设计原则
 
-当前 1.0.0-beta.1 架构可以归纳为：
+当前 1.0.0-beta.3 开发架构可以归纳为：
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**

@@ -24,6 +24,8 @@ import { Messages } from "../../../src/view/page/activity/messages/Page.js";
 
 import { WebTestDomains, withWebDomains } from "../../support/DomainHarness.js";
 
+import { deferred } from "../../support/BetaMatrixHarness.js";
+
 const activeLastAccessedAt = new Date(
     Date.now() - 5 * 60 * 1_000,
 ).toISOString();
@@ -204,6 +206,32 @@ describe("Messages", () => {
     afterEach(() => {
         localStorage.clear();
         vi.useRealTimers();
+    });
+
+    it("reads Context history instead of the bounded Instance preview and offers older pages", async () => {
+        const domains = alphaDomains();
+        domains.setMessageHistory("alpha", [{
+            createdAt: "2026-09-02T11:00:00Z", ctxId: "ctx-unrelated",
+            id: "recent", kind: "comment", status: "delivered", text: "Other Context preview",
+        }]);
+        const scoped = [{
+            createdAt: "2026-09-02T09:00:00Z", ctxId: "ctx-old-active",
+            id: "older", kind: "comment", status: "delivered", text: "Scoped old Comment",
+        }];
+        const loadContext = vi.spyOn(domains.messageHistory, "loadContext")
+            .mockImplementation(async (instance, ctxId) => {
+                domains.messageHistory.patch({ context: {
+                    instance, ctxId, entries: scoped, historyBefore: "older",
+                    historyExhausted: false, loading: false,
+                } });
+            });
+        const loadOlder = vi.spyOn(domains.messageHistory, "loadOlderContext").mockResolvedValue(0);
+        await renderMessages(domains, threadRoute, webStore(domains));
+        expect(loadContext).toHaveBeenCalledWith("alpha", "ctx-old-active");
+        expect(screen.getByText("Scoped old Comment")).toBeInTheDocument();
+        expect(screen.queryByText("Other Context preview")).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));
+        await waitFor(() => expect(loadOlder).toHaveBeenCalledWith("alpha", "ctx-old-active"));
     });
 
     it("keeps only sessions active within the last 30 minutes", () => {
@@ -530,6 +558,34 @@ describe("Messages", () => {
                 "#resume",
             ),
         );
+    });
+
+    it("preserves a newer draft and control while the previous message is being queued", async () => {
+        const domains = alphaDomains();
+        const request = deferred<Awaited<ReturnType<typeof domains.messages.queue>>>();
+        const queueContextMessage = vi.spyOn(domains.messages, "queue").mockImplementation(() => request.promise);
+        await renderMessages(domains, threadRoute, webStore(domains));
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        fireEvent.change(composer, { target: { value: "Message A" } });
+        fireEvent.submit(composer.closest("form")!);
+        expect(queueContextMessage).toHaveBeenCalledWith("alpha", "ctx-old-active", "Message A");
+        expect(composer).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Send Comment" })).toBeDisabled();
+        fireEvent.change(composer, { target: { value: "Draft B" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
+        fireEvent.click(screen.getByRole("button", { name: /StopStop model/u }));
+        await act(async () => request.resolve({ ...baseMessages[0]!, text: "Message A" }));
+        expect(composer).toHaveValue("Draft B");
+        expect(screen.getByText("#stop")).toBeInTheDocument();
+    });
+
+    it("shows history load failure without claiming the thread is empty", async () => {
+        const domains = alphaDomains();
+        domains.setMessageHistory("alpha", []);
+        domains.messageHistory.patch({ failures: { alpha: new Error("History unavailable") } });
+        await renderMessages(domains, threadRoute, messageStore());
+        expect(within(screen.getByRole("log")).getByRole("alert")).toHaveTextContent("History unavailable");
+        expect(screen.queryByText("No Comments or Reports yet.")).not.toBeInTheDocument();
     });
 
     it("shows a send failure next to the composer and preserves the draft", async () => {

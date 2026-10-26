@@ -1,6 +1,6 @@
 # Portable-DevShell 1.0 Beta 功能与测试矩阵
 
-> 范围：`1.0.0-beta.1`；基线为现有用户决策、代码注册入口和可执行测试，不以历史设计稿反推已退役功能。
+> 初始覆盖基线：`1.0.0-beta.1`；后续各轮条目保留其测试发生时的证据，不等于当前 `1.0.0-beta.3` HEAD 的通过状态。当前门禁以 [验收入口](acceptance.md) 和 [RC 前收口状态](rc-preflight.md) 为准。功能基线以现有用户决策、代码注册入口和可执行测试为准，不以历史设计稿反推已退役功能。
 >
 > 本文记录**应提供什么功能**以及**什么测试能证明它可用**。`代码已有`、`有测试文件`、`测试已运行`、`真实 Host/平台验收通过` 是四个不同判断。没有证据时保持“待验证”，不能把存在的 mock/unit test 写成真正的 E2E。
 >
@@ -253,7 +253,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 
 本轮七个 Codex 长任务按“实现入口→可证伪不变量→故障注入/交错→定向实测→Bug复现”多轮执行。下表是**行为组**而非以文件数量充当覆盖率；同一行的多个断言共享测试入口。优先区分绿色默认回归、独立已知缺陷红测、真实 E2E 和仍缺的目标平台运行证据。
 
-详见 [第三轮实际 Bug 与复现](beta-bug-findings.md)；已证实但尚未修复的红测在仓库内 [Known-Bugs](../../test/known-bugs/README.md)，不会影响正常 Package 默认发现。
+详见 [第三轮实际 Bug 与复现](beta-bug-findings.md)。下表的独立红测结果是当轮的发现记录；许多断言后续已迁至各 Domain 普通回归。目录 [Known-Bugs](../../test/known-bugs/README.md) 保留历史/专项验证，不能从旧表推断当前仍在失败。
 
 | Matrix ID | 功能关联 | 新增可证伪断言 | 具体入口 | 证据层级 | 门禁与实测状态 |
 |---|---|---|---|---|---|
@@ -285,7 +285,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | M26 | L06 | 独立Namespace中Control/Reverse/Extension/Mailing/Workflow/Approval贯通 | pnpm testspace / TestspaceExtensionSmoke.mjs | E | 本轮实跑全流程通过 |
 | M27 | C17/C18 | Terminal.attach u64::MAX不得溢出、Timeout或误判Gap | crates/devshell-worker/tests/beta_ipc_contract.rs | I | 真实Worker复测通过；已修复 |
 | M28 | L06/C30 | 外层UID与UserNamespace内UID不同，XDG_RUNTIME_DIR仍一致 | scripts/testspace.test.mjs | I/E | 跨进程+独立Testspace通过；已修复 |
-| M29 | C02/C10/C14/C30 | 独立Known-Bugs红测保留真实实现偏差，默认门禁不加载 | test/known-bugs/README.md | I/UI | 独立显式运行并保持红色，见缺陷台账 |
+| M29 | C02/C10/C14/C30 | 当轮独立Known-Bugs红测记录真实实现偏差（历史状态） | test/known-bugs/README.md | I/UI | 原始红测结果保留；修复后的普通回归与当前状态见验收门禁 |
 
 ## 10. 第四轮长任务补测与真实验收
 
@@ -341,7 +341,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 
 ## 12. 第六轮测试矩阵：跨模块并发、弱网与故障恢复（2026-10-20）
 
-**红色复现独立运行，不得通过弱化预期混入默认全绿测试。** 测试层级严格区分真实Linux Worker、localhost TCP/HTTP/WS、受控文件系统故障注入、可执行Fake Provider CLI和真实浏览器。压力测试由systemd user cgroup限制内存、CPU和进程。
+**以下表格为 2026-10-20 当轮的结果快照，不是 2026-10-26 的当前失败清单。** 红色复现最初独立运行，修复后应保留原始断言并纳入普通回归，不得通过弱化预期取得全绿。测试层级严格区分真实Linux Worker、localhost TCP/HTTP/WS、受控文件系统故障注入、可执行Fake Provider CLI和真实浏览器。压力测试由systemd user cgroup限制内存、CPU和进程。
 
 | ID | 功能 | 断言/场景 | 证据入口 | 实际状态及边界 |
 |---|---|---|---|---|

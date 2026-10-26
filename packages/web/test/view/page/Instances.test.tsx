@@ -6,6 +6,7 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { asInstanceName } from "@portable-devshell/shared";
 import { expect, it, vi } from "vitest";
 
@@ -15,6 +16,8 @@ import {
     WebTestDomains,
     withWebDomains,
 } from "../../support/DomainHarness.js";
+
+import { deferred } from "../../support/BetaMatrixHarness.js";
 
 function setup(
     options: {
@@ -165,6 +168,31 @@ it("creates a local instance from only name and provider", async () => {
     expect(screen.getByRole("status")).toHaveTextContent(
         "Instance created successfully.",
     );
+});
+
+it.each(["Back to instances", "Cancel"])("%s leaves an in-flight creation without closing a later form", async (exit) => {
+    const { domains, store } = setup({ config: localConfig(), instances: [localInstance("ready")] });
+    vi.spyOn(domains.instances, "createSchema").mockResolvedValue(createSchema());
+    const request = deferred<{ instance: string; name: string }>();
+    const create = vi.spyOn(domains.instances, "create").mockReturnValue(request.promise);
+    function CreationPage() {
+        useSyncExternalStore(store.subscribe, () => store.state);
+        return <Instances navigate={() => undefined} route={{ page: "instances" }} store={store} />;
+    }
+    render(withWebDomains(domains, <CreationPage />));
+    fireEvent.click(screen.getByRole("button", { name: "New instance" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(create).toHaveBeenCalledWith({ name: "first", provider: "local" });
+    expect(screen.getByRole("button", { name: "Creating…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: exit })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: exit }));
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New instance" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "second" } });
+    await act(async () => request.resolve({ instance: "first", name: "first" }));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("second");
+    expect(screen.queryByText("Instance created successfully.")).not.toBeInTheDocument();
 });
 
 it("defaults creation to SSH and uses discovered OpenSSH hosts", async () => {

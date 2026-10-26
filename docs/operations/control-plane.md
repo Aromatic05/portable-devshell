@@ -124,7 +124,7 @@ result or error
 purpose / explanation provenance（存在时）
 ```
 
-Audit 尽力持久化；部分存储失败不会改变执行结果，不保证完整记录。输入记录来自 inbound Rewrite 后的值。执行成功不等于发布成功，failed 也不等于无副作用；执行后 adapter 仍可能保留 `retryable: true`，这是 [已知未解决偏差](../concepts/architecture.md#core-工具调用链)，不能作为自动重试依据。
+Audit 尽力持久化；部分存储失败不会改变执行结果，不保证完整记录。输入记录来自 inbound Rewrite 后的值。执行成功不等于发布成功，failed 也不等于无副作用；执行后 adapter 的不可重试语义有[独立回归](../development/toolcall-boundary.md)，但调用方依旧不能仅凭失败就自动重试已经发生副作用的操作。
 
 审计存储与保留策略见 [配置与运行目录](configuration.md)。
 

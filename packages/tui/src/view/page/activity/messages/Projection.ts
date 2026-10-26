@@ -431,9 +431,11 @@ export function selectTuiMessageEntries(
     instance: string,
     ctxId: string,
 ): TuiMessageEntry[] {
+    const context = reader.messageHistory.context;
     return selectTuiMessageEntriesFromSource(
-        reader.messageHistory.instances[instance]?.entries ??
-            emptyMessageEntries,
+        context?.instance === instance && context.ctxId === ctxId
+            ? context.entries
+            : reader.messageHistory.instances[instance]?.entries ?? emptyMessageEntries,
         ctxId,
     );
 }
@@ -465,9 +467,16 @@ export function renderTuiMessageHistoryLines(
     width: number,
 ): Array<{ kind: "meta" | "text"; text: string }> {
     const innerWidth = Math.max(1, width - 2);
-    const source =
-        reader.messageHistory.instances[instance]?.entries ??
-        emptyMessageEntries;
+    const context = reader.messageHistory.context;
+    const selectedContext = context?.instance === instance && context.ctxId === ctxId
+        ? context : undefined;
+    const source = selectedContext !== undefined
+        ? selectedContext.entries
+        : reader.messageHistory.instances[instance]?.entries ?? emptyMessageEntries;
+    const olderHint = selectedContext?.historyBefore !== undefined &&
+        selectedContext.historyExhausted !== true
+        ? { kind: "meta" as const, text: "l load older Comments and Reports" }
+        : undefined;
     let byContextAndWidth = messageHistoryCache.get(source);
     if (byContextAndWidth === undefined) {
         byContextAndWidth = new Map();
@@ -475,7 +484,7 @@ export function renderTuiMessageHistoryLines(
     }
     const cacheKey = `${ctxId}\u0000${innerWidth}`;
     const cached = byContextAndWidth.get(cacheKey);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) return olderHint === undefined ? cached : [olderHint, ...cached];
     const rendered = selectTuiMessageEntriesFromSource(source, ctxId).flatMap(
         (entry) => [
             {
@@ -490,7 +499,7 @@ export function renderTuiMessageHistoryLines(
         ],
     );
     byContextAndWidth.set(cacheKey, rendered);
-    return rendered;
+    return olderHint === undefined ? rendered : [olderHint, ...rendered];
 }
 
 export function tuiMessagesRenderedHistoryRows(

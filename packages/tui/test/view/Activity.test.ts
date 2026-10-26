@@ -15,6 +15,7 @@ import {
 } from "@portable-devshell/tui/testing";
 import { TuiTestDomains } from "../support/DomainHarness.ts";
 import { projectAuditContexts } from "../../src/state/route/Audit.ts";
+import { buildAuditContextBoxes } from "../../src/view/page/activity/audit/Context.ts";
 import { PassThrough } from "node:stream";
 import { type WriteStream } from "node:tty";
 import { stripVTControlCharacters } from "node:util";
@@ -204,6 +205,46 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
 }
 
 {
+    test("Audit shows the selected Context's scoped pages instead of the instance preview", () => {
+        const domains = new TuiTestDomains();
+        domains.setContexts(["ctx-history", "ctx-quiet"].map((ctxId) => ({
+            createdAt: "2026-10-26T00:00:00Z",
+            ctxId,
+            environments: [{ instance: "alpha", workspace: `/workspace/${ctxId}` }],
+            expiresAt: "2026-11-26T00:00:00Z",
+            lastAccessedAt: "2026-10-26T00:00:00Z",
+            principal: "client",
+            status: "active",
+        })));
+        const calls = Array.from({ length: 230 }, (_, index) => ({
+            callId: `call-${index}`,
+            ctxId: "ctx-history",
+            inputSummary: "{}",
+            instance: asInstanceName("alpha"),
+            source: "mcp" as const,
+            startedAt: new Date(1_790_000_000_000 + index * 1000).toISOString(),
+            status: "completed" as const,
+            toolName: "bash_run",
+        }));
+        domains.setToolCalls("alpha", calls.slice(-2));
+        domains.toolCalls.patch({ context: {
+            calls, ctxId: "ctx-history", instance: "alpha", loading: false,
+            historyBefore: calls[0]!.callId, historyExhausted: false,
+        } });
+        const contexts = projectAuditContexts(domains.reader, "alpha");
+        assert.equal(contexts.find((item) => item.key.kind === "context" && item.key.ctxId === "ctx-history")?.calls.length, 230);
+        assert.equal(contexts.find((item) => item.key.kind === "context" && item.key.ctxId === "ctx-quiet")?.calls.length, 0);
+
+        const store = new TuiAppStore();
+        store.setSelectedInstance("alpha");
+        store.setSelectedPage("audit");
+        const boxes = buildAuditContextBoxes(store.getState(), domains.reader, "alpha", {
+            kind: "context", ctxId: "ctx-history",
+        });
+        assert.equal(boxes.filter((box) => box.id.startsWith("audit-call:")).length, 230);
+        assert.equal(boxes.some((box) => box.id === "audit-context-older"), true);
+    });
+
     test("Audit excludes caller-recorded delegated Worker activity", () => {
         const domains = new TuiTestDomains();
         domains.setApprovals("alpha", [

@@ -5,9 +5,11 @@ import type { WebMessageEntry } from "../Model.js";
 
 export const MessageHistory = memo(function MessageHistory({
     entries,
+    error,
     threadKey,
 }: {
     entries: readonly WebMessageEntry[];
+    error?: string;
     threadKey: string;
 }) {
     const historyEndRef = useRef<HTMLDivElement>(null);
@@ -49,7 +51,8 @@ export const MessageHistory = memo(function MessageHistory({
             className="message-history"
             role="log"
         >
-            {entries.length === 0 ? (
+            {error === undefined ? null : <p className="error" role="alert">{error}</p>}
+            {entries.length === 0 && error === undefined ? (
                 <p className="empty">No Comments or Reports yet.</p>
             ) : (
                 entries.map((entry) => {

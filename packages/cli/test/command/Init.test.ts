@@ -361,6 +361,106 @@ test("fresh interactive init silently skips Access when the Access command is ab
     assert.doesNotMatch(output, /MCP access/u);
 });
 
+for (const failure of ["read", "collision", "create", "start"] as const) {
+    test(`init delivers the persisted approval token before a subsequent ${failure} failure`, async () => {
+        const view = configView({ token: undefined });
+        view.instances = failure === "start" ? view.instances : [];
+        if (failure === "collision") {
+            view.instances = [
+                { ...configView().instances[0]!, provider: "ssh" },
+            ] as unknown as ConfigView["instances"];
+        }
+        let savedToken: string | undefined;
+        let output = "";
+        let reads = 0;
+        const context = {
+            clients: {
+                config: {
+                    async get() {
+                        reads += 1;
+                        if (failure === "read" && reads === 2)
+                            throw new Error("config read failed");
+                        return view;
+                    },
+                    async update(request: { mcp: ConfigMcpPatch }) {
+                        savedToken = request.mcp.oauth2?.token;
+                    },
+                },
+                instance: {
+                    async createInstance() {
+                        throw new Error("instance create failed");
+                    },
+                },
+                runtime() {
+                    return {
+                        async start() {
+                            throw new Error("instance start failed");
+                        },
+                    };
+                },
+            },
+            controlNegotiated: true,
+            stderr: { write(chunk: string) { output += chunk; } },
+            writeValue() { assert.fail("failed init must not report success"); },
+        } as unknown as CliDispatchContext;
+
+        const errors = {
+            read: /config read failed/u,
+            collision: /already exists with provider ssh/u,
+            create: /instance create failed/u,
+            start: /instance start failed/u,
+        };
+        await assert.rejects(executeInit({ kind: "init" }, context), errors[failure]);
+        assert.match(savedToken ?? "", /^ds_[A-Za-z0-9_-]{40,}$/u);
+        assert.equal(output, `OAuth2 approval\n  ${savedToken}\n`);
+    });
+}
+
+test("init does not deliver an approval token when its write fails", async () => {
+    let output = "";
+    const context = {
+        clients: {
+            config: {
+                async get() { return configView(); },
+                async update() { throw new Error("config write failed"); },
+            },
+        },
+        controlNegotiated: true,
+        stderr: { write(chunk: string) { output += chunk; } },
+    } as unknown as CliDispatchContext;
+
+    await assert.rejects(executeInit({ kind: "init" }, context), /config write failed/u);
+    assert.equal(output, "");
+});
+
+for (const enabled of [true, false]) {
+    test(`init renders MCP enabled=${enabled} without a public URL accurately`, async () => {
+        const view = configView({ enabled, token: "********" });
+        delete view.mcp.publicBaseUrl;
+        let output = "";
+        let result: unknown;
+        const context = {
+            clients: {
+                config: { async get() { return view; } },
+                runtime(instance: string) {
+                    return { async start() { return readySnapshot(instance); } };
+                },
+            },
+            controlNegotiated: true,
+            writeValue(value: unknown, text: string) {
+                result = value;
+                output = text;
+            },
+        } as unknown as CliDispatchContext;
+
+        assert.equal(await executeInit({ kind: "init" }, context), true);
+        assert.equal((result as { mcpEnabled: boolean }).mcpEnabled, enabled);
+        assert.match(output, enabled
+            ? /enabled \(public URL not configured\)/u
+            : /disabled \(existing configuration preserved\)/u);
+    });
+}
+
 function configView(input?: {
     enabled?: boolean;
     instances?: ConfigView["instances"];

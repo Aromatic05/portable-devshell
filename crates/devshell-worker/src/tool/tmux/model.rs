@@ -245,6 +245,8 @@ pub struct TmuxPaneSummary {
     pub name: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TmuxTaskView>,
 }
 

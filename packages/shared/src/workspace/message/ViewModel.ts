@@ -11,6 +11,7 @@ import {
     isMessageHistoryEvent,
     mergeContextMessage,
     mergeContextMessageList,
+    mergeMessageEntry,
     mergeMessageEntryList,
 } from "./Model.js";
 import type { MessagePreferenceTransport, MessageTransport } from "./Transport.js";
@@ -330,7 +331,18 @@ interface MessageHistoryInstanceState {
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
 }
+export interface MessageHistoryContextState {
+    ctxId: string;
+    entries: MessageEntry[];
+    failure?: Error;
+    historyBefore?: string;
+    historyExhausted?: boolean;
+    historyLoaded?: boolean;
+    instance: string;
+    loading: boolean;
+}
 export interface MessageHistoryViewModelState {
+    context?: MessageHistoryContextState;
     failures: Record<string, Error>;
     instances: Record<string, MessageHistoryInstanceState>;
 }
@@ -351,6 +363,8 @@ export class MessageHistoryViewModel {
         string,
         InstanceEventSubscription<MessageEvent>
     >();
+    #contextSelection = 0;
+    #contextRefreshVersion = 0;
     #epoch = 0;
     #publishedState: MessageHistoryViewModelState =
         createInitialMessageHistoryViewModelState();
@@ -413,12 +427,100 @@ export class MessageHistoryViewModel {
             }));
             this.#clearFailure(key);
             this.#emit();
+            const context = this.#state.context;
+            if (context?.instance === instance)
+                void this.#refreshContext(instance, context.ctxId);
             return result.lastSeq;
         } catch (error) {
             if (!this.#valid(key, version, epoch)) return undefined;
             this.#setFailure(key, error);
             this.#emit();
             return undefined;
+        }
+    }
+
+    /** A Context's history is queried before applying the page limit. */
+    async loadContext(instance: string, ctxId: string): Promise<void> {
+        const current = this.#state.context;
+        if (current?.instance !== instance || current.ctxId !== ctxId) {
+            this.#contextSelection++;
+            this.#state.context = { ctxId, entries: [], instance, loading: true };
+            this.#emit();
+        }
+        await this.#refreshContext(instance, ctxId);
+    }
+
+    clearContext(instance: string, ctxId: string): void {
+        if (this.#state.context?.instance !== instance || this.#state.context.ctxId !== ctxId)
+            return;
+        this.#contextSelection++;
+        this.#state.context = undefined;
+        this.#emit();
+    }
+
+    async loadOlderContext(instance: string, ctxId: string): Promise<number> {
+        const initial = this.#state.context;
+        if (initial?.instance !== instance || initial.ctxId !== ctxId ||
+            initial.historyBefore === undefined || initial.historyExhausted) return 0;
+        const before = initial.historyBefore;
+        const epoch = this.#epoch;
+        const selection = this.#contextSelection;
+        const result = await this.#transport.listMessageEntries(instance, {
+            ctxId, before, limit: MESSAGE_HISTORY_LIST_LIMIT,
+            maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
+        });
+        const current = this.#state.context;
+        if (!this.#current(epoch) || selection !== this.#contextSelection ||
+            current?.instance !== instance || current.ctxId !== ctxId ||
+            current.historyBefore !== before) return 0;
+        let entries = current.entries;
+        for (const entry of result.entries) entries = mergeMessageEntry(entries, entry);
+        this.#state.context = {
+            ...current, entries, failure: undefined,
+            historyBefore: result.entries[0]?.id ?? before,
+            historyExhausted: result.entries.length === 0,
+            historyLoaded: true,
+        };
+        this.#emit();
+        return result.entries.length;
+    }
+
+    async #refreshContext(instance: string, ctxId: string): Promise<void> {
+        const context = this.#state.context;
+        if (context?.instance !== instance || context.ctxId !== ctxId) return;
+        const epoch = this.#epoch;
+        const selection = this.#contextSelection;
+        const version = ++this.#contextRefreshVersion;
+        this.#state.context = { ...context, loading: true };
+        this.#emit();
+        try {
+            const result = await this.#transport.listMessageEntries(instance, {
+                ctxId, limit: MESSAGE_HISTORY_LIST_LIMIT,
+                maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
+            });
+            const current = this.#state.context;
+            if (!this.#current(epoch) || selection !== this.#contextSelection ||
+                version !== this.#contextRefreshVersion ||
+                current?.instance !== instance || current.ctxId !== ctxId) return;
+            let entries = current.historyLoaded ? current.entries : [];
+            for (const entry of result.entries) entries = mergeMessageEntry(entries, entry);
+            this.#state.context = {
+                ...current, entries, failure: undefined,
+                historyBefore: current.historyLoaded ? current.historyBefore : result.entries[0]?.id,
+                historyExhausted: current.historyLoaded ? current.historyExhausted : result.entries.length === 0,
+                loading: false,
+            };
+            this.#emit();
+        } catch (error) {
+            const current = this.#state.context;
+            if (!this.#current(epoch) || selection !== this.#contextSelection ||
+                version !== this.#contextRefreshVersion ||
+                current?.instance !== instance || current.ctxId !== ctxId) return;
+            this.#state.context = {
+                ...current, loading: false,
+                failure: error instanceof Error ? error : new Error(String(error)),
+            };
+            this.#emit();
         }
     }
 

@@ -61,21 +61,7 @@ export function useWebApplicationSession(
                     if (current()) activateStore(generation);
                     return;
                 }
-                const mode = await activeSession.authMode();
-                if (!current()) return;
-                if (mode === "oauth2") {
-                    activeSession.startOAuth();
-                    return;
-                }
-                if (mode === "token") {
-                    if (current()) setSessionState("login");
-                    return;
-                }
-                if (await activeSession.establish()) {
-                    if (current()) activateStore(generation);
-                    return;
-                }
-                if (current()) setSessionState("login");
+                await authenticate(current);
             } catch {
                 if (current()) {
                     setError("Unable to establish a session.");
@@ -84,6 +70,25 @@ export function useWebApplicationSession(
             }
         }
     }, [activeSession, createDomains]);
+
+    async function authenticate(current: () => boolean): Promise<void> {
+        const generation = lifecycle.current;
+        const mode = await activeSession.authMode();
+        if (!current()) return;
+        if (mode === "oauth2") {
+            activeSession.startOAuth();
+            return;
+        }
+        if (mode === "token") {
+            setSessionState("login");
+            return;
+        }
+        if (await activeSession.establish()) {
+            if (current()) activateStore(generation);
+            return;
+        }
+        if (current()) setSessionState("login");
+    }
 
     function discardStore(): void {
         storeRef.current?.close();
@@ -191,7 +196,8 @@ export function useWebApplicationSession(
                 if (!available) {
                     discardStore();
                     setStore(undefined);
-                    setSessionState("login");
+                    setSessionState("checking");
+                    await authenticate(() => lifecycle.current === generation);
                     return;
                 }
                 await target.reconnect();
@@ -201,11 +207,10 @@ export function useWebApplicationSession(
                 )
                     setError(undefined);
             } catch {
-                if (
-                    lifecycle.current === generation &&
-                    storeRef.current === target
-                )
+                if (lifecycle.current === generation) {
                     setError("Unable to verify the session.");
+                    if (storeRef.current === undefined) setSessionState("login");
+                }
             } finally {
                 if (lifecycle.current === generation) setBusy(undefined);
             }

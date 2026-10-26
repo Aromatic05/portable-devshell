@@ -24,6 +24,7 @@ import {
 } from "../control/Refresh.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiAppStore } from "../../state/store/App.js";
+import { currentTuiRoute } from "../../state/route/State.js";
 
 export class TuiRuntimeControlOperations {
     constructor(
@@ -344,8 +345,13 @@ export class TuiRuntimeControlOperations {
                 await refreshTuiMessages(this.options.domains);
                 return;
             case "audit":
-                if (instance !== undefined)
+                if (instance !== undefined) {
                     await refreshTuiAudit(this.options.domains, instance);
+                    const route = currentTuiRoute(this.options.store.getState());
+                    if (route.page === "audit" && route.view === "context" &&
+                        route.scope === "context")
+                        await this.options.domains.toolCalls.loadContext(instance, route.ctxId);
+                }
                 return;
         }
     }

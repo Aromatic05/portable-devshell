@@ -1627,6 +1627,61 @@ function createBuffer(): {
     };
 }
 
+test("CliMain resolves local lifecycle and builtin help despite an incompatible Control protocol", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const calls: string[] = [];
+    let helloCalls = 0;
+    const cli = new CliMain({
+        createCliClients: () => testClients({
+            async hello() {
+                helloCalls += 1;
+                return { capabilities: [], protocolVersion: 0 };
+            },
+        }),
+        createLifecycleManager: async () => ({
+            async logs() {
+                calls.push("logs");
+                return "control log";
+            },
+            async start() {
+                calls.push("start");
+                return { instanceCount: 0, running: true };
+            },
+            async status() {
+                calls.push("status");
+                return { instanceCount: 0, running: false };
+            },
+            async stop() {
+                calls.push("stop");
+                return { instanceCount: 0, running: false };
+            },
+        }),
+        stderr,
+        stdout,
+    });
+
+    for (const command of ["start", "stop", "status", "logs", "restart"])
+        assert.equal(await cli.run([command]), 0);
+    assert.deepEqual(calls, ["start", "stop", "status", "logs", "status", "stop", "start"]);
+    assert.equal(helloCalls, 0);
+    assert.equal(await cli.run(["stop", "unexpected"]), 2);
+    assert.match(stderr.flush(), /Unexpected arguments for stop/u);
+    assert.equal(helloCalls, 0);
+    stdout.flush();
+
+    for (const command of [
+        ["help"], ["--help"], ["stop", "--help"],
+        ["instance", "status", "--help"], ["watch", "help"],
+        ["extension", "--help"], ["config", "update", "--help"],
+    ]) {
+        assert.equal(await cli.run(command), 0);
+        assert.notEqual(stdout.flush(), "");
+        assert.equal(stderr.flush(), "");
+    }
+    assert.equal(helloCalls, 3);
+});
+
 test("CliMain rejects an incompatible protocol before a business request", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();

@@ -136,7 +136,7 @@ function coerceValue(key: string, value: JsonValue): JsonValue {
     if (normalizedMode !== undefined) {
         return normalizedMode;
     }
-    if (value === "true" || value === "false") {
+    if (booleanFields.has(key) && (value === "true" || value === "false")) {
         return value === "true";
     }
     if (numericFields.has(key) && /^\d+$/u.test(value)) {
@@ -157,6 +157,13 @@ function coerceValue(key: string, value: JsonValue): JsonValue {
     }
     return value;
 }
+
+const booleanFields = new Set([
+    "adoptLifecycle",
+    "artifactDirectTransfer",
+    "enabled",
+    "inlineToolCalls",
+]);
 
 const numericFields = new Set([
     "eventBufferSize",
