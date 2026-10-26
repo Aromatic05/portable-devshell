@@ -1,3 +1,4 @@
+import { Endpoint } from "@portable-devshell/shared";
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import test from 'node:test';
@@ -30,6 +31,7 @@ test('MCP App reconciles terminated Contexts on startup and revokes leases on di
     const unsubscribe = registry.changes.onChange((change) => changes.push(change));
     t.after(unsubscribe);
     const module = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: createDefaultControlConfig(),
         context: {} as never,

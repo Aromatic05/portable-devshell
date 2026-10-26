@@ -300,6 +300,7 @@ export function createToolCallRuntime(options: {
             resolveTarget: options.resolveTarget,
         }),
         hooks,
+        lookupExecute: (toolName) => hooks.lookupExecute(toolName),
         close: () => hooks.close(),
     };
 }

@@ -244,9 +244,11 @@ export class Instance {
     host(
         extensionPorts: readonly ControlPortDefinition[] = [],
         provenance?: ToolCallProvenanceApi,
+        controlIngressHost?: string,
     ): ControlHostDefinition {
         return createInstanceHost({
             descriptor: this,
+            controlIngressHost,
             extensionPorts,
             ...(provenance === undefined ? {} : { provenance }),
             state: this.#state,

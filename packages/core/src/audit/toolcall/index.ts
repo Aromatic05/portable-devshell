@@ -20,8 +20,8 @@ export class AuditToolCallStore {
         return this.#store.hasCall(callId);
     }
 
-    readQuery(query: ToolCallQuery = {}): ToolCallRecord[] {
-        return this.#store.readQuery(query);
+    readQuery(query: ToolCallQuery = {}, options?: { deferFirstByteLimit: boolean }): ToolCallRecord[] {
+        return this.#store.readQuery(query, options);
     }
 
     readFailureSummary(sinceMs: number, untilMs: number) {

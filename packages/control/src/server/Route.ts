@@ -88,6 +88,7 @@ export interface ControlRouteExtensionPort {
 export interface ControlRouteRegistryOptions {
     artifact?: ArtifactRouteApi;
     toolCallProvenance?: ToolCallProvenanceApi;
+    controlIngressHost?: string;
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;
@@ -243,6 +244,7 @@ export class ControlRouteRegistry {
                 descriptor.host(
                     this.#options.extensionRoutes?.modules("instance") ?? [],
                     this.#options.toolCallProvenance,
+                    this.#options.controlIngressHost,
                 ),
             );
         }

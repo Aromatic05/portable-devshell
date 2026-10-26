@@ -375,7 +375,8 @@ export class ToolCallViewModel {
         const version = this.#nextVersion(key);
         const query = listQuery(this.#queries.get(instance));
         try {
-            const calls = await this.#transport(instance).listCalls(query);
+            const state = this.#state.instances[instance];
+            const calls = await this.#readRefresh(instance, query, state?.historyLoaded ? state.calls : []);
             if (!this.#valid(key, version, epoch)) return false;
             this.#updateInstance(instance, (state) => ({
                 ...state,
@@ -406,7 +407,7 @@ export class ToolCallViewModel {
         this.#state.context = { ...context, loading: true };
         this.#emit();
         try {
-            const calls = await this.#transport(instance).listCalls(listQuery({ ctxId }));
+            const calls = await this.#readRefresh(instance, listQuery({ ctxId }), context.historyLoaded ? context.calls : []);
             const current = this.#state.context;
             if (!this.#valid(key, version, epoch) || current?.instance !== instance ||
                 current.ctxId !== ctxId) return;
@@ -426,6 +427,18 @@ export class ToolCallViewModel {
             this.#state.context = { ...current, failure: toError(error), loading: false };
             this.#emit();
         }
+    }
+
+    async #readRefresh(instance: string, query: ToolCallQuery, existing: ToolCallRecord[]): Promise<ToolCallRecord[]> {
+        const known = new Set(existing.map((call) => call.callId));
+        const calls = await this.#transport(instance).listCalls(query);
+        let page = calls;
+        // Page backwards until the new window meets the retained history.
+        while (known.size > 0 && page.length > 0 && !page.some((call) => known.has(call.callId))) {
+            page = await this.#transport(instance).listCalls({ ...query, before: page[0]!.callId });
+            calls.unshift(...page);
+        }
+        return calls;
     }
 
     #ensureSubscription(instance: string, fromSeq: number): void {

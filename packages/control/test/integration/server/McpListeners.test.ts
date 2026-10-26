@@ -211,6 +211,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         },
     });
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -258,6 +259,7 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         },
     });
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -358,6 +360,7 @@ test("MCP migration starts a different listener before retiring the previous lis
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -418,6 +421,7 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -472,6 +476,7 @@ test("MCP stop failure disposes the uncommitted Host and restores the previous H
     let wires = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -578,6 +583,7 @@ test("MCP restore attempts every host transition and reports rollback failures",
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -631,6 +637,7 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     config.web.listenPort = address.port;
     const owners = await createOwners(config, homeDirectory);
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -675,6 +682,7 @@ test("Web same-endpoint stop failure disposes the new HTTP Lease and restores th
     config.web.listenHost = "127.0.0.1";
     const owners = await createOwners(config, homeDirectory);
     const mcp = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -737,6 +745,7 @@ test("shared listener Web auth changes require an explicit control restart witho
         },
     });
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
@@ -794,6 +803,7 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
     const endpoint = new Endpoint({ host: "listener-test" });
     const http = new ControlHttpServer();
     const mcp = new McpControlModule({
+        endpoint: new Endpoint(),
         http,
         config, context: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
         controlPaths: new ControlPathHome(homeDirectory),

@@ -9,6 +9,7 @@ import {
     STREAM_GAP_CODE,
     asInstanceName,
     type ToolCallRecord,
+    type ToolCallQuery,
 } from "@portable-devshell/shared";
 import { AuditDatabase, AUDIT_DATABASE_SCHEMA_VERSION } from "../../src/audit/database/index.ts";
 import { AuditEventStore } from "../../src/audit/event/index.ts";
@@ -701,7 +702,8 @@ test("ToolCallHistory keeps cursor pagination bounded while merging active calls
         status: "completed",
         toolName: "bash_run",
     };
-    let readQueryCalled = false;
+    const queries: Array<ToolCallQuery | undefined> = [];
+    const pages = [[{ ...persisted, callId: "persisted-1" }], [persisted]];
     const history = new ToolCallHistory(instanceName, {
         async append() {},
         hasCall(callId) {
@@ -709,13 +711,8 @@ test("ToolCallHistory keeps cursor pagination bounded while merging active calls
         },
         readFailureSummary() { return { count: 0 }; },
         readQuery(query) {
-            readQueryCalled = true;
-            assert.deepEqual(query, {
-                after: "persisted-1",
-                ctxId: "ctx-cursor",
-                limit: 2,
-            });
-            return [persisted];
+            queries.push(query);
+            return pages.shift()!;
         },
     });
     await history.started(
@@ -736,7 +733,10 @@ test("ToolCallHistory keeps cursor pagination bounded while merging active calls
         ).map((record) => record.callId),
         ["persisted-2", "active-1"],
     );
-    assert.equal(readQueryCalled, true);
+    assert.deepEqual(queries, [
+        { callIds: ["persisted-1"], ctxId: "ctx-cursor", includeInput: false, includeOutput: false, limit: 1 },
+        { after: "persisted-1", ctxId: "ctx-cursor", limit: 2 },
+    ]);
 });
 
 test("ToolCallHistory can exclude the detached wait owner from Context activity", async () => {

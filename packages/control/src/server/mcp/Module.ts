@@ -19,6 +19,7 @@ import type { InstanceMcpRuntimePort } from "../../instance/Api.js";
 import type { ContextChangeSource } from "../../context/Api.js";
 import {
     type ToolCallProvenanceApi,
+    createToolCallIngressTransport,
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../../instance/Api.js";
 import { McpEndpointFactory } from "./Endpoint.js";
@@ -31,7 +32,7 @@ export interface McpControlModuleOptions {
     context: Pick<ContextTransport, "resolve" | "validateForInstance">;
     contextChanges?: ContextChangeSource;
     contextRecords?: () => Promise<ContextRecord[]>;
-    endpoint?: Endpoint;
+    endpoint: Endpoint;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     http: McpHttpAccess;
@@ -64,13 +65,8 @@ export class McpControlModule {
         this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpServer({
             context: options.context,
-            ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
-            tools: { call: (instance, ...args) => {
-                const target = options.instances.get(instance);
-                if (target === undefined)
-                    throw new Error(`Instance ${instance} is unavailable.`);
-                return target.toolCallIngress.call(instance, ...args);
-            } },
+            endpoint: options.endpoint,
+            tools: createToolCallIngressTransport(options.endpoint),
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
             toolProvenanceFile: options.controlPaths.toolProvenanceFile,

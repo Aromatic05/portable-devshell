@@ -79,3 +79,30 @@ test("late Context pages cannot append to a different Context or a reopened Cont
     model.clearContext("demo", "ctx-a");
     assert.equal(model.state.context, undefined);
 });
+
+test("paged Context refresh bridges more than 400 new messages and preserves the older cursor", async (t) => {
+    const all = Array.from({ length: 850 }, (_, i) => entry(i, "ctx-a"));
+    const model = new MessageHistoryViewModel({ transport: {
+        listMessageEntries: async (_instance: string, query: MessageListInput = {}) => {
+            const end = query.before === undefined ? all.length : all.findIndex((item) => item.id === query.before);
+            return { entries: all.slice(0, end).slice(-(query.limit ?? 400)), lastSeq: all.length };
+        },
+    } as unknown as MessageTransport });
+    t.after(() => model.close());
+    await model.loadContext("demo", "ctx-a");
+    assert.equal(await model.loadOlderContext("demo", "ctx-a"), 400);
+    assert.equal(model.state.context?.historyBefore, "message-50");
+    all.push(...Array.from({ length: 950 }, (_, i) => entry(i + 850, "ctx-a")));
+    await model.loadContext("demo", "ctx-a");
+    assert.deepEqual(model.state.context?.entries.map((item) => item.id), all.slice(50).map((item) => item.id));
+    assert.equal(model.state.context?.historyBefore, "message-50");
+    assert.equal(await model.loadOlderContext("demo", "ctx-a"), 50);
+    assert.equal(await model.loadOlderContext("demo", "ctx-a"), 0);
+    assert.equal(model.state.context?.historyExhausted, true);
+    assert.deepEqual(model.state.context?.entries.map((item) => item.id), all.map((item) => item.id));
+    all.push(...Array.from({ length: 450 }, (_, i) => entry(i + 1800, "ctx-a")));
+    await model.loadContext("demo", "ctx-a");
+    assert.equal(model.state.context?.historyExhausted, true);
+    assert.equal(model.state.context?.historyBefore, "message-0");
+    assert.deepEqual(model.state.context?.entries.map((item) => item.id), all.map((item) => item.id));
+});

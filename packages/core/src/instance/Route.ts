@@ -4,6 +4,7 @@ import {
     createRemoteError,
     controlErrorCodes,
     createToolRouteModule,
+    createToolCallIngressTransportRoute,
     ENVIRONMENT_PORT,
     INSTANCE_RUNTIME_PORT,
     isProcessEventType,
@@ -31,6 +32,7 @@ const LOG_TRUNCATION_MARKER = "\n... [log entry truncated for transport] ...\n";
 
 export interface InstanceRouteOptions {
     descriptor: Instance;
+    controlIngressHost?: string;
     extensionPorts?: readonly ControlPortDefinition[];
     provenance?: ToolCallProvenanceApi;
     state: InstanceState;
@@ -86,6 +88,9 @@ export function createInstanceHost(
             state.toolCalls.api,
             subscriptions,
         ),
+        ...(options.controlIngressHost === undefined ? [] : [
+            createToolCallIngressTransportRoute(state.toolCalls.api, options.controlIngressHost),
+        ]),
         ...(options.extensionPorts ?? []),
     ]);
     return {

@@ -1,3 +1,16 @@
+import { join } from "node:path";
+import { GoalService } from "../../../../../core/src/task/goal/index.ts";
+import { installMcpAppReentry } from "../../../../../core/src/instance/mcpapp/Reentry.ts";
+import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
+import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
+import { ControlHttpServer } from "../../../../src/server/http/index.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
+import { ControlPathHome, createDefaultControlConfig, type ToolCallApi } from "@portable-devshell/shared";
+import { round4Target, barrier } from "../../../../../core/test/unit/tool/Round4Harness.ts";
+import { registerApprovalToolCallReview } from "../../../../../core/src/approval/execution/ToolCallReview.ts";
+import { McpEndpointDispatch } from "../../../../../mcp/src/protocol/dispatch/Dispatch.ts";
+import { McpEndpointCatalog } from "../../../../../mcp/src/protocol/tool/Catalog.ts";
+import { TestToolSource } from "../../../../../mcp/test/support/ToolSource.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -10,6 +23,14 @@ import {
     asInstanceName,
     createToolCallRuntime,
     createToolCallTargetTransport,
+    createToolCallIngressTransport,
+    createToolCallIngressTransportRoute,
+    mergeControlPorts,
+    createRemoteError,
+    runtimeErrorCodes,
+    readToolCallErrorPayload,
+    attachToolCallErrorPayload,
+    type ToolCallContext,
     createToolRouteModule,
     controlErrorCodes,
     type Channel,
@@ -913,7 +934,7 @@ interface TestClient {
 
 function createClient(
     provider: MemoryControlTransportListener,
-    _peer: "tui" | "web",
+    _peer: "cli" | "tui" | "web",
     host?: string,
 ): TestClient {
     const endpoint = new Endpoint({
@@ -1044,3 +1065,333 @@ async function negotiate(
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });
 }
+
+
+// Actual Packet/RPC/Stream wire and Gateway admission, real ToolCall pipeline,
+// scheduler, Approval and SQLite Audit. Tests supply the Worker leaf executors.
+async function ingressHarness(t: test.TestContext) {
+    const alpha = await round4Target({}, "alpha");
+    const beta = await round4Target({}, "beta");
+    const provider = new MemoryControlTransportListener();
+    const client = createClient(provider, "cli");
+    const ingress = createToolCallRuntime({
+        resolveTarget: (instance) => createToolCallTargetTransport(client.endpoint, instance),
+    });
+    const server = new ControlTransportServer({
+        listeners: [provider],
+        routes: createRouteProvider(() => [
+            ...createRouteHosts(),
+            ...[alpha, beta].map((h) => ({
+                host: h.instanceName,
+                ports: [mergeControlPorts(createToolRouteModule({
+                    name: h.instanceName,
+                    worker: {
+                        readWorkerTools: async () => [],
+                        prepareWorkspace: async (workspace) => ({ workspace }),
+                        readToolCalls: async (query) => h.audit.api.toolCalls.readQuery(query),
+                        readToolCallFailureSummary: async () => ({ count: 0 }),
+                        releaseToolSession: async () => {},
+                        dispatchToolCall: (request) => h.tool.target().dispatch(request),
+                    },
+                }), createToolCallIngressTransportRoute(ingress.api, client.endpoint.host))],
+            })),
+        ]),
+    });
+    t.after(async () => {
+        client.close();
+        await server.close();
+        ingress.close();
+        await Promise.all([alpha.close(), beta.close()]);
+    });
+    await server.start();
+    await client.request("@control", "server", "hello", { clientKind: "cli", protocolRange: CONTROL_PROTOCOL_RANGE });
+    return { alpha, beta, provider, client, ingress, calls: createToolCallIngressTransport(client.endpoint) };
+}
+
+for (const decision of ["approve", "deny"] as const) {
+    test(`Control ingress MCP ${decision} preserves adapters, Context and destination Audit`, { timeout: 10_000 }, async (t) => {
+        const h = await ingressHarness(t);
+        const approval = barrier<string>();
+        registerApprovalToolCallReview(h.ingress.hooks, {
+            async evaluate(input, signal) {
+                const evaluated = await h.alpha.approval.evaluate(input, signal);
+                assert.equal(evaluated.decision, "ask");
+                if (evaluated.decision === "ask") approval.resolve(evaluated.request.approvalId);
+                return evaluated;
+            },
+        });
+        const seen: Array<{ context: unknown; recording: string }> = [];
+        let released = 0;
+        h.ingress.hooks.registerContributor((context, runtime) => {
+            seen.push({ context, recording: runtime.recording });
+            return {
+                rewrites: [{ hook: "600-route", id: "beta", rewrite: (input) => ({
+                    ...input.value,
+                    context: { ...input.value.context, instance: asInstanceName("beta"), workspace: "/beta" },
+                }) }],
+                release() { released++; },
+            };
+        });
+        let executions = 0;
+        h.ingress.hooks.registerExecute("file_read", async (_id, input) => {
+            executions++;
+            return { type: "presented-tool-call-result", result: input,
+                presentation: { content: [{ type: "text", text: "Transport presentation" }] } };
+        });
+        const source = new TestToolSource();
+        source.register("alpha", [{ name: "file_read", description: "Read", group: "file", inputSchema: { type: "object" }, outputSchema: { type: "object" }, requiredCapabilities: [] }]);
+        const resolved: Array<{ instance?: string; touch?: boolean }> = [];
+        const dispatch = new McpEndpointDispatch({
+            instanceName: "alpha", catalog: new McpEndpointCatalog({ instanceName: "alpha", source }),
+            context: { async resolve(input) {
+                assert.equal(input.ctxId, "ctx-mcp");
+                assert.equal(input.principal, "principal-mcp");
+                resolved.push(input);
+                return { ctxId: "ctx-mcp", environments: [{ instance: "alpha", workspace: "/alpha" }, { instance: "beta", workspace: "/beta" }], status: "active", principal: "principal-mcp", createdAt: "now", expiresAt: "later", lastAccessedAt: "now" };
+            } },
+            tools: h.calls,
+        });
+        let executedId = "";
+        const pending = dispatch.callTool("file_read", { ctxId: "ctx-mcp", path: "a" }, {
+            principal: "principal-mcp", requestId: "mcp-request",
+        }, undefined, (callId, value, result) => {
+            executedId = callId;
+            assert.equal(value.context.instance, "beta");
+            assert.deepEqual(result, { path: "a" });
+        });
+        const settled = Promise.allSettled([pending]);
+        const id = await approval.promise;
+        assert.equal(executions, 0, "Approval must precede execution and adapters");
+        assert.equal(resolved.length, 1, "invocationInput waits for Approval");
+        await h.alpha.approval.decideApproval(id, { decision, decidedBy: "cli" });
+        const [result] = await settled;
+        assert.equal(result!.status, decision === "approve" ? "fulfilled" : "rejected");
+        const target = decision === "approve" ? h.beta : h.alpha;
+        const records = await target.audit.api.toolCalls.readQuery();
+        assert.equal(records.length, 1);
+        assert.equal(records[0]!.source, "mcp");
+        assert.equal(records[0]!.ctxId, "ctx-mcp");
+        assert.equal(records[0]!.requestId, "mcp-request");
+        assert.equal(records[0]!.status, decision === "approve" ? "completed" : "denied");
+        assert.equal(executions, decision === "approve" ? 1 : 0);
+        assert.equal(released, 1);
+        assert.equal(seen[0]!.recording, "host");
+        if (result!.status === "fulfilled") {
+            assert.equal(executedId, records[0]!.callId);
+            assert.equal(resolved.at(-1)!.instance, "beta");
+            assert.equal(resolved.at(-1)!.touch, true);
+            assert.deepEqual((result!.value as { content: unknown }).content, [{ type: "text", text: "Transport presentation" }]);
+        }
+    });
+}
+
+for (const recording of ["caller", "host"] as const) {
+    test(`Control ingress preserves Extension attribution, ${recording} recording, progress and errors`, { timeout: 10_000 }, async (t) => {
+        const h = await ingressHarness(t);
+        const context: ToolCallContext = { source: "extension", extensionId: "agent", ctxId: "ctx-extension", workspace: "/alpha", operationId: "op", requestId: "request", principal: "principal", contextMode: "openai-session", externalBindings: [{ kind: "session", value: "binding" }] };
+        const seen: unknown[] = [];
+        h.ingress.hooks.registerContributor((value, runtime) => {
+            assert.equal(runtime.recording, recording);
+            seen.push(value);
+            return { release() {} };
+        });
+        h.ingress.hooks.registerExecute("file_read", async (_id, input, _value, _signal, onProgress) => {
+            onProgress?.({ step: "read" });
+            return input;
+        });
+        h.ingress.hooks.registerContributor((value) => {
+            if (value.operationId === "payload-failure")
+                throw attachToolCallErrorPayload(createRemoteError({
+                    code: "context.invalid", message: "invalid Context", retryable: false,
+                }), { comment: ["Context validation failed"] });
+            return { release() {} };
+        });
+        const progress: JsonValue[] = [];
+        let adaptedId = "";
+        assert.deepEqual(await h.calls.call("alpha", "file_read", { path: "file" }, context, undefined,
+            async (result, callId) => { adaptedId = callId; return result; },
+            (input) => input,
+            (value) => progress.push(value), recording), { path: "file" });
+        assert.deepEqual(seen, [{ ...context, instance: "alpha" }]);
+        assert.deepEqual(progress, [{ step: "read" }]);
+        const records = await h.alpha.audit.api.toolCalls.readQuery();
+        assert.equal(records.length, recording === "host" ? 1 : 0);
+        if (recording === "host") {
+            assert.equal(records[0]!.extensionId, "agent");
+            assert.equal(records[0]!.callId, adaptedId);
+        }
+        await assert.rejects(h.calls.call("alpha", "file_read", {}, { ...context, operationId: "payload-failure" }, undefined,
+            undefined, undefined, undefined, recording), (error: unknown) => {
+                assert.deepEqual(readToolCallErrorPayload(error), { comment: ["Context validation failed"] });
+                return true;
+            });
+        await assert.rejects(h.calls.call("alpha", "file_read", {}, context, undefined, async () => {
+            throw attachToolCallErrorPayload(createRemoteError({ code: "adapter.failed", message: "after execution", retryable: true }), { comment: ["adapter payload"] });
+        }, undefined, undefined, recording), (error: unknown) => {
+            const failure = error as { code: string; retryable: boolean; details: { executionCompleted: boolean; failureStage: string } };
+            assert.equal(failure.code, "adapter.failed");
+            assert.equal(failure.retryable, false);
+            assert.equal(failure.details.executionCompleted, true);
+            assert.equal(failure.details.failureStage, "postExecution");
+            // ExecutionTarget deliberately removes private adapter payloads after execution.
+            return true;
+        });
+    });
+}
+
+test("Control ingress rejects external and web identities before acquiring hooks", { timeout: 10_000 }, async (t) => {
+    const h = await ingressHarness(t);
+    let acquired = false;
+    h.ingress.hooks.registerContributor(() => { acquired = true; return { release() {} }; });
+    const external = createClient(h.provider, "cli");
+    t.after(() => external.close());
+    await external.request("@control", "server", "hello", { clientKind: "cli", protocolRange: CONTROL_PROTOCOL_RANGE });
+    await assert.rejects(createToolCallIngressTransport(external.endpoint).call("alpha", "file_read", {}, { source: "mcp" }), /internal connection/u);
+    assert.equal(acquired, false);
+    // Same sourceHost with web-session admission must still be denied.
+    const route = createToolCallIngressTransportRoute(h.ingress.api, h.client.endpoint.host);
+    await assert.rejects(Promise.resolve(route.streams![0]!.handle({} as MessageStream, { id: "x", name: "ingress" }, {
+        sourceHost: h.client.endpoint.host, peer: "cli", subject: { id: "web", kind: "web-session" },
+    } as ControlPortContext)), /internal connection/u);
+    assert.equal(acquired, false);
+});
+
+test("Control ingress cancellation reaches a pending Approval and releases hook leases", { timeout: 10_000 }, async (t) => {
+    const h = await ingressHarness(t);
+    const approval = barrier<string>();
+    const released = barrier();
+    h.ingress.hooks.registerContributor(() => ({ release() { released.resolve(); } }));
+    registerApprovalToolCallReview(h.ingress.hooks, { async evaluate(input, signal) {
+        const evaluated = await h.alpha.approval.evaluate(input, signal);
+        if (evaluated.decision === "ask") approval.resolve(evaluated.request.approvalId);
+        return evaluated;
+    } });
+    const controller = new AbortController();
+    const pending = h.calls.call("alpha", "file_read", {}, { source: "mcp", ctxId: "cancel" }, controller.signal);
+    const failed = assert.rejects(pending, /cancel/iu);
+    const id = await approval.promise;
+    controller.abort(new Error("cancel ingress"));
+    await failed;
+    await released.promise;
+    assert.equal((await h.alpha.approval.getApproval(id)).status, "cancelled");
+});
+
+
+test("MCP Control module wires Transport without accessing an Instance ingress", { timeout: 10_000 }, async (t) => {
+    const h = await ingressHarness(t);
+    let tools!: ToolCallApi;
+    const module = new McpControlModule({
+        endpoint: h.client.endpoint, config: createDefaultControlConfig(), context: {} as never,
+        controlPaths: new ControlPathHome(h.alpha.directory), http: new ControlHttpServer(),
+        instances: { get() { throw new Error("Control must not access Instance ingress"); } } as never,
+        toolRegistry: createToolCallRegistry(),
+        factory: { wire(_config: unknown, _instances: unknown, options: { runtimeState: { tools: ToolCallApi } }) {
+            tools = options.runtimeState.tools;
+            return undefined;
+        } } as never,
+    });
+    t.after(() => module.stop());
+    h.ingress.hooks.registerExecute("file_read", async (_id, input) => input);
+    assert.deepEqual(await tools.call("beta", "file_read", { path: "module" }, { source: "mcp", ctxId: "module-context" }), { path: "module" });
+    const [record] = await h.beta.audit.api.toolCalls.readQuery();
+    assert.equal(record!.ctxId, "module-context"); assert.equal(record!.source, "mcp");
+});
+
+for (const destination of ["alpha", "beta"] as const) {
+    test(`ToolCall cancellation drains execution on ${destination} before returning terminal`, { timeout: 10_000 }, async (t) => {
+        const h = await ingressHarness(t);
+        const entered = barrier();
+        const finish = barrier();
+        t.after(() => finish.resolve());
+        const events: string[] = [];
+        h.ingress.hooks.registerContributor(() => ({
+            rewrites: [{ hook: "600-route", id: destination, rewrite: (input) => ({
+                ...input.value, context: { ...input.value.context, instance: asInstanceName(destination) },
+            }) }], release() {},
+        }));
+        h.ingress.hooks.registerExecute("file_read", async (_id, _input, _value, signal) => {
+            entered.resolve();
+            await finish.promise;
+            events.push("effect-done");
+            signal?.throwIfAborted();
+            return {};
+        });
+        const controller = new AbortController();
+        let settled = false;
+        const pending = h.calls.call("alpha", "file_read", {}, {
+            source: "extension", extensionId: "draining.agent", workspace: "/alpha",
+        }, controller.signal);
+        void pending.then(() => { settled = true; }, () => { settled = true; });
+        const rejected = assert.rejects(pending, { code: runtimeErrorCodes.toolCallCancelled });
+        await entered.promise;
+        controller.abort(new Error("cancel after effect"));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(settled, false, "terminal acknowledgement must wait for execution to drain");
+        finish.resolve();
+        await rejected;
+        events.push("terminal");
+        assert.deepEqual(events, ["effect-done", "terminal"]);
+        const [record] = await h[destination].audit.api.toolCalls.readQuery();
+        assert.equal(record!.status, "cancelled");
+        assert.equal(record!.extensionId, "draining.agent");
+    });
+}
+
+test("Instance host registers ingress inside its generation admission fence", { timeout: 10_000 }, async (t) => {
+    const started = barrier();
+    const finish = barrier();
+    t.after(() => finish.resolve());
+    const instance = createTestInstanceDescriptor({
+        snapshot: () => ({ lastSeq: 0, ready: true, name: "alpha" }),
+        subscribe: () => ({ kind: "events", events: [], lastSeq: 0 }),
+        async callTool() { started.resolve(); await finish.promise; return { done: true }; },
+    } as never);
+    const provider = new MemoryControlTransportListener();
+    const client = createClient(provider, "cli");
+    const server = new ControlTransportServer({
+        listeners: [provider], routes: createRouteProvider(() => [
+            ...createRouteHosts(), instance.host([], undefined, client.endpoint.host),
+        ]),
+    });
+    t.after(async () => { client.close(); await server.close(); });
+    await server.start();
+    await client.request("@control", "server", "hello", { clientKind: "cli", protocolRange: CONTROL_PROTOCOL_RANGE });
+    const calls = createToolCallIngressTransport(client.endpoint);
+    const pending = calls.call("alpha", "file_read", {}, { source: "mcp" });
+    await started.promise;
+    instance.lifecycle.beginRetirement();
+    let drained = false;
+    const draining = instance.lifecycle.drain().then(() => { drained = true; });
+    await assert.rejects(calls.call("alpha", "file_read", {}, { source: "mcp" }), /retired/u);
+    assert.equal(drained, false);
+    finish.resolve();
+    assert.deepEqual(await pending, { done: true });
+    await draining;
+    assert.equal(drained, true);
+});
+
+
+test("Control ingress preserves Context and owner fences of the MCP Reentry claim executor", { timeout: 10_000 }, async (t) => {
+    const h = await ingressHarness(t);
+    const goal = new GoalService({
+        appendEvent: async () => {}, filePath: join(h.alpha.directory, "goals.json"), instanceName: "alpha",
+    });
+    const created = await goal.manage("claim-context", { action: "start", workspace: "/alpha", objective: "Resume" });
+    assert.ok(created);
+    const stop = installMcpAppReentry(h.ingress.hooks, { goal } as never);
+    t.after(stop);
+    const base = { claimId: "owner", sourceId: created.goalId, intent: "goal-resume" };
+    const call = (input: Record<string, JsonValue>, context: ToolCallContext = { source: "mcp", ctxId: "claim-context", workspace: "/alpha" }) =>
+        h.calls.call("alpha", "mcpapp_reentry", { ...base, ...input }, context);
+    await assert.rejects(call({ action: "claim" }, { source: "extension", ctxId: "claim-context", workspace: "/alpha" }), /validated Context/u);
+    await assert.rejects(call({ action: "claim" }, { source: "mcp", ctxId: "other-context", workspace: "/alpha" }), /Context and Workspace/u);
+    assert.equal((await call({ action: "claim" }) as { claimed: boolean }).claimed, true);
+    assert.equal((await call({ action: "validate", claimId: "wrong-owner" }) as { valid: boolean }).valid, false);
+    await assert.rejects(call({ action: "attempt", claimId: "wrong-owner" }), /no longer active/u);
+    assert.equal((await call({ action: "attempt" }) as { attempted: boolean }).attempted, true);
+    assert.deepEqual(await call({ action: "attempt" }), { attempted: false, duplicate: true });
+    await assert.rejects(call({ action: "report", outcome: "accepted", claimId: "wrong-owner" }), /no longer active/u);
+    await call({ action: "report", outcome: "accepted" });
+    assert.equal((await goal.read("claim-context"))!.continuationPending, false);
+    assert.equal((await goal.read("claim-context"))!.continuationCount, 1);
+});

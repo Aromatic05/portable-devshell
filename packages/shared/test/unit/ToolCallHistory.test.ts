@@ -245,3 +245,62 @@ test("ToolCall history reads older audit slices and retains them across live ref
     assert.equal(model.state.instances.alpha?.historyExhausted, true);
     assert.equal(model.state.instances.alpha?.historyLoaded, false);
 });
+
+for (const scope of ["instance", "context"] as const) {
+    test(`paged ${scope} refresh bridges more than 200 new calls and preserves the older cursor`, async (t) => {
+        const record = (index: number): ToolCallRecord => ({
+            callId: `call-${index}`, ctxId: "ctx-a", instance: asInstanceName("alpha"),
+            inputSummary: "{}", source: "mcp", status: "completed", toolName: "bash_run",
+            startedAt: new Date(1_700_000_000_000 + index * 1000).toISOString(),
+        });
+        const records = Array.from({ length: 450 }, (_, i) => record(i));
+        const transport = {
+            listCalls: async (query: ToolCallQuery = {}) => {
+                const end = query.before === undefined ? records.length : records.findIndex((call) => call.callId === query.before);
+                return records.slice(0, end).slice(-(query.limit ?? 200));
+            },
+            subscribe: async () => ({ close() {}, next: async () => await new Promise<never>(() => {}) }),
+        } as unknown as ToolTransport;
+        const model = new ToolCallViewModel({ cursor: async () => 0, transport: () => transport });
+        t.after(() => model.close());
+        const load = scope === "instance" ? () => model.load("alpha") : () => model.loadContext("alpha", "ctx-a");
+        const older = scope === "instance" ? () => model.loadOlder("alpha") : () => model.loadOlderContext("alpha", "ctx-a");
+        const state = () => scope === "instance" ? model.state.instances.alpha : model.state.context;
+        await load();
+        assert.equal(await older(), 200);
+        assert.equal(state()?.historyBefore, "call-50");
+        records.push(...Array.from({ length: 550 }, (_, i) => record(i + 450)));
+        await load();
+        assert.deepEqual(state()?.calls.map((call) => call.callId), records.slice(50).reverse().map((call) => call.callId));
+        assert.equal(state()?.historyBefore, "call-50");
+        assert.equal(await older(), 50);
+        assert.equal(await older(), 0);
+        assert.equal(state()?.historyExhausted, true);
+        assert.deepEqual(state()?.calls.map((call) => call.callId), records.slice().reverse().map((call) => call.callId));
+        records.push(...Array.from({ length: 250 }, (_, i) => record(i + 1000)));
+        await load();
+        assert.equal(state()?.historyExhausted, true);
+        assert.equal(state()?.historyBefore, "call-0");
+        assert.deepEqual(state()?.calls.map((call) => call.callId), records.slice().reverse().map((call) => call.callId));
+    });
+}
+
+test("an unavailable Context cursor surfaces failure and preserves history rather than marking exhausted", async (t) => {
+    const call: ToolCallRecord = {
+        callId: "retained-head", ctxId: "ctx-a", instance: asInstanceName("alpha"), inputSummary: "{}",
+        source: "mcp", startedAt: "2026-10-27T00:00:00Z", status: "completed", toolName: "bash_run",
+    };
+    const failure = new Error("ToolCall history cursor is unavailable in the requested Context.");
+    const transport = { listCalls: async (query: ToolCallQuery = {}) => {
+        if (query.before !== undefined) throw failure;
+        return [call];
+    } } as unknown as ToolTransport;
+    const model = new ToolCallViewModel({ cursor: async () => 0, transport: () => transport });
+    t.after(() => model.close());
+    await model.loadContext("alpha", "ctx-a");
+    await assert.rejects(model.loadOlderContext("alpha", "ctx-a"), failure);
+    assert.equal(model.state.context?.failure?.message, failure.message);
+    assert.equal(model.state.context?.historyExhausted, false);
+    assert.equal(model.state.context?.historyBefore, "retained-head");
+    assert.deepEqual(model.state.context?.calls.map((record) => record.callId), ["retained-head"]);
+});

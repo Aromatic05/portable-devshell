@@ -115,3 +115,4 @@ export { ProcessSubscriptionManager } from "./execution/process/Subscription.js"
 export { WORKER_PROTOCOL_RANGE, WORKER_PROTOCOL_VERSION } from "./types/Worker.js";
 
 export { ReverseSseChannel } from "./transport/endpoint/channel/ReverseSse.js";
+export { createToolCallIngressTransport, createToolCallIngressTransportRoute } from "./execution/toolcall/IngressTransport.js";

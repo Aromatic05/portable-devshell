@@ -1,3 +1,4 @@
+import { Endpoint } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
@@ -31,6 +32,7 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
     let config = createDefaultControlConfig();
     const toolRegistry = createToolCallRegistry();
     const runtime = new McpControlModule({
+        endpoint: new Endpoint(),
         http: new ControlHttpServer(),
         config,
         context: {} as never,

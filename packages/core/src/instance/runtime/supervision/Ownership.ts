@@ -23,6 +23,7 @@ export class WorkerOwnership {
     #autoOwned = false;
     #explicitlyOwned = false;
     readonly #references = new Set<string>();
+    #operation: Promise<void> = Promise.resolve();
 
     constructor(private readonly options: WorkerOwnershipOptions) {}
 
@@ -31,6 +32,10 @@ export class WorkerOwnership {
     }
 
     async acquireReference(reference: string): Promise<InstanceSnapshot> {
+        return await this.#exclusive(() => this.#acquireReference(reference));
+    }
+
+    async #acquireReference(reference: string): Promise<InstanceSnapshot> {
         if (!this.options.admission.enabled()) {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceConflict,
@@ -88,17 +93,29 @@ export class WorkerOwnership {
     }
 
     async releaseReference(reference: string): Promise<void> {
-        if (!this.#references.delete(reference)) return;
+        await this.#exclusive(() => this.#releaseReference(reference));
+    }
+
+    async #releaseReference(reference: string): Promise<void> {
+        if (!this.#references.has(reference)) return;
         if (
-            this.#references.size > 0 ||
+            this.#references.size > 1 ||
             !this.#autoOwned ||
             this.#explicitlyOwned
         ) {
+            this.#references.delete(reference);
             return;
         }
         if (this.options.snapshot().daemonState !== "stopped")
             await this.options.lifecycle.stop();
+        this.#references.delete(reference);
         this.#autoOwned = false;
+    }
+
+    #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const result = this.#operation.then(operation);
+        this.#operation = result.then(() => undefined, () => undefined);
+        return result;
     }
 
     markOwned(): void {

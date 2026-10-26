@@ -675,3 +675,35 @@ test("terminal transitions enforce both retention bounds", async (t) => {
         new Date(60 * DAY_MS).toISOString(),
     );
 });
+
+test("retirement closes admission before cancelling a pending approval", async (t) => {
+    const { service, store } = fixture();
+    t.after(() => service.close());
+    const pending = await service.evaluate(input);
+    assert.ok(pending.decision === "ask");
+    const retirement = service.retire("generation retired");
+    const late = await service.evaluate({ ...input, callId: "late-call" });
+    assert.equal(late.decision, "deny");
+    await retirement;
+    assert.equal((await pending.awaitDecision).status, "cancelled");
+    assert.equal(store.records.size, 1);
+    service.setPolicy({ mode: "allow" });
+    assert.equal((await service.evaluate({ ...input, callId: "after-retirement" })).decision, "deny");
+});
+
+test("an evaluation already awaiting initialization cannot admit approval after retirement", async (t) => {
+    const store = new MemoryStore();
+    let release!: (records: ApprovalRequest[]) => void;
+    const initializing = new Promise<ApprovalRequest[]>((resolve) => { release = resolve; });
+    store.list = async () => await initializing;
+    const service = new ApprovalService({
+        instanceName: asInstanceName("dev"), store, events: new MemoryEvents(store), policy: { mode: "ask" },
+    });
+    t.after(() => service.close());
+    const evaluation = service.evaluate(input);
+    const retirement = service.retire();
+    release([]);
+    assert.equal((await evaluation).decision, "deny");
+    await retirement;
+    assert.equal(store.records.size, 0);
+});

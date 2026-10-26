@@ -498,6 +498,16 @@ export class MessageHistoryViewModel {
                 ctxId, limit: MESSAGE_HISTORY_LIST_LIMIT,
                 maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
             });
+            const known = new Set(context.historyLoaded ? context.entries.map((entry) => entry.id) : []);
+            let page = result.entries;
+            while (known.size > 0 && page.length > 0 && !page.some((entry) => known.has(entry.id))) {
+                const older = await this.#transport.listMessageEntries(instance, {
+                    ctxId, before: page[0]!.id, limit: MESSAGE_HISTORY_LIST_LIMIT,
+                    maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
+                });
+                page = older.entries;
+                result.entries.unshift(...page);
+            }
             const current = this.#state.context;
             if (!this.#current(epoch) || selection !== this.#contextSelection ||
                 version !== this.#contextRefreshVersion ||

@@ -7,6 +7,7 @@ import test from "node:test";
 import { createContextRuntime } from "../../../src/context/index.ts";
 import { ContextService } from "../../../src/context/service/index.ts";
 import { ContextCleanupService } from "../../../src/context/service/Cleanup.ts";
+import { WorkerOwnership } from "../../../../core/src/instance/runtime/supervision/Ownership.ts";
 
 test("startup retains cleanup debt and permits Control to start when an Instance is absent", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "devshell-context-cleanup-"));
@@ -100,4 +101,51 @@ test("Context startup defers a failed cleanup ledger read but scoped reconciliat
     } finally {
         console.warn = warning;
     }
+});
+
+test("Context cleanup retains Worker stop debt until the same reference is successfully released", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "context-worker-stop-retry-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const ctxId = "ctx-worker-stop";
+    const contextFile = join(root, "contexts.json");
+    await writeFile(contextFile, JSON.stringify({ version: 2, contexts: [{
+        ctxId, principal: "test-principal", status: "expired",
+        createdAt: "2026-09-01T00:00:00.000Z", lastAccessedAt: "2026-09-01T00:00:00.000Z",
+        expiresAt: "2026-09-02T00:00:00.000Z", environments: [{ instance: "worker-a" }],
+        cleanupPending: true, pendingEnvironmentCleanup: [{ kind: "instance_reference", instance: "worker-a" }],
+    }] }));
+    let ready = false;
+    let stops = 0;
+    let stop: () => Promise<void> = async () => { throw new Error("Worker stop failed"); };
+    const ownership = new WorkerOwnership({
+        admission: { active: () => true, enabled: () => true }, instanceName: "worker-a",
+        lifecycle: {
+            async start() { ready = true; return { ready }; },
+            async stop() { stops++; await stop(); },
+        } as never,
+        managementMode: "controllerManaged", recovery: {} as never,
+        snapshot: () => ({ daemonState: ready ? "running" : "stopped", ready }) as never,
+    });
+    await ownership.acquireReference(ctxId);
+    const runtime = createContextRuntime({
+        contextFile, environment: () => ({}) as never, process: () => ({}) as never,
+        leaseInstance: () => ({ release() {} }),
+        runtime: () => ({ releaseReference: (reference: string) => ownership.releaseReference(reference) }) as never,
+    });
+    t.after(() => runtime.close());
+    await runtime.initialize();
+    await assert.rejects(runtime.api.reconcileInstance("worker-a"), /cleanup was incomplete/u);
+    assert.equal(stops, 1);
+    assert.equal(ownership.owned, true);
+    assert.equal((await runtime.api.registry.listEnvironmentCleanup()).length, 1);
+    assert.equal(JSON.parse(await readFile(contextFile, "utf8")).contexts[0].cleanupPending, true);
+    stop = async () => { ready = false; };
+    await runtime.api.reconcileInstance("worker-a");
+    assert.equal(stops, 2);
+    assert.equal(ownership.owned, false);
+    assert.equal(ready, false);
+    assert.deepEqual(await runtime.api.registry.listEnvironmentCleanup(), []);
+    await runtime.reconcile();
+    assert.equal(JSON.parse(await readFile(contextFile, "utf8")).contexts[0].cleanupPending, false);
+    assert.equal(stops, 2);
 });

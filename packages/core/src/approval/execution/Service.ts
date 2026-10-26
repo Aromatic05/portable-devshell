@@ -336,6 +336,8 @@ export class ApprovalService implements ApprovalApi {
     }
 
     async retire(reason = "instance retired"): Promise<void> {
+        // Close admission before awaiting recovery or cancelling existing requests.
+        this.#closed = true;
         await this.#ensureReady();
         await this.#exclusive(async () => {
             for (const pending of [...this.#pending.values()]) {

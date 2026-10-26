@@ -157,6 +157,7 @@ export interface ToolCallRegistration extends ToolCallHooks {
 export interface ToolCallRuntime {
     readonly api: ToolCallApi;
     readonly hooks: ToolCallHooks;
+    lookupExecute(toolName: string): ToolCallExecutor | undefined;
     close(): void;
 }
 

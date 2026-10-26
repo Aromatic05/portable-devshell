@@ -138,6 +138,7 @@ export class ControlServer {
             instanceChanges: options.instanceChanges,
             instances: options.instances,
             toolCallProvenance: options.mcp.toolProvenance,
+            controlIngressHost: options.internalControl.endpoint.host,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: createOperationalOverviewRuntime({

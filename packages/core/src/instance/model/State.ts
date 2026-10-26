@@ -20,8 +20,8 @@ import type { AuditRuntime } from "../../audit/Api.js";
 import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import {
-    installWaitToolCallRewrite,
     installWorkspaceGoalTool,
+    rewriteWaitToolCall,
     workspaceGoalDefinition,
 } from "../../task/Public.js";
 import { mcpAppActionDefinition, mcpAppReentryDefinition, mcpAppOpenDefinition } from "../mcpapp/Definition.js";
@@ -143,10 +143,6 @@ export class InstanceState {
             }),
             installMcpAppReentry(this.toolCalls.hooks, this.task.api),
             installMcpAppOpen(this.toolCalls.hooks),
-            installWaitToolCallRewrite(
-                this.toolCalls.hooks,
-                this.task.api.wait,
-            ),
         ];
     }
 
@@ -159,7 +155,23 @@ export class InstanceState {
     }
 
     async callTool(request: ToolCallDispatchRequest): Promise<JsonValue> {
-        return await this.tools.target().dispatch(request);
+        // Instance-owned executors and Wait effects are resolved after routing.
+        // Caller hooks/adapters still travel through the existing Target Transport.
+        const execute = this.toolCalls.lookupExecute(request.value.toolName);
+        const value = await rewriteWaitToolCall({
+            callId: request.callId, direction: "inbound", value: request.value,
+        }, this.task.api.wait);
+        return await this.tools.target().dispatch({
+            ...request,
+            execute,
+            value,
+            hooks: {
+                review: (input) => request.hooks.review(input),
+                rewrite: async (input) => rewriteWaitToolCall({
+                    ...input, value: await request.hooks.rewrite(input),
+                }, this.task.api.wait),
+            },
+        });
     }
 
     target(): ToolCallTarget {

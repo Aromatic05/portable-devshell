@@ -141,3 +141,66 @@ test("worker ownership stops a late start when instance retirement begins", asyn
     assert.equal(stops, 1);
     assert.equal(ownership.owned, false);
 });
+
+test("failed final reference stop remains owned and can be retried", async () => {
+    let ready = false;
+    let stops = 0;
+    const failure = new Error("stop failed");
+    const ownership = new WorkerOwnership({
+        admission: { active: () => true, enabled: () => true },
+        instanceName: "worker-a",
+        lifecycle: {
+            async start() { ready = true; return { ready }; },
+            async stop() {
+                stops++;
+                if (stops === 1) throw failure;
+                ready = false;
+            },
+        } as never,
+        managementMode: "controllerManaged",
+        recovery: {} as never,
+        snapshot: () => ({ daemonState: ready ? "running" : "stopped", ready }) as never,
+    });
+    await ownership.acquireReference("ctx:retry");
+    await assert.rejects(ownership.releaseReference("ctx:retry"), failure);
+    assert.equal(ownership.owned, true);
+    assert.equal(ready, true);
+    await ownership.releaseReference("ctx:retry");
+    assert.equal(stops, 2);
+    assert.equal(ready, false);
+    assert.equal(ownership.owned, false);
+    await ownership.releaseReference("ctx:retry");
+    assert.equal(stops, 2);
+});
+
+test("a new reference waits for the final release before acquiring Worker ownership", async () => {
+    let ready = false;
+    let starts = 0;
+    let stops = 0;
+    let finishStop!: () => void;
+    let enteredStop!: () => void;
+    const stopping = new Promise<void>((resolve) => { enteredStop = resolve; });
+    const stopGate = new Promise<void>((resolve) => { finishStop = resolve; });
+    const ownership = new WorkerOwnership({
+        admission: { active: () => true, enabled: () => true }, instanceName: "worker-a",
+        lifecycle: {
+            async start() { starts++; ready = true; return { ready }; },
+            async stop() { stops++; enteredStop(); await stopGate; ready = false; },
+        } as never,
+        managementMode: "controllerManaged", recovery: {} as never,
+        snapshot: () => ({ daemonState: ready ? "running" : "stopped", ready }) as never,
+    });
+    await ownership.acquireReference("ctx:old");
+    const releasing = ownership.releaseReference("ctx:old");
+    await stopping;
+    const acquiring = ownership.acquireReference("ctx:new");
+    finishStop();
+    await releasing;
+    assert.equal((await acquiring).ready, true);
+    assert.equal(starts, 2);
+    assert.equal(stops, 1);
+    assert.equal(ownership.owned, true);
+    await ownership.releaseReference("ctx:new");
+    assert.equal(stops, 2);
+    assert.equal(ownership.owned, false);
+});

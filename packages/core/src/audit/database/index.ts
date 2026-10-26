@@ -50,7 +50,7 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
         sinceMs: number,
         untilMs: number,
     ): AuditToolCallFailureSummary;
-    readQuery(query: ToolCallQuery): ToolCallRecord[];
+    readQuery(query: ToolCallQuery, options?: { deferFirstByteLimit: boolean }): ToolCallRecord[];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -383,7 +383,7 @@ export class AuditDatabase {
         return records;
     }
 
-    readToolCallRecords(query: ToolCallQuery): ToolCallRecord[] {
+    readToolCallRecords(query: ToolCallQuery, options?: { deferFirstByteLimit: boolean }): ToolCallRecord[] {
         this.#assertOpen();
         if (
             query.limit !== undefined &&
@@ -459,8 +459,13 @@ export class AuditDatabase {
                     Buffer.byteLength(row.payload, "utf8") +
                     (records.length === 0 ? 0 : 1);
                 if (bytes + rowBytes > query.maxBytes) {
-                    if (records.length === 0)
-                        throw new RangeError(`ToolCall exceeds maxBytes ${query.maxBytes}.`);
+                    if (records.length === 0) {
+                        if (options?.deferFirstByteLimit !== true)
+                            throw new RangeError(`ToolCall exceeds maxBytes ${query.maxBytes}.`);
+                        // History must merge active candidates before deciding whether
+                        // this first persisted record belongs in the bounded page.
+                        records.push(JSON.parse(row.payload) as ToolCallRecord);
+                    }
                     break;
                 }
                 bytes += rowBytes;
@@ -1041,8 +1046,8 @@ class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
         return this.database.readRecords<ToolCallRecord>("toolCalls");
     }
 
-    readQuery(query: ToolCallQuery): ToolCallRecord[] {
-        return this.database.readToolCallRecords(query);
+    readQuery(query: ToolCallQuery, options?: { deferFirstByteLimit: boolean }): ToolCallRecord[] {
+        return this.database.readToolCallRecords(query, options);
     }
 
     readFailureSummary(sinceMs: number, untilMs: number): AuditToolCallFailureSummary {

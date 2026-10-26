@@ -2,6 +2,7 @@ import type {
     JsonValue,
     ToolCallHookValue,
     ToolCallHooks,
+    ToolCallRewriteInput,
     WaitDetachInput,
 } from "@portable-devshell/shared";
 import type { WaitApi } from "../Api.js";
@@ -16,23 +17,29 @@ export function installWaitToolCallRewrite(
                 {
                     hook: "520-wait-detach",
                     id: "tmux-wait",
-                    async rewrite(input) {
-                        const { value } = input;
-                        if (input.direction === "inbound" && value.kind === "call")
-                            return rewriteInbound(value);
-                        if (input.direction === "outbound") {
-                            const targetId = detachedTarget(value);
-                            if (targetId !== undefined) {
-                                await wait.detach(detachInput(input.callId, targetId, value));
-                                if (isHandoff(value)) return presentHandoff(value);
-                            }
-                        }
-                        return value;
-                    },
+                    rewrite: (input) => rewriteWaitToolCall(input, wait),
                 },
             ],
             release() {},
         }));
+}
+
+/** Run at the destination Instance so detached tasks use its Worker and state. */
+export async function rewriteWaitToolCall(
+    input: ToolCallRewriteInput,
+    wait: WaitApi,
+): Promise<ToolCallHookValue> {
+    const { value } = input;
+    if (input.direction === "inbound" && value.kind === "call")
+        return rewriteInbound(value);
+    if (input.direction === "outbound") {
+        const targetId = detachedTarget(value);
+        if (targetId !== undefined) {
+            await wait.detach(detachInput(input.callId, targetId, value));
+            if (isHandoff(value)) return presentHandoff(value);
+        }
+    }
+    return value;
 }
 
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {

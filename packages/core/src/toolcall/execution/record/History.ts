@@ -164,7 +164,7 @@ export class ToolCallHistory {
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         if (hasCursor(query)) return await this.#readCursorQuery(query);
-        const records = this.#store.readQuery(query);
+        const records = this.#store.readQuery(query, { deferFirstByteLimit: true });
         const activeRecords = this.#readActiveRecords();
         const filtered = sliceByFilters(
             sliceByCursor([...records, ...activeRecords], query),
@@ -186,30 +186,37 @@ export class ToolCallHistory {
         const afterPersisted =
             query.after === undefined || afterActiveIndex >= 0
                 ? false
-                : await this.#store.hasCall(query.after);
+                : this.#store.readQuery({ callIds: [query.after], ctxId: query.ctxId,
+                    includeInput: false, includeOutput: false, limit: 1 }).length > 0;
         const beforePersisted =
             query.before === undefined || beforeActiveIndex >= 0
                 ? false
-                : await this.#store.hasCall(query.before);
+                : this.#store.readQuery({ callIds: [query.before], ctxId: query.ctxId,
+                    includeInput: false, includeOutput: false, limit: 1 }).length > 0;
 
         if (
             query.after !== undefined &&
             afterActiveIndex < 0 &&
             !afterPersisted
         )
-            return [];
+            throw new Error("ToolCall history cursor is unavailable in the requested Context.");
         if (
             query.before !== undefined &&
             beforeActiveIndex < 0 &&
             !beforePersisted
         )
-            return [];
+            throw new Error("ToolCall history cursor is unavailable in the requested Context.");
+
+        for (const index of [afterActiveIndex, beforeActiveIndex]) {
+            if (index >= 0 && query.ctxId !== undefined && activeRecords[index]!.ctxId !== query.ctxId)
+                throw new Error("ToolCall history cursor is unavailable in the requested Context.");
+        }
 
         let persistedRecords: ToolCallRecord[] = [];
         if (afterActiveIndex < 0) {
             const persistedQuery =
                 beforeActiveIndex < 0 ? query : { ...query, before: undefined };
-            persistedRecords = await this.#store.readQuery(persistedQuery);
+            persistedRecords = await this.#store.readQuery(persistedQuery, { deferFirstByteLimit: true });
         }
 
         let activeStart = 0;

@@ -17,10 +17,10 @@ export function barrier<T = void>() {
 
 // Real scheduler, terminal audit, and approval persistence. Only the leaf tool
 // implementation is supplied by each test; it can perform actual local I/O.
-export async function round4Target(limits: Partial<WorkerToolSchedulerLimits> = {}) {
+export async function round4Target(limits: Partial<WorkerToolSchedulerLimits> = {}, name = "round4") {
     const directory = await mkdtemp(join(tmpdir(), "round4-tool-audit-"));
     const databasePath = join(directory, "audit.sqlite3");
-    const instanceName = asInstanceName("round4");
+    const instanceName = asInstanceName(name);
     const audit = createAuditRuntime({ instanceName, filePath: databasePath, eventBufferSize: 1000 });
     const events: Array<{ type: string; data?: JsonValue }> = [];
     let seq = 0;

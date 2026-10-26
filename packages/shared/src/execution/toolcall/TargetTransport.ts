@@ -71,7 +71,10 @@ export function createToolCallTargetTransport(
 ): ToolCallTarget {
     const port = createPortClient(endpoint, asInstanceName(instance), "tool");
     return {
-        dispatch: async (request) => await dispatchOverTransport(port, request),
+        dispatch: async (request) => {
+            await endpoint.connect(asInstanceName(instance), "tool", request.signal);
+            return await dispatchOverTransport(port, request);
+        },
     };
 }
 
@@ -85,7 +88,7 @@ export async function serveToolCallTargetDispatch(
     const opened = readDispatchOpenPayload(payload);
     if (opened.value.context.instance !== expectedInstance) {
         await stream.close(
-            failureEnvelope(
+            toolCallFailureEnvelope(
                 createRemoteError({
                     code: "instance.conflict",
                     details: {
@@ -100,7 +103,8 @@ export async function serveToolCallTargetDispatch(
         return;
     }
 
-    const callbacks = new DispatchCallbackServer(stream);
+    const callbacks = new ToolCallCallbackServer(stream);
+    const executionSignal = signal === undefined ? callbacks.signal : AbortSignal.any([signal, callbacks.signal]);
     let progressTail = Promise.resolve();
     const emitProgress = (progress: JsonValue) => {
         progressTail = progressTail.then(() =>
@@ -129,7 +133,7 @@ export async function serveToolCallTargetDispatch(
             },
             onProgress: emitProgress,
             recording: opened.recording,
-            ...(signal === undefined ? {} : { signal }),
+            signal: executionSignal,
             value: opened.value,
             ...(opened.callbacks.execute
                 ? {
@@ -189,7 +193,7 @@ export async function serveToolCallTargetDispatch(
         await stream.close({ ok: true, result });
     } catch (error) {
         await progressTail.catch(() => undefined);
-        await stream.close(failureEnvelope(error));
+        await stream.close(toolCallFailureEnvelope(error));
     } finally {
         callbacks.close();
     }
@@ -212,8 +216,19 @@ async function dispatchOverTransport(
             ...(request.rejection === undefined ? {} : { rejection: request.rejection }),
             value: request.value,
         } satisfies DispatchOpenPayload,
-        request.signal,
     );
+    return await receiveToolCallResult(stream, request);
+}
+
+type ToolCallTransportCallbacks = Pick<ToolCallDispatchRequest,
+    "invocationInput" | "transformResult" | "onProgress" | "signal"
+> & Partial<Pick<ToolCallDispatchRequest, "execute" | "hooks">>;
+
+/** The ToolCall callback wire is shared by ingress adapters and target dispatch. */
+export async function receiveToolCallResult(
+    stream: MessageStream,
+    request: ToolCallTransportCallbacks,
+): Promise<JsonValue> {
     let callbackTail = Promise.resolve();
     const offData = stream.onData((message) => {
         const entry = record(message);
@@ -248,23 +263,38 @@ async function dispatchOverTransport(
                 await progressTail.catch(() => undefined);
                 await stream.send({
                     name: "callback.error",
-                    payload: { id: callback.id, ...wireFailure(error) },
+                    payload: {
+                        id: callback.id,
+                        ...wireFailure(error),
+                        ...(request.signal?.aborted && (error === request.signal.reason ||
+                            (error instanceof Error && error.name === "AbortError")) ? { aborted: true } : {}),
+                    },
                 });
             }
         });
         return callbackTail;
     });
+    // Cancellation is a ToolCall message: keep the stream alive until the
+    // owning Instance has drained execution and released its hook leases.
+    const aborted = () => {
+        void stream.send({ name: "abort", payload: {
+            message: request.signal?.reason instanceof Error ? request.signal.reason.message : "ToolCall cancelled.",
+        } }).catch(() => undefined);
+    };
+    request.signal?.addEventListener("abort", aborted, { once: true });
+    if (request.signal?.aborted) aborted();
     try {
         const terminal = await waitForTerminal(stream);
         await callbackTail;
         return readTerminalResult(terminal);
     } finally {
         offData();
+        request.signal?.removeEventListener("abort", aborted);
     }
 }
 
 async function invokeCallback(
-    request: ToolCallDispatchRequest,
+    request: ToolCallTransportCallbacks,
     callback: CallbackMessage,
     onProgress: (progress: JsonValue) => void,
 ): Promise<JsonValue> {
@@ -273,10 +303,12 @@ async function invokeCallback(
         throw new TypeError(`Invalid ToolCall ${callback.kind} callback payload.`);
     switch (callback.kind) {
         case "review":
+            if (request.hooks === undefined) throw new Error("ToolCall review callback is unavailable.");
             return (await request.hooks.review(
                 callback.payload as unknown as ToolCallReviewInput,
             )) as unknown as JsonValue;
         case "rewrite":
+            if (request.hooks === undefined) throw new Error("ToolCall rewrite callback is unavailable.");
             return (await request.hooks.rewrite(
                 callback.payload as unknown as ToolCallRewriteInput,
             )) as unknown as JsonValue;
@@ -326,7 +358,10 @@ async function invokeCallback(
     }
 }
 
-class DispatchCallbackServer {
+export class ToolCallCallbackServer {
+    readonly #controller = new AbortController();
+
+    get signal(): AbortSignal { return this.#controller.signal; }
     readonly #pending = new Map<number, PendingCallback>();
     readonly #offData: () => void;
     readonly #offClose: () => void;
@@ -335,12 +370,16 @@ class DispatchCallbackServer {
 
     constructor(private readonly stream: MessageStream) {
         this.#offData = stream.onData((message) => this.#accept(message));
-        this.#offClose = stream.onClose(() =>
-            this.#failAll(new Error("ToolCall dispatch stream closed.")),
-        );
-        this.#offCancel = stream.onCancel((error) =>
-            this.#failAll(streamFailure(error)),
-        );
+        this.#offClose = stream.onClose(() => {
+            const error = new Error("ToolCall stream closed.");
+            this.#controller.abort(error);
+            this.#failAll(error);
+        });
+        this.#offCancel = stream.onCancel((error) => {
+            const failure = streamFailure(error);
+            this.#controller.abort(failure);
+            this.#failAll(failure);
+        });
     }
 
     async call(
@@ -373,6 +412,11 @@ class DispatchCallbackServer {
 
     #accept(message: unknown): void {
         const entry = record(message);
+        if (entry?.name === "abort") {
+            const payload = record(entry.payload);
+            this.#controller.abort(new Error(typeof payload?.message === "string" ? payload.message : "ToolCall cancelled."));
+            return;
+        }
         if (
             entry === undefined ||
             (entry.name !== "callback.result" &&
@@ -390,7 +434,10 @@ class DispatchCallbackServer {
         }
         this.#pending.delete(payload.id);
         if (entry.name === "callback.error") {
-            pending.reject(readWireFailure(payload));
+            // Preserve the identity of throwIfAborted() across callback wire.
+            // ExecutionTarget uses it to distinguish interruption from tool failure.
+            pending.reject(payload.aborted === true && this.signal.aborted
+                ? this.signal.reason : readWireFailure(payload));
             return;
         }
         pending.resolve((payload.result ?? null) as JsonValue);
@@ -495,7 +542,7 @@ function readTerminalResult(value: unknown): JsonValue {
     throw new TypeError("Invalid ToolCall dispatch terminal response.");
 }
 
-function failureEnvelope(error: unknown): JsonValue {
+export function toolCallFailureEnvelope(error: unknown): JsonValue {
     return { ok: false, ...wireFailure(error) } as unknown as JsonValue;
 }
 

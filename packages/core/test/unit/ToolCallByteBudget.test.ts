@@ -104,3 +104,45 @@ test("Core active ToolCall cursor finds an older Agent after 65 newer UI calls",
     assert.ok(older.some((record) => record.callId === "actual-agent"));
     assert.equal(new Set([...first, ...older].map((record) => record.callId)).size, 66);
 });
+
+test("byte budget is finalized after merging active and persisted candidates", async (t) => {
+    const root = await createTestTempDirectory("toolcall-merged-budget");
+    const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+        maxBytes: 16 * 1024 * 1024, retentionDays: 30,
+    });
+    t.after(async () => { await database.close(); await rm(root, { recursive: true, force: true }); });
+    const store = database.toolCallStore({ timestamp: (record) => record.completedAt ?? record.startedAt });
+    const history = new ToolCallHistory(asInstanceName("test"), store);
+    const at = new Date().toISOString();
+    await store.append({ callId: "persisted-large", ctxId: "ctx-a", instance: asInstanceName("test"),
+        inputSummary: "X".repeat(4096), source: "mcp", startedAt: at, completedAt: at,
+        status: "completed", toolName: "bash_run" });
+    await history.started("active-small", "bash_run", "{}", { ctxId: "ctx-a", source: "mcp" }, at);
+    const query = { ctxId: "ctx-a", maxBytes: 1024, includeInput: false, includeOutput: false };
+    assert.deepEqual((await history.read({ ...query, limit: 1 })).map((record) => record.callId), ["active-small"]);
+    assert.deepEqual((await history.read({ ...query, limit: 2 })).map((record) => record.callId), ["active-small"]);
+    await history.started("newest", "bash_run", "{}", { ctxId: "ctx-a", source: "mcp" }, at);
+    assert.deepEqual((await history.read({ ...query, before: "newest", limit: 2 })).map((record) => record.callId), ["active-small"]);
+    await assert.rejects(history.read({ ...query, before: "active-small", limit: 2 }), /exceeds maxBytes/u);
+    await history.completed("active-small", at);
+    assert.deepEqual((await history.read({ ...query, after: "persisted-large", limit: 1 })).map((record) => record.callId), ["active-small"]);
+});
+
+for (const cursor of ["before", "after"] as const) {
+    test(`ToolCall ${cursor} rejects missing and wrong-Context cursors`, async (t) => {
+        const root = await createTestTempDirectory("toolcall-invalid-cursor");
+        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+            maxBytes: 16 * 1024 * 1024, retentionDays: 30,
+        });
+        t.after(async () => { await database.close(); await rm(root, { recursive: true, force: true }); });
+        const history = new ToolCallHistory(asInstanceName("test"), database.toolCallStore({
+            timestamp: (record) => record.completedAt ?? record.startedAt,
+        }));
+        await assert.rejects(history.read({ [cursor]: "missing", ctxId: "ctx-a", limit: 64 }), /cursor is unavailable/u);
+        await history.started("other", "bash_run", "{}", { ctxId: "ctx-b", source: "mcp" }, new Date().toISOString());
+        await assert.rejects(history.read({ [cursor]: "other", ctxId: "ctx-a", limit: 64 }), /cursor is unavailable/u);
+        await history.completed("other", new Date().toISOString());
+        await assert.rejects(history.read({ [cursor]: "other", ctxId: "ctx-a", limit: 64 }), /cursor is unavailable/u);
+        assert.deepEqual(await history.read({ [cursor]: "other", ctxId: "ctx-b", limit: 64 }), []);
+    });
+}

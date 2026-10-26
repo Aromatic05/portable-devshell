@@ -62,7 +62,7 @@ export interface AuditLogs {
 export interface AuditToolCalls {
     append(record: ToolCallRecord): Promise<void>;
     hasCall(callId: string): boolean;
-    readQuery(query?: ToolCallQuery): ToolCallRecord[];
+    readQuery(query?: ToolCallQuery, options?: { deferFirstByteLimit: boolean }): ToolCallRecord[];
     readFailureSummary(
         sinceMs: number,
         untilMs: number,
