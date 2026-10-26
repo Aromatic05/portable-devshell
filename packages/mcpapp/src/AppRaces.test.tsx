@@ -262,15 +262,62 @@ test("confirmation is renewed after same Context capability rotation and remains
     expect(actions()[0]!.arguments).toMatchObject({ ctxId: "ctx-a", actionId: "goal-pause", expectedRevision: 11 });
 });
 
-test("a higher watch revision invalidates confirmation even when item expectedRevision is unchanged", async () => {
+test("a higher watch revision invalidates confirmation while preserving button DOM and keyboard focus", async () => {
     const watch = deferred<Response>(); let watches = 0; const state = snapshot();
     serve((url, init) => url.pathname.endsWith("/snapshot") ? response(state)
         : watches++ === 0 ? watch.promise : hold(init?.signal));
     await render(<AppView />); await authorize(); await click("Pause Goal");
+    const focused = button("Confirm Pause Goal");
+    focused.focus();
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: { ...state, cursor: 12 } })));
+    expect(button("Pause Goal")).toBe(focused);
+    expect(document.activeElement).toBe(focused);
     await click("Pause Goal"); expect(actions()).toHaveLength(0);
     await click("Confirm Pause Goal"); expect(actions()).toHaveLength(1);
     expect(actions()[0]!.arguments.expectedRevision).toBe(11);
+});
+
+test("a rejected Goal continuation explains Host refusal and never redelivers on Watch", async () => {
+    const watch = deferred<Response>(); let watches = 0; const state = recovery();
+    host.sendResult = Promise.resolve({ isError: true });
+    host.invoke = async (call) => call.arguments.action === "claim" ? claim() : result({ valid: true, attempted: true });
+    serve((url, init) => url.pathname.endsWith("/snapshot") ? response(state)
+        : watches++ === 0 ? watch.promise : hold(init?.signal));
+    await render(<AppView />); await authorize();
+    expect(host.sent).toHaveLength(1);
+    expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
+    expect(host.calls.at(-1)!.arguments.outcome).toBe("rejected");
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("Host rejected the continuation message");
+    expect(container.textContent).toContain("Continue the Goal from the conversation");
+    await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: { ...state, cursor: 12 } })));
+    expect(host.sent).toHaveLength(1);
+    expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("will not be sent again automatically");
+});
+
+test("retained stdout page failure stays visible with previous output and retries the failed cursor", async () => {
+    const state = snapshot(); state.activity = [{ callId: "audit-a", name: "bash_run", state: "completed", at: "" }];
+    const reads: string[] = [];
+    serve((url, init) => {
+        if (url.pathname.endsWith("/snapshot")) return response(state);
+        if (!url.pathname.endsWith("/activity")) return hold(init?.signal);
+        reads.push(url.href);
+        if (reads.length === 1) return response({ callId: "audit-a", stdout: "first page\n", stderr: "", nextSeq: 33 });
+        if (reads.length === 2) return new Response("{}", { status: 503 });
+        return response({ callId: "audit-a", stdout: "last page\n", stderr: "" });
+    });
+    await render(<AppView />); await authorize(); await click("Activity");
+    await act(async () => container.querySelector<HTMLButtonElement>(".toolcall-compact")!.click());
+    await click("Load more output");
+    expect(container.querySelector(".tc-terminal pre")!.textContent).toBe("first page\n");
+    expect(container.textContent).toContain("503");
+    expect(button("Retry output").disabled).toBe(false);
+    await click("Retry output");
+    expect(reads).toHaveLength(3);
+    expect(reads[1]).toBe(reads[2]);
+    expect(reads[2]).toContain("fromSeq=33");
+    expect(container.querySelector(".tc-terminal pre")!.textContent).toBe("first page\nlast page\n");
+    expect(container.textContent).not.toContain("503");
 });
 
 test("an action refresh awaiting the response body is revalidated after Context replacement", async () => {

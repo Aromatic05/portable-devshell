@@ -200,10 +200,11 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                     <p className="dashboard-notice">
                         {primary.title === "Approval required"
                             ? pendingCount > 1
-                                ? `Approval 1 of ${pendingCount} is awaiting a decision in the conversation.`
-                                : "An approval is pending in the conversation."
-                            : "A decision is pending in the conversation."}
+                                ? `Approval 1 of ${pendingCount} is awaiting your decision.`
+                                : "An approval is awaiting your decision."
+                            : "A decision is awaiting your input."}
                     </p>
+                    {renderItem(primary, "decision")}
                 </> : <p className="dashboard-empty">No pending human decision.</p>}
                 <h2>Background waits</h2>
                 {background.length ? <div className="dashboard-items">

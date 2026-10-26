@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ToolCallCard, readToolCallResult, restoreToolCallResult } from "./ToolCall.js";
 import type { ToolCallResult } from "./ToolCallModel.js";
 import { WorkspaceDashboard } from "./Workspace.js";
+import { mcpAppToolCallWidgetPayload } from "../../mcp/src/mcpapp/WidgetPayload.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
@@ -101,6 +102,21 @@ test("file_edit shows actual diff lines and partial-failure status without manuf
     expect(view.querySelector(".tc-diff-line[data-kind='removed']")?.textContent).toContain("-old");
     expect(view.textContent).toContain("File changed since read");
     expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(2);
+});
+
+test("file_edit failure in operation 41 survives server preview and UI truncation", async () => {
+    const payload = mcpAppToolCallWidgetPayload("file_edit", undefined, { operations: [
+        ...Array.from({ length: 40 }, (_, index) => ({ path: `ok-${index}.ts`, status: "applied" })),
+        { path: "failed.ts", status: "failed", error: { message: "Revision mismatch" } },
+    ] }, false);
+    const restored = restoreToolCallResult({ toolResponseMetadata: { "portable-devshell/widgetPayload": payload } });
+    const view = await display(restored!);
+    expect(view.querySelector(".toolcall-line")?.textContent).toContain("Partial failure");
+    expect(view.querySelector(".toolcall-description")?.textContent).toContain("41 file operations");
+    expect(view.textContent).toContain("1 of 41 operations failed");
+    expect(view.textContent).toContain("failed.ts: Revision mismatch");
+    expect(view.textContent).toContain("Showing 25 of 41 operations; 16 omitted");
+    expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(25);
 });
 
 test("tmux_run and tmux_inspect use tasks, panes, transcript and wait semantics", async () => {

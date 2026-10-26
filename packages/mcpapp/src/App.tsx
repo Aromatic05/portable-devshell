@@ -352,6 +352,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     role: "user", content: [{ type: "text", text: delivery.message }],
                 });
                 outcome = sent?.isError ? "rejected" : "accepted";
+                if (sent?.isError && current() && errorOwnerRef.current === operation)
+                    setActionError("The Goal is active, but the Host rejected the continuation message. This message will not be sent again automatically. Continue the Goal from the conversation.");
             } catch (error) {
                 if (current() && errorOwnerRef.current === operation)
                     setActionError(error instanceof Error ? error.message : "Workspace recovery failed.");
@@ -557,7 +559,9 @@ function WorkspaceItem({ item, kind, onAction, epoch = 0, cursor = 0, pendingAct
         {item.actions && item.actions.length > 0 && onAction && <div className="workspace-actions">
             {item.actions.map((action) => {
                 const key = actionKey(epoch, cursor, item, action);
-                return <span key={key}>
+                // Snapshot changes revoke confirmation without replacing the
+                // focused action's DOM node.
+                return <span key={JSON.stringify([item.id, action.id])}>
                     <button type="button" disabled={busyAction !== undefined} onClick={() => onAction(item, action)}>
                         {pendingAction === key ? `Confirm ${action.label}` : busyAction === key ? "Applying…" : action.label}
                     </button>

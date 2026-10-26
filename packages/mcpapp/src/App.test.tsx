@@ -164,16 +164,16 @@ test("reads live workspace state from private MCP metadata without displaying be
     });
     await vi.waitFor(() => {
         expect(container!.textContent).toContain("Build portable devshell");
-        expect(container!.textContent).toContain("An approval is pending in the conversation.");
+        expect(container!.textContent).toContain("An approval is awaiting your decision.");
     });
-    expect(container!.textContent).toContain("An approval is pending in the conversation.");
+    expect(container!.textContent).toContain("An approval is awaiting your decision.");
     expect(container!.textContent).not.toContain("private-authorization-token");
     expect(calls[0]?.url).toContain("/snapshot?ctxId=ctx-live");
     expect(calls[0]?.authorization).toBe("Bearer private-authorization-token");
     expect(calls[0]?.credentials).toBe("omit");
     expect(calls.some((call) => call.url.includes("/watch?cursor=6&ctxId=ctx-live"))).toBe(true);
     await act(async () => { host.clients[0]?.ontoolinput?.({ arguments: { ctxId: "ctx-new" } }); });
-    expect(container!.textContent).not.toContain("An approval is pending in the conversation.");
+    expect(container!.textContent).not.toContain("An approval is awaiting your decision.");
     expect(container!.textContent).not.toContain("Build portable devshell");
     expect(container!.textContent).toContain("Context · ctx-new");
     expect(calls.at(-1)?.signal?.aborted).toBe(true);
@@ -263,9 +263,16 @@ test("MCPApp user controls use callServerTool with Context, revision and confirm
         requestId: expect.any(String),
     } });
     expect(reads).toBeGreaterThan(1);
-    // The fullscreen dashboard reports pending approval; the action is inline.
-    expect(button("Deny")).toBeUndefined();
-    expect(container!.textContent).toContain("An approval is pending in the conversation.");
+    // The production Workspace is an approval entry even without an Interaction iframe.
+    await act(async () => { button("Deny").click(); });
+    expect(host.actions).toHaveLength(1);
+    await act(async () => { button("Confirm Deny").click(); });
+    expect(host.actions).toHaveLength(2);
+    expect(host.actions[1]).toEqual({ name: "mcpapp_action", arguments: {
+        ctxId: "ctx-human", itemId: "approval-one", actionId: "deny", requestId: expect.any(String),
+    } });
+    expect(host.modeRequests).toEqual([]);
+    expect(container!.textContent).toContain("An approval is awaiting your decision.");
 });
 
 test("server Goal recovery intent delivers model context and one Host message after claim", async () => {
@@ -450,7 +457,7 @@ test("reads complete ChatGPT toolResponseMetadata before the SDK emits a tool-re
         document.body.append(container);
         root = createRoot(container);
         await act(async () => { root?.render(<AppView />); });
-        await vi.waitFor(() => expect(container!.textContent).toContain("An approval is pending in the conversation."));
+        await vi.waitFor(() => expect(container!.textContent).toContain("An approval is awaiting your decision."));
         expect(calls[0]).toContain("snapshot?ctxId=ctx-globals");
         expect(calls.some((url) => url.includes("watch?cursor=12&ctxId=ctx-globals"))).toBe(true);
         expect(container!.textContent).not.toContain(token);
@@ -482,7 +489,7 @@ test("Workspace requests fullscreen only once per Context and respects Host dism
     }); });
     await vi.waitFor(() => expect(host.modeRequests).toEqual(["fullscreen"]));
     expect(container!.textContent).toContain("Build release");
-    expect(container!.textContent).toContain("An approval is pending in the conversation.");
+    expect(container!.textContent).toContain("An approval is awaiting your decision.");
     expect(host.displayMode).toBe("fullscreen");
     host.displayMode = "inline";
     await act(async () => { host.clients[0]?.onhostcontextchanged?.({ displayMode: "inline" }); });

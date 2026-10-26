@@ -96,8 +96,9 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
         case "file_glob": return paths(args?.patterns).join(", ") || summary || "Path discovery";
         case "file_edit": {
             const operations = output?.operations;
+            const total = number(record(output?.editSummary)?.totalOperations);
             return Array.isArray(operations)
-                ? operations.length + " file operation" + (operations.length === 1 ? "" : "s")
+                ? (total ?? operations.length) + " file operation" + ((total ?? operations.length) === 1 ? "" : "s")
                 : "Apply file changes";
         }
         case "tmux_run": return string(args?.command)?.slice(0, 250) ?? summary ?? "Task started";

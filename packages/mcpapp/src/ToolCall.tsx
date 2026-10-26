@@ -101,8 +101,9 @@ export function ToolCallCard({
     const duration = number(record(result?.output)?.durationMs);
     const output = record(result?.output);
     const taskStatus = record(output?.task)?.status;
-    const partialFailure = Array.isArray(output?.operations) && output.operations.some((entry) =>
-        record(entry)?.status === "failed");
+    const partialFailure = (number(record(output?.editSummary)?.failedOperations) ?? 0) > 0 ||
+        (Array.isArray(output?.operations) && output.operations.some((entry) =>
+            record(entry)?.status === "failed"));
     const exit = number(output?.exitCode) ?? (summary?.match(/exit\s+(\d+)/u)
         ? Number(summary.match(/exit\s+(\d+)/u)?.[1]) : undefined);
     const status = result?.isError || state === "failed" || state === "denied" ? "Failed" :

@@ -39,11 +39,10 @@ function ShellView({ input, result }: ToolCallPresentation): ReactNode {
             maxChars={output?.activityRetained === true ? stdout.length : undefined} />}
         {stderr && <Terminal text={stderr} title="stderr"
             maxChars={output?.activityRetained === true ? stderr.length : undefined} />}
-        {!stdout && !stderr && (output?.activityStatus === "loading"
+        {string(output?.activityError) && <Notice tone="warning">{string(output?.activityError)}</Notice>}
+        {!stdout && !stderr && !string(output?.activityError) && (output?.activityStatus === "loading"
             ? <Notice>Loading retained terminal output…</Notice>
-            : string(output?.activityError)
-                ? <Notice tone="warning">{string(output?.activityError)}</Notice>
-                : (number(output?.stdoutBytes) ?? 0) > 0 || (number(output?.stderrBytes) ?? 0) > 0
+            : (number(output?.stdoutBytes) ?? 0) > 0 || (number(output?.stderrBytes) ?? 0) > 0
                     ? <Notice>Retained terminal output is unavailable or has expired.</Notice>
                     : <Notice>Command produced no terminal output.</Notice>)}
         {output?.stdoutTruncated === true || output?.stderrTruncated === true
@@ -119,13 +118,25 @@ function GlobView({ input, result }: ToolCallPresentation): ReactNode {
 function EditView({ input, result }: ToolCallPresentation): ReactNode {
     const output = record(result?.output);
     const operations = entries(output?.operations);
-    const added = operations.reduce((count, item) => count + (number(item.addedLines) ?? 0), 0);
-    const removed = operations.reduce((count, item) => count + (number(item.removedLines) ?? 0), 0);
+    const summary = record(output?.editSummary);
+    const total = number(summary?.totalOperations) ?? operations.length;
+    const failed = number(summary?.failedOperations) ?? operations.filter((item) => item.status === "failed").length;
+    const failures = textList(summary?.failures);
+    const shown = Math.min(operations.length, 25);
+    const added = number(summary?.addedLines) ?? operations.reduce((count, item) => count + (number(item.addedLines) ?? 0), 0);
+    const removed = number(summary?.removedLines) ?? operations.reduce((count, item) => count + (number(item.removedLines) ?? 0), 0);
     return <div className="tc-view">
         <div className="tc-stats">
-            <Stat label="Operations" value={operations.length} />
+            <Stat label="Operations" value={total} />
             <span className="tc-added">+{added}</span><span className="tc-removed">−{removed}</span>
         </div>
+        {failed > 0 && <Notice tone="danger">{failed} of {total} operations failed.
+            {failures.map((failure, index) => <div key={index}>{failure}</div>)}
+            {summary && failed > failures.length && <div>{failed - failures.length} additional failures.</div>}
+        </Notice>}
+        {total > shown && <Notice>
+            Showing {shown} of {total} operations; {total - shown} omitted.
+        </Notice>}
         {operations.slice(0, 25).map((operation, index) => {
             const status = string(operation.status) ?? "unknown";
             const path = string(operation.path) ?? "File";
