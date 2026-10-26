@@ -2,6 +2,8 @@ pub mod backend;
 pub mod model;
 pub mod state;
 pub mod transcript;
+#[cfg(all(test, unix))]
+mod tests;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -12,12 +14,14 @@ use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::instance::runtime::WorkerRuntimeContext;
+use crate::instance::sandbox::path::FilesystemCapability;
 use crate::instance::storage::InstancePaths;
 use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::file::FileToolState;
 use crate::tool::tmux::backend::TmuxBackend;
 use crate::tool::tmux::model::{
-    TmuxInputOutput, TmuxInputParams, TmuxInspectParams, TmuxManageOutput, TmuxManageParams,
+    TmuxInputOutput, TmuxInputParams, TmuxInspectParams, TmuxListOutput, TmuxListScope,
+    TmuxManageCommand, TmuxManageOutput, TmuxManageParams,
     TmuxPaneOperationOutput, TmuxReadOutput, TmuxReadParams, TmuxRunOutput, TmuxRunParams,
     TmuxWarning,
 };
@@ -48,7 +52,7 @@ struct TmuxTool<I, O> {
     capability: ToolCapability,
     meta: serde_json::Value,
     states: Arc<TmuxStateRegistry>,
-    operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
+    operation: fn(&TmuxStateRegistry, &ToolCall, I) -> Result<O, ToolError>,
     marker: PhantomData<fn(I) -> O>,
 }
 
@@ -72,11 +76,15 @@ where
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         let params = call.parse_params()?;
-        let state = self.states.state_for(&call.workspace)?;
         let result =
-            crate::tool::contract::serialize((self.operation)(state.as_ref(), &call, params)?)?;
+            crate::tool::contract::serialize((self.operation)(&self.states, &call, params)?)?;
         #[cfg(unix)]
-        state.observe_read_output(&call, &self.name.as_str(), &result);
+        {
+            let tool_name = self.name.as_str();
+            if matches!(tool_name.as_str(), "tmux_run" | "tmux_read") {
+                self.states.state_for(&call.workspace)?.observe_read_output(&call, &tool_name, &result);
+            }
+        }
         Ok(result)
     }
 }
@@ -132,6 +140,36 @@ impl TmuxStateRegistry {
         states.insert(workspace.to_path_buf(), Arc::clone(&state));
         Ok(state)
     }
+
+    fn manage(&self, call: &ToolCall, params: TmuxManageParams) -> Result<TmuxManageOutput, ToolError> {
+        call.check_cancelled()?;
+        call.policy.check_capability(FilesystemCapability::ProcessExecute).map_err(ToolError::from)?;
+        if params.scope != Some(TmuxListScope::Instance) {
+            return self.state_for(&call.workspace)?.manage(call, params);
+        }
+        if params.command != TmuxManageCommand::List
+            || params.name.is_some()
+            || params.cwd.is_some()
+            || params.task.is_some()
+            || params.pane.is_some()
+            || params.force.is_some()
+        {
+            return Err(ToolError::new("tool.invalidArguments", "scope=instance accepts only command=list and scope"));
+        }
+        call.policy.check_capability(FilesystemCapability::WorkspaceRead).map_err(ToolError::from)?;
+        let mut result = TmuxListOutput { panes: Vec::new(), warnings: None };
+        let mut warnings = Vec::new();
+        for workspace in TmuxBackend::discover_workspaces(&self.instance_paths)? {
+            call.check_cancelled()?;
+            let listed = self.state_for(&workspace)?.list(call, false)?;
+            result.panes.extend(listed.panes);
+            warnings.extend(listed.warnings.unwrap_or_default());
+        }
+        if !warnings.is_empty() {
+            result.warnings = Some(warnings);
+        }
+        Ok(result.into())
+    }
 }
 
 fn tool<I, O>(
@@ -140,7 +178,7 @@ fn tool<I, O>(
     capability: ToolCapability,
     meta: serde_json::Value,
     states: Arc<TmuxStateRegistry>,
-    operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
+    operation: fn(&TmuxStateRegistry, &ToolCall, I) -> Result<O, ToolError>,
 ) -> Arc<dyn ToolHandler>
 where
     I: DeserializeOwned + JsonSchema + 'static,
@@ -198,7 +236,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        TmuxState::run,
+        |states, call, params| states.state_for(&call.workspace)?.run(call, params),
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
@@ -217,7 +255,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        TmuxState::input,
+        |states, call, params| states.state_for(&call.workspace)?.input(call, params),
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
@@ -240,7 +278,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        TmuxState::read,
+        |states, call, params| states.state_for(&call.workspace)?.read(call, params),
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
@@ -263,11 +301,11 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        TmuxState::inspect,
+        |states, call, params| states.state_for(&call.workspace)?.inspect(call, params),
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),
-        "Manage tmux resources with command=list, create, or close. list discovers panes and active tasks, create opens a persistent interactive pane, and close terminates a task or closes a persistent pane; force explicitly permits busy-resource termination.",
+        "Manage tmux resources with command=list, create, or close. list discovers panes and active tasks; scope=instance lists existing panes across all registered backend workspaces and returns each pane's owning workspace. create opens a persistent interactive pane, and close terminates a task or closes a persistent pane; force explicitly permits busy-resource termination.",
         ToolCapability::Execute,
         serde_json::json!({
             "devshell": { "mcp": {
@@ -285,7 +323,7 @@ pub fn register_tools(
             }}
         }),
         states,
-        TmuxState::manage,
+        TmuxStateRegistry::manage,
     ))?;
     Ok(())
 }

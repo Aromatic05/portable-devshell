@@ -145,11 +145,12 @@ pub fn pane_ref(pane: &BackendPane) -> TmuxPaneRef {
     }
 }
 
-pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>) -> TmuxPaneSummary {
+pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>, workspace: String) -> TmuxPaneSummary {
     TmuxPaneSummary {
         id: pane.id.clone(),
         name: pane.name.clone(),
         status: pane_status(pane, task),
+        workspace,
         cwd: (!pane.cwd.is_empty()).then(|| pane.cwd.clone()),
         task: active_task(task),
     }

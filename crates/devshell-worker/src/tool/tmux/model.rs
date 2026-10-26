@@ -153,12 +153,21 @@ pub enum TmuxManageCommand {
     Close,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TmuxListScope {
+    Workspace,
+    Instance,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TmuxManageParams {
     /// Lifecycle operation to perform.
     pub command: TmuxManageCommand,
+    /// Discovery scope for command=list. Defaults to workspace. Instance lists all persisted backend workspaces.
+    pub scope: Option<TmuxListScope>,
     /// Persistent pane name. Required for command=create.
     #[schemars(
         length(min = 1, max = 64),
@@ -244,6 +253,8 @@ pub struct TmuxPaneSummary {
     pub id: String,
     pub name: String,
     pub status: String,
+    /// Original backend workspace used to address this pane; independent of its current cwd.
+    pub workspace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -481,7 +492,7 @@ mod tests {
         assert_eq!(schema["required"], json!(["command"]));
         assert!(schema.get("oneOf").is_none());
         assert!(schema.get("anyOf").is_none());
-        for property in ["command", "name", "cwd", "task", "pane", "force"] {
+        for property in ["command", "scope", "name", "cwd", "task", "pane", "force"] {
             assert!(
                 schema["properties"].get(property).is_some(),
                 "missing {property}: {schema}"

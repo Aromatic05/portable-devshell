@@ -21,6 +21,7 @@ pub struct EnrollOptions {
     pub controller: String,
     pub device_code: String,
     pub proxy_url: Option<String>,
+    pub replace_running: bool,
 }
 
 #[derive(Serialize)]
@@ -89,6 +90,12 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
 
     let instance = InstanceName::parse(&enrollment.instance)?;
     let paths = InstancePaths::resolve(&instance)?;
+    let socket_paths = crate::transport::endpoint::channel::EndpointPaths::resolve(&instance)?;
+    let previous_running = process::daemon_state(&paths, &socket_paths) == DaemonState::Running;
+    require_runtime_replacement(previous_running, options.replace_running, instance.as_str())?;
+    if previous_running {
+        eprintln!("Replacing running Worker {instance}: stopping the Worker and terminating its managed tmux tasks (--replace-running).");
+    }
     eprintln!("[2/5] Credential accepted for {instance}; preparing worker binary...");
     // Finish fallible binary preparation before stopping a usable local
     // daemon. The server credential was already issued at this point.
@@ -98,13 +105,18 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     ensure_dir(&paths.artifacts_dir, 0o700)?;
     ensure_dir(&paths.state_dir, 0o700)?;
 
-    let socket_paths = crate::transport::endpoint::channel::EndpointPaths::resolve(&instance)?;
     let previous_config = if paths.config_file.exists() {
         Some(read_config(&paths, &instance)?)
     } else {
         None
     };
-    let previous_running = process::daemon_state(&paths, &socket_paths) == DaemonState::Running;
+    // Binary preparation may take time; recheck before any destructive local
+    // lifecycle action in case a Worker was started in the meantime.
+    require_runtime_replacement(
+        process::daemon_state(&paths, &socket_paths) == DaemonState::Running,
+        options.replace_running,
+        instance.as_str(),
+    )?;
     eprintln!("[3/5] Preparing local runtime for {instance}...");
     let switched = (|| -> Result<(), String> {
         crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
@@ -188,6 +200,15 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     .map_err(|error| error.to_string())
 }
 
+fn require_runtime_replacement(running: bool, replace_running: bool, instance: &str) -> Result<(), String> {
+    if running && !replace_running {
+        return Err(format!(
+            "Worker {instance} is already running. Re-enrollment stops it and terminates its managed tmux tasks. For a normal reconnect, do not enroll again; inspect devshell-worker logs --instance {instance}. To intentionally replace it, generate a new Device Code (the submitted code has been consumed) and rerun enroll with --replace-running. The local Worker has not been stopped or reconfigured."
+        ));
+    }
+    Ok(())
+}
+
 fn enrollment_endpoint(base: &str) -> Result<Url, String> {
     let mut url = Url::parse(base).map_err(|error| format!("invalid controller URL: {error}"))?;
     let base_path = url.path().trim_end_matches('/');
@@ -216,6 +237,16 @@ fn is_loopback(host: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{enrollment_endpoint, validate_controller_url, validate_proxy_url};
+
+    #[test]
+    fn replacement_requires_explicit_consent_only_for_a_running_worker() {
+        assert!(super::require_runtime_replacement(false, false, "fixture").is_ok());
+        assert!(super::require_runtime_replacement(true, true, "fixture").is_ok());
+        let error = super::require_runtime_replacement(true, false, "fixture").unwrap_err();
+        assert!(error.contains("terminates its managed tmux tasks"));
+        assert!(error.contains("--replace-running"));
+        assert!(error.contains("new Device Code"));
+    }
 
     #[test]
     fn enrollment_endpoint_preserves_base_path() {

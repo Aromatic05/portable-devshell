@@ -6,5 +6,6 @@ pub fn run(args: EnrollArgs) -> Result<String, String> {
         controller: args.controller,
         device_code: args.device_code,
         proxy_url: args.proxy,
+        replace_running: args.replace_running,
     })
 }

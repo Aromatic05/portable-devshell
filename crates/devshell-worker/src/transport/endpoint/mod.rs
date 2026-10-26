@@ -63,6 +63,12 @@ enum EndpointEvent {
     ChannelClosed,
     ChannelFailed(String),
     Outbound(Envelope),
+    StreamOpened {
+        id: String,
+        generation: Arc<()>,
+        result: Result<ByteService, String>,
+        input: Receiver<StreamInputCommand>,
+    },
     StreamData { id: String, data: Vec<u8> },
     StreamInputFinished { id: String },
     StreamOutputFinished { id: String },
@@ -153,6 +159,7 @@ impl StreamOutput {
 }
 
 enum ByteService {
+    Opening(Arc<()>),
     Tcp(TcpService),
     Exec(ExecService),
     PayloadRead {
@@ -239,6 +246,7 @@ impl ByteService {
 
     fn take_input(&mut self) -> Result<StreamInput, String> {
         match self {
+            Self::Opening(_) => Err("Stream is still opening.".to_string()),
             Self::Tcp(service) => service.clone_stream().map(StreamInput::Tcp),
             Self::Exec(service) => service.take_stdin().map(|value| StreamInput::Exec(Some(value))),
             Self::PayloadRead { .. } => Ok(StreamInput::PayloadRead),
@@ -257,6 +265,7 @@ impl ByteService {
 
     fn take_output(&mut self) -> Result<StreamOutput, String> {
         match self {
+            Self::Opening(_) => Err("Stream is still opening.".to_string()),
             Self::Tcp(service) => service.clone_stream().map(StreamOutput::Tcp),
             Self::Exec(service) => service.take_stdout().map(StreamOutput::Exec),
             Self::PayloadRead { reader, .. } => reader
@@ -269,6 +278,7 @@ impl ByteService {
 
     fn output_complete(&mut self) -> Result<bool, String> {
         match self {
+            Self::Opening(_) => Ok(false),
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
             Self::PayloadRead { .. } => Ok(true),
@@ -318,12 +328,13 @@ impl ByteService {
                     "receiveId": receive_id,
                 }))
             }
-            Self::Tcp(_) | Self::Exec(_) => None,
+            Self::Opening(_) | Self::Tcp(_) | Self::Exec(_) => None,
         }
     }
 
     fn reset(&mut self) {
         match self {
+            Self::Opening(_) => {}
             Self::Tcp(service) => service.reset(),
             Self::Exec(service) => service.reset(),
             Self::PayloadRead { .. } | Self::ReceiveWrite { .. } => {}
@@ -342,6 +353,36 @@ struct ActiveStream {
 }
 
 impl ActiveStream {
+    fn opening<F>(
+        id: String,
+        source: Address,
+        dest: Address,
+        events: Sender<EndpointEvent>,
+        open: F,
+    ) -> Self
+    where
+        F: FnOnce() -> Result<ByteService, String> + Send + 'static,
+    {
+        let (input, receiver) = mpsc::channel();
+        let generation = Arc::new(());
+        let pending_generation = Arc::clone(&generation);
+        thread::spawn(move || {
+            let result = open();
+            let _ = events.send(EndpointEvent::StreamOpened {
+                id, generation: pending_generation, result, input: receiver,
+            });
+        });
+        Self {
+            service: ByteService::Opening(generation),
+            input,
+            source,
+            dest,
+            recv_seq: 0,
+            send_seq: 0,
+            output_eof: false,
+        }
+    }
+
     fn open(
         id: &str,
         source: Address,
@@ -415,6 +456,9 @@ where
             Ok(EndpointEvent::ChannelFailed(error)) => return Err(error),
             Ok(EndpointEvent::Outbound(envelope)) => {
                 queue_envelope(&mut pending, envelope)?;
+            }
+            Ok(EndpointEvent::StreamOpened { id, generation, result, input }) => {
+                complete_stream_open(&id, &generation, result, input, &mut streams, &events_tx)?;
             }
             Ok(EndpointEvent::StreamData { id, data }) => {
                 if let Some(active) = streams.get_mut(&id) {
@@ -709,6 +753,17 @@ fn dispatch_stream(
             name,
             message,
         } => {
+            if dest.port == "network" && name == "tcp" {
+                // Register the input queue before returning to dispatch so DATA,
+                // FIN and cancellation retain their arrival order during connect.
+                let context = context.clone();
+                let port = dest.port.clone();
+                let active = ActiveStream::opening(id.clone(), dest, source, events.clone(), move || {
+                    ByteService::open(&port, &name, message, &context)
+                });
+                streams.insert(id, active);
+                return Ok(());
+            }
             let service = match ByteService::open(&dest.port, &name, message, context) {
                 Ok(service) => service,
                 Err(error) => {
@@ -772,6 +827,48 @@ fn dispatch_stream(
                 active.service.reset();
             }
         }
+    }
+    Ok(())
+}
+
+fn complete_stream_open(
+    id: &str,
+    generation: &Arc<()>,
+    result: Result<ByteService, String>,
+    input: Receiver<StreamInputCommand>,
+    streams: &mut HashMap<String, ActiveStream>,
+    events: &Sender<EndpointEvent>,
+) -> Result<(), String> {
+    let Some(active) = streams.get_mut(id) else {
+        return Ok(());
+    };
+    if !matches!(&active.service, ByteService::Opening(current) if Arc::ptr_eq(current, generation)) {
+        return Ok(());
+    }
+    let opened = result.and_then(|mut service| {
+        let writer = service.take_input()?;
+        let reader = service.take_output()?;
+        spawn_stream_input(id.to_string(), writer, input, events.clone());
+        spawn_stream_output(id.to_string(), reader, events.clone());
+        active.service = service;
+        Ok(())
+    });
+    if let Err(error) = opened {
+        let active = streams.remove(id).expect("opening stream exists");
+        events
+            .send(EndpointEvent::Outbound(stream_envelope(
+                &active,
+                StreamPacket::Cancel {
+                    id: id.to_string(),
+                    error: Some(StreamError {
+                        message: error,
+                        code: None,
+                        details: None,
+                        retryable: None,
+                    }),
+                },
+            )?))
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1003,4 +1100,120 @@ fn spawn_stream_output(id: String, mut output: StreamOutput, events: Sender<Endp
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capability::artifact::store::ArtifactStore;
+    use crate::instance::{InstanceName, build_config};
+    use crate::instance::runtime::{PlatformInfo, WorkerRuntimeContext};
+    use crate::instance::sandbox::SecurityMode;
+    use crate::instance::storage::ExtensionResourceStore;
+    use crate::tool::ToolRegistry;
+
+    fn context(path: &std::path::Path) -> EndpointContext {
+        let instance = InstanceName::parse("endpoint-fixture").unwrap();
+        let artifacts = ArtifactStore::new(path.join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(path.join("payloads"), artifacts).unwrap();
+        let receives = ArtifactReceiveStore::new(path.join("receives")).unwrap();
+        let runtime = WorkerRuntimeContext {
+            instance: instance.clone(),
+            platform: PlatformInfo { os: std::env::consts::OS, arch: std::env::consts::ARCH },
+            security_mode: SecurityMode::Disabled, worker_sha256: None,
+        };
+        let router = Arc::new(RpcRouter::new(
+            build_config(&instance).unwrap(), runtime, Arc::new(ToolRegistry::new()),
+            Arc::clone(&payloads), Arc::clone(&receives),
+            Arc::new(ExtensionResourceStore::new(path.join("resources"))),
+        ));
+        EndpointContext::new(instance.as_str(), router, payloads, receives)
+    }
+
+    fn address(port: &str) -> Address {
+        Address { host: "endpoint-fixture-worker".to_string(), port: port.to_string() }
+    }
+
+    #[test]
+    fn tcp_open_dispatch_registers_pending_stream_and_reports_async_failure() {
+        let root = crate::testing::temp_dir();
+        let context = context(root.path());
+        let (events, receiver) = mpsc::channel();
+        let mut streams = HashMap::new();
+        dispatch_stream(address("network"), address("network"), StreamPacket::Open {
+            id: "invalid".to_string(), name: "tcp".to_string(),
+            message: Some(serde_json::json!({ "host": "", "port": 22 })),
+        }, &mut streams, &events, &context).unwrap();
+        assert!(matches!(&streams["invalid"].service, ByteService::Opening(_)));
+        let EndpointEvent::StreamOpened { id, generation, result, input } = receiver.recv_timeout(Duration::from_secs(1)).unwrap() else {
+            panic!("expected asynchronous open completion");
+        };
+        complete_stream_open(&id, &generation, result, input, &mut streams, &events).unwrap();
+        assert!(streams.is_empty());
+        assert!(matches!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            EndpointEvent::Outbound(Envelope {
+                packet: Packet::Stream(StreamPacket::Cancel { id, error: Some(error) }), ..
+            }) if id == "invalid" && error.message.contains("host must not be empty")));
+    }
+
+    #[test]
+    fn pending_tcp_open_keeps_dispatch_responsive_and_preserves_input_until_cancel() {
+        let root = crate::testing::temp_dir();
+        let context = context(root.path());
+        let (events_tx, events_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let started = std::time::Instant::now();
+        // Deterministic SYN-drop fixture: no real socket or SSH service.
+        let active = ActiveStream::opening(
+            "slow".to_string(), address("network"), address("network"), events_tx.clone(),
+            move || {
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                Err("fixture connect timeout".to_string())
+            },
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+        let mut streams = HashMap::from([("slow".to_string(), active)]);
+        for packet in [
+            StreamPacket::Data { id: "slow".to_string(), seq: 1, message: None, bytes: Some(b"queued".to_vec()) },
+            StreamPacket::Fin { id: "slow".to_string() },
+        ] {
+            dispatch_stream(address("network"), address("network"), packet, &mut streams, &events_tx, &context).unwrap();
+        }
+        dispatch_rpc(address("transport"), address("transport"), RpcPacket::Request {
+            id: "ping".to_string(), method: "transport.peer.promote".to_string(), message: None,
+        }, &events_tx, &context).unwrap();
+        let reply = events_rx.recv_timeout(Duration::from_millis(500)).unwrap();
+        assert!(matches!(reply, EndpointEvent::Outbound(Envelope { packet: Packet::Rpc(RpcPacket::Reply { id, .. }), .. }) if id == "ping"));
+        dispatch_stream(address("network"), address("network"), StreamPacket::Cancel {
+            id: "slow".to_string(), error: None,
+        }, &mut streams, &events_tx, &context).unwrap();
+        assert!(streams.is_empty());
+        release_tx.send(()).unwrap();
+        let EndpointEvent::StreamOpened { id, generation, result, input } = events_rx.recv_timeout(Duration::from_secs(1)).unwrap() else {
+            panic!("expected open completion");
+        };
+        assert!(matches!(input.try_recv().unwrap(), StreamInputCommand::Data(bytes) if bytes.as_slice() == b"queued"));
+        assert!(matches!(input.try_recv().unwrap(), StreamInputCommand::Finish));
+        // A completion from the cancelled open cannot emit a late error or
+        // resurrect the removed Stream.
+        complete_stream_open(&id, &generation, result, input, &mut streams, &events_tx).unwrap();
+        assert!(streams.is_empty());
+        assert!(events_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn late_open_completion_cannot_replace_a_new_stream_with_the_same_id() {
+        let (events, receiver) = mpsc::channel();
+        let old_generation = Arc::new(());
+        let new_generation = Arc::new(());
+        let (input, input_rx) = mpsc::channel();
+        let mut streams = HashMap::from([("reused".to_string(), ActiveStream {
+            service: ByteService::Opening(Arc::clone(&new_generation)), input,
+            source: address("network"), dest: address("network"), recv_seq: 0, send_seq: 0, output_eof: false,
+        })]);
+        complete_stream_open("reused", &old_generation, Err("old timeout".to_string()), input_rx,
+            &mut streams, &events).unwrap();
+        assert!(matches!(&streams["reused"].service, ByteService::Opening(generation) if Arc::ptr_eq(generation, &new_generation)));
+        assert!(receiver.try_recv().is_err());
+    }
 }

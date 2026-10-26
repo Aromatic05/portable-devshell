@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -265,7 +265,7 @@ impl TmuxState {
                 .map_err(|_| lock_error("tmux structure"))?;
             self.backend.ensure_session()?;
             let mut workspace = self.backend.capture_workspace()?;
-            if self.refresh_tasks_with_workspace(&workspace)? {
+            if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
                 workspace = self.backend.capture_workspace()?;
             }
             if workspace.total_panes >= MAX_PANES {
@@ -424,8 +424,9 @@ impl TmuxState {
                 let pane_lock = self.pane_lock(&pane_id)?;
                 let output_watermark;
                 {
+                    // Refresh before taking the pane lock. Reconciliation may
+                    // acquire structure and pane locks in that order.
                     let _pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
-                    self.refresh_task(&task_id)?;
                     {
                         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
                         let task = require_task(&tasks, &task_id)?;
@@ -498,9 +499,14 @@ impl TmuxState {
                         "input must not be empty",
                     ));
                 }
+
+                let _structure_guard = self
+                    .structure
+                    .lock()
+                    .map_err(|_| lock_error("tmux structure"))?;
                 self.backend.ensure_session()?;
                 let mut workspace = self.backend.capture_workspace()?;
-                if self.refresh_tasks_with_workspace(&workspace)? {
+                if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
                     workspace = self.backend.capture_workspace()?;
                 }
                 let pane = self
@@ -607,9 +613,14 @@ impl TmuxState {
                 "inspect requires start < end <= 0 and a range of at most 200 lines",
             ));
         }
+
+        let _structure_guard = self
+            .structure
+            .lock()
+            .map_err(|_| lock_error("tmux structure"))?;
         self.backend.ensure_session()?;
         let mut workspace = self.backend.capture_workspace()?;
-        if self.refresh_tasks_with_workspace(&workspace)? {
+        if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
         }
         let selected = if all {
@@ -628,6 +639,7 @@ impl TmuxState {
                 .map(|pane| current_task(&tasks, &pane.id).cloned())
                 .collect::<Vec<_>>()
         };
+        drop(_structure_guard);
         let mut panes = Vec::with_capacity(selected.len());
         for (pane, task) in selected.into_iter().zip(selected_tasks) {
             let lines = self.backend.capture_lines(&pane.tmux_pane_id, start, end)?;
@@ -636,19 +648,28 @@ impl TmuxState {
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
     }
 
-    pub fn list(&self, call: &ToolCall) -> Result<TmuxListOutput, ToolError> {
+    pub fn list(&self, call: &ToolCall, create_session: bool) -> Result<TmuxListOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
-        self.backend.ensure_session()?;
+
+        let _structure_guard = self
+            .structure
+            .lock()
+            .map_err(|_| lock_error("tmux structure"))?;
+        if create_session {
+            self.backend.ensure_session()?;
+        } else if !self.backend.existing_session()? {
+            return Ok(TmuxListOutput { panes: Vec::new(), warnings: None });
+        }
         let mut workspace = self.backend.capture_workspace()?;
-        if self.refresh_tasks_with_workspace(&workspace)? {
+        if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
         }
         let tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
         let panes = workspace
             .panes
             .iter()
-            .map(|pane| pane_summary(pane, current_task(&tasks, &pane.id)))
+            .map(|pane| pane_summary(pane, current_task(&tasks, &pane.id), self.backend.workspace()))
             .collect();
         Ok(TmuxListOutput {
             panes,
@@ -673,13 +694,13 @@ impl TmuxState {
                 {
                     return Err(ToolError::new(
                         "tool.invalidArguments",
-                        "tmux_manage command=list accepts only command",
+                        "tmux_manage command=list accepts only command and optional scope",
                     ));
                 }
-                self.list(call).map(Into::into)
+                self.list(call, true).map(Into::into)
             }
             TmuxManageCommand::Create => {
-                if params.task.is_some() || params.pane.is_some() || params.force.is_some() {
+                if params.scope.is_some() || params.task.is_some() || params.pane.is_some() || params.force.is_some() {
                     return Err(ToolError::new(
                         "tool.invalidArguments",
                         "tmux_manage command=create accepts command, name, and optional cwd",
@@ -703,7 +724,7 @@ impl TmuxState {
                 })
             }
             TmuxManageCommand::Close => {
-                if params.name.is_some() || params.cwd.is_some() {
+                if params.scope.is_some() || params.name.is_some() || params.cwd.is_some() {
                     return Err(ToolError::new(
                         "tool.invalidArguments",
                         "tmux_manage command=close accepts command, exactly one of task or pane, and optional force",
@@ -745,7 +766,7 @@ impl TmuxState {
             .map_err(|_| lock_error("tmux structure"))?;
         self.backend.ensure_session()?;
         let mut workspace = self.backend.capture_workspace()?;
-        if self.refresh_tasks_with_workspace(&workspace)? {
+        if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
         }
         if workspace.panes.iter().any(|pane| pane.name == params.name) {
@@ -880,7 +901,7 @@ impl TmuxState {
             .map_err(|_| lock_error("tmux structure"))?;
         self.backend.ensure_session()?;
         let mut workspace = self.backend.capture_workspace()?;
-        if self.refresh_tasks_with_workspace(&workspace)? {
+        if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
         }
         let pane = self.backend.resolve(&workspace, Some(selector))?.clone();
@@ -927,8 +948,13 @@ impl TmuxState {
     }
 
     fn refresh_all_tasks(&self) -> Result<(), ToolError> {
+        let _structure_guard = self
+            .structure
+            .lock()
+            .map_err(|_| lock_error("tmux structure"))?;
+
         let workspace = self.backend.capture_workspace()?;
-        self.refresh_tasks_with_workspace(&workspace).map(|_| ())
+        self.refresh_tasks_with_workspace(&workspace, &_structure_guard).map(|_| ())
     }
 
     fn refresh_task(&self, task_id: &str) -> Result<(), ToolError> {
@@ -938,8 +964,7 @@ impl TmuxState {
             !tasks.tasks.contains_key(task_id)
         };
         if missing {
-            let workspace = self.backend.capture_workspace()?;
-            self.refresh_tasks_with_workspace(&workspace)?;
+            self.refresh_all_tasks()?;
         }
         let task = {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -957,8 +982,7 @@ impl TmuxState {
                 }
             } else if self.backend.task_runtime_pending(task_id) {
                 if self.backend.has_session() {
-                    let workspace = self.backend.capture_workspace()?;
-                    self.refresh_tasks_with_workspace(&workspace)?;
+                    self.refresh_all_tasks()?;
                 } else {
                     match self.backend.finish_task_capture(task_id) {
                         Ok(()) => self.backend.remove_task_runtime(task_id),
@@ -1061,9 +1085,12 @@ impl TmuxState {
         Ok(())
     }
 
+    // Keep the structure guard from capture through reconciliation: a newly
+    // registered task must never be compared against an older pane snapshot.
     fn refresh_tasks_with_workspace(
         &self,
         workspace: &BackendWorkspace,
+        _structure_guard: &MutexGuard<'_, ()>,
     ) -> Result<bool, ToolError> {
         let mut cleanup = Vec::new();
         let mut finished = Vec::new();
@@ -1714,6 +1741,72 @@ mod tests {
     use super::{validate_line, verify_pane_cwd};
     use crate::instance::sandbox::path::{parse_requested_path, resolve_existing_target};
     use crate::tool::tmux::backend::BackendPane;
+
+    struct EmptyEnvironment;
+    impl crate::tool::ToolCommandEnvironmentProvider for EmptyEnvironment {
+        fn environment(&self, _: &crate::tool::ToolCall, _: Option<&str>, _: Option<&str>) -> Option<crate::tool::ToolCommandEnvironment> {
+            None
+        }
+    }
+
+    #[test]
+    fn reaper_snapshot_excludes_concurrent_task_registration() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+        use crate::instance::storage::InstancePaths;
+        use crate::instance::runtime::{PlatformInfo, WorkerRuntimeContext};
+        use crate::instance::{InstanceName, sandbox::SecurityMode};
+        use crate::tool::tmux::backend::{BackendWorkspace, TmuxBackend};
+        use crate::tool::tmux::state::task::{TaskRecord, TaskState};
+        use crate::tool::tmux::transcript::TranscriptCursor;
+        use crate::transport::endpoint::channel::EndpointPaths;
+
+        let root = crate::testing::temp_dir();
+        let path = root.path();
+        let paths = InstancePaths {
+            instance_root: path.join("instance"), artifacts_dir: path.join("artifacts"),
+            config_file: path.join("config.toml"), logs_dir: path.join("logs"),
+            log_file: path.join("worker.log"), state_dir: path.join("state"),
+            pid_file: path.join("worker.pid"), lock_file: path.join("worker.lock"),
+            daemon_lock_file: path.join("daemon.lock"),
+        };
+        let endpoints = EndpointPaths {
+            instance_runtime_dir: path.join("runtime"), socket_file: path.join("worker.sock"),
+            transport_socket_file: path.join("transport.sock"),
+            #[cfg(unix)]
+            tmux_socket_file: path.join("tmux.sock"),
+        };
+        let runtime = WorkerRuntimeContext {
+            instance: InstanceName::parse("reaper-fixture").unwrap(),
+            platform: PlatformInfo { os: std::env::consts::OS, arch: std::env::consts::ARCH },
+            security_mode: SecurityMode::Disabled, worker_sha256: None,
+        };
+        let backend = TmuxBackend::new(&paths, &endpoints, &runtime, path).unwrap();
+        let state = Arc::new(super::TmuxState::new(backend, Arc::new(EmptyEnvironment), crate::tool::file::FileToolState::new()).unwrap());
+        // Pause the reaper after capture, exactly where run_once used to insert
+        // a new task into a registry newer than the captured workspace.
+        let guard = state.structure.lock().unwrap();
+        let snapshot = BackendWorkspace { panes: vec![], total_panes: 0, foreign_panes: 0 };
+        let writer = Arc::clone(&state);
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let task_path = path.join("new-task.json");
+        let thread = std::thread::spawn(move || {
+            assert!(writer.structure.try_lock().is_err());
+            attempted_tx.send(()).unwrap();
+            let _guard = writer.structure.lock().unwrap();
+            writer.tasks.lock().unwrap().insert(TaskRecord {
+                id: "new-task".to_string(), pane_id: "new-pane".to_string(),
+                pane_incarnation_id: "new-incarnation".to_string(), state: TaskState::Running,
+                transcript: TranscriptCursor::new(task_path, "fixture-unused-ring".to_string()),
+                finished_at_ms: None, last_pane: None, warnings: vec![],
+            });
+        });
+        attempted_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        state.refresh_tasks_with_workspace(&snapshot, &guard).unwrap();
+        drop(guard);
+        thread.join().unwrap();
+        assert_eq!(state.tasks.lock().unwrap().tasks["new-task"].state, TaskState::Running);
+    }
 
     #[test]
     fn transcript_line_count_is_bounded() {

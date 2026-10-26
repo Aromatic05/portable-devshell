@@ -36,6 +36,9 @@ pub struct EnrollArgs {
     pub device_code: String,
     #[arg(long)]
     pub proxy: Option<String>,
+    /// Allow replacing a running Worker, terminating its managed tmux tasks.
+    #[arg(long)]
+    pub replace_running: bool,
 }
 
 #[derive(Args, Debug)]
@@ -81,5 +84,17 @@ mod tests {
             panic!("expected enroll command");
         };
         assert_eq!(args.proxy.as_deref(), Some("socks5h://127.0.0.1:1080"));
+        assert!(!args.replace_running);
     }
+
+    #[test]
+    fn enroll_accepts_explicit_running_worker_replacement() {
+        let cli = Cli::try_parse_from([
+            "devshell-worker", "enroll", "--controller", "https://controller.example",
+            "--device-code", "fixture", "--replace-running",
+        ]).unwrap();
+        let Command::Enroll(args) = cli.command else { panic!("expected enroll"); };
+        assert!(args.replace_running);
+    }
+
 }

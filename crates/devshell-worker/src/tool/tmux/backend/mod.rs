@@ -104,6 +104,11 @@ struct PaneStatusRecord {
     state: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceRecord {
+    workspace: PathBuf,
+}
+
 pub struct TmuxBackend {
     instance: String,
     workspace: PathBuf,
@@ -156,6 +161,7 @@ impl TmuxBackend {
         for path in [&panes_dir, &psmux_data_dir] {
             ensure_dir(path, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
         }
+        persist_workspace(&root, workspace)?;
         Ok(Self {
             instance: runtime.instance.as_str().to_string(),
             workspace: workspace.to_path_buf(),
@@ -172,6 +178,67 @@ impl TmuxBackend {
             session_prepared: AtomicBool::new(false),
             runtime_migrated: AtomicBool::new(false),
         })
+    }
+
+    pub fn workspace(&self) -> String {
+        protocol_path(&self.workspace)
+    }
+
+    pub fn discover_workspaces(instance_paths: &InstancePaths) -> Result<Vec<PathBuf>, ToolError> {
+        let root = instance_paths.instance_root.join("tmux").join("workspaces");
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(storage_error(error)),
+        };
+        let mut workspaces = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(storage_error)?;
+            if !entry.file_type().map_err(storage_error)?.is_dir() {
+                continue;
+            }
+            let path = entry.path().join("workspace.json");
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(ToolError::new(
+                        "tmux.workspaceUnresolved",
+                        format!("{} has no original workspace identity; access tmux_manage from that original workspace once to register it before instance discovery", entry.path().display()),
+                    ));
+                }
+                Err(error) => return Err(storage_error(error)),
+            };
+            let record: WorkspaceRecord = serde_json::from_slice(&bytes)
+                .map_err(|error| {
+                    ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
+                })?;
+            let expected_key = workspace_key(&instance_paths.instance_root, &record.workspace);
+            if !record.workspace.is_absolute()
+                || entry.file_name().to_str() != Some(expected_key.as_str())
+            {
+                return Err(ToolError::new(
+                    "tmux.storageFailed",
+                    format!("{} does not match its workspace key", path.display()),
+                ));
+            }
+            workspaces.push(record.workspace);
+        }
+        workspaces.sort();
+        Ok(workspaces)
+    }
+
+    // Discovery must not create sessions or migrate (and replace) an older runtime.
+    pub fn existing_session(&self) -> Result<bool, ToolError> {
+        if !self.has_session() {
+            return Ok(false);
+        }
+        if !self.validate_existing_session()? {
+            return Err(ToolError::new(
+                "tmux.runtimeConflict",
+                "existing tmux session requires workspace-scoped runtime migration",
+            ));
+        }
+        Ok(true)
     }
 
     pub fn has_session(&self) -> bool {
@@ -1414,6 +1481,31 @@ fn workspace_key(instance_root: &Path, workspace: &Path) -> String {
     hasher.update(&[0]);
     hash_path(&mut hasher, workspace);
     hasher.finalize().to_hex()[..16].to_string()
+}
+
+fn persist_workspace(root: &Path, workspace: &Path) -> Result<(), ToolError> {
+    let path = root.join("workspace.json");
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let record: WorkspaceRecord = serde_json::from_slice(&bytes)
+                .map_err(|error| {
+                    ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
+                })?;
+            if record.workspace != workspace {
+                return Err(ToolError::new(
+                    "tmux.storageFailed",
+                    format!("{} belongs to a different workspace", path.display()),
+                ));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            atomic_write_json(&path, &WorkspaceRecord {
+                workspace: workspace.to_path_buf(),
+            })
+        }
+        Err(error) => Err(storage_error(error)),
+    }
 }
 
 fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
