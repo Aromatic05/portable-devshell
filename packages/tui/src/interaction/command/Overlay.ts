@@ -1,5 +1,5 @@
 import type { TuiInteractionProjection } from "../Projection.js";
-import { tuiApprovalFields, tuiConfirmationBodyText, tuiOverlayBodyLayout } from "../../view/overlay/Presentation.js";
+import { tuiApprovalFields, tuiConfirmationBodyText, tuiOverlayBodyLayout } from "../../layout/Overlay.js";
 import type { TuiUiIntent } from "../../state/Interaction.js";
 import { errorMessage } from "@portable-devshell/shared";
 import type { TuiAppStore } from "../../state/store/App.js";

@@ -1,4 +1,4 @@
-import { measureExpandableBoxHeight } from "../component/content/Box.js";
+import { measureExpandableBoxHeight } from "../../layout/Box.js";
 import type { TuiMode } from "../../state/Interaction.js";
 import type { TuiActivePage } from "../../state/Ui.js";
 import { buildBoxesForPage } from "../page/Builder.js";

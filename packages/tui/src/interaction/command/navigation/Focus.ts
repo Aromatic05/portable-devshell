@@ -1,4 +1,4 @@
-import { renderExpandableBoxLines } from "../../../view/component/content/Box.js";
+import { renderExpandableBoxLines } from "../../../layout/Box.js";
 import type { TuiAppStore } from "../../../state/store/App.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
 import { overviewInstanceViewportRows, tuiMessagesHistoryRows, tuiBlockHeight } from "../../../terminal/Public.js";

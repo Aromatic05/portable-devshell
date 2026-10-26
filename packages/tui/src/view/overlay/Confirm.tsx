@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import { wrapTerminalText } from "../../terminal/Public.js";
 
-import { tuiConfirmationActionText, tuiOverlayBodyLayout } from "./Presentation.js";
+import { tuiConfirmationActionText, tuiOverlayBodyLayout } from "../../layout/Overlay.js";
 
 export interface TuiComponentConfirmDialogProps {
     body: string;

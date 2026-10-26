@@ -10,7 +10,7 @@ import type { TuiBoxModel } from "../../state/Ui.js";
 import {
     renderExpandableBoxLines,
     type TuiComponentExpandableBoxRenderLine,
-} from "../component/content/Box.js";
+} from "../../layout/Box.js";
 import { TuiComponentErrorBanner } from "../component/chrome/Error.js";
 import {
     measureMainBoxFlowMetrics,

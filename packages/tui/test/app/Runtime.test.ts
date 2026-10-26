@@ -7,7 +7,7 @@ import {
     type ApprovalRequest,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
-import { renderExpandableBoxLines } from "../../src/view/component/content/Box.tsx";
+import { renderExpandableBoxLines } from "../../src/layout/Box.ts";
 import { TuiTerminalBuffer } from "../../src/terminal/emulation/Buffer.ts";
 import { readContextMessageDraft } from "../../src/state/editor/MessageDraft.ts";
 import { TuiRuntime } from "../../src/app/Runtime.ts";

@@ -27,7 +27,7 @@ import {
     readContextMessageDraft,
     selectSidebarModel,
 } from "../../../src/testing.ts";
-import { renderExpandableBoxLines } from "../../../src/view/component/content/Box.js";
+import { renderExpandableBoxLines } from "../../../src/layout/Box.js";
 import { buildTuiHitRegions } from "../../../src/view/projection/HitRegion.js";
 import { selectMainScreenModel } from "../../../src/view/projection/View.js";
 

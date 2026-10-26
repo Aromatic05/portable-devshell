@@ -4,8 +4,8 @@ import type {
 } from "@portable-devshell/shared";
 import stringWidth from "string-width";
 
-import type { TuiConfirmationOverlay } from "../../state/Overlay.js";
-import { wrapTerminalText } from "../../terminal/Public.js";
+import type { TuiConfirmationOverlay } from "../state/Overlay.js";
+import { wrapTerminalText } from "../terminal/Public.js";
 
 export type TuiApprovalAction = "back" | "input" | "deny" | "approve";
 export type TuiConfirmationAction = "cancel" | "confirm";

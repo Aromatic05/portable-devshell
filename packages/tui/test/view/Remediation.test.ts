@@ -11,7 +11,7 @@ import { TuiScreenRouter } from "../../src/view/shell/Router.tsx";
 import { TuiOverlayView } from "../../src/view/overlay/View.tsx";
 import { TuiComponentTmuxPanes } from "../../src/terminal/tmux/View.tsx";
 import { TuiTmuxPaneTerminalSession } from "../../src/terminal/tmux/Session.ts";
-import { renderExpandableBoxLines } from "../../src/view/component/content/Box.tsx";
+import { renderExpandableBoxLines } from "../../src/layout/Box.ts";
 import { currentTuiRoute, reconcileTuiRouteResources } from "../../src/state/route/State.ts";
 import { round6Tui } from "../support/Round6Harness.ts";
 

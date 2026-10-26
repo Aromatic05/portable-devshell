@@ -1,10 +1,10 @@
 import stringWidth from "string-width";
-import { takeTerminalWidth, wrapTerminalText } from "../../../terminal/Public.js";
+import { takeTerminalWidth, wrapTerminalText } from "../terminal/Public.js";
 
-export { wrapTerminalText } from "../../../terminal/Text.js";
+export { wrapTerminalText } from "../terminal/Text.js";
 
-import type { TuiBoxLineTone, TuiBoxModel } from "../../../state/Ui.js";
-import type { TuiExpandableBoxStatus } from "../../../state/Ui.js";
+import type { TuiBoxLineTone, TuiBoxModel } from "../state/Ui.js";
+import type { TuiExpandableBoxStatus } from "../state/Ui.js";
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
     granularity: "grapheme",
@@ -14,7 +14,7 @@ export type {
     TuiBoxLine as BoxLine,
     TuiBoxLineTone as BoxLineTone,
     TuiBoxModel as BoxModel,
-} from "../../../state/Ui.js";
+} from "../state/Ui.js";
 
 export interface TuiComponentExpandableBoxRenderLine {
     backgroundColor?: string;

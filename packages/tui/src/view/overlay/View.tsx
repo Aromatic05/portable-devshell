@@ -15,7 +15,7 @@ import {
     tuiApprovalFields,
     tuiOverlayBodyLayout,
     tuiConfirmationBodyText,
-} from "./Presentation.js";
+} from "../../layout/Overlay.js";
 
 export interface TuiOverlayViewProps {
     onTextDetailImageVisibility?(visible: boolean): void;

@@ -34,7 +34,7 @@ export * from "./terminal/tmux/Model.js";
 export * from "./app/Operations.js";
 export * from "./interaction/command/navigation/Focus.js";
 export * from "./interaction/command/navigation/Navigation.js";
-export * from "./view/component/content/Box.js";
+export * from "./layout/Box.js";
 export * from "./view/shell/Layout.js";
 export * from "./app/control/Route.js";
 export * from "./state/Overlay.js";

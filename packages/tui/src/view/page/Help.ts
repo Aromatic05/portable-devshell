@@ -1,4 +1,4 @@
-import type { BoxModel } from "../component/content/Box.js";
+import type { BoxModel } from "../../layout/Box.js";
 import type { TuiAppState } from "../../state/store/Model.js";
 import { buildHelpLines } from "../../state/route/Help.js";
 import { makeBox } from "./Support.js";

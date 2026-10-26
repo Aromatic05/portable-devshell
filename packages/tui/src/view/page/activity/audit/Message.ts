@@ -3,7 +3,7 @@ import type {
     MessageEntry,
 } from "@portable-devshell/shared";
 
-import type { BoxModel } from "../../../component/content/Box.js";
+import type { BoxModel } from "../../../../layout/Box.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 import { readContextMessageDraft } from "../../../../state/editor/MessageDraft.js";

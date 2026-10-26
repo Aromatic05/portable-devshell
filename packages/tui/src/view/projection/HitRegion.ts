@@ -3,7 +3,7 @@ import type { TuiAppState } from "../../state/store/Model.js";
 import type { TuiDomainReader } from "../../app/control/Reader.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import type { TuiTerminalTab } from "../../state/route/Model.js";
-import { renderExpandableBoxLines } from "../component/content/Box.js";
+import { renderExpandableBoxLines } from "../../layout/Box.js";
 import {
     tuiTerminalTabLabel,
     tuiTerminalTabs,
@@ -35,7 +35,7 @@ import {
     projectTuiConfirmationActions,
     type TuiApprovalAction,
     type TuiConfirmationAction,
-} from "../overlay/Presentation.js";
+} from "../../layout/Overlay.js";
 import { tuiTextDetailImageRows } from "../component/content/Detail.js";
 
 export type TuiHitTarget =
