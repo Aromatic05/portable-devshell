@@ -525,3 +525,73 @@ test("switching Host presentation reconnects observation under a fresh epoch wit
     await click("Approve"); expect(actions()[0]!.arguments.ctxId).toBe("ctx-a");
     expect(host.closed).toBe(1);
 });
+
+test.each(["reject", "throw"])("Resume 与 Watch 交错时派生恢复的 %s 错误保持可见且只发送一次", async (failure) => {
+    const actionRefresh = deferred<Response>();
+    const watch = deferred<Response>();
+    let reads = 0; let watches = 0; let state = snapshot();
+    host.sendResult = failure === "reject" ? Promise.resolve({ isError: true }) : undefined;
+    host.sendError = failure === "throw" ? new Error("Host continuation transport failed") : undefined;
+    host.invoke = async (call) => call.name === "mcpapp_action" ? result({ status: "applied" })
+        : call.arguments.action === "claim" ? claim() : result({ valid: true, attempted: true });
+    serve((url, init) => url.pathname.endsWith("/snapshot")
+        ? ++reads === 2 ? actionRefresh.promise : response(state)
+        : watches++ === 0 ? watch.promise : hold(init?.signal));
+    await render(<AppView />); await authorize();
+    const resume = button("Resume Goal"); resume.focus();
+    await click("Resume Goal");
+    state = recovery(snapshot("ctx-a", "alpha", 12));
+    await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
+    expect(host.sent).toHaveLength(1);
+    const error = failure === "reject" ? "Host rejected the continuation message" : "Host continuation transport failed";
+    expect(container.textContent).toContain(error);
+    await act(async () => actionRefresh.resolve(response(state)));
+    expect(container.textContent).toContain(error);
+    expect(host.sent).toHaveLength(1);
+    expect(button("Resume Goal")).toBe(resume);
+    expect(document.activeElement).toBe(resume);
+});
+
+
+test("Activity 同一 seq 的 UTF-8 偏移续页失败后重试同一游标", async () => {
+    const state = snapshot(); state.activity = [{ callId: "utf8", name: "bash_run", state: "completed", at: "" }];
+    const reads: string[] = [];
+    serve((url, init) => {
+        if (url.pathname.endsWith("/snapshot")) return response(state);
+        if (!url.pathname.endsWith("/activity")) return hold(init?.signal);
+        reads.push(url.href);
+        if (reads.length === 1) return response({ callId: "utf8", stdout: "中文", stderr: "", nextSeq: 1, nextOffset: 6 });
+        if (reads.length === 2) return new Response("{}", { status: 503 });
+        return response({ callId: "utf8", stdout: "😀结尾", stderr: "错误" });
+    });
+    await render(<AppView />); await authorize(); await click("Activity");
+    await act(async () => container.querySelector<HTMLButtonElement>(".toolcall-compact")!.click());
+    await click("Load more output");
+    expect(container.textContent).toContain("503");
+    await click("Retry output");
+    expect(reads[1]).toBe(reads[2]);
+    expect(reads[2]).toContain("fromSeq=1&offset=6");
+    expect(container.querySelector(".tc-terminal pre")!.textContent).toContain("中文😀结尾");
+    expect(container.textContent).toContain("错误");
+    expect(container.textContent).not.toContain("503");
+    expect(container.textContent).not.toContain("Load more output");
+});
+
+test("恢复拒绝与同时接纳的动作拒绝各自可见，后续刷新不清除失败", async () => {
+    const watch = deferred<Response>(); const action = deferred<unknown>();
+    const send = deferred<{ isError?: boolean }>(); let watches = 0; let state = snapshot();
+    host.sendResult = send.promise;
+    host.invoke = async (call) => call.name === "mcpapp_action" ? action.promise
+        : call.arguments.action === "claim" ? claim() : result({ valid: true, attempted: true });
+    serve((url, init) => url.pathname.endsWith("/snapshot") ? response(state)
+        : watches++ === 0 ? watch.promise : hold(init?.signal));
+    await render(<AppView />); await authorize(); await click("Resume Goal");
+    state = recovery(snapshot("ctx-a", "alpha", 12));
+    await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
+    await act(async () => action.resolve({ isError: true }));
+    expect(container.textContent).toContain("Workspace action was rejected.");
+    await act(async () => send.resolve({ isError: true }));
+    expect(container.textContent).toContain("Workspace action was rejected.");
+    expect(container.textContent).toContain("Host rejected the continuation message");
+    expect(host.sent).toHaveLength(1);
+});

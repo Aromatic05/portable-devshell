@@ -44,6 +44,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
     const [liveError, setLiveError] = useState<string>();
     const [actionError, setActionError] = useState<string>();
+    const [recoveryError, setRecoveryError] = useState<string>();
     const [pendingAction, setPendingAction] = useState<string>();
     const [busyAction, setBusyAction] = useState<string>();
     const [closeRequested, setCloseRequested] = useState(false);
@@ -70,6 +71,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         setBusyAction(undefined);
         setCloseRequested(false);
         setActionError(undefined);
+        setRecoveryError(undefined);
         setLiveError(undefined);
     };
     const replaceSession = (next: McpAppSession | undefined, nextContext = next?.ctxId) => {
@@ -306,10 +308,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
         if (!app || !currentScope(app)) return;
         const operation = { epoch, cursor: snapshot.cursor, active: true };
         recoveryAttempts.current.set(key, operation);
-        if (!actionRef.current && !closeRef.current) {
-            if (errorOwnerRef.current === previous) setActionError(undefined);
-            errorOwnerRef.current = operation;
-        }
+        // Recovery can be derived from Watch while its explicit action is
+        // awaiting a refresh. Each operation retains its own error surface.
         const claimId = `mcpapp-${crypto.randomUUID()}`;
         const base = { ctxId: session.ctxId, claimId,
             intent: recovery.intent, sourceId: recovery.sourceId,
@@ -352,11 +352,12 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     role: "user", content: [{ type: "text", text: delivery.message }],
                 });
                 outcome = sent?.isError ? "rejected" : "accepted";
-                if (sent?.isError && current() && errorOwnerRef.current === operation)
-                    setActionError("The Goal is active, but the Host rejected the continuation message. This message will not be sent again automatically. Continue the Goal from the conversation.");
+                if (sent?.isError && current())
+                    setRecoveryError("The Goal is active, but the Host rejected the continuation message. This message will not be sent again automatically. Continue the Goal from the conversation.");
+                else if (current()) setRecoveryError(undefined);
             } catch (error) {
-                if (current() && errorOwnerRef.current === operation)
-                    setActionError(error instanceof Error ? error.message : "Workspace recovery failed.");
+                if (current())
+                    setRecoveryError(error instanceof Error ? error.message : "Workspace recovery failed.");
             } finally {
                 if (claimed) {
                     try {
@@ -507,6 +508,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 {view === "interaction" ? <>
                     {snapshot ? <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
+                        {recoveryError && <p role="alert">{recoveryError}</p>}
                         {snapshot.presentation.pendingApprovals !== undefined &&
                             snapshot.presentation.pendingApprovals > 1 &&
                             <p className="workspace-notice">Approval 1 of {snapshot.presentation.pendingApprovals}</p>}
@@ -520,6 +522,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     </div> : <p>{liveError ?? "Waiting for interaction state…"}</p>}
                 </> : snapshot ? <>
                     {actionError && <p role="alert">{actionError}</p>}
+                    {recoveryError && <p role="alert">{recoveryError}</p>}
                     <WorkspaceDashboard key={snapshot.ctxId} snapshot={snapshot} session={session}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" || liveError !== undefined || status !== "connected" ? undefined : act}
