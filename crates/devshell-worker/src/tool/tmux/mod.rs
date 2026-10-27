@@ -161,7 +161,7 @@ impl TmuxStateRegistry {
         let mut warnings = Vec::new();
         for workspace in TmuxBackend::discover_workspaces(&self.instance_paths)? {
             call.check_cancelled()?;
-            let listed = self.state_for(&workspace)?.list(call, false)?;
+            let listed = self.state_for(&workspace)?.list(call, false, true)?;
             result.panes.extend(listed.panes);
             warnings.extend(listed.warnings.unwrap_or_default());
         }

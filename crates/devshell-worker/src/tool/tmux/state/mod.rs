@@ -656,7 +656,12 @@ impl TmuxState {
         Ok(self.pane_output(panes, self.output_warnings(&workspace)?))
     }
 
-    pub fn list(&self, call: &ToolCall, create_session: bool) -> Result<TmuxListOutput, ToolError> {
+    pub fn list(
+        &self,
+        call: &ToolCall,
+        create_session: bool,
+        include_cwd: bool,
+    ) -> Result<TmuxListOutput, ToolError> {
         call.check_cancelled()?;
         require_read(call)?;
 
@@ -677,7 +682,17 @@ impl TmuxState {
         let panes = workspace
             .panes
             .iter()
-            .map(|pane| pane_summary(pane, current_task(&tasks, &pane.id), self.backend.workspace()))
+            .map(|pane| {
+                let mut summary = pane_summary(
+                    pane,
+                    current_task(&tasks, &pane.id),
+                    self.backend.workspace(),
+                );
+                if !include_cwd {
+                    summary.cwd = None;
+                }
+                summary
+            })
             .collect();
         Ok(TmuxListOutput {
             panes,
@@ -705,7 +720,7 @@ impl TmuxState {
                         "tmux_manage command=list accepts only command and optional scope",
                     ));
                 }
-                self.list(call, true).map(Into::into)
+                self.list(call, true, false).map(Into::into)
             }
             TmuxManageCommand::Create => {
                 if params.scope.is_some() || params.task.is_some() || params.pane.is_some() || params.force.is_some() {
