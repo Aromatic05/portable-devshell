@@ -42,8 +42,8 @@ export class Stream {
     constructor(target: Connection | Port) {
         this.#target = target;
         if (target instanceof Connection) {
-            const offPacket = target.onPacket((packet) =>
-                this.#accept(packet, target.remote, target.local),
+            const offPacket = target.onPacket((packet, incoming) =>
+                this.#accept(packet, target.remote, target.local, incoming),
             );
             const offClose = target.onClose((error) =>
                 this.#disconnect(error),
@@ -62,13 +62,14 @@ export class Stream {
     async open(name: string, message?: Message): Promise<MessageStream> {
         if (!(this.#target instanceof Connection))
             throw new Error("Stream open requires a Connection.");
-        const connection = this.#target;
+        const connection = this.#target.retain();
         const id = createTransportId();
         const stream = this.#create(
             id,
             connection.remote,
             connection.local,
             connection,
+            connection.channel,
         );
         await connection.send({
             protocol: "stream",
@@ -123,7 +124,7 @@ export class Stream {
         if (packet.type === "open") {
             const connection =
                 this.#target instanceof Connection
-                    ? this.#target
+                    ? this.#target.retain(incoming)
                     : incoming === undefined
                         ? this.#target.connect(peer.host, peer.port, local)
                         : this.#target.connectIncoming(peer.host, peer.port, local, incoming);
@@ -159,18 +160,16 @@ export class Stream {
             streams = new Map();
             this.#streams.set(incoming, streams);
         }
-        let offClose: (() => void) | undefined;
         const stream = new MessageStream(id, connection, () => {
-            offClose?.();
+            offClose();
             if (streams.get(key) !== stream) return;
             streams.delete(key);
             if (streams.size === 0) this.#streams.delete(incoming);
         });
         streams.set(key, stream);
-        if (this.#target instanceof Port)
-            offClose = connection.onClose((error) => stream.acceptCancel({
-                message: error?.message ?? "Stream connection closed.",
-            }));
+        const offClose = connection.onClose((error) => stream.acceptCancel({
+            message: error?.message ?? "Stream connection closed.",
+        }));
         return stream;
     }
 }
@@ -273,7 +272,7 @@ export class MessageStream {
 
     async close(message?: Message): Promise<void> {
         if (this.#closed) return;
-        this.#closed = true;
+        this.acceptClose(message);
         try {
             if (this.#connection.connected)
                 await this.#connection.send({
@@ -284,14 +283,12 @@ export class MessageStream {
                 } satisfies StreamPacket);
         } catch (error) {
             if (this.#connection.connected) throw error;
-        } finally {
-            this.#finish();
         }
     }
 
     async cancel(error?: StreamError): Promise<void> {
         if (this.#closed) return;
-        this.#closed = true;
+        this.acceptCancel(error);
         try {
             if (this.#connection.connected)
                 await this.#connection.send({
@@ -302,8 +299,6 @@ export class MessageStream {
                 } satisfies StreamPacket);
         } catch (cause) {
             if (this.#connection.connected) throw cause;
-        } finally {
-            this.#finish();
         }
     }
 
@@ -406,8 +401,9 @@ export class MessageStream {
         this.#terminal = { type: "close", ...(message === undefined ? {} : { message }) };
         for (const reader of this.#readers.splice(0))
             reader.resolve({ type: "close", ...(message === undefined ? {} : { message }) });
-        for (const listener of this.#closeListeners) listener(message);
-        this.#finish();
+        const listeners = [...this.#closeListeners];
+        this.#release();
+        for (const listener of listeners) listener(message);
     }
 
     acceptCancel(error?: StreamError): void {
@@ -415,15 +411,21 @@ export class MessageStream {
         this.#closed = true;
         this.#terminal = { type: "cancel", ...(error === undefined ? {} : { error }) };
         for (const reader of this.#readers.splice(0)) reader.reject(streamError(error));
-        for (const listener of this.#cancelListeners) listener(error);
+        const listeners = [...this.#cancelListeners];
+        this.#release();
+        for (const listener of listeners) listener(error);
+    }
+
+    #release(): void {
         this.#finish();
+        this.#dataListeners.clear();
+        this.#closeListeners.clear();
+        this.#cancelListeners.clear();
     }
 
     dispose(): void {
-        this.#closed = true;
+        this.acceptCancel({ message: "Stream disposed." });
         this.#pending.length = 0;
-        this.#readers.length = 0;
-        this.#finish();
     }
 }
 

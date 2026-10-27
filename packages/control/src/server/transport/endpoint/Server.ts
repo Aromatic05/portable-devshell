@@ -510,7 +510,7 @@ export class ControlTransportServer {
                     peer: pending.peer,
                     protocolVersion: pending.protocolVersion,
                     requestId: rpc.requestId,
-                    signal: rpc.signal,
+                    signal: AbortSignal.any([rpc.signal, session.disconnected.signal]),
                     sourceHost: rpc.peer.host,
                     subject: session.admission.subject,
                 },
@@ -542,7 +542,7 @@ export class ControlTransportServer {
                     ? {}
                     : { protocolVersion: session.protocolVersion }),
                 requestId: rpc.requestId,
-                signal: rpc.signal,
+                signal: AbortSignal.any([rpc.signal, session.disconnected.signal]),
                 sourceHost: rpc.peer.host,
                 subject: session.admission.subject,
             },

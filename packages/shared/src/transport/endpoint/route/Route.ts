@@ -34,6 +34,17 @@ export class Connection {
         this.remote = remote;
     }
 
+    get channel(): Channel | undefined {
+        return this.#direct?.channel;
+    }
+
+    retain(incoming?: Channel): Connection {
+        if (incoming !== undefined)
+            return this.#port.connectIncoming(this.remote.host, this.remote.port, this.local, incoming);
+        if (this.#direct !== undefined) return this;
+        return this.#port.retain(this.remote, this.local);
+    }
+
     get connected(): boolean {
         return !this.#port.closed &&
             (this.#direct === undefined
@@ -50,7 +61,7 @@ export class Connection {
         return this.#port.send(this.remote, packet, this.local);
     }
 
-    onPacket(listener: (packet: Packet) => Promise<void> | void): () => void {
+    onPacket(listener: (packet: Packet, incoming?: Channel) => Promise<void> | void): () => void {
         return this.#port.onPacket((packet, source, destination, incoming) => {
             if (
                 (this.#direct === undefined ||
@@ -60,7 +71,7 @@ export class Connection {
                 destination.host === this.local.host &&
                 destination.port === this.local.port
             )
-                return listener(packet);
+                return listener(packet, incoming);
         });
     }
 
@@ -119,9 +130,13 @@ export class Port {
         incoming: Channel,
     ): Connection {
         const codec = this.#route.codecFor(incoming);
-        return codec === undefined
-            ? this.connect(host, port, local)
-            : this.connectVia(host, port, codec, incoming, local);
+        if (codec === undefined) throw new Error("Incoming Channel is unavailable.");
+        return this.connectVia(host, port, codec, incoming, local);
+    }
+
+    retain(remote: Address, local: Address): Connection {
+        const direct = this.#route.directFor(remote);
+        return new Connection(this, remote, local, direct);
     }
 
     canReach(dest: Address): boolean {
@@ -197,6 +212,13 @@ export class Route {
         reachable: boolean;
     }>();
     #gateway?: EnvelopeCodec;
+
+    directFor(dest: Address): { codec: EnvelopeCodec; channel: Channel } | undefined {
+        if (this.#ports.get(dest.host)?.has(dest.port)) return undefined;
+        const codec = this.#peers.get(dest.host) ?? this.#gateway;
+        if (codec === undefined) return undefined;
+        return { codec, channel: this.#acceptedChannels.get(codec)! };
+    }
 
     codecFor(channel: Channel): EnvelopeCodec | undefined {
         return this.#incomingCodecs.get(channel);
@@ -370,6 +392,7 @@ export class Route {
 
     gateway(codec: EnvelopeCodec, channel: Channel, staged = false): () => void {
         this.#incomingCodecs.set(channel, codec);
+        this.#acceptedChannels.set(codec, channel);
         if (!staged) this.activateGateway(codec);
         const offEnvelope = codec.onEnvelope((envelope) => {
             // Only replies to candidate-specific verification calls may enter

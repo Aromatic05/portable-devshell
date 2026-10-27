@@ -43,12 +43,13 @@ export type RpcPacket =
 
 interface Pending {
     readonly peer: Address;
+    readonly connection: Connection;
     resolve(value: Message | undefined): void;
     reject(error: Error): void;
 }
 
 export class Rpc {
-    readonly #active = new Map<string, AbortController>();
+    readonly #active = new Map<Channel | undefined, Map<string, AbortController>>();
     readonly #handlers = new Map<string, RpcHandler>();
     readonly #pending = new Map<string, Pending>();
     readonly #target: Connection | Port;
@@ -60,8 +61,8 @@ export class Rpc {
     ) {
         this.#target = target;
         if (target instanceof Connection) {
-            const offPacket = target.onPacket((packet) =>
-                this.#accept(packet, target.remote, target.local),
+            const offPacket = target.onPacket((packet, incoming) =>
+                this.#accept(packet, target.remote, target.local, incoming),
             );
             const offClose = target.onClose((error) => this.#disconnect(error));
             this.#unsubscribe = () => {
@@ -91,12 +92,16 @@ export class Rpc {
     ): Promise<T> {
         if (!(this.#target instanceof Connection))
             throw new Error("RPC request requires a Connection.");
-        const connection = this.#target;
+        const connection = this.#target.retain();
         signal?.throwIfAborted();
         const id = createTransportId();
         const response = new Promise<Message | undefined>((resolve, reject) =>
-            this.#pending.set(id, { peer: connection.remote, reject, resolve }),
+            this.#pending.set(id, { peer: connection.remote, connection, reject, resolve }),
         );
+        const offClose = connection.onClose((error) => {
+            this.#pending.get(id)?.reject(uncertainResult(error));
+            this.#pending.delete(id);
+        });
         let rejectCancellation: ((reason?: unknown) => void) | undefined;
         const cancellation =
             signal === undefined
@@ -137,6 +142,7 @@ export class Rpc {
             ]);
             return value as T;
         } finally {
+            offClose();
             this.#pending.delete(id);
             signal?.removeEventListener("abort", abort);
         }
@@ -150,19 +156,13 @@ export class Rpc {
 
     #disconnect(error?: Error): void {
         const failure = error ?? new Error("RPC connection closed.");
-        for (const controller of this.#active.values())
-            controller.abort(failure);
+        for (const active of this.#active.values())
+            for (const controller of active.values()) controller.abort(failure);
         if (this.#pending.size > 0) {
             // Once an RPC was sent, a transport close cannot prove the
             // remote handler never executed. Never offer an automatic retry
             // of a potentially side-effecting call after losing its result.
-            const uncertain = createRemoteError({
-                code: TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
-                cause: failure,
-                message: "RPC result is uncertain: the connection closed before its reply. " +
-                    "The remote operation may have completed; do not retry it automatically.",
-                retryable: false,
-            });
+            const uncertain = uncertainResult(failure);
             for (const pending of this.#pending.values()) pending.reject(uncertain);
         }
         this.#active.clear();
@@ -182,12 +182,13 @@ export class Rpc {
             return;
         }
         if (packet.type === "cancel") {
-            this.#active.get(activeKey(local, peer, packet.id))?.abort();
+            this.#active.get(incoming)?.get(activeKey(local, peer, packet.id))?.abort();
             return;
         }
         const pending = this.#pending.get(packet.id);
         if (
             pending === undefined ||
+            pending.connection.channel !== incoming ||
             pending.peer.host !== peer.host ||
             pending.peer.port !== peer.port
         )
@@ -205,7 +206,7 @@ export class Rpc {
     ): Promise<void> {
         const connection =
             this.#target instanceof Connection
-                ? this.#target
+                ? this.#target.retain(incoming)
                 : incoming === undefined
                     ? this.#target.connect(peer.host, peer.port, local)
                     : this.#target.connectIncoming(peer.host, peer.port, local, incoming);
@@ -227,7 +228,18 @@ export class Rpc {
         const controller = new AbortController();
         const key = activeKey(local, peer, packet.id);
         const afterReply: Array<() => Promise<void> | void> = [];
-        this.#active.set(key, controller);
+        let active = this.#active.get(incoming);
+        if (active === undefined) {
+            active = new Map();
+            this.#active.set(incoming, active);
+        }
+        active.set(key, controller);
+        const offClose = connection.onClose((error) => {
+            if (active.get(key) === controller) active.delete(key);
+            if (active.size === 0 && this.#active.get(incoming) === active)
+                this.#active.delete(incoming);
+            controller.abort(error);
+        });
         try {
             let message: Message | undefined;
             try {
@@ -257,11 +269,24 @@ export class Rpc {
                 ...(message === undefined ? {} : { message }),
             } satisfies RpcPacket);
         } finally {
-            this.#active.delete(key);
+            offClose();
+            if (active.get(key) === controller) active.delete(key);
+            if (active.size === 0 && this.#active.get(incoming) === active)
+                this.#active.delete(incoming);
             for (const action of afterReply)
                 queueMicrotask(() => void action());
         }
     }
+}
+
+function uncertainResult(cause?: Error): Error {
+    return createRemoteError({
+        code: TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+        ...(cause === undefined ? {} : { cause }),
+        message: "RPC result is uncertain: the connection closed before its reply. " +
+            "The remote operation may have completed; do not retry it automatically.",
+        retryable: false,
+    });
 }
 
 function activeKey(local: Address, peer: Address, id: string): string {
