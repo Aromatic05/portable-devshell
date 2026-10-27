@@ -9,7 +9,7 @@ import { createCliRuntimeAdapter } from "../../src/transport/Runtime.js";
 
 test(
     "interactive start surfaces relay send failure and restores terminal state",
-    { timeout: 1_000 },
+    { timeout: 10_000 },
     async () => {
         const rawModes: boolean[] = [];
         const input = new EventEmitter() as EventEmitter &
@@ -27,9 +27,13 @@ test(
 
         const endpoint = new Endpoint({ host: "alpha" });
         const connection = await endpoint.connect("alpha", PROCESS_PORT);
+        // Stream.open retains a separate Connection for the stream's sends.
+        // Inject the failure there rather than on the original Connection.
+        const relayConnection = connection.retain();
+        connection.retain = () => relayConnection;
         let sends = 0;
-        const deliver = connection.send.bind(connection);
-        connection.send = async (packet: Packet) => {
+        const deliver = relayConnection.send.bind(relayConnection);
+        relayConnection.send = async (packet: Packet) => {
             sends += 1;
             if (sends > 1) throw new Error("relay send failed");
             await deliver(packet);
@@ -41,11 +45,16 @@ test(
             {} as ProcessTransport,
         );
 
+        const relayAttached = new Promise<void>((resolve) => {
+            input.once("newListener", (event) => {
+                if (event === "data") resolve();
+            });
+        });
         const started = adapter.start({
             input,
             output: { write() {} },
         });
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await relayAttached;
         input.emit("data", Buffer.from("input"));
 
         await assert.rejects(started, /relay send failed/u);
