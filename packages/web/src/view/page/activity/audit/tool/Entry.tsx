@@ -42,7 +42,12 @@ export function ToolCallEntry({
     onRefresh(): Promise<void>;
 }) {
     const [open, setOpen] = useState(initiallyOpen);
-    const [detail, setDetail] = useState<{ source: ToolCallRecord; value: ToolCallRecord }>();
+    const [detail, setDetail] = useState<{ source: string; value: ToolCallRecord }>();
+    // Previews are recreated by unrelated audit events. Compare their scalar
+    // values, while payloads remain separate from this small cache identity.
+    const detailKey = JSON.stringify({ ...call, input: undefined, output: undefined });
+    const { instance, callId } = call;
+    const hasPayload = call.input !== undefined || call.output !== undefined;
     const detailEpoch = useRef(0);
     const [loading, setLoading] = useState(false);
     const [loadFailure, setLoadFailure] = useState<string>();
@@ -57,11 +62,11 @@ export function ToolCallEntry({
         setDetail(undefined);
         setLoadFailure(undefined);
         setLoading(false);
-        if (!open || call.input !== undefined || call.output !== undefined) return;
+        if (!open || hasPayload) return;
         setLoading(true);
         void loadDetail.current().then((next) => {
             if (epoch !== detailEpoch.current) return;
-            if (next?.instance === call.instance && next.callId === call.callId) setDetail({ source: call, value: next });
+            if (next?.instance === instance && next.callId === callId) setDetail({ source: detailKey, value: next });
             setLoading(false);
         }, (error: unknown) => {
             if (epoch !== detailEpoch.current) return;
@@ -69,8 +74,8 @@ export function ToolCallEntry({
             setLoading(false);
         });
         return () => { detailEpoch.current += 1; };
-    }, [call, open, detailRetry]);
-    const currentDetail = detail?.source === call ? detail.value : undefined;
+    }, [detailKey, instance, callId, hasPayload, open, detailRetry]);
+    const currentDetail = detail?.source === detailKey ? detail.value : undefined;
     const visibleCall = {
         ...call,
         input: call.input === undefined ? currentDetail?.input : call.input,
