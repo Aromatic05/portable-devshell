@@ -26,7 +26,7 @@ const BINARY_CHUNK_SIZE = 64 * 1024;
 
 export class Stream {
     readonly #target: Connection | Port;
-    readonly #streams = new Map<string, MessageStream>();
+    readonly #streams = new Map<Channel | undefined, Map<string, MessageStream>>();
     readonly #openListeners = new Set<
         (
             stream: MessageStream,
@@ -96,7 +96,8 @@ export class Stream {
 
     close(): void {
         this.#unsubscribe();
-        for (const stream of this.#streams.values()) stream.dispose();
+        for (const streams of this.#streams.values())
+            for (const stream of streams.values()) stream.dispose();
         this.#streams.clear();
         this.#openListeners.clear();
     }
@@ -105,8 +106,8 @@ export class Stream {
         const failure: StreamError = {
             message: error?.message ?? "Stream connection closed.",
         };
-        for (const stream of [...this.#streams.values()])
-            stream.acceptCancel(failure);
+        for (const streams of [...this.#streams.values()])
+            for (const stream of [...streams.values()]) stream.acceptCancel(failure);
         this.#streams.clear();
     }
 
@@ -123,13 +124,15 @@ export class Stream {
             const connection =
                 this.#target instanceof Connection
                     ? this.#target
-                    : this.#target.connect(peer.host, peer.port, local);
-            const stream = this.#create(packet.id, peer, local, connection);
+                    : incoming === undefined
+                        ? this.#target.connect(peer.host, peer.port, local)
+                        : this.#target.connectIncoming(peer.host, peer.port, local, incoming);
+            const stream = this.#create(packet.id, peer, local, connection, incoming);
             for (const listener of this.#openListeners)
                 await listener(stream, packet.name, packet.message, peer, local, incoming);
             return;
         }
-        const stream = this.#streams.get(key);
+        const stream = this.#streams.get(incoming)?.get(key);
         if (stream === undefined) return;
         if (packet.type === "data") {
             await stream.acceptData(packet.seq, packet.message, packet.bytes);
@@ -139,7 +142,6 @@ export class Stream {
             stream.acceptFin();
             return;
         }
-        this.#streams.delete(key);
         if (packet.type === "cancel") stream.acceptCancel(packet.error);
         else stream.acceptClose(packet.message);
     }
@@ -149,12 +151,26 @@ export class Stream {
         peer: Address,
         local: Address,
         connection: Connection,
+        incoming?: Channel,
     ): MessageStream {
         const key = streamKey(local, peer, id);
-        const stream = new MessageStream(id, connection, () =>
-            this.#streams.delete(key),
-        );
-        this.#streams.set(key, stream);
+        let streams = this.#streams.get(incoming);
+        if (streams === undefined) {
+            streams = new Map();
+            this.#streams.set(incoming, streams);
+        }
+        let offClose: (() => void) | undefined;
+        const stream = new MessageStream(id, connection, () => {
+            offClose?.();
+            if (streams.get(key) !== stream) return;
+            streams.delete(key);
+            if (streams.size === 0) this.#streams.delete(incoming);
+        });
+        streams.set(key, stream);
+        if (this.#target instanceof Port)
+            offClose = connection.onClose((error) => stream.acceptCancel({
+                message: error?.message ?? "Stream connection closed.",
+            }));
         return stream;
     }
 }
