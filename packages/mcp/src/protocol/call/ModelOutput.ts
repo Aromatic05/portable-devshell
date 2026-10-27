@@ -151,7 +151,10 @@ function projectFileRead(value: RecordValue, budget: number, content: CallToolRe
                 };
             }
             const read = shortenNumberedLines(file.content, perFile, /^\d+:/u);
-            if (!read.omitted) return file;
+            // Numbered lines are indivisible: an empty preview would offer
+            // the same selector forever. Let the existing soft-budget fallback
+            // retain this file when even its first line cannot fit.
+            if (!read.omitted || read.text.length === 0) return file;
             return {
                 ...file,
                 content: read.text,
@@ -165,20 +168,8 @@ function projectFileRead(value: RecordValue, budget: number, content: CallToolRe
         if (resultBytes(projected, content) <= budget) return projected;
         perFile = Math.max(0, Math.floor(perFile * 0.65));
     }
-    // The original request still contains all file paths; retain the file
-    // identities and offer selectors rather than omitting an unseen file.
-    return {
-        ...value,
-        files: files.map((file) => typeof file.content === "string"
-            ? {
-                ...file,
-                content: "",
-                truncated: true,
-                ...(file.view === "outline" ? {}
-                    : { nextSelector: file.nextSelector ?? "1" }),
-            }
-            : file),
-    };
+    // Prefer the original evidence over an empty page that cannot advance.
+    return value;
 }
 
 function projectFileGrep(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {

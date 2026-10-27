@@ -296,3 +296,26 @@ test("模型编辑全失败摘要显式计算被省略的失败，纯成功不�
         assert.equal(operations[0]?.diff, "中".repeat(1_000));
     }
 });
+
+test("file_read returns an indivisible 20 KB line instead of an empty self-continuation", () => {
+    for (const line of [1, 73]) {
+        const original = { files: [{ path: "fixture.json", view: "content",
+            content: `${line}:${"x".repeat(20_000)}`, truncated: false }] };
+        const projected = projectMcpModelOutput("file_read", original);
+        const file = (data(projected).files as Array<Record<string, JsonValue>>)[0]!;
+        assert.equal(file.content, original.files[0]!.content);
+        assert.equal(file.nextSelector, undefined);
+        assert.equal(projectMcpModelOutput("file_read", original, {
+            byTool: { file_read: 10_000 },
+        }), original);
+    }
+});
+
+test("file_read keeps worker continuation when the next indivisible line exceeds the budget", () => {
+    const original = { files: [{ path: "fixture.json", view: "content",
+        content: `73:${"界".repeat(8_000)}`, truncated: true, nextSelector: "74" }] };
+    const projected = projectMcpModelOutput("file_read", original);
+    const file = (data(projected).files as Array<Record<string, JsonValue>>)[0]!;
+    assert.equal(file.content, original.files[0]!.content);
+    assert.equal(file.nextSelector, "74");
+});
