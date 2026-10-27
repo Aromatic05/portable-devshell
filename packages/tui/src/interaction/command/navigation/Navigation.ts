@@ -39,6 +39,7 @@ export interface TuiCommandDispatcherNavigationOptions {
 }
 
 export class TuiCommandDispatcherNavigation {
+    readonly #pendingMessages = new Set<string>();
     readonly #focus: TuiCommandDispatcherFocus;
     readonly #focusManager: TuiFocusManager;
     readonly #onContextMessage?: TuiCommandDispatcherNavigationOptions["onContextMessage"];
@@ -475,29 +476,34 @@ export class TuiCommandDispatcherNavigation {
             );
             return false;
         }
-        try {
-            await this.#onContextMessage(target.instance, target.ctxId, text);
-            this.#store.setFormDraft(
-                contextMessageDraftKey(target.instance, target.ctxId),
-                "",
-                false,
-            );
-            this.#store.setEditor({
-                cursor: 0,
-                editing: true,
-                key: contextMessageDraftKey(target.instance, target.ctxId),
-                kind: "comment",
-            });
-            this.#store.setScreenStatus(target.page, "Comment queued.");
-            this.#store.setFocusScope("contextMessage");
-            return true;
-        } catch (error) {
-            this.#store.setScreenStatus(
-                target.page,
-                `Comment failed: ${readErrorMessage(error)}`,
-            );
-            return false;
-        }
+        const key = contextMessageDraftKey(target.instance, target.ctxId);
+        if (this.#pendingMessages.has(key)) return false;
+        const draft = state.ui.formDrafts[key];
+        this.#pendingMessages.add(key);
+        this.#store.setScreenStatus(target.page, "Queuing comment…");
+        // The local input queue must not wait for a remote acknowledgement.
+        void (async () => {
+            try {
+                await this.#onContextMessage!(target.instance, target.ctxId, text);
+                const current = this.#store.getState();
+                if (current.ui.formDrafts[key] === draft) {
+                    this.#store.setFormDraft(key, "", false);
+                    const editor = current.interaction.editor;
+                    if (editor?.key === key) {
+                        this.#store.setEditor({ ...editor, cursor: 0 });
+                    }
+                }
+                this.#store.setScreenStatus(target.page, "Comment queued.");
+            } catch (error) {
+                this.#store.setScreenStatus(
+                    target.page,
+                    `Comment failed: ${readErrorMessage(error)}`,
+                );
+            } finally {
+                this.#pendingMessages.delete(key);
+            }
+        })();
+        return true;
     }
 
     #contextMessageTarget():

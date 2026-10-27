@@ -205,3 +205,38 @@ function asRecord(
         ? value
         : undefined;
 }
+
+// Only these records are merged field by field by the config patch contract.
+export function changedTuiConfigFields(
+    previous: Record<string, JsonValue>,
+    next: Record<string, JsonValue>,
+    kind: "instance" | "mcp" | "web",
+): Record<string, JsonValue> {
+    const before = kind === "instance"
+        ? normalizeTuiInstanceEditorRecord(previous)
+        : coerceTuiEditorRecord(previous);
+    const after = kind === "instance"
+        ? normalizeTuiInstanceEditorRecord(next)
+        : coerceTuiEditorRecord(next);
+    const merged = kind === "instance"
+        ? new Set(["mcp", "security", "workspace", "extensions"])
+        : new Set(kind === "mcp" ? ["oauth2"] : []);
+    const patch: Record<string, JsonValue> = {};
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (semanticJson(before[key] ?? null) === semanticJson(after[key] ?? null)) continue;
+        const oldRecord = asRecord(before[key]);
+        const newRecord = asRecord(after[key]);
+        patch[key] = merged.has(key) && oldRecord !== undefined && newRecord !== undefined
+            ? changedTuiConfigFields(oldRecord, newRecord, "web")
+            : after[key] ?? null;
+    }
+    // Auth is a single replacement unit; credentials alone are not an auth patch.
+    if (["auth", "token", "oauth2"].some((key) => Object.hasOwn(patch, key)) && after.auth !== undefined) {
+        for (const key of ["auth", "token", "oauth2"]) {
+            delete patch[key];
+            if (after[key] !== undefined) patch[key] = after[key]!;
+        }
+    }
+    if (after.approval === "tui") delete patch.token;
+    return patch;
+}

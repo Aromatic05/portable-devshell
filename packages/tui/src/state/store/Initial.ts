@@ -16,6 +16,7 @@ export function createInitialTuiAppState(): TuiAppState {
             dirtyForms: {},
             expandedBoxes: {},
             formDrafts: {},
+            formDraftBaselines: {},
             mainFocusId: undefined,
             messageCollapsedWorkspaces: {},
             messageScope: "active",

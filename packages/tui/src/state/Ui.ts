@@ -60,6 +60,7 @@ export type TuiUiState = {
     scrollOffsets: Record<string, number>;
     searchQueries: Record<string, string>;
     formDrafts: Record<string, unknown>;
+    formDraftBaselines: Record<string, unknown>;
     dirtyForms: Record<string, boolean>;
     controlRestartRequired: boolean;
 };

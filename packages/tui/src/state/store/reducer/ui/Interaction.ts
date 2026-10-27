@@ -148,6 +148,12 @@ export function reduceTuiStoreReducerInteraction(
                         ...state.ui.formDrafts,
                         [action.key]: action.value,
                     },
+                    formDraftBaselines: {
+                        ...state.ui.formDraftBaselines,
+                        [action.key]: action.dirty
+                            ? state.ui.formDraftBaselines[action.key] ?? {}
+                            : action.value,
+                    },
                 },
             };
         case "formDraft.clear": {
@@ -159,6 +165,8 @@ export function reduceTuiStoreReducerInteraction(
             }
             const { [action.key]: _removedDraft, ...formDrafts } =
                 state.ui.formDrafts;
+            const { [action.key]: _removedBaseline, ...formDraftBaselines } =
+                state.ui.formDraftBaselines;
             const { [action.key]: _removedDirty, ...dirtyForms } =
                 state.ui.dirtyForms;
             return {
@@ -167,6 +175,7 @@ export function reduceTuiStoreReducerInteraction(
                     ...state.ui,
                     dirtyForms,
                     formDrafts,
+                    formDraftBaselines,
                 },
             };
         }

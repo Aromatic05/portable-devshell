@@ -24,6 +24,7 @@ import {
 } from "../../../state/editor/Draft.js";
 import {
     coerceTuiEditorRecord,
+    changedTuiConfigFields,
     parseTuiConfigDraft,
     parseTuiInstanceDraft,
     parseTuiInstancePatch,
@@ -37,6 +38,12 @@ import type {
     TuiEditorState,
     TuiUiIntent,
 } from "../../../state/Interaction.js";
+
+import {
+    nextTuiGraphemeCursor,
+    normalizeTuiGraphemeCursor,
+    previousTuiGraphemeCursor,
+} from "../../selection/Model.js";
 
 interface CommandEditorOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
@@ -251,17 +258,18 @@ export class TuiCommandDispatcherEditor {
         const draft = this.#editorDraft(target.key, target.fallback);
         const current = readPath(draft, target.path);
         const text = inputText(current);
-        const cursor = Math.min(
-            Math.max(editor.cursor ?? text.length, 0),
-            text.length,
+        const cursor = normalizeTuiGraphemeCursor(
+            text,
+            editor.cursor ?? text.length,
         );
+        const previous = previousTuiGraphemeCursor(text, cursor);
         const next = backspace
-            ? `${text.slice(0, Math.max(0, cursor - 1))}${text.slice(cursor)}`
+            ? `${text.slice(0, previous)}${text.slice(cursor)}`
             : `${text.slice(0, cursor)}${input}${text.slice(cursor)}`;
         this.#setEditorDraft(target, setPath(draft, target.path, next));
         this.#store.setEditor({
             ...editor,
-            cursor: backspace ? Math.max(0, cursor - 1) : cursor + input.length,
+            cursor: backspace ? previous : normalizeTuiGraphemeCursor(next, cursor + input.length),
         });
         return true;
     }
@@ -321,16 +329,16 @@ export class TuiCommandDispatcherEditor {
                 target.path,
             ),
         );
-        const cursor = Math.min(
-            Math.max(editor.cursor ?? text.length, 0),
-            text.length,
+        const cursor = normalizeTuiGraphemeCursor(
+            text,
+            editor.cursor ?? text.length,
         );
         this.#store.setEditor({
             ...editor,
             cursor:
                 direction === "left"
-                    ? Math.max(0, cursor - 1)
-                    : Math.min(text.length, cursor + 1),
+                    ? previousTuiGraphemeCursor(text, cursor)
+                    : nextTuiGraphemeCursor(text, cursor),
         });
         return true;
     }
@@ -521,12 +529,30 @@ export class TuiCommandDispatcherEditor {
                     ? {
                           instance: {
                               instanceName: instance,
-                              patch: parseTuiInstancePatch(instanceDraft),
+                              patch: parseTuiInstancePatch(
+                                  changedTuiConfigFields(
+                                      asRecord(state.ui.formDraftBaselines[instanceKey!])!,
+                                      instanceDraft,
+                                      "instance",
+                                  ),
+                              ),
                           },
                       }
                     : {}),
-                ...(globalDirty ? { mcp: parseTuiMcpPatch(globalDraft) } : {}),
-                ...(webDirty ? { web: parseTuiWebPatch(webDraft) } : {}),
+                ...(globalDirty
+                    ? { mcp: parseTuiMcpPatch(changedTuiConfigFields(
+                          asRecord(state.ui.formDraftBaselines[globalKey])!,
+                          globalDraft,
+                          "mcp",
+                      )) }
+                    : {}),
+                ...(webDirty
+                    ? { web: parseTuiWebPatch(changedTuiConfigFields(
+                          asRecord(state.ui.formDraftBaselines[webKey])!,
+                          webDraft,
+                          "web",
+                      )) }
+                    : {}),
             };
             const applyResult =
                 instanceDirty || globalDirty || webDirty
@@ -755,11 +781,14 @@ export class TuiCommandDispatcherEditor {
         value: Record<string, JsonValue>,
     ): void {
         const editor = this.#store.getState().interaction.editor;
+        if (this.#store.getState().ui.formDrafts[target.key] === undefined) {
+            this.#store.setFormDraft(target.key, target.fallback, false);
+        }
         const dirty =
             editor?.kind === "create"
                 ? true
                 : !tuiEditorRecordsEqual(
-                      target.fallback,
+                      asRecord(this.#store.getState().ui.formDraftBaselines[target.key])!,
                       value,
                       target.key.startsWith("config:"),
                   );
