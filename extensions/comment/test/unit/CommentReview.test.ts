@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { join } from "node:path";
+
+import { CommentService } from "../../src/comment/CommentService.ts";
+import { MessageStore } from "../../src/message/store/MessageStore.ts";
+import { createMemoryAutoHook } from "../../src/mailing/Hook.ts";
+import { databaseConnection } from "../helpers/Database.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 import {
     createCommentAdvice,
@@ -50,6 +57,115 @@ function createPort(overrides: Partial<Ports> = {}): Ports {
     };
 }
 
+test("Context-scoped Extension work leaves queued Comments for the outer MCP result", async (t) => {
+    const root = await createTestTempDirectory("comment-nested-delivery");
+    const filePath = join(root, "message.sqlite3");
+    const store = new MessageStore({
+        filePath,
+        instanceName: "demo",
+        openDatabase: () => databaseConnection(filePath),
+    });
+    t.after(() => store.close());
+    const events: string[] = [];
+    const service = new CommentService({
+        store,
+        instanceName: "demo",
+        appendEvent: async (type) => {
+            events.push(type);
+        },
+    });
+    const queued = await service.queue({
+        ctxId: base.value.context.ctxId,
+        text: "User constraint",
+    });
+    const delivery = createCommentDelivery({
+        consumePending: async (_instance, ctxId, callId) =>
+            await service.consumePending(ctxId, callId),
+    });
+    const auto = createMemoryAutoHook(
+        {
+            async ensureBound() {
+                const value = {
+                    ...base.value,
+                    kind: "result" as const,
+                    toolName: "file_read",
+                    context: {
+                        ...base.value.context,
+                        source: "extension" as const,
+                    },
+                    payload: { files: [] },
+                };
+                assert.deepEqual(
+                    await delivery(
+                        {
+                            callId: "internal-memory-read",
+                            direction: "outbound",
+                            value,
+                        },
+                        unusedInvocation,
+                    ),
+                    value,
+                );
+                return {
+                    name: "memory",
+                    directory: "/workspace/memory",
+                    mailbox: "/workspace/memory/mailbox.md",
+                };
+            },
+        },
+        (error) => {
+            throw error;
+        },
+    );
+    await auto(
+        {
+            ...base,
+            value: {
+                ...base.value,
+                context: { ...base.value.context, workspace: "/workspace" },
+            },
+        },
+        unusedInvocation,
+    );
+    assert.equal(
+        (await service.list(base.value.context.ctxId))[0]?.status,
+        "sent",
+    );
+    const result = {
+        ...base.value,
+        kind: "result" as const,
+        payload: { stdout: "ok" },
+    };
+    assert.deepEqual(
+        (
+            await delivery(
+                { ...base, direction: "outbound", value: result },
+                unusedInvocation,
+            )
+        ).payload,
+        { stdout: "ok", comment: [queued.text] },
+    );
+    assert.deepEqual(
+        (await service.list(base.value.context.ctxId)).map(
+            ({ id, callId, status }) => ({ id, callId, status }),
+        ),
+        [{ id: queued.id, callId: base.callId, status: "delivered" }],
+    );
+    assert.equal(
+        events.filter((type) => type === "context.message.delivered").length,
+        1,
+    );
+    assert.deepEqual(
+        (
+            await delivery(
+                { ...base, direction: "outbound", value: result },
+                unusedInvocation,
+            )
+        ).payload,
+        result.payload,
+    );
+});
+
 test("Comment toolcall gate applies model control only to inbound MCP calls with a Context", async () => {
     const calls: string[] = [];
     const gate = createCommentToolCallGate(
@@ -97,7 +213,6 @@ test("Comment toolcall gate applies model control only to inbound MCP calls with
     );
     assert.deepEqual(calls, ["review:bash_run"]);
 });
-
 
 test("Comment delivery hook writes the queued Comment and the advice hook appends hints independently", async () => {
     const delivery = createCommentDelivery(

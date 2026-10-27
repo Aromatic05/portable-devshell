@@ -540,6 +540,10 @@ export function createCommentDelivery(
         if (
             input.direction !== "outbound" ||
             input.value.kind !== "result" ||
+            // Context-scoped Extension work (including automatic Memory
+            // binding) returns to the Extension, not the Context's caller.
+            // Leave its queued Comments for the caller's own tool result.
+            input.value.context.source === "extension" ||
             input.value.context.ctxId === undefined
         ) {
             return input.value;
