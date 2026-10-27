@@ -284,10 +284,10 @@ test("production React MCP App uses private Live HTTP state and dispatches appro
     const app = page.frameLocator("#workspace");
     const interaction = page.frameLocator("#interaction");
     await interaction.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("An approval is pending in the conversation.", { exact: true })
+    await app.getByText("An approval is awaiting your decision.", { exact: true })
         .waitFor({ state: "visible" });
     assert.equal(await page.evaluate("window.__initialized"), 2);
-    assert.equal(await app.getByRole("button", { name: "Approve", exact: true }).count(), 0);
+    assert.equal(await app.getByRole("button", { name: "Approve", exact: true }).count(), 1);
     assert.equal(fixture.requests.some((request) =>
         request.path.includes("/snapshot?ctxId=ctx-browser") &&
         request.authorization === "Bearer browser-private-capability-00001" &&
