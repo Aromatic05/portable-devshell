@@ -12,6 +12,8 @@ use crate::instance::storage::ensure_dir;
 use crate::tool::{ToolCall, ToolCommandEnvironment, ToolCommandEnvironmentProvider};
 use crate::transport::endpoint::channel::EndpointPaths;
 
+pub const WORKER_TOOL_ENV: &str = "DEVSHELL_WORKER_TOOL";
+
 pub const BROKER_SOCKET_ENV: &str = "DEVSHELL_MODEL_BROKER_SOCKET";
 pub const CTX_ID_ENV: &str = "DEVSHELL_MODEL_CTX_ID";
 pub const PARENT_CALL_ID_ENV: &str = "DEVSHELL_MODEL_PARENT_CALL_ID";
@@ -48,7 +50,10 @@ impl ModelDevshellShim {
         requested_path: Option<&str>,
     ) -> Option<ToolCommandEnvironment> {
         if call.source.as_deref() != Some("mcp") {
-            return None;
+            return Some(ToolCommandEnvironment::new(
+                vec![(WORKER_TOOL_ENV, "1".to_string())],
+                Vec::new(),
+            ));
         }
         let inherited = requested_path
             .map(ToOwned::to_owned)
@@ -91,6 +96,7 @@ fn model_command_environment(
     workspace: String,
 ) -> ToolCommandEnvironment {
     let mut values = vec![
+        (WORKER_TOOL_ENV, "1".to_string()),
         (BROKER_SOCKET_ENV, broker_socket),
         (CTX_ID_ENV, ctx_id),
         (PARENT_CALL_ID_ENV, parent_call_id),
@@ -316,6 +322,54 @@ mod tests {
         BROKER_SOCKET_ENV, CTX_ID_ENV, PARENT_CALL_ID_ENV, TASK_ID_ENV, WORKSPACE_ENV,
         model_command_environment,
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_and_mcp_worker_shells_reject_installer_before_any_work() {
+        use crate::instance::sandbox::policy::DisabledSecurityPolicy;
+        use crate::tool::{
+            ToolCall, ToolCancellation, ToolProcessGuard, ToolProcessRegistry, ToolProgressEmitter,
+        };
+        use std::sync::Arc;
+        struct NoProcesses;
+        impl ToolProcessRegistry for NoProcesses {
+            fn register(self: Arc<Self>, _: i32) -> Result<Box<dyn ToolProcessGuard>, String> {
+                unreachable!()
+            }
+        }
+        let root = crate::testing::temp_dir();
+        let shim = super::ModelDevshellShim {
+            bin_dir: root.path().join("bin"),
+            socket_file: root.path().join("worker.sock"),
+        };
+        for source in [None, Some("cli"), Some("mcp")] {
+            let call = ToolCall {
+                workspace: root.path().to_path_buf(),
+                params: serde_json::Value::Null,
+                ctx_id: "ctx".into(),
+                operation_id: "call".into(),
+                source: source.map(str::to_string),
+                policy: Arc::new(DisabledSecurityPolicy),
+                process_registry: Arc::new(NoProcesses),
+                cancellation: ToolCancellation::default(),
+                progress: ToolProgressEmitter::new(|_| {}),
+            };
+            let environment = shim.environment(&call, None, None).unwrap();
+            let mut env = BTreeMap::from([(super::WORKER_TOOL_ENV.to_string(), None)]);
+            environment.inject(&mut env);
+            assert_eq!(env[super::WORKER_TOOL_ENV].as_deref(), Some("1"));
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(include_str!("../../../../../../scripts/install-release.sh"))
+                .env_clear()
+                .envs(environment.pairs())
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("独立终端或 SSH"));
+            assert!(output.stdout.is_empty());
+        }
+    }
 
     #[test]
     fn authoritative_model_environment_overrides_caller_values() {

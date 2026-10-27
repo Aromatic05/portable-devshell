@@ -29,6 +29,25 @@ const allTargets = [
 ];
 
 test(
+    "Unix installer rejects CLI Worker marker without MCP model context",
+    { skip: process.platform === "win32" },
+    () => {
+        const env = {
+            ...process.env,
+            DEVSHELL_WORKER_TOOL: "1",
+            PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-worker-tool-release",
+        };
+        delete env.DEVSHELL_MODEL_CTX_ID;
+        delete env.DEVSHELL_MODEL_PARENT_CALL_ID;
+        const result = runInstallerRaw(env, false);
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /不支持从 DevShell bash_run\/tmux_run 自升级/u);
+        assert.match(result.stderr, /独立终端或 SSH/u);
+        assert.equal(result.stdout, "");
+    },
+);
+
+test(
     "Unix installer rejects Worker-owned self-upgrades before touching release assets",
     { skip: process.platform === "win32" },
     () => {
