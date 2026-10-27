@@ -7,7 +7,7 @@ $ProgressPreference = "SilentlyContinue"
 
 # The executing Worker owns shell processes and will terminate the installer
 # when self-upgrade retires that Worker.
-if ($env:DEVSHELL_MODEL_CTX_ID -or $env:DEVSHELL_MODEL_PARENT_CALL_ID) {
+if ($env:DEVSHELL_WORKER_TOOL -or $env:DEVSHELL_MODEL_CTX_ID -or $env:DEVSHELL_MODEL_PARENT_CALL_ID) {
     throw "不支持从 DevShell bash_run/tmux_run 自升级：停止 Worker 时会终止安装器。请从独立终端或 SSH 会话执行相同的升级命令。"
 }
 $script:InstallStep = 0

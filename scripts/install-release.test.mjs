@@ -28,6 +28,30 @@ const allTargets = [
     "windows-arm64",
 ];
 
+test("Windows installer checks Worker ownership before any install work", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
+    const guard = source.indexOf("if ($env:DEVSHELL_WORKER_TOOL -or $env:DEVSHELL_MODEL_CTX_ID -or $env:DEVSHELL_MODEL_PARENT_CALL_ID)");
+    assert.ok(guard >= 0 && guard < source.indexOf("$script:InstallStep = 0"));
+});
+
+test(
+    "Windows installer rejects CLI Worker marker without MCP model context",
+    { skip: process.platform !== "win32" },
+    () => {
+        const env = {
+            ...process.env,
+            DEVSHELL_WORKER_TOOL: "1",
+            PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-worker-tool-release",
+        };
+        delete env.DEVSHELL_MODEL_CTX_ID;
+        delete env.DEVSHELL_MODEL_PARENT_CALL_ID;
+        const result = runInstallerRaw(env, true);
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /bash_run\/tmux_run/u);
+        assert.doesNotMatch(result.stdout, /\[1\/6\]/u);
+    },
+);
+
 test(
     "Unix installer rejects CLI Worker marker without MCP model context",
     { skip: process.platform === "win32" },
