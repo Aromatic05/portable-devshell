@@ -1,5 +1,3 @@
-import { createInterface } from "node:readline/promises";
-
 import {
     createRemoteError,
     controlErrorCodes,
@@ -11,6 +9,7 @@ import {
 
 import type { CliDispatchContext } from "./Dispatch.js";
 import type { CliParsedCommand } from "./Parse.js";
+import { readCommandLine } from "./Input.js";
 
 const defaultInitialInstanceName = "local-pc";
 
@@ -172,46 +171,38 @@ function renderInitResult(result: CliInitResult): string {
 }
 
 async function offerRemoteAccess(context: CliDispatchContext, endpointPath: string): Promise<void> {
-    const readline = createInterface({ input: context.stdin });
-    const lines = readline[Symbol.asyncIterator]();
     async function readLine(prompt: string): Promise<string> {
         context.stdout.write(prompt);
-        const next = await lines.next();
-        return next.done ? "" : next.value.trim();
+        return (await readCommandLine(context.stdin)).trim();
     }
-    let answer: string;
-    try {
-        answer = (await readLine([
-            "MCP access", "1. Already public", "2. Cloudflare Tunnel",
-            "3. SSH reverse", "4. Configure later", "selection [4]: ",
-        ].join("\n"))).toLowerCase();
-        if (answer === "1" || answer === "public") {
-            while (true) {
-                const value = await readLine("Public base URL (e.g. https://devshell.example, without the Instance MCP path; blank to skip): ");
-                if (value.length === 0) return;
-                let url: URL;
-                try {
-                    url = new URL(value);
-                } catch {
-                    context.stdout.write("Enter an absolute HTTP(S) base URL.\n");
-                    continue;
-                }
-                if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-                    context.stdout.write("Use an HTTP(S) base URL without credentials, query or fragment.\n");
-                    continue;
-                }
-                const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
-                if (url.pathname.replace(/\/+$/u, "").endsWith("/mcp") || base.endsWith(endpointPath)) {
-                    context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
-                    continue;
-                }
-                await context.clients.config.update({ mcp: { publicBaseUrl: base } });
-                context.stdout.write(`MCP public base URL configured: ${base}\nMCP endpoint: ${joinEndpoint(base, endpointPath)}\n`);
-                return;
+    const answer = (await readLine([
+        "MCP access", "1. Already public", "2. Cloudflare Tunnel",
+        "3. SSH reverse", "4. Configure later", "selection [4]: ",
+    ].join("\n"))).toLowerCase();
+    if (answer === "1" || answer === "public") {
+        while (true) {
+            const value = await readLine("Public base URL (e.g. https://devshell.example, without the Instance MCP path; blank to skip): ");
+            if (value.length === 0) return;
+            let url: URL;
+            try {
+                url = new URL(value);
+            } catch {
+                context.stdout.write("Enter an absolute HTTP(S) base URL.\n");
+                continue;
             }
+            if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+                context.stdout.write("Use an HTTP(S) base URL without credentials, query or fragment.\n");
+                continue;
+            }
+            const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
+            if (url.pathname.replace(/\/+$/u, "").endsWith("/mcp") || base.endsWith(endpointPath)) {
+                context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
+                continue;
+            }
+            await context.clients.config.update({ mcp: { publicBaseUrl: base } });
+            context.stdout.write(`MCP public base URL configured: ${base}\nMCP endpoint: ${joinEndpoint(base, endpointPath)}\n`);
+            return;
         }
-    } finally {
-        readline.close();
     }
     if (answer === "2" || answer === "cloudflare")
         await runAccessCommand(context, ["cloudflare"]);

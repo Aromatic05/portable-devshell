@@ -117,11 +117,14 @@ function attachInput(
     };
     const onEnd = () => send("eof");
     input.on("data", onData);
-    input.once("end", onEnd);
+    if ("readableEnded" in input && input.readableEnded === true) onEnd();
+    else input.once("end", onEnd);
+    input.resume();
     return {
         cleanup() {
             input.off("data", onData);
             input.off("end", onEnd);
+            input.pause();
             restoreTerminal();
         },
         failure,
