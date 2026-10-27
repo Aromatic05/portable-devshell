@@ -1,6 +1,6 @@
 # portable-devshell 文档
 
-这套文档以当前开发源码 `1.0.0-beta.3` 的运行模型为基线，**尚未提升 RC**。Beta 早期缺陷报告、测试矩阵和历史 Release Note 保留原始版本与日期，不能代替当前 HEAD 的验收结论。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
+这套文档以 `1.0.0-rc.1` 候选版本的运行模型为基线，发行后的开发分支将继续推进版本。Beta 早期缺陷报告、测试矩阵和历史 Release Note 保留原始版本与日期，不能代替当前 HEAD 的验收结论。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
 
 ## 从这里开始
 
@@ -54,4 +54,4 @@
 4. **长任务与长 HTTP 请求分离。** `tmux_run(wait=block)` 可以同步等待一段时间，超过产品同步窗口后由 durable Wait/Workspace 接管，但 task 本身继续运行。
 5. **旧名称不代表现行协议支持。** MCP endpoint 拒绝 legacy 协议；少量隐藏 stale-recipient 转换不重新进入 catalog。当前 catalog 包含 Worker、Control primitive 与 Extension `mcp.tools`，shell command ACL 是另一条边界。
 6. **fresh 默认与旧配置默认分开。** fresh init 使用 OAuth token 审批和 `openai-session`；通用 client 应显式配置 `explicit`。
-7. **安全目标与现状分开。** Execute、发布与 Audit 不是统一 Commit；执行后 adapter retry 历史缺陷已有回归，但 Secret 在 inbound Rewrite 后可能进入 Audit 的风险仍需明确处理，见 [安全说明](operations/security.md)和 [RC 前收口状态](development/rc-preflight.md)。
+7. **信任边界按实际部署定义。** Execute、发布与 Audit 不是统一 Commit；Secret 在可信本地运行时和本地 Audit 中出现不自动构成泄漏。跨越本地可信边界的授权与传输仍需审查，见 [安全说明](operations/security.md)和 [RC 收口记录](development/rc-preflight.md)。

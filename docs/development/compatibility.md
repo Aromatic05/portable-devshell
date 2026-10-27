@@ -1,11 +1,11 @@
 # Version 与 Compatibility Lifecycle
 
-原始源码审计基线提交 `2287310a` 的产品版本为 **`1.0.0-beta.1`**；当前工作树的开发版本为 **`1.0.0-beta.3`**，尚未提升 RC。历史 `0.x.y` 中的 `y` 是同一开发世代的发布序号，不承担 SemVer patch 语义；`0.7.x` 是当时面向 1.0.0 的收敛阶段，不是当前开发版本。历史 release note 与 release interval 保持原有语境。
+原始源码审计基线提交 `2287310a` 的产品版本为 **`1.0.0-beta.1`**；`1.0.0-rc.1` 为首个 Release Candidate 候选版本；发布后开发分支会自动进入下一开发版本。历史 `0.x.y` 中的 `y` 是同一开发世代的发布序号，不承担 SemVer patch 语义；`0.7.x` 是当时面向 1.0.0 的收敛阶段，不是当前开发版本。历史 release note 与 release interval 保持原有语境。
 
 产品版本不能替代各 public contract 自己的版本。一个 DevShell release 同时依赖多个彼此独立的 compatibility surface：
 
 ```text
-DevShell release        1.0.0-beta.3
+DevShell release        1.0.0-rc.1
     Control Protocol    x.y.z
     Worker Protocol     x.y.z
     Frame Protocol      x.y.z
@@ -16,11 +16,11 @@ DevShell release        1.0.0-beta.3
 
 这些版本只在对应 contract 发生变化时推进，不随 DevShell release 同步 bump。
 
-### 当前实现（1.0.0-beta.3 开发版）
+### RC 候选实现（1.0.0-rc.1）
 
 | Surface | 当前 representation | 源码 owner |
 | --- | --- | --- |
-| DevShell release | `1.0.0-beta.3` | 根 `package.json` |
+| DevShell release | `1.0.0-rc.1` | 根 `package.json`（发布提交） |
 | Control Protocol | semantic range `1.0.0`–`1.0.0` | `shared/src/control/server/Model.ts` |
 | Worker Protocol | semantic range `1.0.0`–`1.0.0` | `shared/src/types/Worker.ts` / Rust RPC codec |
 | Frame Protocol | semantic range `1.0.0`–`1.0.0`；wire format v1 | `shared/src/transport/frame/Codec.ts` |

@@ -1,6 +1,6 @@
 # 系统架构
 
-这份文档以当前 `1.0.0-beta.3` 开发源码和运行时边界为基线，不保留已经被替换的早期方案；RC 尚未发布。
+这份文档以 `1.0.0-rc.1` 候选源码和运行时边界为基线，不保留已经被替换的早期方案；RC 发布状态以 GitHub Release 为准。
 
 ## 总体结构
 
@@ -296,7 +296,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 ## 设计原则
 
-当前 1.0.0-beta.3 开发架构可以归纳为：
+1.0.0-rc.1 候选架构可以归纳为：
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**
