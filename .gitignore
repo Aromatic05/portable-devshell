@@ -12,3 +12,5 @@ packages/core/assets/devshell-worker
 packages/core/assets/workers/
 release-assets/
 .testspace/
+
+var/
