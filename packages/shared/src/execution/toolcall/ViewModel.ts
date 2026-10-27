@@ -430,11 +430,13 @@ export class ToolCallViewModel {
     }
 
     async #readRefresh(instance: string, query: ToolCallQuery, existing: ToolCallRecord[]): Promise<ToolCallRecord[]> {
-        const known = new Set(existing.map((call) => call.callId));
+        // Active calls follow all persisted records and move on completion, so
+        // their IDs cannot establish a continuous persisted history window.
+        const known = new Set(existing.filter(isPersistedCall).map((call) => call.callId));
         const calls = await this.#transport(instance).listCalls(query);
         let page = calls;
-        // Page backwards until the new window meets the retained history.
-        while (known.size > 0 && page.length > 0 && !page.some((call) => known.has(call.callId))) {
+        // With only active history retained, read through the authoritative end.
+        while (existing.length > 0 && page.length > 0 && !page.some((call) => isPersistedCall(call) && known.has(call.callId))) {
             page = await this.#transport(instance).listCalls({ ...query, before: page[0]!.callId });
             calls.unshift(...page);
         }
@@ -554,6 +556,10 @@ export class ToolCallViewModel {
 
 function emptyState(): ToolCallViewModelState {
     return { instances: {} };
+}
+
+function isPersistedCall(call: ToolCallRecord): boolean {
+    return call.status !== "running" && call.status !== "queued";
 }
 
 function emptyInstanceState(): ToolCallInstanceState {
