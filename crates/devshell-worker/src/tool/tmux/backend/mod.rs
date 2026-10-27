@@ -110,6 +110,7 @@ struct WorkspaceRecord {
 }
 
 pub struct TmuxBackend {
+    instance_root: PathBuf,
     instance: String,
     workspace: PathBuf,
     socket: PathBuf,
@@ -163,6 +164,7 @@ impl TmuxBackend {
         }
         persist_workspace(&root, workspace)?;
         Ok(Self {
+            instance_root: instance_paths.instance_root.clone(),
             instance: runtime.instance.as_str().to_string(),
             workspace: workspace.to_path_buf(),
             socket,
@@ -203,15 +205,17 @@ impl TmuxBackend {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     return Err(ToolError::new(
                         "tmux.workspaceUnresolved",
-                        format!("{} has no original workspace identity; access tmux_manage from that original workspace once to register it before instance discovery", entry.path().display()),
+                        format!(
+                            "{} has no original workspace identity; access tmux_manage from that original workspace once to register it before instance discovery",
+                            entry.path().display()
+                        ),
                     ));
                 }
                 Err(error) => return Err(storage_error(error)),
             };
-            let record: WorkspaceRecord = serde_json::from_slice(&bytes)
-                .map_err(|error| {
-                    ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
-                })?;
+            let record: WorkspaceRecord = serde_json::from_slice(&bytes).map_err(|error| {
+                ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
+            })?;
             let expected_key = workspace_key(&instance_paths.instance_root, &record.workspace);
             if !record.workspace.is_absolute()
                 || entry.file_name().to_str() != Some(expected_key.as_str())
@@ -1185,6 +1189,10 @@ impl TmuxBackend {
         for (option, value) in [
             ("@devshell_worker_managed", "1".to_string()),
             ("@devshell_worker_instance", self.instance.clone()),
+            (
+                "@devshell_worker_instance_root",
+                self.instance_root.to_string_lossy().into_owned(),
+            ),
             ("@devshell_worker_session_id", session_id.to_string()),
             ("@devshell_worker_schema", TMUX_RUNTIME_SCHEMA.to_string()),
         ] {
@@ -1487,10 +1495,9 @@ fn persist_workspace(root: &Path, workspace: &Path) -> Result<(), ToolError> {
     let path = root.join("workspace.json");
     match fs::read(&path) {
         Ok(bytes) => {
-            let record: WorkspaceRecord = serde_json::from_slice(&bytes)
-                .map_err(|error| {
-                    ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
-                })?;
+            let record: WorkspaceRecord = serde_json::from_slice(&bytes).map_err(|error| {
+                ToolError::new("tmux.storageFailed", format!("{}: {error}", path.display()))
+            })?;
             if record.workspace != workspace {
                 return Err(ToolError::new(
                     "tmux.storageFailed",
@@ -1499,11 +1506,12 @@ fn persist_workspace(root: &Path, workspace: &Path) -> Result<(), ToolError> {
             }
             Ok(())
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            atomic_write_json(&path, &WorkspaceRecord {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => atomic_write_json(
+            &path,
+            &WorkspaceRecord {
                 workspace: workspace.to_path_buf(),
-            })
-        }
+            },
+        ),
         Err(error) => Err(storage_error(error)),
     }
 }

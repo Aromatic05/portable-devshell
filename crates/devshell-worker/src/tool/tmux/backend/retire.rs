@@ -18,7 +18,13 @@ pub fn retire_instance_runtime(
     #[cfg(windows)]
     let _ = socket_paths;
     #[cfg(unix)]
-    for socket in socket_candidates(socket_paths)? {
+    for socket in socket_candidates(instance_paths, socket_paths)? {
+        if socket == socket_paths.tmux_socket_file
+            && show_option(&socket, "@devshell_worker_instance_root", None).unwrap_or_default()
+                != instance_paths.instance_root.to_string_lossy()
+        {
+            continue;
+        }
         if !owned_session(&socket, instance, None)? {
             continue;
         }
@@ -81,34 +87,26 @@ fn retire_windows_workspaces(instance_paths: &InstancePaths, instance: &str) -> 
 }
 
 #[cfg(unix)]
-fn socket_candidates(socket_paths: &EndpointPaths) -> Result<Vec<PathBuf>, String> {
+fn socket_candidates(
+    instance_paths: &InstancePaths,
+    socket_paths: &EndpointPaths,
+) -> Result<Vec<PathBuf>, String> {
+    // Workspace socket names include instance_root, including the /tmp fallback.
+    // Never enumerate another HOME's sockets in a shared runtime directory or /tmp.
     let mut sockets = HashSet::new();
     sockets.insert(socket_paths.tmux_socket_file.clone());
-    collect_matching_sockets(&socket_paths.instance_runtime_dir, "tmux-", &mut sockets)?;
-    collect_matching_sockets(Path::new("/tmp"), "devshell-tmux-", &mut sockets)?;
-    Ok(sockets.into_iter().collect())
-}
-
-#[cfg(unix)]
-fn collect_matching_sockets(
-    directory: &Path,
-    prefix: &str,
-    sockets: &mut HashSet<PathBuf>,
-) -> Result<(), String> {
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("failed to read {}: {error}", directory.display())),
-    };
-    for entry in entries {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with(prefix) && name.ends_with(".sock") {
-            sockets.insert(entry.path());
-        }
+    for workspace in
+        super::TmuxBackend::discover_workspaces(instance_paths).map_err(|error| error.message)?
+    {
+        let key = super::workspace_key(&instance_paths.instance_root, &workspace);
+        sockets.insert(super::workspace_socket(
+            socket_paths,
+            &instance_paths.instance_root,
+            &workspace,
+            &key,
+        ));
     }
-    Ok(())
+    Ok(sockets.into_iter().collect())
 }
 
 fn owned_session(
@@ -222,4 +220,140 @@ fn remove_recorded_rings(root: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn retire_fixture_child() {
+        if std::env::var_os("DEVSHELL_RETIRE_FIXTURE").is_none() {
+            return;
+        }
+        let instance = crate::instance::InstanceName::parse("same-name").unwrap();
+        let paths = InstancePaths::resolve(&instance).unwrap();
+        let runtime = PathBuf::from(std::env::var_os("FIXTURE_RUNTIME").unwrap());
+        let sockets = EndpointPaths {
+            socket_file: runtime.join("worker.sock"),
+            transport_socket_file: runtime.join("transport.sock"),
+            tmux_socket_file: runtime.join("tmux.sock"),
+            instance_runtime_dir: runtime,
+        };
+        retire_instance_runtime(&paths, &sockets, instance.as_str()).unwrap();
+    }
+
+    #[test]
+    fn retirement_never_inspects_or_kills_another_home_with_the_same_name() {
+        for (long_path, legacy_owned) in [(false, false), (true, false), (false, true)] {
+            let root = crate::testing::temp_dir();
+            let home = root.path().join("home-a");
+            let instance_root = home.join("same-name");
+            let foreign_root = root.path().join("home-b/same-name");
+            let workspace = root.path().join("workspace");
+            let runtime = if long_path {
+                root.path().join("x".repeat(100))
+            } else {
+                root.path().join("run")
+            };
+            fs::create_dir_all(&runtime).unwrap();
+            let sockets = EndpointPaths {
+                socket_file: runtime.join("worker.sock"),
+                transport_socket_file: runtime.join("transport.sock"),
+                tmux_socket_file: runtime.join("tmux.sock"),
+                instance_runtime_dir: runtime.clone(),
+            };
+            let key = super::super::workspace_key(&instance_root, &workspace);
+            let foreign_key = super::super::workspace_key(&foreign_root, &workspace);
+            let own = super::super::workspace_socket(&sockets, &instance_root, &workspace, &key);
+            let foreign =
+                super::super::workspace_socket(&sockets, &foreign_root, &workspace, &foreign_key);
+            let record = instance_root.join("tmux/workspaces").join(&key);
+            fs::create_dir_all(&record).unwrap();
+            fs::write(
+                record.join("workspace.json"),
+                serde_json::to_vec(&serde_json::json!({"workspace": workspace})).unwrap(),
+            )
+            .unwrap();
+            fs::write(&own, "fixture").unwrap();
+            fs::write(&foreign, "fixture").unwrap();
+            let bin = root.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            let log = root.path().join("calls");
+            let fixture = bin.join("tmux");
+            fs::write(
+                &fixture,
+                r#"#!/bin/sh
+socket=$2
+shift 2
+printf '%s %s\n' "$socket" "$*" >> "$FIXTURE_LOG"
+case "$socket" in
+    "$FIXTURE_OWN"|"$FIXTURE_FOREIGN"|"$FIXTURE_LEGACY") ;;
+    *) exit 1 ;;
+esac
+case "$1" in
+    has-session|kill-session) exit 0 ;;
+    show-options)
+        case "$5" in
+            @devshell_worker_managed) echo 1 ;;
+            @devshell_worker_instance) echo same-name ;;
+            @devshell_worker_instance_root) printf '%s\n' "$FIXTURE_FOREIGN_ROOT" ;;
+        esac ;;
+esac
+"#,
+            )
+            .unwrap();
+            fs::set_permissions(&fixture, fs::Permissions::from_mode(0o700)).unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tool::tmux::backend::retire::tests::retire_fixture_child",
+                    "--nocapture",
+                ])
+                .env("DEVSHELL_RETIRE_FIXTURE", "1")
+                .env("PORTABLE_DEVSHELL_HOME", &home)
+                .env("FIXTURE_RUNTIME", &runtime)
+                .env("PATH", &bin)
+                .env("FIXTURE_LOG", &log)
+                .env("FIXTURE_OWN", &own)
+                .env("FIXTURE_FOREIGN", &foreign)
+                .env("FIXTURE_LEGACY", &sockets.tmux_socket_file)
+                .env(
+                    "FIXTURE_FOREIGN_ROOT",
+                    if legacy_owned {
+                        &instance_root
+                    } else {
+                        &foreign_root
+                    },
+                )
+                .output()
+                .unwrap();
+            // Remove only our inert /tmp fixture files, including on assertion failure.
+            fs::remove_file(&own).unwrap();
+            fs::remove_file(&foreign).unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let calls = fs::read_to_string(log).unwrap();
+            assert!(
+                calls.contains(&format!("{} kill-session", own.display())),
+                "{calls}"
+            );
+            assert!(
+                !calls.contains(&foreign.to_string_lossy().to_string()),
+                "another HOME was inspected: {calls}"
+            );
+            assert_eq!(
+                calls.contains(&format!(
+                    "{} kill-session",
+                    sockets.tmux_socket_file.display()
+                )),
+                legacy_owned,
+                "legacy socket must match the exact instance root: {calls}",
+            );
+        }
+    }
 }
