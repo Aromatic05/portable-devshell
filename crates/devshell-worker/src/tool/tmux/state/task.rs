@@ -48,6 +48,12 @@ pub struct TaskRecord {
     pub warnings: Vec<TmuxWarning>,
 }
 
+impl TaskRecord {
+    fn can_prune(&self) -> bool {
+        !self.state.is_active() && self.transcript.metadata_path.is_file()
+    }
+}
+
 #[derive(Default)]
 pub struct TaskRegistry {
     pub tasks: HashMap<String, TaskRecord>,
@@ -71,7 +77,7 @@ impl TaskRegistry {
             .tasks
             .iter()
             .filter_map(|(id, task)| {
-                (!task.state.is_active()
+                (task.can_prune()
                     && task
                         .finished_at_ms
                         .is_some_and(|finished| now.saturating_sub(finished) > TASK_RETENTION_MS))
@@ -85,14 +91,14 @@ impl TaskRegistry {
         while self
             .tasks
             .values()
-            .filter(|task| !task.state.is_active())
+            .filter(|task| task.can_prune())
             .count()
             > MAX_COMPLETED_TASKS
         {
             let Some(id) = self
                 .tasks
                 .iter()
-                .filter(|(_, task)| !task.state.is_active())
+                .filter(|(_, task)| task.can_prune())
                 .min_by_key(|(_, task)| task.finished_at_ms.unwrap_or(0))
                 .map(|(id, _)| id.clone())
             else {
@@ -248,14 +254,22 @@ mod tests {
         }
     }
 
-    fn task(id: &str, state: TaskState, finished_at_ms: Option<u128>) -> TaskRecord {
+    fn task(root: &std::path::Path, id: &str, state: TaskState, finished_at_ms: Option<u128>) -> TaskRecord {
+        let metadata_path = root.join(format!("{id}.json"));
+        if !state.is_active() {
+            let record = super::super::PersistedTaskRecord {
+                schema_version: 1, task_id: id.to_string(), pane_id: "pane-main".to_string(),
+                status: state.text(), finished_at_ms: finished_at_ms.unwrap(),
+            };
+            std::fs::write(&metadata_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        }
         TaskRecord {
             id: id.to_string(),
             pane_id: "pane-main".to_string(),
             pane_incarnation_id: "incarnation".to_string(),
             state,
             transcript: TranscriptCursor::new(
-                std::env::temp_dir().join(format!("{id}.log")),
+                metadata_path,
                 format!("/devshell-test-task-{id}"),
             ),
             finished_at_ms,
@@ -266,10 +280,11 @@ mod tests {
 
     #[test]
     fn completed_tasks_expire_but_active_tasks_are_retained() {
+        let root = crate::testing::temp_dir();
         let old = unix_time_millis().saturating_sub(TASK_RETENTION_MS + 1);
         let mut registry = TaskRegistry::default();
-        registry.insert(task("completed", TaskState::Exited(0), Some(old)));
-        registry.insert(task("running", TaskState::Running, Some(old)));
+        registry.insert(task(root.path(), "completed", TaskState::Exited(0), Some(old)));
+        registry.insert(task(root.path(), "running", TaskState::Running, Some(old)));
 
         assert!(!registry.tasks.contains_key("completed"));
         assert!(registry.tasks.contains_key("running"));
@@ -277,10 +292,12 @@ mod tests {
 
     #[test]
     fn completed_task_cap_evicts_the_oldest_finish_time() {
+        let root = crate::testing::temp_dir();
         let now = unix_time_millis();
         let mut registry = TaskRegistry::default();
         for index in 0..=64u128 {
             registry.insert(task(
+                root.path(),
                 &format!("task-{index:02}"),
                 TaskState::Exited(0),
                 Some(now.saturating_sub(index)),
@@ -294,7 +311,8 @@ mod tests {
 
     #[test]
     fn unknown_managed_pane_marks_running_task_lost() {
-        let mut task = task("task-a", TaskState::Running, None);
+        let root = crate::testing::temp_dir();
+        let mut task = task(root.path(), "task-a", TaskState::Running, None);
         let mut pane = pane();
         pane.managed_task_id = Some("task-a".to_string());
         pane.status = Some("unknown".to_string());
@@ -307,7 +325,8 @@ mod tests {
 
     #[test]
     fn completed_task_state_is_not_downgraded_by_later_unknown_pane_status() {
-        let mut task = task("task-a", TaskState::Exited(0), Some(unix_time_millis()));
+        let root = crate::testing::temp_dir();
+        let mut task = task(root.path(), "task-a", TaskState::Exited(0), Some(unix_time_millis()));
         let mut pane = pane();
         pane.managed_task_id = Some("task-a".to_string());
         pane.status = Some("unknown".to_string());
@@ -315,5 +334,21 @@ mod tests {
         refresh_task_record(&mut task, &pane);
 
         assert_eq!(task.state, TaskState::Exited(0));
+    }
+
+    #[test]
+    fn terminal_tasks_with_pending_writes_survive_retention_and_capacity_pruning() {
+        let root = crate::testing::temp_dir();
+        let old = unix_time_millis().saturating_sub(TASK_RETENTION_MS + 1);
+        let mut registry = TaskRegistry::default();
+        for index in 0..65 {
+            let mut pending = task(root.path(), &format!("pending-{index}"), TaskState::Running, None);
+            pending.state = TaskState::Lost;
+            pending.finished_at_ms = Some(old);
+            registry.insert(pending);
+        }
+        registry.prune();
+        assert_eq!(registry.tasks.len(), 65);
+        assert!(registry.tasks.values().all(|task| !task.transcript.metadata_path.exists()));
     }
 }

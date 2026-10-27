@@ -188,6 +188,14 @@ impl TmuxState {
                 let Some(state) = state.upgrade() else {
                     break;
                 };
+                if let Err(error) = state.persist_pending_terminal_records() {
+                    let _ = state.push_pending_warning(warning(
+                        None,
+                        "tmux.reaperFailed",
+                        &format!("tmux terminal record retry failed: {}", error.message),
+                    ));
+                    continue;
+                }
                 let has_lifecycle_work = state.tasks.lock().is_ok_and(|tasks| {
                     tasks.tasks.values().any(|task| {
                         task.state.is_active()
@@ -976,6 +984,9 @@ impl TmuxState {
                 .ok_or_else(|| task_expired(task_id))?
         };
         if !task.state.is_active() {
+            if !task.transcript.metadata_path.is_file() {
+                self.persist_task_record(task_id)?;
+            }
             if let Some(pane) = task.last_pane.as_ref() {
                 if let Err(error) = self.cleanup_task_pane(task_id, pane) {
                     self.push_task_cleanup_warning(task_id, &error)?;
@@ -1092,6 +1103,7 @@ impl TmuxState {
         workspace: &BackendWorkspace,
         _structure_guard: &MutexGuard<'_, ()>,
     ) -> Result<bool, ToolError> {
+        self.persist_pending_terminal_records()?;
         let mut cleanup = Vec::new();
         let mut finished = Vec::new();
         let mut lost = Vec::new();
@@ -1388,6 +1400,20 @@ impl TmuxState {
             );
         }
         call.emit_progress(value);
+    }
+
+    fn persist_pending_terminal_records(&self) -> Result<(), ToolError> {
+        // Terminal state changes precede the write. Its durable JSON is the
+        // authority for retry, including when no pane/runtime/session remains.
+        let pending = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?
+            .tasks.values().filter_map(|task| {
+                (!task.state.is_active() && !task.transcript.metadata_path.is_file())
+                    .then(|| task.id.clone())
+            }).collect::<Vec<_>>();
+        for task_id in pending {
+            self.persist_task_record(&task_id)?;
+        }
+        Ok(())
     }
 
     fn persist_task_record(&self, task_id: &str) -> Result<(), ToolError> {
@@ -1747,6 +1773,105 @@ mod tests {
         fn environment(&self, _: &crate::tool::ToolCall, _: Option<&str>, _: Option<&str>) -> Option<crate::tool::ToolCommandEnvironment> {
             None
         }
+    }
+
+    fn isolated_state(path: &std::path::Path) -> super::TmuxState {
+        use std::sync::Arc;
+        use crate::instance::storage::InstancePaths;
+        use crate::instance::runtime::{PlatformInfo, WorkerRuntimeContext};
+        use crate::instance::{InstanceName, sandbox::SecurityMode};
+        use crate::tool::tmux::backend::TmuxBackend;
+        use crate::transport::endpoint::channel::EndpointPaths;
+
+        let paths = InstancePaths {
+            instance_root: path.join("instance"), artifacts_dir: path.join("artifacts"),
+            config_file: path.join("config.toml"), logs_dir: path.join("logs"),
+            log_file: path.join("worker.log"), state_dir: path.join("state"),
+            pid_file: path.join("worker.pid"), lock_file: path.join("worker.lock"),
+            daemon_lock_file: path.join("daemon.lock"),
+        };
+        let endpoints = EndpointPaths {
+            instance_runtime_dir: path.join("runtime"), socket_file: path.join("worker.sock"),
+            transport_socket_file: path.join("transport.sock"),
+            #[cfg(unix)]
+            tmux_socket_file: path.join("tmux.sock"),
+        };
+        let runtime = WorkerRuntimeContext {
+            instance: InstanceName::parse("persistence-fixture").unwrap(),
+            platform: PlatformInfo { os: std::env::consts::OS, arch: std::env::consts::ARCH },
+            security_mode: SecurityMode::Disabled, worker_sha256: None,
+        };
+        let backend = TmuxBackend::new(&paths, &endpoints, &runtime, path).unwrap();
+        super::TmuxState::new(backend, Arc::new(EmptyEnvironment), crate::tool::file::FileToolState::new()).unwrap()
+    }
+
+    #[test]
+    fn terminal_persistence_failure_is_retried_before_runtime_cleanup_and_cold_restore() {
+        use crate::tool::tmux::backend::BackendWorkspace;
+        use crate::tool::tmux::state::task::{TaskRecord, TaskState};
+        use crate::tool::tmux::transcript::TranscriptCursor;
+
+        let root = crate::testing::temp_dir();
+        let state = isolated_state(root.path());
+        let task_id = "terminal-retry";
+        let record_path = state.backend.task_record_path(task_id);
+        let done_path = record_path.with_extension("done");
+        // A directory at the JSON destination deterministically fails atomic rename.
+        fs::create_dir(&record_path).unwrap();
+        fs::write(&done_path, b"done").unwrap();
+        state.tasks.lock().unwrap().insert(TaskRecord {
+            id: task_id.to_string(), pane_id: "gone-pane".to_string(),
+            pane_incarnation_id: "gone-incarnation".to_string(), state: TaskState::Running,
+            transcript: TranscriptCursor::new(record_path.clone(), state.backend.transcript_buffer_name(task_id)),
+            finished_at_ms: None, last_pane: None, warnings: vec![],
+        });
+        let snapshot = BackendWorkspace { panes: vec![], total_panes: 0, foreign_panes: 0 };
+        let guard = state.structure.lock().unwrap();
+        let error = state.refresh_tasks_with_workspace(&snapshot, &guard).unwrap_err();
+        assert_eq!(error.code, "tmux.storageFailed");
+        assert_eq!(state.tasks.lock().unwrap().tasks[task_id].state, TaskState::Lost);
+        assert!(state.backend.task_runtime_pending(task_id));
+        assert!(done_path.is_file());
+        fs::remove_dir(&record_path).unwrap();
+
+        state.refresh_tasks_with_workspace(&snapshot, &guard).unwrap();
+        assert!(!state.backend.task_runtime_pending(task_id));
+        assert!(!done_path.exists());
+        let persisted: super::PersistedTaskRecord = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+        assert_eq!(persisted.task_id, task_id);
+        assert_eq!(persisted.status, "unknown");
+        drop(guard);
+        drop(state);
+        let cold = isolated_state(root.path());
+        assert_eq!(cold.tasks.lock().unwrap().tasks[task_id].state, TaskState::Lost);
+    }
+
+    #[test]
+    fn pending_terminal_write_retries_without_a_pane_runtime_or_session() {
+        use crate::tool::tmux::state::task::{TaskRecord, TaskState};
+        use crate::tool::tmux::transcript::TranscriptCursor;
+
+        let root = crate::testing::temp_dir();
+        let state = isolated_state(root.path());
+        let task_id = "no-runtime-retry";
+        let record_path = state.backend.task_record_path(task_id);
+        fs::create_dir(&record_path).unwrap();
+        state.tasks.lock().unwrap().insert(TaskRecord {
+            id: task_id.to_string(), pane_id: "gone-pane".to_string(),
+            pane_incarnation_id: String::new(), state: TaskState::Exited(0),
+            transcript: TranscriptCursor::new(record_path.clone(), state.backend.transcript_buffer_name(task_id)),
+            finished_at_ms: Some(crate::tool::unix_time_millis()), last_pane: None, warnings: vec![],
+        });
+        assert_eq!(state.persist_pending_terminal_records().unwrap_err().code, "tmux.storageFailed");
+        assert!(!state.backend.task_runtime_pending(task_id));
+        assert_eq!(state.refresh_task(task_id).unwrap_err().code, "tmux.storageFailed");
+        assert!(state.tasks.lock().unwrap().tasks.contains_key(task_id));
+        fs::remove_dir(&record_path).unwrap();
+        state.persist_pending_terminal_records().unwrap();
+        state.refresh_task(task_id).unwrap();
+        drop(state);
+        let cold = isolated_state(root.path());
+        assert_eq!(cold.tasks.lock().unwrap().tasks[task_id].state, TaskState::Exited(0));
     }
 
     #[test]
