@@ -20,7 +20,7 @@ import {
     normalizeTuiGraphemeCursor,
 } from "../../../../interaction/selection/Model.js";
 import type { TuiSidebarContextEntry } from "../../../../state/Ui.js";
-import { wrapTerminalText } from "../../../../terminal/Public.js";
+import { takeTerminalWidth, wrapTerminalText } from "../../../../terminal/Public.js";
 import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 
 export interface TuiMessageEntry {
@@ -546,6 +546,40 @@ export function renderTuiMessageComposerSegments(
         },
         { text: draft.slice(next) },
     ];
+}
+
+export function renderTuiMessageComposerLines(
+    draft: string,
+    requestedCursor: number,
+    visible: boolean,
+    width: number,
+    rows: number,
+): TuiMessageComposerSegment[][] {
+    const cursor = normalizeTuiGraphemeCursor(draft, requestedCursor);
+    const lines: Array<{ start: number; text: string }> = [];
+    let start = 0;
+    let cursorRow = 0;
+    for (const source of draft.split("\n")) {
+        const text = source.endsWith("\r") ? source.slice(0, -1) : source;
+        // A newline/end cursor owns a cell, including at an exact wrap boundary.
+        let remaining = text + (cursor === start + text.length ? " " : "");
+        let offset = start;
+        do {
+            const chunk = takeTerminalWidth(remaining, Math.max(1, width));
+            if (cursor >= offset && cursor < offset + chunk.length) cursorRow = lines.length;
+            lines.push({ start: offset, text: chunk });
+            offset += chunk.length;
+            remaining = remaining.slice(chunk.length);
+        } while (remaining.length > 0);
+        start += source.length + 1;
+    }
+    const count = Math.max(1, rows);
+    const first = Math.max(0, Math.min(cursorRow - count + 1, lines.length - count));
+    return lines.slice(first, first + count).map((line, index) =>
+        first + index === cursorRow
+            ? renderTuiMessageComposerSegments(line.text, cursor - line.start, visible)
+            : [{ text: line.text || " " }],
+    );
 }
 
 function laterTimestamp(

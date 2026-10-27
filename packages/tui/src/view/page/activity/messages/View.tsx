@@ -8,7 +8,7 @@ import {
 } from "../../../../state/route/State.js";
 import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 import {
-    renderTuiMessageComposerSegments,
+    renderTuiMessageComposerLines,
     renderTuiMessageHistoryLines,
     selectTuiMessageHiddenSessions,
     selectTuiMessageHistorySessions,
@@ -92,19 +92,16 @@ export function TuiMessagesView(props: {
                 ))}
             </Box>
             <Text dimColor>{"─".repeat(Math.max(1, props.width))}</Text>
-            <Box>
+            <Box height={2} flexShrink={0} overflowY="hidden">
                 <Text>{"> "}</Text>
-                {editing ? (
-                    <ComposerText
-                        cursor={editor.cursor ?? draft.length}
-                        cursorVisible
-                        draft={draft}
-                    />
-                ) : (
-                    <Text>{draft || "Write a comment…"}</Text>
-                )}
+                <ComposerText
+                    cursor={editing ? editor.cursor ?? draft.length : draft.length}
+                    cursorVisible={editing}
+                    draft={draft || (editing ? "" : "Write a comment…")}
+                    width={Math.max(1, props.width - 2)}
+                />
             </Box>
-            <Text dimColor>{status ?? "Enter send · Esc sessions"}</Text>
+            <Text dimColor wrap="truncate-end">{status ?? "Enter send · Esc sessions"}</Text>
         </Box>
     );
 }
@@ -113,19 +110,26 @@ function ComposerText(props: {
     cursor: number;
     cursorVisible: boolean;
     draft: string;
+    width: number;
 }) {
-    const segments = renderTuiMessageComposerSegments(
+    const lines = renderTuiMessageComposerLines(
         props.draft,
         props.cursor,
         props.cursorVisible,
+        props.width,
+        2,
     );
     return (
-        <Text>
-            {segments.map((segment, index) => (
-                <Text key={index} underline={segment.underline}>
-                    {segment.text}
+        <Box flexDirection="column" width={props.width} flexShrink={0}>
+            {lines.map((segments, row) => (
+                <Text key={row} wrap="truncate-end">
+                    {segments.map((segment, index) => (
+                        <Text key={index} underline={segment.underline}>
+                            {segment.text}
+                        </Text>
+                    ))}
                 </Text>
             ))}
-        </Text>
+        </Box>
     );
 }

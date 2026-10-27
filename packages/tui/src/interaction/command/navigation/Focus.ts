@@ -126,14 +126,11 @@ export class TuiCommandDispatcherFocus {
             return;
         }
 
-        if (state.interaction.focusScope === "form" || state.interaction.focusScope === "wizard") {
-            const box = this.#projection.selectMainScreenModel(state).boxes.find((item) => item.id === boxId);
-            if (box !== undefined) {
-                const selected = state.interaction.selectedDetailLineIds[box.expandedKey];
-                const row = renderExpandableBoxLines(box, this.#mainFlowColumns(state))
-                    .findIndex((line) => line.lineId === selected);
-                if (row >= 0) range = { start: range.start + row, end: range.start + row + 1 };
-            }
+        const box = this.#projection.selectMainScreenModel(state).boxes.find((item) => item.id === boxId);
+        if (box?.expanded === true && box.selectedDetailLineId !== undefined) {
+            const row = renderExpandableBoxLines(box, this.#mainFlowColumns(state))
+                .findIndex((line) => line.lineId === box.selectedDetailLineId);
+            if (row >= 0) range = { start: range.start + row, end: range.start + row + 1 };
         }
 
         const viewportRows = this.boxViewportRows();
