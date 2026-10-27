@@ -298,11 +298,10 @@ describe("Web Connections", () => {
             expect(updateConfig).toHaveBeenCalledWith(
                 expect.objectContaining({
                     mcp: expect.objectContaining({ listenPort: 3200 }),
-                    web: expect.any(Object),
                 }),
             ),
         );
-        expect(updateConfig.mock.calls[0]?.[0]).not.toHaveProperty("instance");
+        expect(updateConfig.mock.calls[0]?.[0]).toEqual({ mcp: { listenPort: 3200 } });
     });
 });
 

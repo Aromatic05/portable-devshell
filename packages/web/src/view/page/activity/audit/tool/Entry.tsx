@@ -46,6 +46,7 @@ export function ToolCallEntry({
     const detailEpoch = useRef(0);
     const [loading, setLoading] = useState(false);
     const [loadFailure, setLoadFailure] = useState<string>();
+    const [detailRetry, setDetailRetry] = useState(0);
     useEffect(() => {
         if (initiallyOpen) setOpen(true);
     }, [initiallyOpen]);
@@ -68,7 +69,7 @@ export function ToolCallEntry({
             setLoading(false);
         });
         return () => { detailEpoch.current += 1; };
-    }, [call, open]);
+    }, [call, open, detailRetry]);
     const currentDetail = detail?.source === call ? detail.value : undefined;
     const visibleCall = {
         ...call,
@@ -115,7 +116,17 @@ export function ToolCallEntry({
                         disabled={disabled}
                         logs={logs}
                         onLoadImage={onLoadImage}
-                        onRefresh={onRefresh}
+                        onRefresh={async () => {
+                            const epoch = detailEpoch.current;
+                            try {
+                                await onRefresh();
+                            } finally {
+                                // Retained archived previews can keep the same object.
+                                // Retry their own detail even if preview refresh fails.
+                                if (epoch === detailEpoch.current)
+                                    setDetailRetry((value) => value + 1);
+                            }
+                        }}
                     />
                 ) : null}
             </details>

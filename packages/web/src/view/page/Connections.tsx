@@ -189,17 +189,23 @@ export function Connections({
                 setFeedback({ kind: "error", text: "Connection settings changed during validation. Your draft was not saved. Cancel to load the latest settings." });
                 return;
             }
+            // Control merges these fields into its current config under runExclusive.
+            // A locally cached view (including its revision) is not an atomic CAS.
+            const baseline = JSON.parse(editor.baseline) as ConnectionDrafts;
+            const instanceMcp = changedConnectionFields(baseline.instanceMcp ?? {}, drafts.instanceMcp ?? {});
+            const mcp = changedConnectionFields(baseline.mcp, drafts.mcp);
+            const web = changedConnectionFields(baseline.web, drafts.web);
             const succeeded = await store.updateConfig({
-                ...(selectedName === undefined
+                ...(selectedName === undefined || Object.keys(instanceMcp).length === 0
                     ? {}
                     : {
                           instance: {
                               instanceName: selectedName,
-                              patch: { mcp: drafts.instanceMcp },
+                              patch: { mcp: instanceMcp },
                           },
                       }),
-                mcp: drafts.mcp,
-                web: drafts.web,
+                ...(Object.keys(mcp).length === 0 ? {} : { mcp }),
+                ...(Object.keys(web).length === 0 ? {} : { web }),
             });
             if (!succeeded) {
                 setFeedback({
@@ -879,6 +885,21 @@ function connectionDrafts(
         mcp: configMcpPatch(configView?.mcp),
         web: configWebPatch(configView?.web),
     };
+}
+
+function changedConnectionFields<T extends object>(baseline: T, draft: T): Partial<T> {
+    const patch: Partial<T> = {};
+    for (const key of Object.keys(draft) as (keyof T)[]) {
+        if (JSON.stringify(draft[key]) !== JSON.stringify(baseline[key]))
+            patch[key] = draft[key];
+    }
+    // The existing API replaces auth as a unit and ignores token/oauth2 without
+    // auth. Include that unit only when an auth field was actually edited.
+    const authKeys = ["auth", "token", "oauth2"] as (keyof T)[];
+    if ("auth" in draft && authKeys.some((key) => Object.hasOwn(patch, key))) {
+        for (const key of authKeys) patch[key] = draft[key];
+    }
+    return patch;
 }
 
 function globalOAuthApproval(configView: ConfigView | undefined): {
