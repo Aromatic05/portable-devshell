@@ -255,3 +255,44 @@ test("Control MCP modelOutput survives draft normalization and update patches", 
     });
     assert.equal(cleared.mcp.modelOutput, undefined);
 });
+
+test("第 41 项编辑失败的全局摘要在默认模型预算裁剪后仍然可见", () => {
+    const operations = Array.from({ length: 41 }, (_, i) => ({
+        action: "write", path: "nested/" + "p".repeat(150) + `/file-${i}.txt`,
+        status: i === 40 ? "failed" : "applied",
+        ...(i === 40 ? { error: { code: "file.ioError", message: "Permission denied" } } : { addedLines: 1 }),
+    }));
+    const raw = { operations, revision: "original-revision" };
+    const original = new McpNativeToolResult({ content: [], isError: false, structuredContent: raw });
+    const projected = projectMcpModelOutput("file_edit", original);
+    const output = data(projected);
+    const summary = output.editSummary as Record<string, JsonValue>;
+    assert.equal(summary?.totalOperations, 41);
+    assert.equal(summary?.failedOperations, 1);
+    assert.equal(summary?.partial, true);
+    assert.match(JSON.stringify(summary?.failures), /file-40.txt.*Permission denied/u);
+    assert.equal((output.operations as JsonValue[]).length + (output.omittedOperations as number), 41);
+    assert.equal(size(projected) <= 6_000, true);
+    assert.equal(raw.operations.length, 41);
+    assert.equal(raw.operations[40]?.status, "failed");
+    assert.equal(output.revision, raw.revision);
+    assert.equal((projected as McpNativeToolResult).isError, false);
+});
+
+test("模型编辑全失败摘要显式计算被省略的失败，纯成功不变成错误", () => {
+    for (const status of ["failed", "applied"]) {
+        const operations = Array.from({ length: 41 }, (_, i) => ({
+            path: `src/${i}.ts`, status, diff: "中".repeat(1_000),
+            ...(status === "failed" ? { error: { message: "conflict" } } : {}),
+        }));
+        const original = new McpNativeToolResult({ content: [], structuredContent: { operations }, isError: false });
+        const projected = projectMcpModelOutput("file_edit", original);
+        const summary = data(projected).editSummary as Record<string, JsonValue>;
+        assert.equal(summary.failedOperations, status === "failed" ? 41 : 0);
+        assert.equal(summary.partial, false);
+        assert.equal(summary.omittedFailures, status === "failed" ? 36 : 0);
+        assert.equal((projected as McpNativeToolResult).isError, false);
+        assert.ok(size(projected) <= 6_000);
+        assert.equal(operations[0]?.diff, "中".repeat(1_000));
+    }
+});

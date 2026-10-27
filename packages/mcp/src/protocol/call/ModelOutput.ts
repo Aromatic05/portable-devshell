@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { McpNativeToolResult, type McpEndpointResult } from "./Boundary.js";
+import { mcpAppFileEditSummary } from "../../mcpapp/WidgetPayload.js";
 
 /**
  * Budgets apply only to the MCP model-facing projection, not the executed
@@ -210,6 +211,7 @@ function projectFileGrep(value: RecordValue, budget: number, content: CallToolRe
 
 function projectFileEdit(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {
     if (!Array.isArray(value.operations)) return value;
+    const originalCount = value.operations.length;
     const operations = value.operations.filter(isRecord).map((operation) => ({ ...operation }));
     for (let index = operations.length - 1; index >= 0; index--) {
         if (typeof operations[index]?.diff === "string") {
@@ -219,14 +221,33 @@ function projectFileEdit(value: RecordValue, budget: number, content: CallToolRe
     }
     const originalOmitted = typeof value.omittedOperations === "number"
         ? value.omittedOperations : 0;
-    let projected: RecordValue = { ...value, operations };
-    while (resultBytes(projected, content) > budget && operations.length > 0) {
-        operations.pop();
-        projected = {
-            ...value,
-            operations,
-            omittedOperations: originalOmitted + value.operations.length - operations.length,
+    // Compute outcomes from the entire batch before dropping any details.
+    const summary = mcpAppFileEditSummary(value)!;
+    const failures = (summary.failures as string[]).map((failure) =>
+        shorten(failure, Math.min(600, Math.floor(budget / 12)), "middle"));
+    const project = (): RecordValue => {
+        const omitted = originalOmitted + originalCount - operations.length;
+        return {
+            ...value, operations,
+            ...(omitted > 0 ? { omittedOperations: omitted } : {}),
+            editSummary: {
+                ...summary, failures,
+                partial: (summary.failedOperations as number) > 0 &&
+                    (summary.failedOperations as number) < (summary.totalOperations as number),
+                omittedOperations: omitted,
+                omittedFailures: (summary.failedOperations as number) - failures.length,
+            },
         };
+    };
+    let projected = project();
+    while (resultBytes(projected, content) > budget && operations.length > 0) {
+        // Prefer retaining a failed operation over a successful one.
+        let remove = operations.length - 1;
+        for (let index = operations.length - 1; index >= 0; index--) {
+            if (operations[index]!.status !== "failed") { remove = index; break; }
+        }
+        operations.splice(remove, 1);
+        projected = project();
     }
     return projected;
 }
