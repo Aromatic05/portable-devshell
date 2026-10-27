@@ -248,7 +248,7 @@ function renderFileEditModelToolResult(
 ): string {
     const operations = value.operations;
     if (!Array.isArray(operations)) return renderToolResult(value);
-    return operations
+    const rendered = operations
         .map((operation) => {
             if (!isRecord(operation)) return renderToolResult(operation);
             const action =
@@ -309,8 +309,26 @@ function renderFileEditModelToolResult(
             ]
                 .filter(Boolean)
                 .join("\n");
-        })
-        .join("\n");
+        });
+    const records = operations.filter(isRecord);
+    const summary = compactFields([
+        `totalOperations=${operations.length}`,
+        `appliedOperations=${records.filter((operation) => operation.status === "applied").length}`,
+        `failedOperations=${records.filter((operation) => operation.status === "failed").length}`,
+        `notExecutedOperations=${records.filter((operation) => operation.status === "not_executed").length}`,
+    ]);
+    // Put failures before routine details so the final head/tail limit cannot
+    // hide the failed item in the middle of a large, stopped batch.
+    const failures = operations.flatMap((operation, index) =>
+        isRecord(operation) && operation.status === "failed"
+            ? [rendered[index]!]
+            : [],
+    );
+    const remaining = rendered.filter((_, index) => {
+        const operation = operations[index]!;
+        return !isRecord(operation) || operation.status !== "failed";
+    });
+    return [summary, ...failures, ...remaining].join("\n");
 }
 
 function renderBashModelToolResult(
