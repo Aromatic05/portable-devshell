@@ -826,7 +826,7 @@ test(
         await server.start();
         await pointProxyAtControlMcp(proxy, server.socketPath);
 
-        const enroll = async () => {
+        const enroll = async (replaceRunning = false) => {
             const code = await new ReverseCredentialStore(
                 controlHome,
             ).createDeviceCode("reverse-reenroll");
@@ -838,6 +838,7 @@ test(
                     publicBaseUrl,
                     "--device-code",
                     code.deviceCode,
+                    ...(replaceRunning ? ["--replace-running"] : []),
                 ],
                 {
                     cwd: workspace,
@@ -873,7 +874,37 @@ test(
         await writeFile(retainedLog, "saved log", "utf8");
         await writeFile(retainedArtifact, "saved artifact", "utf8");
 
-        await enroll();
+        const retainedConfig = join(retainedRoot, "config.toml");
+        const originalConfig = await readFile(retainedConfig, "utf8");
+        const pidFile = join(retainedRoot, "state", "worker.pid");
+        const originalPid = await readFile(pidFile, "utf8");
+        // Re-enrollment is destructive and must require explicit consent while
+        // the first worker is running, leaving its local runtime untouched.
+        await assert.rejects(enroll(), (error: unknown) => {
+            assert.ok(error instanceof Error);
+            const failure = error as Error & { code?: number; stderr?: string };
+            assert.equal(failure.code, 1);
+            assert.match(
+                failure.stderr ?? "",
+                /Worker reverse-reenroll is already running/u,
+            );
+            assert.match(failure.stderr ?? "", /--replace-running/u);
+            assert.match(failure.stderr ?? "", /generate a new Device Code/u);
+            return true;
+        });
+        assert.equal(await readFile(retainedConfig, "utf8"), originalConfig);
+        assert.equal(await readFile(pidFile, "utf8"), originalPid);
+        await assertReverseMarker(
+            server.socketPath,
+            "reverse-reenroll",
+            workspace,
+            markerName,
+            marker,
+        );
+
+        // The rejected attempt consumed its device code; enroll creates a fresh
+        // one before intentionally replacing the running worker.
+        await enroll(true);
         assert.equal(await readFile(retainedLog, "utf8"), "saved log");
         assert.equal(await readFile(retainedArtifact, "utf8"), "saved artifact");
         const secondGeneration = await waitForReverseGeneration(
