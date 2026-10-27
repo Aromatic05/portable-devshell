@@ -210,7 +210,7 @@ test("Activity restores retained stdout/stderr for only the owning Context and m
     });
     assert.deepEqual(queries[1], {
         callId: "call-shell", ctxId: "ctx-own", fromSeq: 1,
-        limit: 32, maxDecodedBytes: 256 * 1024,
+        limit: 32, maxDecodedBytes: 1024 * 1024,
     });
 });
 

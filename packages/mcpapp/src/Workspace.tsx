@@ -32,7 +32,7 @@ function ActivityCard({ item, reads, session }: {
     item: Activity; reads: readonly Activity[]; session?: McpAppSession;
 }) {
     const [terminal, setTerminal] = useState<{
-        stdout: string; stderr: string; nextSeq?: number;
+        stdout: string; stderr: string; nextSeq?: number; nextOffset?: number;
         loaded: boolean; loading: boolean; error?: string;
     }>(emptyTerminal);
     const [image, setImage] = useState<McpAppActivityImage>();
@@ -44,13 +44,13 @@ function ActivityCard({ item, reads, session }: {
         controller.current?.abort();
         imageController.current?.abort();
     }, [session, item.callId]);
-    const load = (fromSeq: number) => {
+    const load = (fromSeq: number, offset = 0) => {
         if (!session || terminal.loading) return;
         controller.current?.abort();
         const pending = new AbortController();
         controller.current = pending;
         setTerminal((previous) => ({ ...previous, loading: true, error: undefined }));
-        void readMcpAppActivityOutput(session, item.callId, fromSeq, pending.signal).then((page) => {
+        void readMcpAppActivityOutput(session, item.callId, fromSeq, pending.signal, offset).then((page) => {
             if (pending.signal.aborted) return;
             setTerminal((previous) => ({
                 stdout: previous.stdout + page.stdout,
@@ -58,6 +58,7 @@ function ActivityCard({ item, reads, session }: {
                 loaded: true,
                 loading: false,
                 nextSeq: page.nextSeq,
+                nextOffset: page.nextOffset,
             }));
         }).catch((error: unknown) => {
             if (pending.signal.aborted) return;
@@ -129,7 +130,7 @@ function ActivityCard({ item, reads, session }: {
             </div> : isShell && session && (terminal.nextSeq !== undefined || terminal.error)
             ? <div className="tc-activity-actions">
                 <button type="button" disabled={terminal.loading}
-                    onClick={() => load(terminal.nextSeq ?? 1)}>
+                    onClick={() => load(terminal.nextSeq ?? 1, terminal.nextOffset)}>
                     {terminal.loading ? "Loading…" : terminal.error ? "Retry output" : "Load more output"}
                 </button>
             </div> : undefined} />;

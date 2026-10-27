@@ -1,15 +1,20 @@
-import { resolveToolOutput, type ArtifactImageContent, type ArtifactTransport, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
+import { type ArtifactImageContent, type ArtifactTransport, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
 import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentationText } from "./Presentation.js";
 import { mcpAppFileEditSummary } from "./WidgetPayload.js";
 
 const ACTIVITY_OUTPUT_PAGE_BYTES = 256 * 1024;
 const ACTIVITY_OUTPUT_PAGE_ENTRIES = 32;
+// Historical producer chunks were at most 256 Ki UTF-16 units (768 KiB).
+// Read them whole within the existing Process cap, then page the presentation.
+const ACTIVITY_OUTPUT_READ_BYTES = 1024 * 1024;
 
 export interface McpAppActivityOutput {
     callId: string;
     stdout: string;
     stderr: string;
     nextSeq?: number;
+    /** UTF-8 byte offset in the redacted entry at nextSeq; absent means zero. */
+    nextOffset?: number;
 }
 export interface McpAppActivity {
     callId: string;
@@ -225,6 +230,7 @@ export async function readMcpAppActivityOutput(
     ctxId: string,
     callId: string,
     fromSeq = 1,
+    offset = 0,
 ): Promise<McpAppActivityOutput | undefined> {
     const records = await tools.listCalls({
         ctxId, callIds: [callId], limit: 1, includeInput: false,
@@ -233,21 +239,39 @@ export async function readMcpAppActivityOutput(
     const audited = records.find((entry) =>
         entry.callId === callId && entry.ctxId === ctxId && entry.toolName === "bash_run");
     if (audited === undefined) return undefined;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > ACTIVITY_OUTPUT_READ_BYTES)
+        throw new TypeError("Invalid Activity output offset");
     const entries = await process.readLogs({
         callId, ctxId, fromSeq, limit: ACTIVITY_OUTPUT_PAGE_ENTRIES,
-        maxDecodedBytes: ACTIVITY_OUTPUT_PAGE_BYTES,
+        maxDecodedBytes: ACTIVITY_OUTPUT_READ_BYTES,
     }).then((logs) => logs.filter((entry) => entry.callId === callId && entry.ctxId === ctxId));
-    const restored = object(resolveToolOutput(undefined, callId, entries));
-    const bytes = entries.reduce((size, entry) => size + Buffer.byteLength(entry.message, "utf8"), 0);
+    if (offset > 0 && entries[0]?.seq !== fromSeq)
+        throw new Error("Activity output offset is no longer retained");
+    const output: McpAppActivityOutput = { callId, stdout: "", stderr: "" };
+    let remaining = ACTIVITY_OUTPUT_PAGE_BYTES;
+    for (const entry of entries) {
+        // Redact before slicing so a page boundary cannot split a secret.
+        const bytes = Buffer.from(redactPresentationText(entry.message), "utf8");
+        const start = entry.seq === fromSeq ? offset : 0;
+        if (start > bytes.length || (start < bytes.length && (bytes[start]! & 0xc0) === 0x80))
+            throw new TypeError("Invalid Activity output offset");
+        let end = Math.min(bytes.length, start + remaining);
+        while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+        output[entry.stream] += bytes.subarray(start, end).toString("utf8");
+        remaining -= end - start;
+        if (end < bytes.length) {
+            output.nextSeq = entry.seq;
+            if (end > 0) output.nextOffset = end;
+            return output;
+        }
+        if (remaining === 0) {
+            output.nextSeq = entry.seq + 1;
+            return output;
+        }
+    }
     const last = entries.at(-1);
-    const hasMore = last !== undefined &&
-        (entries.length >= ACTIVITY_OUTPUT_PAGE_ENTRIES || bytes >= ACTIVITY_OUTPUT_PAGE_BYTES);
-    return {
-        callId,
-        stdout: typeof restored?.stdout === "string"
-            ? protect(restored.stdout, ACTIVITY_OUTPUT_PAGE_BYTES + 1024) : "",
-        stderr: typeof restored?.stderr === "string"
-            ? protect(restored.stderr, ACTIVITY_OUTPUT_PAGE_BYTES + 1024) : "",
-        ...(hasMore ? { nextSeq: last.seq + 1 } : {}),
-    };
+    const readBytes = entries.reduce((total, entry) => total + Buffer.byteLength(entry.message, "utf8"), 0);
+    if (last && (entries.length >= ACTIVITY_OUTPUT_PAGE_ENTRIES || readBytes >= ACTIVITY_OUTPUT_READ_BYTES))
+        output.nextSeq = last.seq + 1;
+    return output;
 }

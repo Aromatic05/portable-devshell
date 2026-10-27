@@ -199,9 +199,9 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             stream.close();
         }
     };
-    const activityOutput = (instance: string, ctxId: string, callId: string, fromSeq = 1) =>
+    const activityOutput = (instance: string, ctxId: string, callId: string, fromSeq = 1, offset = 0) =>
         readMcpAppActivityOutput(createToolTransport(endpoint, instance),
-            createProcessTransport(endpoint, instance), ctxId, callId, fromSeq);
+            createProcessTransport(endpoint, instance), ctxId, callId, fromSeq, offset);
     const activityImage = (instance: string, ctxId: string, callId: string) =>
         readMcpAppActivityImage(createToolTransport(endpoint, instance),
             createArtifactTransport(endpoint), ctxId, callId);

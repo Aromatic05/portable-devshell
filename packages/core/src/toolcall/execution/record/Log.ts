@@ -12,7 +12,7 @@ import type {
 } from "../../../audit/Api.js";
 import { toEventData } from "./Event.js";
 
-const LOG_CHUNK_CODE_UNITS = 256 * 1024;
+const LOG_CHUNK_BYTES = 256 * 1024;
 
 interface WorkerInstanceToolLogOptions {
     appendEvent(
@@ -114,27 +114,15 @@ export class WorkerInstanceToolLog {
 }
 
 function* logChunks(message: string): Generator<string> {
+    const bytes = Buffer.from(message, "utf8");
     let offset = 0;
-    while (offset < message.length) {
-        let end = Math.min(message.length, offset + LOG_CHUNK_CODE_UNITS);
-        if (
-            end < message.length &&
-            isHighSurrogate(message.charCodeAt(end - 1)) &&
-            isLowSurrogate(message.charCodeAt(end))
-        ) {
-            end -= 1;
-        }
-        yield message.slice(offset, end);
+    while (offset < bytes.length) {
+        let end = Math.min(bytes.length, offset + LOG_CHUNK_BYTES);
+        // A chunk boundary must precede the complete next UTF-8 code point.
+        while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+        yield bytes.subarray(offset, end).toString("utf8");
         offset = end;
     }
-}
-
-function isHighSurrogate(value: number): boolean {
-    return value >= 0xd800 && value <= 0xdbff;
-}
-
-function isLowSurrogate(value: number): boolean {
-    return value >= 0xdc00 && value <= 0xdfff;
 }
 
 function readPreview(value: string): string {

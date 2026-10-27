@@ -154,3 +154,16 @@ test("SQLite ToolCall log lookup restores compressed streams with Context isolat
         await rm(root, { force: true, recursive: true });
     }
 });
+
+test("日志按 UTF-8 字节限制分块且中文与 emoji 边界无损", async () => {
+    const chunks: string[] = [];
+    const log = new WorkerInstanceToolLog({ appendEvent: async () => undefined,
+        logStore: { append: async (_stream: string, text: string) => { chunks.push(text); } } as never });
+    const text = "中".repeat(87_381) + "😀" + "文".repeat(12_619);
+    await log.append({ stdout: text, stderr: "错误😀" },
+        { callId: "utf8", source: "mcp", toolName: "bash_run" });
+    assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk, "utf8") <= 256 * 1024));
+    assert.equal(chunks.slice(0, -1).join(""), text);
+    assert.equal(chunks.at(-1), "错误😀");
+    assert.ok(chunks.every((chunk) => !chunk.includes("�") && !/[\uD800-\uDBFF]$/u.test(chunk)));
+});

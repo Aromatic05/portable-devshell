@@ -66,12 +66,15 @@ export function installMcpAppLive(options: {
             const callId = url.searchParams.get("callId") ?? "";
             const rawFromSeq = url.searchParams.get("fromSeq") ?? "1";
             const fromSeq = Number(rawFromSeq);
+            const rawOffset = url.searchParams.get("offset") ?? "0";
+            const offset = Number(rawOffset);
             if (!callId || callId.length > 256 || !/^[1-9]\d*$/u.test(rawFromSeq) ||
-                !Number.isSafeInteger(fromSeq)) {
+                !Number.isSafeInteger(fromSeq) || !/^(0|[1-9]\d*)$/u.test(rawOffset) ||
+                !Number.isSafeInteger(offset) || offset > 1024 * 1024) {
                 reply(response, 400, { error: "Invalid ToolCall output query" });
                 return;
             }
-            const output = await options.view.activityOutput(options.instance, ctxId, callId, fromSeq);
+            const output = await options.view.activityOutput(options.instance, ctxId, callId, fromSeq, offset);
             const access = await revalidate(ctxId, token, workspace);
             if (access !== 200) {
                 reply(response, access, { error: "MCP App authorization expired" });

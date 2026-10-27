@@ -51,6 +51,7 @@ export interface McpAppActivityOutput {
     stdout: string;
     stderr: string;
     nextSeq?: number;
+    nextOffset?: number;
 }
 
 export interface McpAppActivityImage {
@@ -79,15 +80,19 @@ export async function readMcpAppActivityImage(
 }
 
 export async function readMcpAppActivityOutput(
-    session: McpAppSession, callId: string, fromSeq: number, signal: AbortSignal,
+    session: McpAppSession, callId: string, fromSeq: number, signal: AbortSignal, offset = 0,
 ): Promise<McpAppActivityOutput> {
     const result = record(await request(session,
-        `/activity?callId=${encodeURIComponent(callId)}&fromSeq=${fromSeq}`, signal));
+        `/activity?callId=${encodeURIComponent(callId)}&fromSeq=${fromSeq}${offset ? `&offset=${offset}` : ""}`, signal));
     if (result?.callId !== callId || typeof result.stdout !== "string" ||
         typeof result.stderr !== "string" ||
         (result.nextSeq !== undefined &&
             (typeof result.nextSeq !== "number" || !Number.isSafeInteger(result.nextSeq) ||
-                result.nextSeq <= fromSeq)))
+                result.nextSeq < fromSeq ||
+                (result.nextSeq === fromSeq && !(typeof result.nextOffset === "number" && result.nextOffset > offset)))) ||
+        (result.nextOffset !== undefined &&
+            (typeof result.nextOffset !== "number" || !Number.isSafeInteger(result.nextOffset) ||
+                result.nextOffset < 1 || result.nextOffset > 1024 * 1024 || result.nextSeq === undefined)))
         throw new Error("Invalid MCP App Activity output");
     return result as unknown as McpAppActivityOutput;
 }
