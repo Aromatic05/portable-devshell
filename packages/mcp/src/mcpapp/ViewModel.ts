@@ -168,33 +168,46 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             .subscribeEvents(cursor + 1);
         let timer: ReturnType<typeof setTimeout> | undefined;
         let cancel: (() => void) | undefined;
+        let batchTimer: ReturnType<typeof setTimeout> | undefined;
         const interrupted = new Promise<"timeout" | "aborted">((resolve) => {
             timer = setTimeout(() => resolve("timeout"), 20_000);
             cancel = () => resolve("aborted");
             signal?.addEventListener("abort", cancel, { once: true });
         });
         try {
-            const result = await Promise.race([stream.next(), interrupted]);
-            if (result === "aborted") return { changed: false, cursor };
-            if (result === "timeout") {
-                // A Wait can commit while Audit delivery is temporarily
-                // unavailable. Poll authoritative state even without events.
-                const due = await snapshot(instance, ctxId, workspace);
-                due.cursor = Math.max(due.cursor, cursor);
-                return { changed: true, cursor: due.cursor, snapshot: due };
+            if (signal?.aborted) return { changed: false, cursor };
+            let observed = cursor;
+            let changed = false;
+            let batch: Promise<"batch"> | undefined;
+            while (true) {
+                const result = await Promise.race([
+                    stream.next(), interrupted, ...(batch === undefined ? [] : [batch]),
+                ]);
+                if (result === "aborted") return { changed: false, cursor };
+                if (result === "timeout") {
+                    // Wait state can commit even while Audit delivery is unavailable.
+                    changed = true;
+                    break;
+                }
+                if (result === "batch") break;
+                if (result.kind === "closed")
+                    throw result.error ?? new Error("Instance Event stream closed unexpectedly.");
+                observed = Math.max(observed,
+                    result.kind === "event" ? result.event.seq : result.gap.lastSeq);
+                changed ||= result.kind === "gap" || mcpAppEventAffectsContext(result.event, ctxId);
+                // Consume the seed and nearby live events on this subscription.
+                // Advance only across events actually inspected, including mixed Contexts.
+                batch ??= new Promise<"batch">((resolve) => {
+                    batchTimer = setTimeout(() => resolve("batch"), 25);
+                });
             }
-            if (result.kind === "closed")
-                throw result.error ?? new Error("Instance Event stream closed unexpectedly.");
-            // An event not relevant to this Context must still advance the
-            // cursor. Otherwise the next watch replays the same event forever.
-            const observed = result.kind === "event" ? result.event.seq : result.gap.lastSeq;
-            if (result.kind === "event" && !mcpAppEventAffectsContext(result.event, ctxId))
-                return { changed: false, cursor: Math.max(observed, cursor) };
+            if (!changed) return { changed: false, cursor: observed };
             const next = await snapshot(instance, ctxId, workspace);
             next.cursor = Math.max(next.cursor, observed, cursor);
             return { changed: true, cursor: next.cursor, snapshot: next };
         } finally {
             if (timer !== undefined) clearTimeout(timer);
+            if (batchTimer !== undefined) clearTimeout(batchTimer);
             if (cancel !== undefined) signal?.removeEventListener("abort", cancel);
             stream.close();
         }

@@ -32,6 +32,12 @@ export interface ProcessSubscription {
     stream: MessageStream;
 }
 
+interface ManagedSubscription extends ProcessSubscription {
+    controller: AbortController;
+    draining: boolean;
+    detach(): void;
+}
+
 interface ProcessEventWatch {
     projectEvent?: ProcessEventProjector;
     instance: ProcessSubscription["instance"];
@@ -49,7 +55,7 @@ interface ProcessEventWatch {
 
 export class ProcessSubscriptionManager {
     readonly #pollIntervalMs: number;
-    readonly #subscriptions = new Map<string, ProcessSubscription>();
+    readonly #subscriptions = new Map<string, ManagedSubscription>();
     readonly #watches = new Map<number, ProcessEventWatch>();
     #nextWatchId = 1;
     #timer?: NodeJS.Timeout;
@@ -84,35 +90,41 @@ export class ProcessSubscriptionManager {
         }
 
         const key = this.#key(context.connectionId, context.requestId);
-        await stream.send({
-            name: "seed",
-            payload: {
-                events: slice.events.flatMap((event) => {
-                    const projected =
-                        projectEvent === undefined
-                            ? event
-                            : projectEvent(event);
-                    return projected === undefined ? [] : [projected];
-                }) as unknown as JsonValue,
-                lastSeq: slice.lastSeq,
-            },
-        });
-        const close = () => {
-            this.#subscriptions.delete(key);
-            this.#stopPollingWhenIdle();
-        };
-        stream.onClose(close);
-        stream.onCancel(close);
-
-        this.#subscriptions.set(key, {
+        const controller = new AbortController();
+        const subscription: ManagedSubscription = {
             connectionId: context.connectionId,
-            projectEvent,
-            instance,
-            instanceName,
+            projectEvent, instance, instanceName,
             nextSeq: slice.lastSeq + 1,
             requestId: context.requestId,
-            stream,
-        });
+            stream, controller, draining: true,
+            detach: () => { offClose(); offCancel(); },
+        };
+        const close = () => this.#removeSubscription(key, subscription);
+        const offClose = stream.onClose(close);
+        const offCancel = stream.onCancel(close);
+        const previous = this.#subscriptions.get(key);
+        if (previous !== undefined) this.#removeSubscription(key, previous);
+        this.#subscriptions.set(key, subscription);
+        try {
+            await this.#send(subscription, {
+                name: "seed",
+                payload: {
+                    events: slice.events.flatMap((event) => {
+                        const projected =
+                            projectEvent === undefined
+                                ? event
+                                : projectEvent(event);
+                        return projected === undefined ? [] : [projected];
+                    }) as unknown as JsonValue,
+                    lastSeq: slice.lastSeq,
+                },
+            });
+            controller.signal.throwIfAborted();
+        } catch (error) {
+            close();
+            throw error;
+        }
+        subscription.draining = false;
         this.#ensurePolling();
     }
 
@@ -171,13 +183,14 @@ export class ProcessSubscriptionManager {
     unsubscribeConnection(connectionId: string): void {
         for (const [key, subscription] of this.#subscriptions) {
             if (subscription.connectionId === connectionId)
-                this.#subscriptions.delete(key);
+                this.#removeSubscription(key, subscription);
         }
         this.#stopPollingWhenIdle();
     }
 
     close(): void {
-        this.#subscriptions.clear();
+        for (const [key, subscription] of this.#subscriptions)
+            this.#removeSubscription(key, subscription);
         for (const watch of this.#watches.values()) watch.resolve();
         this.#watches.clear();
         if (this.#timer !== undefined) {
@@ -205,42 +218,10 @@ export class ProcessSubscriptionManager {
     }
 
     async #pollSubscriptions(): Promise<void> {
-        for (const [key, subscription] of [...this.#subscriptions]) {
-            try {
-                const slice = subscription.instance.subscribe(
-                    subscription.nextSeq,
-                );
-                if (slice.kind === "gap") {
-                    await subscription.stream.send({
-                        name: "gap",
-                        payload: {
-                            instance: subscription.instanceName,
-                            latestSeq: slice.lastSeq,
-                            oldestAvailableSeq: slice.nextSeq,
-                            requestedFromSeq: subscription.nextSeq,
-                        },
-                        seq: slice.lastSeq,
-                    });
-                    subscription.nextSeq = slice.nextSeq;
-                    continue;
-                }
-
-                for (const event of slice.events) {
-                    const projected =
-                        subscription.projectEvent === undefined
-                            ? event
-                            : subscription.projectEvent(event);
-                    if (projected === undefined) continue;
-                    await subscription.stream.send({
-                        name: "event",
-                        payload: projected as unknown as JsonValue,
-                        seq: projected.seq,
-                    });
-                }
-                subscription.nextSeq = slice.lastSeq + 1;
-            } catch {
-                this.#subscriptions.delete(key);
-            }
+        for (const [key, subscription] of this.#subscriptions) {
+            if (subscription.draining) continue;
+            subscription.draining = true;
+            void this.#drainSubscription(key, subscription);
         }
 
         for (const [id, watch] of [...this.#watches]) {
@@ -257,6 +238,67 @@ export class ProcessSubscriptionManager {
             }
         }
 
+        this.#stopPollingWhenIdle();
+    }
+
+    async #drainSubscription(key: string, subscription: ManagedSubscription): Promise<void> {
+        try {
+            // One retained source slice and one pending send per subscription.
+            // Slow Channels never queue more slices or block another drain.
+            const slice = subscription.instance.subscribe(subscription.nextSeq);
+            if (slice.kind === "gap") {
+                await this.#send(subscription, {
+                    name: "gap",
+                    payload: {
+                        instance: subscription.instanceName,
+                        latestSeq: slice.lastSeq,
+                        oldestAvailableSeq: slice.nextSeq,
+                        requestedFromSeq: subscription.nextSeq,
+                    },
+                    seq: slice.lastSeq,
+                });
+                subscription.nextSeq = slice.nextSeq;
+                return;
+            }
+            for (const event of slice.events) {
+                subscription.controller.signal.throwIfAborted();
+                const projected = subscription.projectEvent === undefined
+                    ? event : subscription.projectEvent(event);
+                if (projected === undefined) continue;
+                await this.#send(subscription, {
+                    name: "event",
+                    payload: projected as unknown as JsonValue,
+                    seq: projected.seq,
+                });
+            }
+            subscription.nextSeq = slice.lastSeq + 1;
+        } catch {
+            this.#removeSubscription(key, subscription);
+        } finally {
+            subscription.draining = false;
+        }
+    }
+
+    async #send(subscription: ManagedSubscription, message: Parameters<MessageStream["send"]>[0]): Promise<void> {
+        const signal = subscription.controller.signal;
+        signal.throwIfAborted();
+        let abort!: () => void;
+        const stopped = new Promise<never>((_, reject) => {
+            abort = () => reject(signal.reason);
+            signal.addEventListener("abort", abort, { once: true });
+        });
+        try {
+            await Promise.race([subscription.stream.send(message), stopped]);
+        } finally {
+            signal.removeEventListener("abort", abort);
+        }
+    }
+
+    #removeSubscription(key: string, subscription: ManagedSubscription): void {
+        if (this.#subscriptions.get(key) !== subscription) return;
+        this.#subscriptions.delete(key);
+        subscription.detach();
+        subscription.controller.abort();
         this.#stopPollingWhenIdle();
     }
 
