@@ -492,7 +492,7 @@ export function renderTuiMessageHistoryLines(
         : reader.messageHistory.instances[instance]?.entries ?? emptyMessageEntries;
     const olderHint = selectedContext?.historyBefore !== undefined &&
         selectedContext.historyExhausted !== true
-        ? { kind: "meta" as const, text: "l load older Comments and Reports" }
+        ? { kind: "meta" as const, text: "Ctrl+O load older Comments and Reports" }
         : undefined;
     let byContextAndWidth = messageHistoryCache.get(source);
     if (byContextAndWidth === undefined) {

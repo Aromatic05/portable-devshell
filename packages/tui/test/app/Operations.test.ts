@@ -3,18 +3,26 @@ import test from "node:test";
 import {
     type InstanceCreateDraft,
     type JsonValue,
+    createDefaultControlConfig,
+    normalizeConfigInstanceDraft,
+    toConfigView,
 } from "@portable-devshell/shared";
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
 import { type TuiDomainSession } from "../../src/app/control/Client.ts";
 import {
     type TuiRuntimeOperationClients,
 } from "../../src/app/Operations.ts";
+import { toTuiInstanceEditorRecord } from "../../src/state/editor/Config.ts";
+import { round6Tui } from "../support/Round6Harness.ts";
+import { selectMainScreenModel } from "../../src/view/projection/View.ts";
 
 {
     function createHarness(
         options: {
             failConfigUpdate?: boolean;
             cleanupPending?: boolean;
+            restartControlRequired?: boolean;
+            store?: TuiAppStore;
             failReverseCode?: boolean;
             failStart?: boolean;
             initialHomeDirectory?: string | null;
@@ -24,7 +32,7 @@ import {
             startedHomeDirectory?: string;
         } = {},
     ) {
-        const store = new TuiAppStore();
+        const store = options.store ?? new TuiAppStore();
         const initialHomeDirectory =
             options.initialHomeDirectory === undefined
                 ? "/home/alpha"
@@ -48,7 +56,10 @@ import {
             config: {
                 async update() {
                     calls.push("config.update");
-                    return {};
+                    return {
+                        cleanupPending: options.cleanupPending ?? false,
+                        restartControlRequired: options.restartControlRequired ?? false,
+                    };
                 },
                 async updateMcpEndpoint() {
                     calls.push("config.mcp");
@@ -372,6 +383,59 @@ import {
         );
         assert.deepEqual(harness.refreshed, []);
     });
+
+    test("Instances shows another target's failure once and clears it after retry", async () => {
+        const ui = round6Tui({
+            onInstanceAction: (action, instance) => runtime.operations.runInstanceAction(action, instance),
+        });
+        const options = { failStart: true, store: ui.store };
+        const runtime = createHarness(options);
+        runtime.store.setSelectedPage("instances");
+        runtime.store.setSelectedInstance("alpha");
+        runtime.store.setScreenStatus("instances", "Old success");
+        const beta = ui.model().boxes.find((box) => box.id === "instance:beta")!;
+        ui.store.toggleExpanded(beta.expandedKey);
+        ui.store.setMainFocusId(beta.id);
+        ui.store.setSelectedDetailLine(beta.expandedKey, "instance:beta:button:start");
+        ui.store.setFocusScope("boxDetail");
+        await ui.dispatcher.dispatch({ type: "focus.activate" });
+        const model = () => selectMainScreenModel(runtime.store.getState(), ui.domains.reader);
+        assert.deepEqual(model().errorLines, ["beta: core.startFailed: start failed"]);
+        assert.equal(model().statusLine, undefined);
+        assert.equal(runtime.store.getState().ui.selectedInstance, "alpha");
+        options.failStart = false;
+        await ui.dispatcher.dispatch({ type: "focus.activate" });
+        assert.equal(model().errorLines, undefined);
+        assert.equal(model().statusLine, "Start Worker: beta completed.");
+    });
+
+    for (const restartControlRequired of [false, true]) {
+    test(`config editor preserves pending cleanup with Control restart=${restartControlRequired}`, async () => {
+        const runtime = createHarness({ cleanupPending: true, restartControlRequired });
+        const ui = round6Tui({
+            onConfigUpdate: (request) => runtime.operations.updateConfig(request),
+            onValidateConfigDraft: async () => undefined,
+        });
+        const config = createDefaultControlConfig();
+        config.instances = [normalizeConfigInstanceDraft({ name: "alpha", provider: "local" })];
+        const view = toConfigView(config);
+        ui.domains.setConfig(view);
+        ui.store.setFormDraft("config:alpha", toTuiInstanceEditorRecord(view.instances[0]! as unknown as Record<string, JsonValue>), false);
+        ui.store.setSelectedPage("config");
+        await ui.dispatcher.dispatch({ type: "editor.open", kind: "config", key: "config:alpha" });
+        ui.store.setFormDraft("config:alpha", {
+            ...ui.store.getState().ui.formDrafts["config:alpha"] as Record<string, JsonValue>,
+            enabled: false,
+        }, true);
+        assert.equal(await ui.dispatcher.dispatch({ type: "editor.save" }), true, ui.store.getState().interaction.editor?.error);
+        assert.deepEqual(runtime.calls, ["config.update"]);
+        assert.equal(ui.store.getState().ui.dirtyForms["config:alpha"], false);
+        assert.equal(ui.store.getState().ui.controlRestartRequired, restartControlRequired);
+        assert.equal(ui.model().statusLine,
+            "Config committed; instance lifecycle cleanup remains pending. Open Instances to check lifecycle status."
+            + (restartControlRequired ? " Control restart is required for MCP changes." : ""));
+    });
+    }
 
     test("reverse instance creation reports committed creation when device code generation fails", async () => {
         const harness = createHarness({ failReverseCode: true });

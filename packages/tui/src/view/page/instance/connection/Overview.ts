@@ -26,19 +26,18 @@ export function buildConnectionsOverviewBoxes(
             : undefined;
     const instanceRecord = asRecord(instanceConfig);
     const instanceMcp = asRecord(instanceRecord?.mcp);
-    const instanceAuth = asRecord(instanceMcp?.auth);
     const provider =
         typeof instanceRecord?.provider === "string"
             ? instanceRecord.provider
             : undefined;
     const authMode =
-        typeof instanceAuth?.mode === "string" ? instanceAuth.mode : "none";
+        typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
     const oauthMode =
         reader.mcp.status?.authMode === "oauth2" ? "oauth2" : authMode;
     const running = reader.mcp.status?.running === true;
-    const pendingOAuth = reader.mcp.approvals.filter(
+    const pendingOAuth = reader.mcp.approvalFailure !== undefined ? "unknown" : String(reader.mcp.approvals.filter(
         (approval) => approval.status === "pending",
-    ).length;
+    ).length);
     const snapshot =
         instance === undefined
             ? undefined
@@ -137,7 +136,7 @@ export function buildConnectionsOverviewBoxes(
                             : "failed",
                       summaryLines: [
                           compactSummary(
-                              ["provider", authMode],
+                              ["provider", oauthMode],
                               ["pending", String(pendingOAuth)],
                           ),
                       ],

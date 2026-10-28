@@ -170,6 +170,7 @@ export class TuiKeyDispatcher {
     }
 
     #forContextMessage(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.ctrl && press.input.toLowerCase() === "o") return [{ type: "history.loadOlder" }];
         if (press.key.ctrl && press.input.toLowerCase() === "r") return [{ type: "page.reload" }];
         if (press.key.backspace || press.key.delete) {
             return [{ type: "contextMessage.backspace" }];
@@ -248,6 +249,7 @@ export class TuiKeyDispatcher {
     }
 
     #forMainScopes(press: TuiKeyPress): TuiUiIntent[] {
+        if (press.key.ctrl && press.input.toLowerCase() === "o") return [{ type: "history.loadOlder" }];
         const instanceIndex = shiftedInstanceIndex(press);
         if (instanceIndex !== undefined) {
             return [{ index: instanceIndex, type: "instance.selectIndex" }];

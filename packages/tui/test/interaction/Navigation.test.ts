@@ -3096,7 +3096,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                 "[Global] Web UI",
                 "[Instance] Auth",
                 "Page Actions",
-                "Configuration Validation",
             ],
         );
         const endpoint = expandBox(harness, "connection-endpoints");
@@ -3268,13 +3267,8 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                 {
                     enabled: true,
                     mcp: {
-                        auth: {
-                            mode: "oauth2",
-                            oauth2: {
-                                requiredScopes: [],
-                                resourceName: "alpha",
-                            },
-                        },
+                        auth: "oauth2",
+                        oauth2: { requiredScopes: [], resourceName: "alpha" },
                         enabled: true,
                         path: "/alpha/mcp",
                     },
@@ -3300,6 +3294,7 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
             ["Connector", "OAuth Provider"],
         );
         const connector = expandBox(harness, "connections:connector:mcp");
+        assert.equal(connector.status, "ready");
         assert.equal(
             connector.expandedLines.some(
                 (line) =>
@@ -3382,7 +3377,7 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                 {
                     enabled: true,
                     mcp: {
-                        auth: { mode: "none" },
+                        auth: "none",
                         enabled: true,
                         path: "/alpha/mcp",
                     },

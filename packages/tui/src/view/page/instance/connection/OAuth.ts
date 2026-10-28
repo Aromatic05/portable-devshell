@@ -12,6 +12,10 @@ export function buildOAuthPageBoxes(
 ): BoxModel[] {
     const status = oauthRuntimeStatus(reader);
     const approval = oauthApprovalConfig(reader);
+    const approvalFailure = reader.mcp.approvalFailure;
+    const pending = approvalFailure === undefined
+        ? String(reader.mcp.approvals.filter((entry) => entry.status === "pending").length)
+        : "unknown";
     const statusBox = makeBox(state, "connections", instanceName, {
         detailLines: [
             `Provider           ${status.provider}`,
@@ -20,7 +24,7 @@ export function buildOAuthPageBoxes(
             `Reason             ${status.reason}`,
             `Approval mode      ${approval.mode}`,
             `Approval token     ${approval.tokenConfigured ? "configured" : "not configured"}`,
-            `Pending requests   ${reader.mcp.approvals.filter((approval) => approval.status === "pending").length}`,
+            `Pending requests   ${pending}`,
             ...(approval.mode === "token"
                 ? [
                       {
@@ -54,18 +58,28 @@ export function buildOAuthPageBoxes(
                 ["runtime", status.runtime],
                 [
                     "pending",
-                    String(
-                        reader.mcp.approvals.filter(
-                            (approval) => approval.status === "pending",
-                        ).length,
-                    ),
+                    pending,
                 ],
             ),
         ],
         title: "[Global] OAuth Runtime",
     });
 
-    if (reader.mcp.approvals.length === 0) {
+    const failureBoxes = approvalFailure === undefined ? [] : [
+        makeBox(state, "connections", instanceName, {
+            detailLines: [
+                `Could not load OAuth approvals: ${approvalFailure.message}`,
+                ...(reader.mcp.approvals.length === 0 ? [] : ["Cached approvals may be out of date."]),
+                { id: "oauth.retry", text: "[ Retry ]" },
+            ],
+            id: "oauth-unavailable",
+            status: "warning",
+            summaryLines: ["Approvals unavailable · r retry", ...(reader.mcp.approvals.length === 0 ? [] : ["Cached approvals may be out of date."])],
+            title: "OAuth Approvals",
+        }),
+    ];
+
+    if (reader.mcp.approvals.length === 0 && approvalFailure === undefined) {
         return [
             statusBox,
             makeBox(state, "connections", instanceName, {
@@ -81,6 +95,7 @@ export function buildOAuthPageBoxes(
 
     return [
         statusBox,
+        ...failureBoxes,
         ...reader.mcp.approvals.map((approval) =>
             oauthApprovalBox(state, instanceName, approval),
         ),

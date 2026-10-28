@@ -935,6 +935,10 @@ function readErrorMessage(error: unknown): string {
 function describeApplyResult(result: JsonValue, restarted: boolean): string {
     const record = asRecord(result);
     const controlRestart = record?.restartControlRequired === true;
+    if (record?.cleanupPending === true) {
+        return "Config committed; instance lifecycle cleanup remains pending. Open Instances to check lifecycle status."
+            + (controlRestart ? " Control restart is required for MCP changes." : "");
+    }
     if (restarted) {
         return controlRestart
             ? "Saved and instance restarted. Control restart is still required for MCP changes."

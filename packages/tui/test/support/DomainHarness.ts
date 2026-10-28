@@ -59,6 +59,7 @@ export class TuiTestDomains {
         status: "idle" as "idle" | "ready",
     });
     readonly mcp = new TestDomainSource({
+        approvalFailure: undefined as Error | undefined,
         approvals: [] as any[],
         status: undefined as any,
     });

@@ -56,7 +56,7 @@ test("TUI Messages projects selected Context history and exposes its older-page 
     assert.deepEqual(selectTuiMessageEntries(domains.reader, "alpha", "ctx-old").map((entry) => entry.text),
         ["Scoped message survives"]);
     const lines = renderTuiMessageHistoryLines(domains.reader, "alpha", "ctx-old", 80);
-    assert.match(lines[0]?.text ?? "", /l load older/u);
+    assert.match(lines[0]?.text ?? "", /Ctrl\+O load older/u);
     assert.ok(lines.some((line) => line.text.includes("Scoped message survives")));
     assert.equal(lines.some((line) => line.text.includes("Wrong preview entry")), false);
     const keys = new TuiKeyDispatcher();

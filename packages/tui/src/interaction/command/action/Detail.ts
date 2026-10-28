@@ -64,6 +64,10 @@ export class TuiCommandDispatcherDetail {
             return await this.#dispatch({ type: "contextMessage.edit" });
         }
 
+        if (state.ui.selectedPage === "connections" && actionId === "oauth.retry") {
+            return await this.#dispatch({ type: "page.reload" });
+        }
+
         if (
             state.ui.selectedPage === "connections" &&
             actionId?.startsWith("reverse.createCode:")

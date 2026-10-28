@@ -202,7 +202,10 @@ export class TuiRuntimeControlOperations {
         await this.#refreshBestEffort(this.#panelKey("config"), async () => {
             await this.options.domains.config.refresh();
         });
-        return { restartControlRequired: result.restartControlRequired };
+        return {
+            cleanupPending: result.cleanupPending === true,
+            restartControlRequired: result.restartControlRequired,
+        };
     }
 
     async updateInstanceConfig(

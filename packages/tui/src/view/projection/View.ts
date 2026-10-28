@@ -165,13 +165,19 @@ function projectMainScreenModel(
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
     const panelKey = `${activePage.page}:${activePage.instance ?? "-"}`;
     const panelErrors = Object.entries(state.panelErrors)
-        .filter(([key]) => key === panelKey || key.startsWith(`${panelKey}:`))
-        .map(([, error]) => error);
-    const panelError = panelErrors[0];
+        .filter(([key]) => activePage.page === "instances"
+            ? key.startsWith("instances:")
+            : key === panelKey || key.startsWith(`${panelKey}:`));
+    const panelError = panelErrors[0]?.[1];
     const errorLines =
         panelErrors.length === 0
             ? undefined
-            : panelErrors.map((error) => `${error.code}: ${error.message}`);
+            : panelErrors.map(([key, error]) => {
+                  const instance = key.split(":")[1];
+                  const target = activePage.page === "instances" && instance !== "-"
+                      ? `${instance}: ` : "";
+                  return `${target}${error.code}: ${error.message}`;
+              });
 
     if (activePage.page === "overview") {
         return {

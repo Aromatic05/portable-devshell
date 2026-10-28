@@ -208,6 +208,7 @@ export class TuiRuntimeExecutionOperations {
             title,
         };
         this.options.store.upsertCommand({ ...command, status: "running" });
+        this.options.store.setScreenStatus(sourcePanel, undefined);
         this.options.store.setPanelError(panelKey, undefined);
         try {
             await operation(commandId);
