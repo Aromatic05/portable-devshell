@@ -75,7 +75,7 @@ export async function readMcpAppActivityImage(
         content.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(content) ||
         typeof bytes !== "number" || !Number.isSafeInteger(bytes) ||
         bytes < 1 || bytes > 10 * 1024 * 1024)
-        throw new Error("Invalid MCP App Activity image");
+        throw new McpAppReadError("invalid", "Invalid MCP App Activity image");
     return { src: `data:${mediaType};base64,${content}`, mediaType };
 }
 
@@ -93,13 +93,13 @@ export async function readMcpAppActivityOutput(
         (result.nextOffset !== undefined &&
             (typeof result.nextOffset !== "number" || !Number.isSafeInteger(result.nextOffset) ||
                 result.nextOffset < 1 || result.nextOffset > 1024 * 1024 || result.nextSeq === undefined)))
-        throw new Error("Invalid MCP App Activity output");
+        throw new McpAppReadError("invalid", "Invalid MCP App Activity output");
     return result as unknown as McpAppActivityOutput;
 }
 
 export async function readMcpAppSnapshot(session: McpAppSession, signal: AbortSignal): Promise<McpAppSnapshot> {
     const result = await request(session, "/snapshot", signal);
-    if (!isSnapshot(result) || result.ctxId !== session.ctxId) throw new Error("Invalid MCP App snapshot");
+    if (!isSnapshot(result) || result.ctxId !== session.ctxId) throw new McpAppReadError("invalid", "Invalid MCP App snapshot");
     return result;
 }
 
@@ -111,7 +111,7 @@ export async function readMcpAppTimeline(session: McpAppSession, signal: AbortSi
             const entry = record(item);
             return typeof entry?.callId === "string" && typeof entry.name === "string" &&
                 typeof entry.state === "string" && typeof entry.at === "string";
-        })) throw new Error("Invalid MCP App activity");
+        })) throw new McpAppReadError("invalid", "Invalid MCP App activity");
     return result.activity as McpAppActivity[];
 }
 
@@ -121,9 +121,9 @@ export async function watchMcpApp(
     const result = await request(session, `/watch?cursor=${cursor}`, signal);
     const watch = record(result);
     if (typeof watch?.changed !== "boolean" || typeof watch.cursor !== "number" ||
-        !Number.isSafeInteger(watch.cursor) || watch.cursor < 0) throw new Error("Invalid MCP App watch result");
+        !Number.isSafeInteger(watch.cursor) || watch.cursor < 0) throw new McpAppReadError("invalid", "Invalid MCP App watch result");
     if (watch.changed && (!isSnapshot(watch.snapshot) || watch.snapshot.ctxId !== session.ctxId))
-        throw new Error("Invalid MCP App watch snapshot");
+        throw new McpAppReadError("invalid", "Invalid MCP App watch snapshot");
     return {
         changed: watch.changed,
         cursor: watch.cursor,
@@ -139,9 +139,13 @@ async function request(session: McpAppSession, path: string, signal: AbortSignal
         headers: { Authorization: `Bearer ${session.token}` },
         signal,
     });
-    if (!response.ok) throw new Error(response.status === 401 || response.status === 403
-        ? "MCP App authorization expired" : `MCP App HTTP ${response.status}`);
-    return await response.json() as unknown;
+    if (!response.ok) throw new McpAppReadError(response.status === 401 || response.status === 403
+        ? "expired" : "unavailable", `MCP App HTTP ${response.status}`);
+    try {
+        return await response.json() as unknown;
+    } catch (error) {
+        throw new McpAppReadError("invalid", "Invalid MCP App JSON", { cause: error });
+    }
 }
 
 function isSnapshot(value: unknown): value is McpAppSnapshot {
@@ -156,4 +160,20 @@ function isSnapshot(value: unknown): value is McpAppSnapshot {
 function record(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value as Record<string, unknown> : undefined;
+}
+
+export class McpAppReadError extends Error {
+    constructor(readonly kind: "expired" | "unavailable" | "invalid", message: string, options?: ErrorOptions) {
+        super(message, options);
+    }
+}
+
+export function mcpAppReadErrorMessage(error: unknown, subject: string, retrying = false): string {
+    console.error(`Unable to read ${subject}`, error);
+    if (error instanceof McpAppReadError && error.kind === "expired")
+        return retrying ? "MCP App authorization expired"
+            : "MCP App authorization expired. Reopen Workspace from the active conversation.";
+    const reason = error instanceof McpAppReadError && error.kind === "invalid"
+        ? `${subject} returned an invalid response.` : `${subject} is temporarily unavailable.`;
+    return `${reason} ${retrying ? "Reconnecting automatically." : "Please retry."}`;
 }

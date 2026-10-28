@@ -310,14 +310,14 @@ test("retained stdout page failure stays visible with previous output and retrie
     await act(async () => container.querySelector<HTMLButtonElement>(".toolcall-compact")!.click());
     await click("Load more output");
     expect(container.querySelector(".tc-terminal pre")!.textContent).toBe("first page\n");
-    expect(container.textContent).toContain("503");
+    expect(container.textContent).toContain("Retained output is temporarily unavailable. Please retry.");
     expect(button("Retry output").disabled).toBe(false);
     await click("Retry output");
     expect(reads).toHaveLength(3);
     expect(reads[1]).toBe(reads[2]);
     expect(reads[2]).toContain("fromSeq=33");
     expect(container.querySelector(".tc-terminal pre")!.textContent).toBe("first page\nlast page\n");
-    expect(container.textContent).not.toContain("503");
+    expect(container.textContent).not.toContain("Retained output is temporarily unavailable. Please retry.");
 });
 
 test("an action refresh awaiting the response body is revalidated after Context replacement", async () => {
@@ -353,7 +353,7 @@ test("watch retry retains its revision floor when an action refresh overtook the
     await render(<AppView />); await authorize(); await click("Resume Goal");
     expect(container.textContent).toContain("Revision 20 work");
     await act(async () => watch.reject(new Error("watch interrupted")));
-    expect(container.textContent).toContain("watch interrupted");
+    expect(container.textContent).toContain("Workspace connection is temporarily unavailable. Reconnecting automatically.");
     expect(container.textContent).toContain("Revision 20 work");
     expect(container.textContent).toContain("Showing last known state");
     expect(container.querySelector(".workspace-actions button")).toBeNull();
@@ -363,7 +363,7 @@ test("watch retry retains its revision floor when an action refresh overtook the
     const latest = snapshot("ctx-a", "alpha", 21); latest.presentation.work[0]!.title = "Revision 21 work";
     await act(async () => recoveryWatch.resolve(response({ changed: true, cursor: 21, snapshot: latest })));
     expect(container.textContent).toContain("Revision 21 work"); expect(button("Resume Goal").disabled).toBe(false);
-    expect(container.textContent).not.toContain("watch interrupted");
+    expect(container.textContent).not.toContain("Workspace connection is temporarily unavailable. Reconnecting automatically.");
 });
 
 test.each(["close", "teardown", "unmount"] as const)("Host %s invalidates pending work before its late completion", async (event) => {
@@ -471,7 +471,7 @@ test("an uncertain attempt reports the original operation and never blindly repl
     await render(<AppView />); await authorize();
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
     expect(host.calls.at(-1)!.arguments.outcome).toBe("uncertain");
-    expect(host.sent).toEqual([]); expect(container.querySelector('[role="alert"]')!.textContent).toBe("attempt response lost");
+    expect(host.sent).toEqual([]); expect(container.querySelector('[role="alert"]')!.textContent).toContain("Unable to confirm whether the Goal continuation was delivered");
     state = recovery(snapshot("ctx-a", "alpha", 12));
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
@@ -543,7 +543,7 @@ test.each(["reject", "throw"])("Resume 与 Watch 交错时派生恢复的 %s 错
     state = recovery(snapshot("ctx-a", "alpha", 12));
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: state })));
     expect(host.sent).toHaveLength(1);
-    const error = failure === "reject" ? "Host rejected the continuation message" : "Host continuation transport failed";
+    const error = failure === "reject" ? "Host rejected the continuation message" : "Unable to confirm whether the Goal continuation was delivered";
     expect(container.textContent).toContain(error);
     await act(async () => actionRefresh.resolve(response(state)));
     expect(container.textContent).toContain(error);
@@ -567,13 +567,13 @@ test("Activity 同一 seq 的 UTF-8 偏移续页失败后重试同一游标", as
     await render(<AppView />); await authorize(); await click("Activity");
     await act(async () => container.querySelector<HTMLButtonElement>(".toolcall-compact")!.click());
     await click("Load more output");
-    expect(container.textContent).toContain("503");
+    expect(container.textContent).toContain("Retained output is temporarily unavailable. Please retry.");
     await click("Retry output");
     expect(reads[1]).toBe(reads[2]);
     expect(reads[2]).toContain("fromSeq=1&offset=6");
     expect(container.querySelector(".tc-terminal pre")!.textContent).toContain("中文😀结尾");
     expect(container.textContent).toContain("错误");
-    expect(container.textContent).not.toContain("503");
+    expect(container.textContent).not.toContain("Retained output is temporarily unavailable. Please retry.");
     expect(container.textContent).not.toContain("Load more output");
 });
 
@@ -594,4 +594,50 @@ test("恢复拒绝与同时接纳的动作拒绝各自可见，后续刷新不�
     expect(container.textContent).toContain("Workspace action was rejected.");
     expect(container.textContent).toContain("Host rejected the continuation message");
     expect(host.sent).toHaveLength(1);
+});
+
+
+test("first snapshot failure never claims connection and retries into fresh ready state", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = deferred<Response>();
+    const state = snapshot(); state.agentBusy = false;
+    serve((url, init) => url.pathname.endsWith("/snapshot")
+        ? ++reads === 1 ? first.promise : response(state) : hold(init?.signal));
+    await render(<AppView />); await authorize();
+    expect(container.querySelector("h1")!.textContent).toBe("Connecting to workspace");
+    await act(async () => first.resolve(new Response("{}", { status: 503 })));
+    expect(container.querySelector("h1")!.textContent).toBe("Workspace unavailable");
+    expect(container.textContent).toContain("Workspace connection is temporarily unavailable. Reconnecting automatically.");
+    expect(container.textContent).not.toContain("HTTP 503");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(container.querySelector("h1")!.textContent).toBe("Workspace ready");
+});
+
+test("invalid live response fences stale ready state and actions until snapshot recovery", async () => {
+    vi.useFakeTimers();
+    const watch = deferred<Response>(); let watches = 0;
+    const state = snapshot(); state.agentBusy = false;
+    serve((url, init) => url.pathname.endsWith("/snapshot") ? response(state)
+        : watches++ === 0 ? watch.promise : hold(init?.signal));
+    await render(<AppView />); await authorize();
+    expect(container.querySelector("h1")!.textContent).toBe("Workspace ready");
+    await act(async () => watch.resolve(response({ changed: "invalid" })));
+    expect(container.querySelector("h1")!.textContent).toBe("Reconnecting to workspace");
+    expect(container.textContent).toContain("Workspace connection returned an invalid response. Reconnecting automatically.");
+    expect(container.textContent).not.toContain("Invalid MCP App");
+    expect(container.textContent).not.toContain("Resume Goal");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(container.querySelector("h1")!.textContent).toBe("Workspace ready");
+    expect(button("Resume Goal").disabled).toBe(false);
+    expect(host.sent).toHaveLength(0);
+});
+
+test("interaction bootstrap missing authorization gives a reopening action without protocol details", async () => {
+    host.invoke = async () => result({});
+    await render(<AppView view="interaction" />);
+    expect(container.textContent).toContain("Workspace access returned an invalid response");
+    expect(container.textContent).toContain("Reopen Workspace from the active conversation");
+    expect(container.textContent).not.toContain("private Live capability");
+    expect(host.sent).toHaveLength(0);
 });

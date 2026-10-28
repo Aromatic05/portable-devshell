@@ -5,7 +5,7 @@ import {
     applyHostStyleVariables,
 } from "@modelcontextprotocol/ext-apps/app-with-deps";
 import { useEffect, useRef, useState } from "react";
-import { readMcpAppSnapshot, watchMcpApp, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
+import { McpAppReadError, mcpAppReadErrorMessage, readMcpAppSnapshot, watchMcpApp, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
 import { clearMcpAppSession, hasMcpAppFullscreenClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppFullscreenClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
 import { ToolCallInline } from "./ToolCallInline.js";
 import { useToolCallDisplay } from "./Preferences.js";
@@ -202,13 +202,13 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                         if (result.isError) throw new Error("MCP App Context is unavailable.");
                         const capability = readMcpAppSession(result);
                         if (capability === undefined)
-                            throw new Error("MCP App bootstrap returned no private Live capability.");
+                            throw new McpAppReadError("invalid", "MCP App bootstrap returned no private Live capability.");
                         replaceSession(capability);
                         saveMcpAppSession(capability);
                     }).catch((error: unknown) => {
                         if (active && currentApp === app && hostRef.current === app &&
                             sessionEpoch.current === bootstrapEpoch)
-                            setLiveError(error instanceof Error ? error.message : "MCP App bootstrap failed.");
+                            setLiveError(mcpAppReadErrorMessage(error, "Workspace access") + " Reopen Workspace from the active conversation.");
                     });
                 }
             }).catch(() => { if (currentApp === app) retry(); });
@@ -259,7 +259,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     retries = 0;
                 } catch (error) {
                     if (!current()) return;
-                    const message = error instanceof Error ? error.message : "MCP App connection failed";
+                    const message = mcpAppReadErrorMessage(error, "Workspace connection", true);
                     if (message === "MCP App authorization expired") {
                         replaceSession(undefined, contextRef.current);
                         clearMcpAppSession();
@@ -356,8 +356,11 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     setRecoveryError("The Goal is active, but the Host rejected the continuation message. This message will not be sent again automatically. Continue the Goal from the conversation.");
                 else if (current()) setRecoveryError(undefined);
             } catch (error) {
+                console.error("Workspace recovery failed", error);
                 if (current())
-                    setRecoveryError(error instanceof Error ? error.message : "Workspace recovery failed.");
+                    setRecoveryError(attempted || attemptUncertain
+                        ? "Unable to confirm whether the Goal continuation was delivered. It will not be sent again automatically. Check the conversation before continuing the Goal."
+                        : error instanceof Error ? error.message : "Workspace recovery failed.");
             } finally {
                 if (claimed) {
                     try {
@@ -503,7 +506,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             <section className="workspace-content">
                 {fullscreenError && <p className="workspace-notice" role="alert">{fullscreenError}</p>}
                 {liveError !== undefined && snapshot && <p className="workspace-notice" role="status">
-                    Live updates interrupted: {liveError}. Showing last known state; actions are paused until reconnect.
+                    {liveError} Showing last known state; actions are paused until reconnect.
                 </p>}
                 {view === "interaction" ? <>
                     {snapshot ? <div className="workspace-items">
@@ -523,13 +526,13 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                 </> : snapshot ? <>
                     {actionError && <p role="alert">{actionError}</p>}
                     {recoveryError && <p role="alert">{recoveryError}</p>}
-                    <WorkspaceDashboard key={snapshot.ctxId} snapshot={snapshot} session={session}
+                    <WorkspaceDashboard key={snapshot.ctxId} snapshot={snapshot} session={session} fresh={status === "connected" && liveError === undefined}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" || liveError !== undefined || status !== "connected" ? undefined : act}
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
                             cancel={() => setPendingAction(undefined)} />} />
                 </> : <div className="workspace-landing">
-                    <h1>{authorizationExpired ? "Workspace authorization expired" : ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>
+                    <h1>{authorizationExpired ? "Workspace authorization expired" : ctxId || session ? liveError ? "Workspace unavailable" : status === "disconnected" ? "Workspace disconnected" : "Connecting to workspace" : "Waiting for workspace"}</h1>
                     <p>{authorizationExpired ? "MCP App authorization expired. Reopen Workspace from the active DevShell Context to obtain fresh authorization." : liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Open an active DevShell Context to inspect its Tasks, Goals and background activity.")}</p>
                     {(ctxId || session?.ctxId) && <p className="workspace-context">Context · {ctxId ?? session?.ctxId}</p>}
                 </div>}

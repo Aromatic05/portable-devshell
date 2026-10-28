@@ -133,7 +133,7 @@ test("round5: ambiguous Host send reports uncertain once and watch rerender does
     await render(<AppView />); await authorize();
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
     expect(host.calls.at(-1)!.arguments.outcome).toBe("uncertain");
-    expect(container.querySelector('[role="alert"]')!.textContent).toBe("host send timed out after dispatch");
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe("Unable to confirm whether the Goal continuation was delivered. It will not be sent again automatically. Check the conversation before continuing the Goal.");
     await act(async () => watch.resolve(response({ changed: true, cursor: 12, snapshot: { ...state, cursor: 12 } })));
     expect(host.sent).toHaveLength(1); expect(host.contexts).toHaveLength(1);
     expect(phases()).toEqual(["claim", "validate", "attempt", "report"]);
@@ -206,12 +206,12 @@ test("round5: mismatched Activity page is rejected and explicit retry starts at 
     });
     await render(<AppView />); await authorize(); await click("Activity");
     await act(async () => { container.querySelector<HTMLButtonElement>(".toolcall-compact")!.click(); });
-    expect(container.textContent).toContain("Invalid MCP App Activity output");
+    expect(container.textContent).toContain("Retained output returned an invalid response. Please retry.");
     expect(container.textContent).not.toContain("foreign audit secret"); expect(button("Retry output").disabled).toBe(false);
     await click("Retry output");
     expect(reads).toHaveLength(2); expect(reads[0]).toBe(reads[1]); expect(reads[1]).toContain("fromSeq=1");
     expect(container.querySelector(".tc-terminal pre")!.textContent).toContain("authorized retained output");
-    expect(container.textContent).not.toContain("Invalid MCP App Activity output"); expect(host.calls).toEqual([]);
+    expect(container.textContent).not.toContain("Retained output returned an invalid response. Please retry."); expect(host.calls).toEqual([]);
 });
 
 test("round5: refused fullscreen does not loop and failed Close permits explicit retry without workspace actions", async () => {

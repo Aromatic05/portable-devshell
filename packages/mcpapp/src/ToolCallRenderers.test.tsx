@@ -61,7 +61,7 @@ test("Activity displays every loaded terminal character while ordinary Inline re
 
 test("file_read displays numbered code, supports metadata, and does not JSON-escape content", async () => {
     const view = await display({ name: "file_read", isError: false, output: {
-        files: [{ path: "./src/App.ts", view: "content", content: "9:const state = true;\n10:export default state;" },
+        files: [{ path: "./src/App.ts", view: "content", content: "9:const state = true;\n10:export default state;", nextSelector: "opaque-selector" },
             { path: "./missing.txt", view: "metadata", metadata: { exists: false } }],
     } }, { files: [{ path: "./src/App.ts" }, { path: "./missing.txt" }] });
     expect(view.querySelectorAll(".tc-file")).toHaveLength(2);
@@ -69,6 +69,9 @@ test("file_read displays numbered code, supports metadata, and does not JSON-esc
     expect(view.querySelector(".tc-syntax-keyword")?.textContent).toBe("const");
     expect(view.querySelector(".tc-fields")?.textContent).toContain("existsfalse");
     expect(view.textContent).not.toContain('"files":');
+    expect(view.textContent).toContain("More lines available");
+    expect(view.textContent).not.toContain("next selector");
+    expect(view.querySelector(".tc-view button")).toBeNull();
 });
 
 test("file_grep highlights matching lines while file_glob creates a navigable file tree", async () => {
@@ -78,6 +81,9 @@ test("file_grep highlights matching lines while file_glob creates a navigable fi
     } }, { pattern: "needle", paths: ["./src"], syntax: "literal" });
     expect(view.querySelector(".tc-code-line[data-match='true'] mark")?.textContent).toBe("needle");
     expect(view.textContent).toContain("More matches after line 18");
+    expect(view.textContent).toContain("More files exist.");
+    expect(view.textContent).not.toContain("using its cursor");
+    expect(view.querySelector(".tc-view button")).toBeNull();
     await act(async () => { root?.unmount(); root = undefined; });
     container?.remove();
     view = await display({ name: "file_glob", isError: false, output: {
@@ -220,4 +226,30 @@ test("progress_report renders a compact report and its readable message", async 
     const view = await display({ name: "progress_report", isError: false, output: { reported: true } },
         { message: "Final Goal and Memory are now active" });
     expect(view.textContent).toContain("Final Goal and Memory are now active");
+});
+
+
+test("file_edit without a diff reports limited content without parameter tips or a replay action", async () => {
+    const view = await display({ name: "file_edit", isError: false, output: {
+        operations: [{ action: "patch", path: "./app.ts", status: "applied", addedLines: 1, removedLines: 1 }],
+    } });
+    expect(view.textContent).toContain("Only change counts were returned; no actual diff was provided.");
+    expect(view.textContent).not.toContain("resultDetail");
+    expect(view.querySelector(".tc-view button")).toBeNull();
+});
+
+test("Activity remains useful with history toggled without a persistent mount explanation", async () => {
+    container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+    await act(async () => { root!.render(<WorkspaceDashboard renderItem={() => null}
+        snapshot={{ ctxId: "ctx-a", instance: "demo", cursor: 1, agentBusy: false,
+            presentation: { work: [], background: [] }, activity: [] }} />); });
+    await act(async () => { Array.from(container!.querySelectorAll("button"))
+        .find((entry) => entry.textContent === "Activity")!.click(); });
+    expect(container.textContent).toContain("No recent audited ToolCalls for this Context.");
+    expect(container.textContent).not.toContain("Inline cards");
+    expect(container.textContent).not.toContain("mounted");
+    await act(async () => { container!.querySelector<HTMLInputElement>(".workspace-setting input")!.click(); });
+    expect(container.textContent).toContain("ToolCall history is hidden.");
+    expect(container.textContent).not.toContain("Recent Context audit");
+    expect(container.textContent).not.toContain("mounted");
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { readMcpAppActivityImage, readMcpAppActivityOutput, readMcpAppTimeline, type McpAppActivity, type McpAppActivityImage, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
+import { mcpAppReadErrorMessage, readMcpAppActivityImage, readMcpAppActivityOutput, readMcpAppTimeline, type McpAppActivity, type McpAppActivityImage, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
 import type { McpAppSession } from "./Session.js";
 import { ToolCallCard } from "./ToolCall.js";
 import { record } from "./ToolCallModel.js";
@@ -64,7 +64,7 @@ function ActivityCard({ item, reads, session }: {
             if (pending.signal.aborted) return;
             setTerminal((previous) => ({
                 ...previous, loading: false,
-                error: error instanceof Error ? error.message : "Unable to read retained output",
+                error: mcpAppReadErrorMessage(error, "Retained output"),
             }));
         });
     };
@@ -83,7 +83,7 @@ function ActivityCard({ item, reads, session }: {
             setImageLoading(false);
         }).catch((error: unknown) => {
             if (pending.signal.aborted) return;
-            setImageError(error instanceof Error ? error.message : "Unable to load image preview");
+            setImageError(mcpAppReadErrorMessage(error, "Image preview"));
             setImageLoading(false);
         });
     };
@@ -136,8 +136,9 @@ function ActivityCard({ item, reads, session }: {
             </div> : undefined} />;
 }
 
-export function WorkspaceDashboard({ snapshot, renderItem, session }: {
+export function WorkspaceDashboard({ snapshot, renderItem, session, fresh = true }: {
     snapshot: McpAppSnapshot;
+    fresh?: boolean;
     renderItem: (item: McpAppItem, kind: string) => ReactNode;
     session?: McpAppSession;
 }) {
@@ -156,7 +157,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
             if (!controller.signal.aborted) setActivity(next);
         }).catch((error: unknown) => {
             if (!controller.signal.aborted) setActivityError(
-                error instanceof Error ? error.message : "Unable to read ToolCall activity",
+                mcpAppReadErrorMessage(error, "Activity history"),
             );
         });
         return () => controller.abort();
@@ -174,7 +175,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     return <div className="dashboard">
         <div className="dashboard-overview">
             <div className="dashboard-title">
-                <h1>{snapshot.agentBusy ? "Execution in progress" : "Workspace ready"}</h1>
+                <h1>{!fresh ? "Reconnecting to workspace" : snapshot.agentBusy ? "Execution in progress" : "Workspace ready"}</h1>
                 <p>{snapshot.instance} · <span>{snapshot.ctxId}</span></p>
             </div>
             <div className="dashboard-metrics">

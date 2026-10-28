@@ -425,7 +425,7 @@ test("React MCP App reports uncertain Host delivery without replaying a Reentry"
     expect(host.actions.at(-1)?.arguments.outcome).toBe("uncertain");
     expect(host.sent).toHaveLength(1);
     expect(host.modelContexts).toHaveLength(1);
-    await vi.waitFor(() => expect(container!.textContent).toContain("Host delivery outcome unknown"));
+    await vi.waitFor(() => expect(container!.textContent).toContain("Unable to confirm whether the Goal continuation was delivered"));
     await act(async () => { await Promise.resolve(); });
     expect(host.actions.filter((call) => call.arguments.action === "claim")).toHaveLength(1);
     expect(host.sent).toHaveLength(1);
@@ -808,8 +808,7 @@ test("Workspace toggle updates ToolCall presentation preference without changing
     const checkbox = container!.querySelector<HTMLInputElement>(".workspace-setting input");
     expect(checkbox?.checked).toBe(true);
     expect(checkbox?.parentElement?.textContent).toContain("Show provided ToolCall cards");
-    expect(checkbox?.parentElement?.title).toContain("Only changes the display of cards already provided by the Host");
-    expect(checkbox?.parentElement?.title).toContain("Does not enable server Inline ToolCalls or change fullscreen");
+    expect(checkbox?.parentElement?.title).toBe("");
     await act(async () => { checkbox?.click(); });
     expect(checkbox?.checked).toBe(false);
     expect(host.actions).toHaveLength(0);
