@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { dirname } from "node:path";
 import {
     access,
     mkdir,
@@ -844,3 +847,154 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
         "Timed out waiting for Extension install state transition.",
     );
 }
+
+
+test("post-rename directory sync EIO preserves selected code across Host restart", async (t) => {
+    const h = await harness(t);
+    const first = await h.service.install(await h.source("durability-v1"));
+    const source = await h.source("durability-v2", { version: "2.0.0" });
+    const originalOpen = fs.open;
+    let injected = false;
+    const mocked = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+        const handle = await originalOpen(...args);
+        if (!injected && args[0] === dirname(h.paths.registryFile) && args[1] === "r") {
+            injected = true;
+            t.mock.method(handle, "sync", async () => {
+                throw Object.assign(new Error("registry directory sync EIO"), { code: "EIO" });
+            });
+        }
+        return handle;
+    });
+    syncBuiltinESMExports();
+    try {
+        await assert.rejects(h.service.install(source), /registry directory sync EIO/u);
+    } finally {
+        mocked.mock.restore();
+        syncBuiltinESMExports();
+    }
+    assert.equal(injected, true);
+    const persisted = await new ExtensionRegistryStore(h.paths.registryFile).read();
+    const selected = persisted.extensions.example!.selectedGeneration!;
+    assert.notEqual(selected, first.selectedGeneration);
+    assert.equal(persisted.extensions.example!.lastKnownGoodGeneration, selected);
+    assert.equal(await exists(h.paths.generationDirectory("example", selected)), true);
+    assert.equal((await h.host.list())[0]?.selectedGeneration, first.selectedGeneration);
+    await h.host.stop();
+    const restarted = await restartHost(t, h);
+    assert.equal((await restarted.list())[0]?.selectedGeneration, selected);
+    assert.equal((await restarted.list())[0]?.state, "installed");
+    await invokeCliRegistration(restarted, "example", "after-eio-restart");
+});
+
+for (const purge of [false, true]) {
+    test(`remove owns same-id reinstall through filesystem cleanup (purge=${purge})`, async (t) => {
+        const h = await harness(t);
+        await h.service.install(await h.source("race-old"));
+        const source = await h.source("race-new", { version: "2.0.0" });
+        const otherSource = await h.source("race-other", { id: "other" });
+        const entered = deferred();
+        const release = deferred();
+        const originalRm = fs.rm;
+        let blocked = false;
+        const mocked = t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+            if (!blocked && args[0] === join(h.paths.codeRoot, "example")) {
+                blocked = true;
+                assert.deepEqual(await h.host.list(), []);
+                entered.resolve();
+                await release.promise;
+            }
+            return await originalRm(...args);
+        });
+        syncBuiltinESMExports();
+        const removal = h.service.remove("example", purge);
+        await entered.promise;
+        const installer = new ExtensionInstallService({ host: h.host, paths: h.paths });
+        let installed = false;
+        const installation = installer.install(source).then(async (record) => {
+            installed = true;
+            for (const directory of [
+                h.paths.runtimeDirectory("example", record.selectedGeneration!),
+                h.paths.stateDirectory("example"), h.paths.dataDirectory("example"),
+            ]) {
+                await mkdir(directory, { recursive: true });
+                await writeFile(join(directory, "new-data"), "new");
+            }
+            return record;
+        });
+        try {
+            await installer.install(otherSource);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            assert.equal(installed, false, "same-id install waits while unrelated ID proceeds");
+        } finally {
+            release.resolve();
+            await Promise.allSettled([removal, installation]);
+            mocked.mock.restore();
+            syncBuiltinESMExports();
+        }
+        assert.deepEqual(await removal, { id: "example", purged: purge, removed: true });
+        const record = await installation;
+        assert.equal(await exists(h.paths.generationDirectory("example", record.selectedGeneration!)), true);
+        for (const directory of [
+            h.paths.runtimeDirectory("example", record.selectedGeneration!),
+            h.paths.stateDirectory("example"), h.paths.dataDirectory("example"),
+        ]) {
+            assert.equal(await readFile(join(directory, "new-data"), "utf8"), "new");
+        }
+        await h.host.stop();
+        const restarted = await restartHost(t, h);
+        assert.equal((await restarted.list()).find((entry) => entry.id === "example")?.selectedGeneration, record.selectedGeneration);
+        await invokeCliRegistration(restarted, "example", "after-reinstall-restart");
+        const restartedInstaller = new ExtensionInstallService({ host: restarted, paths: h.paths });
+        await restartedInstaller.remove("example", true);
+        assert.equal(await exists(h.paths.stateDirectory("example")), false);
+    });
+}
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+}
+
+async function restartHost(t: test.TestContext, h: Harness): Promise<ExtensionHost> {
+    const restarted = new ExtensionHost({
+        loader: new ExtensionLoader({
+            readToolCalls: async () => [],
+            instances: { list: () => [] } as never,
+            instanceRuntime: unusedInstanceRuntime,
+            paths: h.paths,
+            points: createControlExtensionPointRegistry(),
+        }),
+        registry: new ExtensionRegistryStore(h.paths.registryFile),
+    });
+    t.after(async () => await restarted.stop());
+    await restarted.start();
+    return restarted;
+}
+
+test("pre-rename registry file sync EIO cleans only the unselected new generation", async (t) => {
+    const h = await harness(t);
+    const first = await h.service.install(await h.source("pre-rename-v1"));
+    const source = await h.source("pre-rename-v2", { version: "2.0.0" });
+    const originalOpen = fs.open;
+    let injected = false;
+    const mocked = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+        const handle = await originalOpen(...args);
+        if (!injected && String(args[0]).startsWith(`${h.paths.registryFile}.`) && args[1] === "wx") {
+            injected = true;
+            t.mock.method(handle, "sync", async () => { throw new Error("registry file sync EIO"); });
+        }
+        return handle;
+    });
+    syncBuiltinESMExports();
+    try {
+        await assert.rejects(h.service.install(source), /registry file sync EIO/u);
+    } finally {
+        mocked.mock.restore();
+        syncBuiltinESMExports();
+    }
+    assert.equal(injected, true);
+    assert.deepEqual(await readdir(join(h.paths.codeRoot, "example")), [first.selectedGeneration]);
+    assert.equal((await h.host.list())[0]?.selectedGeneration, first.selectedGeneration);
+    assert.equal((await new ExtensionRegistryStore(h.paths.registryFile).read()).extensions.example?.selectedGeneration, first.selectedGeneration);
+});

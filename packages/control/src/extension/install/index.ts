@@ -31,6 +31,7 @@ import {
     type ExtensionInstallLimits,
 } from "./Policy.js";
 import type { ExtensionPathLayout } from "../state/Layout.js";
+import { ExtensionRegistryStore } from "../state/Store.js";
 
 export const BUILTIN_EXTENSION_IDS = new Set([
     "access",
@@ -63,6 +64,11 @@ export interface ExtensionInstallServiceOptions {
 }
 
 export class ExtensionInstallService {
+    // Services using the same Host must retain ID ownership through filesystem cleanup.
+    static readonly #operations = new WeakMap<
+        ExtensionInstallHost,
+        Map<string, Promise<void>>
+    >();
     readonly #host: ExtensionInstallHost;
     readonly #limits: ExtensionInstallLimits;
     readonly #paths: ExtensionPathLayout;
@@ -118,6 +124,7 @@ export class ExtensionInstallService {
         let ownsArchive = false;
         let installedDirectory: string | undefined;
         let installedDirectoryCreated = false;
+        let releaseOperation: (() => void) | undefined;
 
         try {
             const source = await lstat(sourcePath).catch((error: unknown) => {
@@ -161,6 +168,7 @@ export class ExtensionInstallService {
             );
             const manifest = await readStagedManifest(stagingDirectory);
             assertInstallableManifest(manifest, builtinId);
+            releaseOperation = await this.#acquireOperation(manifest.id);
             const digest = await hashExtensionDirectory(
                 stagingDirectory,
                 this.#limits,
@@ -222,6 +230,22 @@ export class ExtensionInstallService {
                 await this.#host.selectGeneration(manifest.id, generation);
             } catch (error) {
                 if (installedDirectoryCreated) {
+                    // A failed directory fsync can follow a successful registry rename.
+                    // Keep referenced code even though publication reported failure.
+                    let entry;
+                    try {
+                        const registry = new ExtensionRegistryStore(this.#paths.registryFile);
+                        entry = (await registry.read()).extensions[manifest.id];
+                    } catch (readError) {
+                        throw new AggregateError(
+                            [error, readError],
+                            `Extension ${manifest.id} selection failed; registry outcome is unknown, retaining generation code.`,
+                        );
+                    }
+                    if (
+                        entry?.selectedGeneration === generation ||
+                        entry?.lastKnownGoodGeneration === generation
+                    ) throw error;
                     await rm(installedDirectory, {
                         force: true,
                         recursive: true,
@@ -239,11 +263,40 @@ export class ExtensionInstallService {
                     () => undefined,
                 );
             }
+            releaseOperation?.();
         }
+    }
+
+    async #acquireOperation(id: string): Promise<() => void> {
+        let operations = ExtensionInstallService.#operations.get(this.#host);
+        if (operations === undefined) {
+            operations = new Map();
+            ExtensionInstallService.#operations.set(this.#host, operations);
+        }
+        const previous = operations.get(id);
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        operations.set(id, promise);
+        await previous;
+        return () => {
+            if (operations.get(id) === promise) operations.delete(id);
+            release();
+        };
     }
 
     async remove(id: string, purge = false): Promise<ExtensionRemoveResult> {
         if (BUILTIN_EXTENSION_IDS.has(id)) throw builtinRemoveError(id);
+        const release = await this.#acquireOperation(id);
+        try {
+            return await this.#remove(id, purge);
+        } finally {
+            release();
+        }
+    }
+
+    async #remove(id: string, purge: boolean): Promise<ExtensionRemoveResult> {
         await this.#host.disable(id);
         await this.#host.waitForDrain(id);
         await this.#host.forget(id);
