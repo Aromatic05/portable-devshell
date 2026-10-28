@@ -212,6 +212,8 @@ it("defaults creation to SSH and uses discovered OpenSSH hosts", async () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New instance" }));
     expect(await screen.findByRole("radio", { name: /SSH/u })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Control host/u })).toBeInTheDocument();
+    expect(screen.getByText(/Uses the Control host’s OpenSSH config/u)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /SSH host/u })).toHaveValue(
         "aromatic-server",
     );

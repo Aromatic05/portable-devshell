@@ -227,7 +227,7 @@ export class WebStore {
         const generation = this.#generation;
         return await this.#operations.run(
             `context-message:${instance}:${ctxId}`,
-            "Message queued.",
+            undefined,
             generation,
             async () => {
                 await this.domains.messages.queue(instance, ctxId, text);
@@ -386,7 +386,7 @@ export class WebStore {
         return await withRequestTimeout(
             this.domains.instances.createSchema(),
             this.#requestTimeoutMs,
-            "instance.createSchema",
+            "Loading instance creation options",
         );
     }
 
@@ -439,7 +439,7 @@ export class WebStore {
                 await withRequestTimeout(
                     this.domains.config.validate(draft),
                     this.#requestTimeoutMs,
-                    "config.validate",
+                    "Validating configuration",
                 );
             },
         );
@@ -463,7 +463,8 @@ export class WebStore {
             const result = await withRequestTimeout(
                 this.domains.reverse.createCode(instance),
                 this.#requestTimeoutMs,
-                `reverse.createCode:${instance}`,
+                "Creating the enrollment code",
+                "uncertain",
             );
             return (
                 [
@@ -560,7 +561,8 @@ export class WebStore {
             await withRequestTimeout(
                 this.domains.server.restart(),
                 this.#requestTimeoutMs,
-                "control.restart",
+                "Restarting Control",
+                "uncertain",
             );
         } catch (error) {
             this.#set({

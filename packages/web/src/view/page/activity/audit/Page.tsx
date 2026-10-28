@@ -93,12 +93,15 @@ export function Audit({
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [olderError, setOlderError] = useState<string>();
     const olderRequest = useRef(0);
+    const olderBusy = useRef(false);
     useEffect(() => {
         olderRequest.current += 1;
+        olderBusy.current = false;
         setLoadingOlder(false);
         setOlderError(undefined);
         setToolCallPage(0);
-    }, [routeKey]);
+        return () => { olderRequest.current += 1; };
+    }, [routeKey, filters, contextStatus, server.status, disabled]);
     const [detailRetry, setDetailRetry] = useState(0);
     const [directCall, setDirectCall] = useState<{
         key: string;
@@ -135,6 +138,10 @@ export function Audit({
         const ledger = toolCallsState.instances[instance];
         return ledger?.historyBefore !== undefined && ledger.historyExhausted !== true;
     });
+    const historyComplete = scope.kind === "context"
+        ? contextHistory?.historyExhausted === true && contextHistory.failure === undefined
+        : scopedInstanceNames.every((instance) => toolCallsState.instances[instance]?.historyExhausted === true &&
+            toolCallsState.instances[instance]?.failure === undefined);
     const contextHasOlder = contextHistory?.historyBefore !== undefined &&
         contextHistory.historyExhausted !== true;
     const inMemoryCall = route.view === "call" ? allCalls.find((call) =>
@@ -240,37 +247,57 @@ export function Audit({
     const interactive = server.status === "online" && !disabled;
     const directLoading = route.view === "call" && inMemoryCall === undefined &&
         (directCall?.key !== routeKey || directCall.loading === true);
+    const directError = route.view === "call" && inMemoryCall === undefined && directCall?.key === routeKey
+        ? directCall.error : undefined;
     const countText =
         route.view === "call"
             ? selection.total === 0
-                ? directLoading ? "Loading archived Tool Call…" : "Tool Call not found in the retained audit."
+                ? directLoading ? "Loading archived Tool Call…" : directError !== undefined ? "Tool Call could not be read." : "Tool Call not found in the retained audit."
                 : "Tool call detail."
             : selection.total === 0
               ? `0 of ${scopedCalls.length} loaded tool calls${active ? " match active filters." : "."}`
               : `Showing ${currentPage * toolCallPageSize + 1}-${currentPage * toolCallPageSize + selection.items.length} of ${selection.total} loaded matching tool calls.`;
 
     async function loadOlder(): Promise<void> {
-        if (!interactive || loadingOlder || (!contextHasOlder && historyInstances.length === 0)) return;
+        if (!interactive || olderBusy.current || (!contextHasOlder && historyInstances.length === 0)) return;
         const request = ++olderRequest.current;
+        olderBusy.current = true;
         setLoadingOlder(true);
         setOlderError(undefined);
         try {
-            if (scope.kind === "context") {
-                await domains.toolCalls.loadOlderContext(scope.instance, scope.ctxId);
-                return;
+            const targets = scope.kind === "context" ? [scope.instance] : historyInstances;
+            for (const instance of targets) {
+                const history = () => scope.kind === "context"
+                    ? domains.toolCalls.state.context
+                    : domains.toolCalls.state.instances[instance];
+                const cursors = new Set<string>();
+                while (request === olderRequest.current) {
+                    const current = history();
+                    if (current?.historyExhausted === true) break;
+                    const before = current?.historyBefore;
+                    if (before === undefined || cursors.has(before))
+                        throw new Error("Search could not advance. Retry searching.");
+                    cursors.add(before);
+                    if (scope.kind === "context")
+                        await domains.toolCalls.loadOlderContext(instance, scope.ctxId);
+                    else await domains.toolCalls.loadOlder(instance);
+                    if (request !== olderRequest.current) return;
+                    const next = history();
+                    if (next?.historyExhausted !== true && next?.historyBefore === before)
+                        throw new Error("Search could not advance. Retry searching.");
+                    if (!active) break;
+                    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                }
+                if (request !== olderRequest.current) return;
             }
-            const results = await Promise.allSettled(historyInstances.map((instance) =>
-                domains.toolCalls.loadOlder(instance)));
-            const failed = results.map((result, index) => result.status === "rejected"
-                ? `${historyInstances[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
-                : undefined).filter((message): message is string => message !== undefined);
-            if (failed.length > 0 && request === olderRequest.current)
-                setOlderError(failed.join("; "));
         } catch (error) {
             if (request === olderRequest.current)
                 setOlderError(error instanceof Error ? error.message : String(error));
         } finally {
-            if (request === olderRequest.current) setLoadingOlder(false);
+            if (request === olderRequest.current) {
+                olderBusy.current = false;
+                setLoadingOlder(false);
+            }
         }
     }
 
@@ -410,9 +437,9 @@ export function Audit({
                     <button disabled={!interactive} type="button" onClick={() => void domains.toolCalls.loadContext(scope.instance, scope.ctxId)}>Retry Context Audit</button>
                 </div>
             ) : null}
-            {route.view === "call" && directCall?.key === routeKey && directCall.error !== undefined ? (
+            {directError !== undefined ? (
                 <div role="alert">
-                    <p className="error">Could not read Tool Call: {directCall.error}</p>
+                    <p className="error">Could not read Tool Call: {directError}</p>
                     <button disabled={!interactive} type="button" onClick={() => setDetailRetry((value) => value + 1)}>Retry detail</button>
                 </div>
             ) : null}
@@ -444,14 +471,14 @@ export function Audit({
                     : "Loading Context Tool Calls…"}</p>
             ) : directLoading ? (
                 <p className="empty">Loading archived Tool Call…</p>
-            ) : selection.items.length === 0 ? (
+            ) : directError !== undefined ? null : selection.items.length === 0 ? (
                 <p className="empty">
                     {failingInstances.length > 0 ? "Tool Call history is incomplete until failed reads recover."
                         : route.view === "call"
                         ? "This Tool Call is unavailable."
                         : active
-                          ? "No tool calls match these filters."
-                          : "No tool calls are available in this scope."}
+                          ? loadingOlder ? "Searching audit…" : historyComplete ? "No tool calls match these filters." : "No matches found yet."
+                          : "No tool calls are loaded in this scope."}
                 </p>
             ) : (
                 <ol className="feed activity-feed">
@@ -496,11 +523,16 @@ export function Audit({
                         page={currentPage}
                         pageCount={pageCount(selection.total, toolCallPageSize)}
                     />
-                    {(historyInstances.length > 0 || contextHasOlder) && (
+                    {(loadingOlder || historyInstances.length > 0 || contextHasOlder) && (
                         <div className="actions">
                             <button disabled={!interactive || loadingOlder} onClick={() => void loadOlder()} type="button">
-                                {loadingOlder ? "Loading older Tool Calls…" : "Load older Tool Calls"}
+                                {loadingOlder ? active ? "Searching audit…" : "Loading older Tool Calls…" : active ? "Search older Tool Calls" : "Load older Tool Calls"}
                             </button>
+                            {loadingOlder && <button type="button" onClick={() => {
+                                olderRequest.current += 1;
+                                olderBusy.current = false;
+                                setLoadingOlder(false);
+                            }}>Cancel</button>}
                         </div>
                     )}
                     {olderError !== undefined && <p className="error" role="alert">Older Tool Calls could not be loaded: {olderError}</p>}

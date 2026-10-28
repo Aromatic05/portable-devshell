@@ -362,3 +362,36 @@ function connectionView(): ConfigView {
         },
     };
 }
+
+
+it("separates saved addresses, unsaved preview and restart-pending configuration", () => {
+    const { domains, store } = setup();
+    renderConnections(store, domains, "reverse-one");
+    const saved = screen.getByRole("heading", { name: "Saved connection configuration" }).closest("article")!;
+    const listener = screen.getByRole("heading", { name: "[Global] MCP listener" }).closest("article")!;
+    expect(saved).toHaveTextContent(":3100");
+    fireEvent.change(within(listener).getByLabelText("Listen port"), { target: { value: "3200" } });
+    expect(saved).toHaveTextContent(":3100");
+    expect(saved).not.toHaveTextContent(":3200");
+    expect(screen.getByRole("heading", { name: "Unsaved endpoint preview" }).closest("article")).toHaveTextContent(":3200");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Unsaved endpoint preview" })).not.toBeInTheDocument();
+    const pending = connectionView(); pending.mcp.listenPort = 3300; pending.restartControlRequired = true;
+    act(() => domains.setConfig(pending));
+    expect(saved).toHaveTextContent(":3300");
+    expect(saved).toHaveTextContent("pending a Control restart");
+    expect(saved).toHaveTextContent("runtime reachability is not verified");
+});
+
+it("uses unknown runtime and OAuth state until status is available", () => {
+    const { domains, store } = setup();
+    domains.mcp.patch({ status: undefined });
+    renderConnections(store, domains, "reverse-one");
+    const saved = screen.getByRole("heading", { name: "Saved connection configuration" }).closest("article")!;
+    expect(saved).toHaveTextContent("MCP runtimeunknown");
+    const oauth = screen.getByRole("heading", { name: "OAuth runtime" }).closest("article")!;
+    expect(oauth).toHaveTextContent("provider=unknown · runtime=unknown · pending=unknown");
+    expect(oauth).not.toHaveTextContent("runtime=stopped");
+    act(() => domains.setMcp({ approvals: [], status: { running: false, authMode: "none" } }));
+    expect(oauth).toHaveTextContent("provider=none · runtime=stopped · pending=0");
+});

@@ -58,6 +58,8 @@ it("presents worker handshake metadata only when the server supplied it", () => 
     expect(screen.getByText("1.2.3")).toBeInTheDocument();
     rerender(<WorkerDiagnostics worker={undefined} />);
     expect(screen.queryByText("1.2.3")).not.toBeInTheDocument();
+    expect(screen.getByText(/Worker handshake details are unavailable/u)).toBeInTheDocument();
+    expect(screen.queryByText(/not connected/u)).not.toBeInTheDocument();
 });
 
 it("shows an Overview failure instead of an endless loading message", () => {
@@ -181,4 +183,15 @@ it("renders the Alerts heading as plain text instead of a self-referential link"
     expect(
         screen.queryByRole("link", { name: "Alerts" }),
     ).not.toBeInTheDocument();
+});
+
+
+it("ends loading when Overview is unsupported and offers working destinations", () => {
+    const domains = new WebTestDomains();
+    Object.assign(domains.overview.state, { status: "unsupported" });
+    render(withWebDomains(domains, <Overview />));
+    expect(screen.getByText("This Control does not support the operational overview.")).toBeInTheDocument();
+    expect(screen.queryByText("Loading operational overview…")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Instances" })).toHaveAttribute("href", "#/instances");
+    expect(screen.getByRole("link", { name: "Audit" })).toHaveAttribute("href", "#/audit");
 });

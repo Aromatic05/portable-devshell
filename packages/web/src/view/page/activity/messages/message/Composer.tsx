@@ -27,8 +27,7 @@ export interface MessageDraft {
 export function MessageComposer({
     draft: messageDraft,
     onDraftChange,
-    historyComplete,
-    entries,
+    loadExportEntries,
     onActivity,
     route,
     store,
@@ -36,8 +35,7 @@ export function MessageComposer({
 }: {
     draft: MessageDraft;
     onDraftChange(update: (draft: MessageDraft) => MessageDraft): void;
-    historyComplete: boolean;
-    entries: readonly WebMessageEntry[];
+    loadExportEntries(): Promise<readonly WebMessageEntry[]>;
     onActivity(): void;
     route: Extract<WebRoute, { page: "messages"; view: "thread" }>;
     store: WebStore;
@@ -55,6 +53,11 @@ export function MessageComposer({
         kind: "error" | "success";
         text: string;
     }>();
+    useEffect(() => {
+        if (feedback?.kind !== "success") return;
+        const timer = setTimeout(() => setFeedback(undefined), 5_000);
+        return () => clearTimeout(timer);
+    }, [feedback]);
     const draftRevision = useRef(0);
     const controlMenuRef = useRef<HTMLDivElement>(null);
     const controlTriggerRef = useRef<HTMLButtonElement>(null);
@@ -111,20 +114,35 @@ export function MessageComposer({
         }
     }
 
-    function exportMarkdown(): void {
-        downloadMarkdown(
-            markdownExportFilename(title, route.instance, route.ctxId),
-            buildMessageMarkdown({
-                ctxId: route.ctxId,
-                entries,
-                instance: route.instance,
-                title,
-                historyComplete,
-            }),
-        );
-        setFeedback({ kind: "success", text: historyComplete
-            ? `Exported ${entries.length} loaded messages.`
-            : `Exported ${entries.length} loaded messages only. Earlier history may be missing; load older messages before exporting again.` });
+    const [exporting, setExporting] = useState(false);
+    const exportPending = useRef(false);
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
+
+    async function exportMarkdown(): Promise<void> {
+        if (exportPending.current) return;
+        exportPending.current = true;
+        setExporting(true);
+        setFeedback(undefined);
+        try {
+            const entries = await loadExportEntries();
+            if (!mounted.current) return;
+            downloadMarkdown(
+                markdownExportFilename(title, route.instance, route.ctxId),
+                buildMessageMarkdown({ ctxId: route.ctxId, entries,
+                    instance: route.instance, title }),
+            );
+            setFeedback({ kind: "success", text: `Exported ${entries.length} messages.` });
+        } catch (error) {
+            if (mounted.current) setFeedback({ kind: "error",
+                text: `Export failed: ${error instanceof Error ? error.message : String(error)}` });
+        } finally {
+            exportPending.current = false;
+            if (mounted.current) setExporting(false);
+        }
     }
 
     const operation = `context-message:${route.instance}:${route.ctxId}`;
@@ -217,11 +235,12 @@ export function MessageComposer({
             <button
                 aria-label="Export Markdown"
                 className="messages-export"
-                onClick={exportMarkdown}
-                title={historyComplete ? "Export Markdown" : "Export loaded messages only; earlier history may be missing"}
+                disabled={exporting}
+                onClick={() => void exportMarkdown()}
+                title="Export Markdown"
                 type="button"
             >
-                ↓
+                {exporting ? "Exporting…" : "↓"}
             </button>
             <button
                 aria-label="Send Comment"

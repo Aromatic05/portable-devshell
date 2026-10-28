@@ -78,8 +78,7 @@ it("round4: Goal stream refreshes authoritative revisions over framed transport"
     await waitFor(async () => expect((await peer.subscribers())["alpha:task"]).toBe(1));
     await act(async () => { await peer.put("alpha", "goals", { goals: [round4Goal(8, "completed")], lastSeq: 1 },
         { instanceName: "alpha", seq: 1, type: "goal.updated", at: "2026-10-20T00:01:00Z" }); });
-    await waitFor(() => expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 8"));
-    expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed");
+    await waitFor(() => expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed"));
 });
 
 it("round4: approval rejection restores actions and a retry dispatches exactly once", async () => {

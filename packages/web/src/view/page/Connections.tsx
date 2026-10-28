@@ -247,33 +247,34 @@ export function Connections({
             <fieldset disabled={!interactive} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <div className="control-grid">
                 <article className="card connection-status-card">
-                    <h3>Connection endpoints</h3>
+                    <h3>Saved connection configuration</h3>
+                    <p className="hint">Configured addresses; runtime reachability is not verified here.</p>
                     <dl>
                         <dt>Local MCP</dt>
                         <dd>
                             {selectedName === undefined
                                 ? "Select an instance"
-                                : localMcpEndpoint(selectedName, drafts)}
+                                : localMcpEndpoint(selectedName, base)}
                         </dd>
                         <dt>Public MCP</dt>
                         <dd>
                             {selectedName === undefined
                                 ? "Select an instance"
-                                : publicMcpEndpoint(drafts)}
+                                : publicMcpEndpoint(base)}
                         </dd>
                         <dt>Web UI</dt>
-                        <dd>{webEndpoint(drafts)}</dd>
+                        <dd>{configView === undefined ? "unknown" : webEndpoint(base)}</dd>
                         <dt>MCP runtime</dt>
                         <dd>
                             {mcpStatus?.running === true
                                 ? "running"
-                                : "stopped"}
+                                : mcpStatus === undefined ? "unknown" : "stopped"}
                         </dd>
                         <dt>Instance auth</dt>
                         <dd>
                             {selectedName === undefined
                                 ? "not selected"
-                                : String(drafts.instanceMcp?.auth ?? "none")}
+                                : configView === undefined ? "unknown" : String(base.instanceMcp?.auth ?? "none")}
                         </dd>
                     </dl>
                     {controlRestartRequired ? (
@@ -284,6 +285,17 @@ export function Connections({
                     ) : null}
                 </article>
 
+                {dirty ? (
+                    <article className="card">
+                        <h3>Unsaved endpoint preview</h3>
+                        <p className="hint">Save and apply these settings before using these addresses.</p>
+                        <dl>
+                            <dt>Local MCP</dt><dd>{selectedName === undefined ? "Select an instance" : localMcpEndpoint(selectedName, drafts)}</dd>
+                            <dt>Public MCP</dt><dd>{selectedName === undefined ? "Select an instance" : publicMcpEndpoint(drafts)}</dd>
+                            <dt>Web UI</dt><dd>{webEndpoint(drafts)}</dd>
+                        </dl>
+                    </article>
+                ) : null}
                 {selectedName === undefined ? null : (
                     <article className="card">
                         <h3>[Instance] MCP</h3>
@@ -677,9 +689,9 @@ function OAuthSection({
         <article className="detail oauth-panel">
             <h3>OAuth runtime</h3>
             <p className="hint">
-                provider={status?.authMode ?? "none"} · runtime=
-                {status?.running === true ? "running" : "stopped"} · pending=
-                {pending.length}
+                provider={status?.authMode ?? "unknown"} · runtime=
+                {status === undefined ? "unknown" : status.running ? "running" : "stopped"} · pending=
+                {status === undefined ? "unknown" : pending.length}
             </p>
             <dl>
                 <dt>Approval mode</dt>

@@ -114,6 +114,59 @@ export function Messages({
             ? `${route.instance}\u0000${route.ctxId}`
             : undefined;
 
+    const exportSelection = useRef({ key: threadKey });
+    if (exportSelection.current.key !== threadKey) exportSelection.current = { key: threadKey };
+    const [exportError, setExportError] = useState<string>();
+    const exportPending = useRef<typeof exportSelection.current>();
+    useEffect(() => {
+        if (exportPending.current !== undefined && exportPending.current !== exportSelection.current) {
+            exportPending.current = undefined;
+            setExportError("Export cancelled because the selected Context changed. Retry in the selected Context.");
+        }
+    }, [threadKey]);
+
+    async function loadExportEntries() {
+        if (route.view !== "thread") throw new Error("Select a Context first.");
+        const selection = exportSelection.current;
+        exportPending.current = selection;
+        setExportError(undefined);
+        const currentHistory = () => {
+            if (exportSelection.current !== selection) {
+                throw new Error("Selected Context changed.");
+            }
+            if (domains.server.state.status !== "online") throw new Error("Reconnect and retry exporting.");
+            const history = domains.messageHistory.state.context;
+            if (history?.instance !== route.instance || history.ctxId !== route.ctxId)
+                throw new Error("Context history is unavailable. Retry exporting.");
+            return history;
+        };
+        try {
+            let history = currentHistory();
+            if (history.loading || history.failure !== undefined || history.historyExhausted === undefined) {
+                await domains.messageHistory.loadContext(route.instance, route.ctxId);
+                history = currentHistory();
+            }
+            if (history.failure !== undefined || history.loading) throw new Error("Context history could not be read. Retry exporting.");
+            const cursors = new Set<string>();
+            while (!history.historyExhausted) {
+                history = currentHistory();
+                const before = history.historyBefore;
+                if (before === undefined || cursors.has(before)) throw new Error("History could not be completed. Retry exporting.");
+                cursors.add(before);
+                await domains.messageHistory.loadOlderContext(route.instance, route.ctxId);
+                history = currentHistory();
+                if (!history.historyExhausted && history.historyBefore === before)
+                    throw new Error("History could not be completed. Retry exporting.");
+                if (!history.historyExhausted) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
+            history = currentHistory();
+            if (history.failure !== undefined || history.loading) throw new Error("Context history could not be read. Retry exporting.");
+            return selectWebMessageEntries({ ...projection, message: domains.messageHistory.state }, route.instance, route.ctxId);
+        } finally {
+            if (exportPending.current === selection) exportPending.current = undefined;
+        }
+    }
+
     useEffect(() => {
         if (server.status !== "online") return;
         let cancelled = false;
@@ -262,6 +315,7 @@ export function Messages({
                         </a>
                     ) : null}
                 </header>
+                {exportError === undefined ? null : <p role="alert" className="error">{exportError}</p>}
                 {route.view === "contexts" ? (
                     <div className="messages-placeholder">
                         <h3>Messages</h3>
@@ -301,8 +355,7 @@ export function Messages({
                                 const key = threadKey!;
                                 setDrafts((current) => ({ ...current, [key]: update(current[key] ?? emptyDraft) }));
                             }}
-                            historyComplete={selectedHistory?.historyExhausted === true && selectedHistory.failure === undefined && !selectedHistory.loading}
-                            entries={entries}
+                            loadExportEntries={loadExportEntries}
                             key={threadKey}
                             onActivity={() => setDrawerOpen(false)}
                             route={route}

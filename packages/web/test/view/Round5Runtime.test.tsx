@@ -116,34 +116,36 @@ it("round5: persisted records stay instance scoped when another instance reloads
     expect(await peer.read("beta", "calls")).toHaveLength(1);
 });
 
-it("round5: crash-recovered goal completion and newer revision render together", async () => {
+it("round5: crash-recovered goal completion renders its final Note", async () => {
     const { peer, domains, store, database } = await fixture();
-    await peer.put("alpha", "goals", { goals: [round4Goal(12, "completed")], lastSeq: 12 });
+    await peer.put("alpha", "goals", { goals: [{ ...round4Goal(12, "completed"), note: "Recovered completion" }], lastSeq: 12 });
     await domains.goals.load("alpha");
     render(withWebDomains(domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
     expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed");
-    expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 12");
+    expect(screen.getByText("Recovered completion")).toBeInTheDocument();
 });
 
 
 it("round5: goal stream revision supersedes stale mounted snapshot and remains after remount", async () => {
     const { peer, domains, store, database } = await fixture();
-    await peer.put("alpha", "goals", { goals: [round4Goal(2)], lastSeq: 2 });
+    await peer.put("alpha", "goals", { goals: [{ ...round4Goal(2), note: "Work in progress" }], lastSeq: 2 });
     await domains.goals.load("alpha");
     await waitFor(async () => expect((await peer.subscribers())["alpha:task"]).toBe(1));
     const first = render(withWebDomains(domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
-    await act(async () => peer.put("alpha", "goals", { goals: [round4Goal(3, "completed")], lastSeq: 3 },
+    await act(async () => peer.put("alpha", "goals", { goals: [{ ...round4Goal(3, "completed"), note: "Verified complete" }], lastSeq: 3 },
         { instanceName: "alpha", seq: 3, type: "goal.updated", at: "2026-10-20T00:03:00Z" }));
-    await waitFor(() => expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 3"));
-    expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed");
+    await waitFor(() => expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed"));
+    expect(screen.getByText("Verified complete")).toBeInTheDocument();
+    expect(screen.queryByText("Work in progress")).not.toBeInTheDocument();
     first.unmount();
     const restarted = await restartDomains(database, domains);
     await restarted.domains.goals.load("alpha");
     render(withWebDomains(restarted.domains.harness, <Goals />));
     expect(await screen.findByText("Verify round4 persistence")).toBeInTheDocument();
-    expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveTextContent("revision 3");
+    expect(screen.getByText("Verify round4 persistence").closest("article")).toHaveAttribute("data-goal-status", "completed");
+    expect(screen.getByText("Verified complete")).toBeInTheDocument();
 });
 
 

@@ -6,7 +6,9 @@ export class RequestTimeoutError extends Error {
     readonly outcome: "read" | "uncertain";
 
     constructor(label: string, outcome: "read" | "uncertain") {
-        super(`${label} timed out.`);
+        super(outcome === "uncertain"
+            ? `${label} timed out. The outcome is unknown; it may already have completed. Inspect the affected conversation, Audit, or instance status before trying again to avoid a duplicate action.`
+            : `${label} timed out. Retry to read the current status.`);
         this.name = "RequestTimeoutError";
         this.outcome = outcome;
     }

@@ -156,8 +156,8 @@ export function InstanceCreate({
                         {schema.providers.includes("local") ? (
                             <ProviderChoice
                                 checked={form.provider === "local"}
-                                description="Run directly on this machine"
-                                label="This computer"
+                                description="Run directly on the machine hosting Control"
+                                label="Control host"
                                 onSelect={() => changeProvider("local")}
                             />
                         ) : null}
@@ -222,7 +222,7 @@ export function InstanceCreate({
                                 ))}
                             </datalist>
                             <small className="hint">
-                                Uses your OpenSSH config, including HostName,
+                                Uses the Control host’s OpenSSH config, including HostName,
                                 User, Port, IdentityFile and ProxyJump.
                             </small>
                         </Field>

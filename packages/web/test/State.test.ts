@@ -9,6 +9,8 @@ import {
     type ProcessStartOptions,
 } from "@portable-devshell/shared";
 
+import { RequestTimeoutError } from "../src/state/Request.js";
+import { approvalOperationKey } from "../src/state/Operation.js";
 import { WebStore } from "../src/state/Store.js";
 import { WebTestDomains } from "./support/DomainHarness.js";
 
@@ -682,8 +684,43 @@ describe("WebStore operation and transport boundaries", () => {
 
         expect(store.state.operations["start:demo"]).toBeUndefined();
         expect(operationSignal?.aborted).toBe(true);
-        expect(store.state.error).toBeTruthy();
+        expect(store.state.error).toContain("Starting the instance timed out");
+        expect(store.state.error).toContain("The outcome is unknown");
+        expect(store.state.error).toContain("Inspect the affected conversation, Audit, or instance status");
+        expect(store.state.error).not.toContain("start:demo");
+        expect(runtime.start).toHaveBeenCalledTimes(1);
     });
+});
+
+
+it("preserves uncertain approval outcomes without exposing internal keys or resending", async () => {
+    vi.useFakeTimers();
+    const domains = new WebTestDomains();
+    const decide = vi.spyOn(domains.approval("alpha"), "decide")
+        .mockImplementation(async () => await new Promise<void>(() => undefined));
+    const store = new WebStore(domains.domains, { operationTimeoutMs: 100 });
+    const request = store.decideTool("alpha", "private-id", "approve");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await request).toBe(false);
+    expect(store.state.error).toContain("Recording the approval decision timed out");
+    expect(store.state.error).toContain("The outcome is unknown");
+    expect(store.state.error).toContain("before trying again to avoid a duplicate action");
+    expect(store.state.error).not.toContain("approval:");
+    expect(store.state.error).not.toContain("private-id");
+    expect(store.operationFailure(approvalOperationKey("alpha", "private-id"))).toBe(store.state.error);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(decide).toHaveBeenCalledTimes(1);
+    store.close();
+});
+
+it("distinguishes read timeouts from uncertain mutations", () => {
+    const read = new RequestTimeoutError("Reading status", "read");
+    const mutation = new RequestTimeoutError("Saving configuration", "uncertain");
+    expect(read.outcome).toBe("read");
+    expect(read.message).toContain("Retry to read the current status");
+    expect(read.message).not.toContain("outcome is unknown");
+    expect(mutation.outcome).toBe("uncertain");
+    expect(mutation.message).toContain("outcome is unknown");
 });
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

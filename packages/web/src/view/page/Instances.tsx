@@ -900,7 +900,7 @@ export function WorkerSummary({
 }) {
     const presentation = presentWorker(worker);
     return presentation === undefined ? (
-        <span>Worker: not connected / unavailable</span>
+        <span>Worker: handshake details unknown</span>
     ) : (
         <span>
             Worker {presentation.version} · protocol {presentation.protocol} ·{" "}
@@ -920,7 +920,7 @@ export function WorkerDiagnostics({
             <section className="worker-diagnostics">
                 <h4>Worker diagnostics</h4>
                 <p className="empty">
-                    Worker handshake is not connected / unavailable.
+                    Worker handshake details are unavailable; connection status is shown separately.
                 </p>
             </section>
         );

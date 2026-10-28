@@ -157,3 +157,54 @@ it("late approval failure cannot modify a replacement approval review on the sam
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(decide.mock.calls).toEqual([["approval-alpha", "approve"], ["replacement", "deny"]]);
 });
+
+
+it("keeps direct read failure, loading and confirmed missing mutually exclusive through Retry", async () => {
+    const domains = new WebTestDomains(); domains.setInstances([{ name: "alpha" }]);
+    const retry = deferred<typeof auditCall[]>();
+    const read = vi.spyOn(domains.toolCalls, "readDetail")
+        .mockRejectedValueOnce(new Error("Archive temporarily locked"))
+        .mockReturnValueOnce(retry.promise);
+    render(withWebDomains(domains, <Audit store={new WebStore(domains.domains)} navigate={() => undefined}
+        route={{ page: "audit", view: "call", instance: "alpha", callId: "archived-call" }} />));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Archive temporarily locked");
+    expect(screen.queryByText(/not found|This Tool Call is unavailable/u)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry detail" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Loading archived Tool Call…")[0]).toBeInTheDocument();
+    await act(async () => retry.resolve([]));
+    expect(screen.getByText("Tool Call not found in the retained audit.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(2);
+});
+
+it("extends filtered search only on request and blocks duplicate and offline older-page requests", async () => {
+    const domains = new WebTestDomains(); domains.setInstances([{ name: "alpha" }]);
+    domains.setToolCalls("alpha", [auditCall]);
+    domains.toolCalls.state.instances.alpha.historyBefore = auditCall.callId;
+    domains.toolCalls.state.instances.alpha.historyExhausted = false;
+    const olderPage = deferred<number>();
+    const older = vi.fn(async () => {
+        await olderPage.promise;
+        domains.setToolCalls("alpha", [auditCall, { ...auditCall, callId: "needle-old", toolName: "needle" }]);
+        domains.toolCalls.state.instances.alpha.historyBefore = "needle-old";
+        return 1;
+    });
+    Object.assign(domains.toolCalls, { loadOlder: older });
+    render(withWebDomains(domains, <Audit store={new WebStore(domains.domains)} navigate={() => undefined}
+        route={{ page: "audit", view: "timeline", scope: { kind: "instance", instance: "alpha" } }} />));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search audit" }), { target: { value: "needle" } });
+    expect(screen.getByText("No matches found yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No tool calls match these filters.")).not.toBeInTheDocument();
+    expect(older).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Search older Tool Calls" }));
+    const busy = screen.getByRole("button", { name: "Searching audit…" });
+    expect(busy).toBeDisabled(); fireEvent.click(busy);
+    expect(older).toHaveBeenCalledTimes(1);
+    act(() => domains.server.patch({ status: "offline" }));
+    await act(async () => olderPage.resolve(1));
+    expect(screen.getByText("needle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search older Tool Calls" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Search older Tool Calls" }));
+    expect(older).toHaveBeenCalledTimes(1);
+});

@@ -16,6 +16,15 @@ export function Overview() {
     const overviewState = useDomainSnapshot(domains.overview);
     const server = useDomainSnapshot(domains.server);
     const overview = overviewState.overview;
+    if (overviewState.status === "unsupported") {
+        return (
+            <section>
+                <h2>Overview</h2>
+                <p className="empty">This Control does not support the operational overview.</p>
+                <p>Open <a href="#/instances">Instances</a> to inspect runtime status or <a href="#/audit">Audit</a> to review activity.</p>
+            </section>
+        );
+    }
     if (overview === undefined) {
         const failure = overviewState.failure;
         const message =

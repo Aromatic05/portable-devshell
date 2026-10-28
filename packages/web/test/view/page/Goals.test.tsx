@@ -26,7 +26,7 @@ describe("Goals page", () => {
         }], lastSeq: 1, status: "ready" } }, status: "ready" } as never);
         render(withWebDomains(domains, <Goals />));
         expect(await screen.findByText("Ship beta")).toBeInTheDocument();
-        expect(screen.getByText("Ship beta").closest("article")).toHaveTextContent("revision 2");
+        expect(screen.getByText("Ship beta").closest("article")).toHaveAttribute("data-goal-status", "active");
         expect(screen.getByText("Progress lives in Memory")).toBeInTheDocument();
     });
 });

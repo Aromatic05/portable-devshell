@@ -22,7 +22,7 @@ export class WebOperationCoordinator {
 
     async run(
         operation: string,
-        success: string,
+        success: string | undefined,
         generation: number,
         action: (signal: AbortSignal) => Promise<void>,
     ): Promise<boolean> {
@@ -47,8 +47,8 @@ export class WebOperationCoordinator {
             await withRequestTimeout(
                 Promise.race([action(controller.signal), aborted.promise]),
                 this.timeoutMs,
-                operation,
-                "uncertain",
+                operationLabel(operation),
+                operation === "config:validate" ? "read" : "uncertain",
             );
             if (
                 !this.access.isCurrent(generation) ||
@@ -116,4 +116,27 @@ function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
         : new Error("Web operation was aborted.");
+}
+
+function operationLabel(operation: string): string {
+    const labels: Record<string, string> = {
+        approval: "Recording the approval decision",
+        "context-message": "Sending the Comment",
+        "context-disable": "Disabling the Context",
+        "context-disable-batch": "Disabling Contexts",
+        "context-renew": "Renewing the Context",
+        start: "Starting the instance",
+        stop: "Stopping the instance",
+        restart: "Restarting the instance",
+        enabled: "Updating the instance",
+        delete: "Deleting the instance",
+        "instance-create": "Creating the instance",
+        "config:validate": "Validating configuration",
+        "config:update": "Saving configuration",
+        "artifact:revoke": "Revoking the artifact share",
+        "artifact:cancel": "Cancelling the artifact transfer",
+        "reverse:rotate": "Rotating the device token",
+        "reverse:revoke": "Revoking the device token",
+    };
+    return labels[operation] ?? labels[operation.split(":").slice(0, 2).join(":")] ?? labels[operation.split(":")[0]!] ?? "The operation";
 }

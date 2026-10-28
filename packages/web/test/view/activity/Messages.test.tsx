@@ -259,35 +259,6 @@ describe("Messages", () => {
         expect(screen.queryByText("Page temporarily unavailable")).not.toBeInTheDocument();
     });
 
-    it("labels a 400-message partial export in UI and Markdown, then includes the older page", async () => {
-        const domains = alphaDomains();
-        const entries = Array.from({ length: 400 }, (_, i) => ({ ...baseMessageEntries[0]!, id: `comment-${i}`, text: `Loaded ${i}` }));
-        vi.spyOn(domains.messageHistory, "loadContext").mockImplementation(async (instance, ctxId) => {
-            domains.messageHistory.patch({ context: { instance, ctxId, entries,
-                historyBefore: "comment-0", historyExhausted: false, loading: false } });
-        });
-        vi.spyOn(domains.messageHistory, "loadOlderContext").mockImplementation(async (instance, ctxId) => {
-            domains.messageHistory.patch({ context: { instance, ctxId,
-                entries: [{ ...baseMessageEntries[0]!, id: "oldest", text: "The missing oldest message" }, ...entries],
-                historyExhausted: true, loading: false } });
-            return 1;
-        });
-        const download = vi.spyOn(MessageExport, "downloadMarkdown").mockImplementation(() => undefined);
-        await renderMessages(domains, threadRoute, messageStore());
-        expect(screen.getByText(/Markdown export includes loaded messages only/u)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
-        expect(download.mock.calls[0]![1]).toContain("Exported messages: 400");
-        expect(download.mock.calls[0]![1]).toContain("Earlier history may be missing");
-        expect(screen.getByRole("status")).toHaveTextContent("Exported 400 loaded messages only");
-        fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));
-        await waitFor(() => expect(screen.queryByRole("button", { name: "Load older Comments and Reports" })).not.toBeInTheDocument());
-        fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
-        expect(download.mock.calls[1]![1]).toContain("Exported messages: 401");
-        expect(download.mock.calls[1]![1]).toContain("The missing oldest message");
-        expect(download.mock.calls[1]![1]).not.toContain("Earlier history may be missing");
-        expect(screen.queryByText(/Markdown export includes loaded messages only/u)).not.toBeInTheDocument();
-    });
-
     it("shows asynchronous delivery error and failure time after a Comment was queued", async () => {
         const domains = alphaDomains();
         const store = messageStore();
@@ -465,7 +436,6 @@ describe("Messages", () => {
         const domains = alphaDomains();
         expect(
             buildMessageMarkdown({
-                historyComplete: true,
                 ctxId: "ctx-old-active",
                 entries: selectWebMessageEntries(
                     projection(domains),
@@ -482,7 +452,7 @@ describe("Messages", () => {
                 "- Instance: `alpha`",
                 "- Context: `ctx-old-active`",
                 "- Exported messages: 2",
-                "- Range: all loaded Context history.",
+                "- Range: complete available Context history.",
                 "",
                 "## You",
                 "",
@@ -533,10 +503,10 @@ describe("Messages", () => {
             await renderMessages(domains, threadRoute, webStore(domains));
 
             fireEvent.click(
-                screen.getByRole("button", { name: "Export Markdown" }),
+                screen.getByRole("button", { name: /^Export Markdown/u }),
             );
 
-            expect(createObjectURL).toHaveBeenCalledTimes(1);
+            await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
             expect(createObjectURL.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
             expect(revokeObjectURL).toHaveBeenCalledWith("blob:message");
             expect(click).toHaveBeenCalledTimes(1);
@@ -577,7 +547,7 @@ describe("Messages", () => {
         const composer = screen.getByRole("textbox", { name: "Comment" });
         expect(composer.closest("form")).toHaveClass("messages-composer");
         expect(
-            screen.getByRole("button", { name: "Export Markdown" }),
+            screen.getByRole("button", { name: /^Export Markdown/u }),
         ).toBeEnabled();
         fireEvent.click(
             screen.getByRole("button", { name: "Open messages" }),
@@ -1583,5 +1553,19 @@ describe("Messages", () => {
         expect(
             formatMessageDate(new Date(2025, 8, 27, 9, 30).toISOString(), now),
         ).toMatch(/2025/u);
+    });
+
+    it("owns queue success in the composer and clears it after five seconds", async () => {
+        const domains = alphaDomains();
+        const store = webStore(domains);
+        await renderMessages(domains, threadRoute, store);
+        vi.useFakeTimers();
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        fireEvent.change(composer, { target: { value: "Queue once" } });
+        await act(async () => { fireEvent.submit(composer.closest("form")!); });
+        expect(screen.getAllByText("Message queued.")).toHaveLength(1);
+        expect(store.state.notice).toBeUndefined();
+        await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+        expect(screen.queryByText("Message queued.")).not.toBeInTheDocument();
     });
 });
