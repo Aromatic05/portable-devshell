@@ -3,6 +3,7 @@ import type {
     ExtensionRuntime,
 } from "./Api.js";
 import type { ConfigRegistry } from "../config/Api.js";
+import type { ExtensionCatalogSnapshot } from "@portable-devshell/shared";
 import {
     ExtensionLoader,
     type ExtensionLoaderOptions,
@@ -12,6 +13,8 @@ import {
 } from "./host/index.js";
 import { ExtensionInstallService } from "./install/index.js";
 import { ExtensionControlService } from "./manager/index.js";
+import { ExtensionChangeHub } from "./manager/Change.js";
+import { readExtensionSnapshot } from "./manager/Snapshot.js";
 import { createControlExtensionPointRegistry } from "./registration/Points.js";
 import {
     ExtensionPathLayout,
@@ -28,6 +31,7 @@ type ExtensionRuntimeOptions = Omit<
 };
 
 class ExtensionRuntimeState extends ExtensionHost implements ExtensionRuntime {
+    readonly changes: ExtensionChangeHub;
     readonly control: ExtensionControlPort;
     readonly #installer: ExtensionInstallService;
     readonly #paths: ExtensionPathLayout;
@@ -35,16 +39,19 @@ class ExtensionRuntimeState extends ExtensionHost implements ExtensionRuntime {
     constructor(options: ExtensionRuntimeOptions) {
         const { configRegistry, pathOptions, ...loaderOptions } = options;
         const paths = new ExtensionPathLayout(pathOptions);
+        const changes = new ExtensionChangeHub();
         const loader = new ExtensionLoader({
             ...loaderOptions,
             paths,
             points: createControlExtensionPointRegistry(),
         });
         super({
+            changeHub: changes,
             configRegistry,
             loader,
             registry: new ExtensionRegistryStore(paths.registryFile),
         });
+        this.changes = changes;
         this.#paths = paths;
         this.#installer = new ExtensionInstallService({
             host: this,
@@ -54,6 +61,10 @@ class ExtensionRuntimeState extends ExtensionHost implements ExtensionRuntime {
             host: this,
             installer: this.#installer,
         });
+    }
+
+    snapshot(catalogs: () => ExtensionCatalogSnapshot) {
+        return readExtensionSnapshot(this, catalogs);
     }
 
     generationDirectory(id: string, generation: string): string {

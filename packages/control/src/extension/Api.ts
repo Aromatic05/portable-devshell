@@ -1,10 +1,13 @@
 import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
 import type {
+    ExtensionCatalogSnapshot,
+    ExtensionSnapshot,
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
 import type { ExtensionCatalogRegistration } from "./discovery/Catalog.js";
+import type { ExtensionChangeHub } from "./manager/Change.js";
 import type { ExtensionGenerationLease } from "./registration/Generation.js";
 import type { ExtensionRuntimeRegistration } from "./registration/Registration.js";
 export type { CliCommandPort } from "./api/point/cli/Endpoint.js";
@@ -26,7 +29,9 @@ export interface ExtensionControlPort {
 }
 
 export interface ExtensionRuntime {
+    readonly changes: ExtensionChangeHub;
     readonly control: ExtensionControlPort;
+    snapshot(catalogs: () => ExtensionCatalogSnapshot): Promise<ExtensionSnapshot>;
     acquireRegistration(
         pointId: string,
         id: string,

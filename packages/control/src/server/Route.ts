@@ -102,6 +102,7 @@ export interface ControlRouteRegistryOptions {
     controlDegradedServices?: () => readonly string[] | Promise<readonly string[]>;
     debug?: DebugApi;
     extension?: ExtensionControlPort;
+    extensionState?: Parameters<typeof createExtensionRouteModule>[1];
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
     instanceChanges?: InstanceChangeHub;
@@ -185,6 +186,7 @@ export class ControlRouteRegistry {
                         : [
                               createExtensionRouteModule(
                                   this.#options.extension,
+                                  this.#options.extensionState,
                               ),
                           ]),
                     ...(this.#options.cliCommands === undefined

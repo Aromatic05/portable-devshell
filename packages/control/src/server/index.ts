@@ -100,6 +100,9 @@ export class ControlServer {
         this.#reverseIngress = options.reverse.ingress;
 
         this.#extensionRoutes = new ControlExtensionRouteService(options.extensions);
+        const tuiPages = new TuiExtensionPageService(options.extensions);
+        const webApplications = new WebApplicationCatalog(options.extensions);
+        const webPages = new WebExtensionPageService(options.extensions);
         this.#routes = new ControlRouteRegistry({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(options.extensions, {
@@ -132,6 +135,16 @@ export class ControlServer {
             },
             debug: options.debug,
             extension: options.extensions.control,
+            extensionState: {
+                changes: options.extensions.changes,
+                snapshot: () => options.extensions.snapshot(() => ({
+                    tuiPages: [...tuiPages.list()],
+                    tuiSupported: true,
+                    webApplications: [...webApplications.list()],
+                    webPages: [...webPages.list()],
+                    webSupported: true,
+                })),
+            },
             extensionRoutes: this.#extensionRoutes,
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
@@ -152,9 +165,9 @@ export class ControlServer {
             restart: options.restart,
             reverse: this.#reverseCredentials,
             shutdown: options.shutdown,
-            tuiPages: new TuiExtensionPageService(options.extensions),
-            webApplications: new WebApplicationCatalog(options.extensions),
-            webPages: new WebExtensionPageService(options.extensions),
+            tuiPages,
+            webApplications,
+            webPages,
         });
         this.#socketListener = new ControlSocketListener({
             socketPath: options.socketPath,
