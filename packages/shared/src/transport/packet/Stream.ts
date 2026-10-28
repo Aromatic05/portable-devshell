@@ -2,6 +2,7 @@ import { Connection, Port } from "../endpoint/route/Route.js";
 import { createTransportId, type Address } from "../endpoint/Address.js";
 import type { Channel } from "../endpoint/channel/Channel.js";
 import type { Message } from "./Packet.js";
+import { STREAM_QUEUE_MAX_BYTES, STREAM_QUEUE_MAX_MESSAGES, streamMessageBytes } from "./Queue.js";
 
 export interface StreamError {
     readonly message: string;
@@ -187,7 +188,10 @@ export class MessageStream {
     >();
     readonly #closeListeners = new Set<(message?: Message) => void>();
     readonly #cancelListeners = new Set<(error?: StreamError) => void>();
-    readonly #pending: Array<{ bytes?: Uint8Array; message?: Message; seq: number }> = [];
+    readonly #pending: Array<{ bytes?: Uint8Array; message?: Message; seq: number; size: number }> = [];
+    #pendingBytes = 0;
+    #deliveringBytes = 0;
+    #deliveringCount = 0;
     readonly #readers: Array<{
         resolve(value: StreamRead): void;
         reject(error: Error): void;
@@ -209,7 +213,13 @@ export class MessageStream {
 
     async readMessage(): Promise<StreamRead> {
         const pending = this.#pending.shift();
-        if (pending !== undefined) return { type: "data", ...pending };
+        if (pending !== undefined) {
+            this.#pendingBytes -= pending.size;
+            return { type: "data", seq: pending.seq,
+                ...(pending.bytes === undefined ? {} : { bytes: pending.bytes }),
+                ...(pending.message === undefined ? {} : { message: pending.message }),
+            };
+        }
         if (this.#terminal?.type === "close")
             return {
                 type: "close",
@@ -309,20 +319,26 @@ export class MessageStream {
         ) => Promise<void> | void,
     ): () => void {
         this.#dataListeners.add(listener);
-        const pending: Array<{ message: Message | undefined; seq: number }> = [];
-        for (let index = this.#pending.length - 1; index >= 0; index -= 1) {
-            const item = this.#pending[index]!;
-            if (item.bytes !== undefined) continue;
-            this.#pending.splice(index, 1);
-            pending.unshift({ message: item.message, seq: item.seq });
-        }
-        if (pending.length > 0)
-            queueMicrotask(() => {
-                void (async () => {
-                    for (const item of pending)
+        queueMicrotask(() => {
+            void (async () => {
+                while (this.#terminal?.type !== "cancel") {
+                    const index = this.#pending.findIndex((item) => item.bytes === undefined);
+                    if (index < 0) return;
+                    const item = this.#pending.splice(index, 1)[0]!;
+                    this.#pendingBytes -= item.size;
+                    this.#deliveringBytes += item.size;
+                    this.#deliveringCount += 1;
+                    try {
                         await listener(item.message, item.seq);
-                })();
-            });
+                    } finally {
+                        this.#deliveringBytes -= item.size;
+                        this.#deliveringCount -= 1;
+                    }
+                }
+            })().catch((error: unknown) => this.cancel({
+                message: error instanceof Error ? error.message : String(error),
+            })).catch((error: unknown) => console.warn(error));
+        });
         return () => this.#dataListeners.delete(listener);
     }
 
@@ -359,6 +375,11 @@ export class MessageStream {
                 `Stream ${this.id} expected seq ${this.#recvSeq + 1}, received ${seq}.`,
             );
         this.#recvSeq = seq;
+        const size = bytes?.byteLength ?? streamMessageBytes(message);
+        if (size > STREAM_QUEUE_MAX_BYTES) {
+            await this.cancel({ code: "stream.queue_overflow", message: "Stream message exceeds 8 MiB consumer limit.", retryable: true });
+            return;
+        }
         const data = {
             ...(bytes === undefined ? {} : { bytes }),
             ...(message === undefined ? {} : { message }),
@@ -369,11 +390,27 @@ export class MessageStream {
             reader.resolve({ type: "data", ...data });
             return;
         }
-        if (bytes !== undefined || this.#dataListeners.size === 0) {
-            this.#pending.push(data);
+        if (this.#pending.length + this.#deliveringCount >= STREAM_QUEUE_MAX_MESSAGES ||
+            this.#pendingBytes + this.#deliveringBytes + size > STREAM_QUEUE_MAX_BYTES) {
+            await this.cancel({ code: "stream.queue_overflow", message: "Stream consumer queue exceeds 8 MiB or 4096 messages.", retryable: true });
             return;
         }
-        for (const listener of this.#dataListeners) await listener(message, seq);
+        if (bytes !== undefined || this.#dataListeners.size === 0) {
+            this.#pending.push({ ...data, ...(bytes === undefined ? {} : { bytes: Uint8Array.from(bytes) }), size });
+            this.#pendingBytes += size;
+            return;
+        }
+        this.#deliveringBytes += size;
+        this.#deliveringCount += 1;
+        try {
+            for (const listener of this.#dataListeners) {
+                if (this.#terminal?.type === "cancel") break;
+                await listener(message, seq);
+            }
+        } finally {
+            this.#deliveringBytes -= size;
+            this.#deliveringCount -= 1;
+        }
     }
 
     #sendBytes(bytes: Uint8Array): Promise<void> {
@@ -409,6 +446,8 @@ export class MessageStream {
     acceptCancel(error?: StreamError): void {
         if (this.#closed) return;
         this.#closed = true;
+        this.#pending.length = 0;
+        this.#pendingBytes = 0;
         this.#terminal = { type: "cancel", ...(error === undefined ? {} : { error }) };
         for (const reader of this.#readers.splice(0)) reader.reject(streamError(error));
         const listeners = [...this.#cancelListeners];
@@ -426,6 +465,7 @@ export class MessageStream {
     dispose(): void {
         this.acceptCancel({ message: "Stream disposed." });
         this.#pending.length = 0;
+        this.#pendingBytes = 0;
     }
 }
 

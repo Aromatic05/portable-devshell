@@ -2,10 +2,10 @@
 // reader turns a raw MessageStream into ordered seed/event/gap/closed messages
 // and drains the initial server seed before yielding live events. Event
 // decoding and gap recognition are supplied by the caller, so this knows only
-// sequence/cursor semantics. Parsing is deferred to next() so a malformed frame
-// surfaces as a stream error instead of throwing inside the data listener.
+// sequence/cursor semantics. Parsing is deferred to next().
 
 import type { MessageStream } from "../transport/packet/Stream.js";
+import { STREAM_QUEUE_MAX_MESSAGES } from "../transport/packet/Queue.js";
 import type { InstanceName } from "../types/Instance.js";
 import type { JsonValue } from "../types/Json.js";
 
@@ -74,81 +74,93 @@ export class EventStreamReader<Event> implements EventStreamPort<Event> {
     readonly #stream: MessageStream;
     readonly #options: EventStreamOptions<Event>;
     readonly #queue: EventStreamEnvelope[] = [];
-    readonly #waiters: Array<
-        (message: EventStreamEnvelope | undefined) => void
-    > = [];
+    readonly #offCancel: () => void;
     #error?: Error;
     #closed = false;
 
     constructor(stream: MessageStream, options: EventStreamOptions<Event>) {
         this.#stream = stream;
         this.#options = options;
-        stream.onData((message) => this.#push(message as EventStreamEnvelope));
-        stream.onClose(() => this.#finish());
-        stream.onCancel((error) => {
-            this.#error = error === undefined ? undefined : streamError(error);
-            this.#finish();
+        // Pull live envelopes directly from the bounded MessageStream queue.
+        // Only an expanded seed is retained here: <= 8 MiB of original JSON
+        // and 4096 events. Together with MessageStream this retains at most
+        // 16 MiB of payload JSON and 8192 pending entries per reader.
+        this.#offCancel = stream.onCancel((error) => {
+            this.#error = streamError(error ?? { message: "Stream cancelled." });
+            this.#queue.length = 0;
+            this.#closed = true;
+            this.#offCancel();
         });
     }
 
     async next(): Promise<StreamMessage<Event>> {
-        const envelope = await this.#nextEnvelope();
-        if (envelope === undefined)
+        while (!this.#closed) {
+            let envelope = this.#queue.shift();
+            if (envelope === undefined) {
+                try {
+                    const message = await this.#stream.readMessage();
+                    if (this.#closed) break;
+                    if (message.type !== "data") {
+                        this.close();
+                        break;
+                    }
+                    envelope = message.message as EventStreamEnvelope;
+                } catch (error) {
+                    this.#error = error instanceof Error ? error : new Error(String(error));
+                    this.close();
+                    break;
+                }
+            }
+            if (envelope.name === "seed") {
+                const payload = record(envelope.payload);
+                const events = Array.isArray(payload?.events) ? payload.events : [];
+                if (events.length > STREAM_QUEUE_MAX_MESSAGES) {
+                    const error = {
+                        code: "stream.queue_overflow",
+                        message: "Event seed exceeds 4096 pending events.",
+                        retryable: true,
+                    };
+                    this.#error = streamError(error);
+                    this.#closed = true;
+                    this.#offCancel();
+                    // Do not wait for a cancellation packet blocked by send WINDOW.
+                    void this.#stream.cancel(error).catch((cause: unknown) => console.warn(cause));
+                    this.#stream.dispose();
+                    break;
+                }
+                this.#queue.push(...events.map((event): EventStreamEnvelope => ({
+                    name: "event", payload: event,
+                })));
+                continue;
+            }
+            if (envelope.name === "gap") {
+                const gap = this.#options.readGap(envelope.payload);
+                if (gap === undefined) continue;
+                return {
+                    ...(envelope.payload === undefined ? {} : { details: envelope.payload }),
+                    gap,
+                    kind: "gap",
+                };
+            }
             return {
-                ...(this.#error === undefined ? {} : { error: this.#error }),
-                kind: "closed",
-            };
-        if (envelope.name === "seed") {
-            const payload = record(envelope.payload);
-            const events = Array.isArray(payload?.events) ? payload.events : [];
-            this.#queue.unshift(
-                ...events.map((event): EventStreamEnvelope => ({
-                    name: "event",
-                    payload: event,
-                })),
-            );
-            return await this.next();
-        }
-        if (envelope.name === "gap") {
-            const gap = this.#options.readGap(envelope.payload);
-            if (gap === undefined) return await this.next();
-            return {
-                ...(envelope.payload === undefined
-                    ? {}
-                    : { details: envelope.payload }),
-                gap,
-                kind: "gap",
+                event: this.#options.decodeEvent(envelope.payload),
+                kind: "event",
             };
         }
         return {
-            event: this.#options.decodeEvent(envelope.payload),
-            kind: "event",
+            ...(this.#error === undefined ? {} : { error: this.#error }),
+            kind: "closed",
         };
     }
 
     close(): void {
-        if (this.#closed) return;
         this.#closed = true;
-        void this.#stream.close();
-        this.#finish();
-    }
-
-    #push(message: EventStreamEnvelope): void {
-        const waiter = this.#waiters.shift();
-        if (waiter !== undefined) waiter(message);
-        else this.#queue.push(message);
-    }
-
-    #finish(): void {
-        this.#closed = true;
-        for (const waiter of this.#waiters.splice(0)) waiter(undefined);
-    }
-
-    async #nextEnvelope(): Promise<EventStreamEnvelope | undefined> {
-        const message = this.#queue.shift();
-        if (message !== undefined) return message;
-        if (this.#closed) return undefined;
-        return await new Promise((resolve) => this.#waiters.push(resolve));
+        this.#queue.length = 0;
+        this.#offCancel();
+        void this.#stream.close().catch((error: unknown) => {
+            this.#error = error instanceof Error ? error : new Error(String(error));
+        });
+        this.#stream.dispose();
     }
 }
 

@@ -274,3 +274,26 @@ test("reset rejects an already pending read with its remote error", async (t) =>
     await local.reset(frameResetCodes.cancelled, "reader cancelled");
     await rejected;
 });
+
+test("CHANNEL remote FIN closes with a zero-credit write and queued waiters", { timeout: 3000 }, async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "fin-blocked-write", 8);
+    const channel = new FrameStreamChannel(local);
+    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+    const writing = assert.rejects(channel.write(new Uint8Array(9)), /Channel closed/u);
+    const queued = assert.rejects(channel.write(Uint8Array.of(1)), /closed/u);
+    const finishing = assert.rejects(local.finish(), /closed/u);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(channel.closed, false);
+    // The peer leaves all eight received bytes unread and returns no WINDOW.
+    await remote.write(Uint8Array.of(7));
+    await remote.finish();
+    assert.equal(await closed, undefined);
+    await Promise.all([writing, queued, finishing]);
+    assert.equal(channel.closed, true);
+    assert.equal(local.closed, true);
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+    await assert.rejects(remote.read(), /Channel closed/u);
+});

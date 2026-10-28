@@ -51,8 +51,9 @@ export class FrameStreamChannel extends ChannelBase {
             while (!this.closed) {
                 const data = await this.#stream.read();
                 if (data === undefined) {
-                    await this.#stream.finish();
-                    this.#finish();
+                    // CHANNEL has full-close semantics. RESET interrupts writes
+                    // waiting for WINDOW; FIN would queue behind those writes.
+                    this.close();
                     return;
                 }
                 this.emitData(data);
