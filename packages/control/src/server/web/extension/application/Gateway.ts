@@ -158,7 +158,8 @@ export class ExtensionWebGateway {
         const removeUpgrade = http.registerUpgradePrefix(
             this.#basePath,
             async (request, socket, head) => {
-                if (!sessions.authorize(request)) {
+                const token = sessions.authorizeToken(request);
+                if (token === undefined) {
                     rejectUpgrade(socket, 401, "Unauthorized");
                     return;
                 }
@@ -172,6 +173,16 @@ export class ExtensionWebGateway {
                 }
                 if (!this.#hasApplication(target.applicationId)) {
                     rejectUpgrade(socket, 404, "Extension WebUI not found");
+                    return;
+                }
+                if (socket.destroyed) return;
+                const removeRevocation = sessions.onRevoked((revokedToken) => {
+                    if (revokedToken === token) socket.destroy();
+                });
+                socket.once("close", removeRevocation);
+                // Recheck after subscribing so a revocation during admission cannot be missed.
+                if (sessions.authorizeToken(request) !== token) {
+                    socket.destroy();
                     return;
                 }
                 let acquired;
@@ -194,7 +205,15 @@ export class ExtensionWebGateway {
                     return;
                 }
                 const { lease, registration } = acquired;
+                let released = false;
+                const release = () => {
+                    if (released) return;
+                    released = true;
+                    lease.release();
+                };
+                socket.once("close", release);
                 try {
+                    if (socket.destroyed) return;
                     try {
                         const source = (
                             registration.binding as WebApplicationBinding
@@ -208,6 +227,7 @@ export class ExtensionWebGateway {
                             return;
                         }
                         const upstream = await source.resolve();
+                        if (socket.destroyed) return;
                         if (upstream === undefined) {
                             rejectUpgrade(
                                 socket,
@@ -235,7 +255,8 @@ export class ExtensionWebGateway {
                             );
                     }
                 } finally {
-                    lease.release();
+                    socket.off("close", release);
+                    release();
                 }
             },
         );
@@ -472,6 +493,10 @@ async function proxyUpgrade(
         proxyRequest.once(
             "upgrade",
             (proxyResponse, connectedUpstream, upstreamHead) => {
+                if (settled || socket.destroyed) {
+                    connectedUpstream.destroy();
+                    return;
+                }
                 responseStarted = true;
                 upstreamSocket = connectedUpstream;
                 writeUpgradeResponse(socket, proxyResponse);
@@ -479,11 +504,14 @@ async function proxyUpgrade(
                 if (head.length > 0) upstreamSocket.write(head);
                 socket.pipe(upstreamSocket);
                 upstreamSocket.pipe(socket);
-                socket.once("close", downstreamClosed);
                 upstreamSocket.once("close", upstreamClosed);
             },
         );
         proxyRequest.once("response", (proxyResponse) => {
+            if (settled || socket.destroyed) {
+                proxyResponse.destroy();
+                return;
+            }
             responseStarted = true;
             writeUpgradeResponse(socket, proxyResponse);
             proxyResponse.pipe(socket);

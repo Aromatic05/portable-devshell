@@ -266,6 +266,277 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
     }
 });
 
+for (const revocation of [
+    "DELETE",
+    "expiry",
+    "eviction",
+    "acquire",
+    "resolve",
+    "upstream",
+] as const) {
+    test(`Extension WebSocket ${revocation} closes only the revoked session and releases its generation`, async () => {
+        const racing =
+            revocation === "acquire" ||
+            revocation === "resolve" ||
+            revocation === "upstream";
+        let unblock!: () => void;
+        const blocked = new Promise<void>((resolve) => {
+            unblock = resolve;
+        });
+        let reached = false;
+        let firstAcquisition = true;
+        let pendingUpstreamEnded = false;
+        let pendingUpstreamClosed = false;
+        const upstreamServer = createServer();
+        const upstreamWebSockets = new WebSocketServer({ noServer: true });
+        let firstUpgrade = true;
+        upstreamServer.on("upgrade", async (request, socket, head) => {
+            if (firstUpgrade && revocation === "upstream") {
+                firstUpgrade = false;
+                socket.on("error", () => undefined);
+                socket.once("end", () => {
+                    pendingUpstreamEnded = true;
+                });
+                socket.once("close", () => {
+                    pendingUpstreamClosed = true;
+                });
+                reached = true;
+                socket.resume();
+                await blocked;
+            }
+            upstreamWebSockets.handleUpgrade(
+                request,
+                socket,
+                head,
+                (webSocket) => {
+                    upstreamWebSockets.emit("connection", webSocket, request);
+                },
+            );
+        });
+        const received: string[] = [];
+        const upstreamSockets: WebSocket[] = [];
+        upstreamWebSockets.on("connection", (socket) => {
+            upstreamSockets.push(socket);
+            socket.on("message", (message) => {
+                received.push(message.toString());
+                socket.send(`echo:${message.toString()}`);
+            });
+        });
+        await new Promise<void>((resolve) =>
+            upstreamServer.listen(0, "127.0.0.1", resolve),
+        );
+        const upstreamAddress = upstreamServer.address();
+        assert.ok(
+            typeof upstreamAddress === "object" && upstreamAddress !== null,
+        );
+        let leases = 0;
+        let releases = 0;
+        const extensions = {
+            listDeclarations: () => [{ id: "example" }],
+            acquireRegistration: async () => {
+                const first = firstAcquisition;
+                firstAcquisition = false;
+                if (first && revocation === "acquire") {
+                    reached = true;
+                    await blocked;
+                }
+                leases += 1;
+                return {
+                    lease: {
+                        generation: "g1",
+                        release() {
+                            leases -= 1;
+                            releases += 1;
+                        },
+                    },
+                    registration: {
+                        binding: {
+                            source: {
+                                kind: "endpoint",
+                                resolve: async () => {
+                                    if (first && revocation === "resolve") {
+                                        reached = true;
+                                        await blocked;
+                                    }
+                                    return new URL(
+                                        `http://127.0.0.1:${upstreamAddress.port}/`,
+                                    );
+                                },
+                            },
+                        },
+                    },
+                };
+            },
+        };
+        const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+        const sessions = new ControlWebSessionService({
+            auth: { mode: "none" },
+            basePath: "/web",
+            maxSessions: 2,
+            sessionTtlMs: revocation === "expiry" ? 1_500 : 60_000,
+        });
+        const removeSessions = sessions.install(http);
+        const removeGateway = new ExtensionWebGateway({
+            basePath: "/web/extensions",
+            extensions: extensions as never,
+            loginPath: "/web/",
+        }).install(http, sessions);
+        const clients: WebSocket[] = [];
+        let removeRevoked = () => {};
+        try {
+            await http.start();
+            const address = http.address;
+            assert.ok(typeof address === "object" && address !== null);
+            const baseUrl = `http://127.0.0.1:${address.port}`;
+            const createSession = async () => {
+                const response = await fetch(`${baseUrl}/web/session`, {
+                    method: "POST",
+                });
+                assert.equal(response.status, 200);
+                return sessionCookie(response.headers.get("set-cookie"));
+            };
+            const connect = async (cookie: string) => {
+                const socket = new WebSocket(
+                    `${baseUrl.replace("http:", "ws:")}/web/extensions/example/socket`,
+                    { headers: { cookie } },
+                );
+                clients.push(socket);
+                await new Promise<void>((resolve, reject) => {
+                    socket.once("error", reject);
+                    socket.once("open", resolve);
+                });
+                return socket;
+            };
+            const cookieA = await createSession();
+            if (racing) {
+                const admission = connect(cookieA).then(
+                    () => "opened",
+                    () => "rejected",
+                );
+                await waitFor(() => reached);
+                const b = await connect(await createSession());
+                assert.equal(await echoMessage(b, "before-B"), "echo:before-B");
+                const response = await fetch(`${baseUrl}/web/session`, {
+                    method: "DELETE",
+                    headers: { cookie: cookieA },
+                });
+                assert.equal(response.status, 204);
+                await waitFor(
+                    () => clients[0]?.readyState === WebSocket.CLOSED,
+                );
+                if (revocation === "resolve" || revocation === "upstream") {
+                    // Downstream close must release A's lease before the blocked work resumes.
+                    await waitFor(() => leases === 1);
+                    assert.equal(releases, 1);
+                }
+                if (revocation === "upstream") {
+                    // HTTP upgrade sockets allow half-open connections. Observe the proxy's FIN
+                    // before resuming handleUpgrade, which destroys the now-unreadable peer.
+                    await waitFor(() => pendingUpstreamEnded);
+                    await new Promise<void>((resolve) =>
+                        clients[0]!.send("NEW-after-upstream", () => resolve()),
+                    );
+                }
+                unblock();
+                assert.equal(await admission, "rejected");
+                await waitFor(() => releases === 1 && leases === 1);
+                if (revocation === "upstream") {
+                    await waitFor(() => pendingUpstreamClosed);
+                    assert.equal(
+                        (
+                            await requestUpgradeFailure(
+                                `${baseUrl}/web/extensions/example/socket`,
+                                cookieA,
+                            )
+                        ).statusCode,
+                        401,
+                    );
+                }
+                assert.equal(
+                    await echoMessage(b, "NEW-independent-B"),
+                    "echo:NEW-independent-B",
+                );
+                assert.equal(upstreamSockets.length, 1);
+                if (revocation === "upstream")
+                    assert.equal(received.includes("NEW-after-upstream"), false);
+                b.terminate();
+                await waitFor(() => releases === 2 && leases === 0);
+                return;
+            }
+            const a = await connect(cookieA);
+            assert.equal(await echoMessage(a, "before-A"), "echo:before-A");
+            if (revocation === "expiry")
+                await new Promise((resolve) => setTimeout(resolve, 900));
+            const b = await connect(await createSession());
+            assert.equal(await echoMessage(b, "before-B"), "echo:before-B");
+            assert.equal(leases, 2);
+            const revoked = new Promise<void>((resolve) => {
+                removeRevoked = sessions.onRevoked((token) => {
+                    if (cookieA === `devshell_web_session=${token}`) resolve();
+                });
+            });
+            if (revocation === "DELETE") {
+                const response = await fetch(`${baseUrl}/web/session`, {
+                    method: "DELETE",
+                    headers: { cookie: cookieA },
+                });
+                assert.equal(response.status, 204);
+            } else if (revocation === "eviction") {
+                await createSession();
+            }
+            await revoked;
+            const nonce = `NEW-after-${revocation}`;
+            await new Promise<void>((resolve) =>
+                a.send(nonce, () => resolve()),
+            );
+            // A round trip through B also gives the upstream a chance to observe stray A data.
+            assert.equal(await echoMessage(b, nonce + "-B"), `echo:${nonce}-B`);
+            assert.equal(received.includes(nonce), false);
+            await waitFor(() => a.readyState === WebSocket.CLOSED);
+            await waitFor(
+                () =>
+                    upstreamSockets[0]?.readyState === WebSocket.CLOSED &&
+                    leases === 1,
+            );
+            assert.equal(releases, 1);
+            assert.equal(upstreamSockets[1]?.readyState, WebSocket.OPEN);
+            assert.equal(
+                (
+                    await requestUpgradeFailure(
+                        `${baseUrl}/web/extensions/example/socket`,
+                        cookieA,
+                    )
+                ).statusCode,
+                401,
+            );
+            b.terminate();
+            await waitFor(() => leases === 0);
+            assert.equal(releases, 2);
+        } finally {
+            removeRevoked();
+            unblock();
+            for (const socket of clients) socket.terminate();
+            for (const socket of upstreamSockets) socket.terminate();
+            sessions.clear();
+            removeGateway();
+            removeSessions();
+            await http.stop();
+            upstreamWebSockets.close();
+            await new Promise<void>((resolve) =>
+                upstreamServer.close(() => resolve()),
+            );
+        }
+    });
+}
+
+async function echoMessage(socket: WebSocket, value: string): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+        socket.once("error", reject);
+        socket.once("message", (message) => resolve(message.toString()));
+        socket.send(value);
+    });
+}
+
 test("Extension static Web contribution serves only files contained by the immutable generation", async (t) => {
     const root = await createTestTempDirectory("extension-web-static");
     t.after(async () => await rm(root, { force: true, recursive: true }));
