@@ -1,3 +1,4 @@
+import { readHistoryPage } from "../../workspace/message/HistoryRequest.js";
 // Stateful tool-call ledger projection. This view model owns the per-instance
 // tool-call list, its subscription status, and its gap recovery policy. It does
 // not own tool execution session state; `call`/`callStreaming` stay on the
@@ -161,7 +162,8 @@ export class ToolCallViewModel {
     }
 
     /** Reads older ledger pages while retaining the live projection. */
-    async loadOlder(instance: string): Promise<number> {
+    async loadOlder(instance: string, signal?: AbortSignal): Promise<number> {
+        if (signal !== undefined) return await this.#loadOlder(instance, signal);
         const pending = this.#historyLoads.get(instance);
         if (pending !== undefined) return await pending;
         const request = this.#loadOlder(instance);
@@ -198,7 +200,8 @@ export class ToolCallViewModel {
         this.#emit();
     }
 
-    async loadOlderContext(instance: string, ctxId: string): Promise<number> {
+    async loadOlderContext(instance: string, ctxId: string, signal?: AbortSignal): Promise<number> {
+        if (signal !== undefined) return await this.#loadOlderContext(instance, ctxId, signal);
         const key = JSON.stringify([instance, ctxId]);
         const pending = this.#contextHistoryLoads.get(key);
         if (pending !== undefined) return await pending;
@@ -212,7 +215,7 @@ export class ToolCallViewModel {
         }
     }
 
-    async #loadOlderContext(instance: string, ctxId: string): Promise<number> {
+    async #loadOlderContext(instance: string, ctxId: string, signal?: AbortSignal): Promise<number> {
         const initial = this.#state.context;
         if (initial?.instance !== instance || initial.ctxId !== ctxId ||
             initial.historyBefore === undefined || initial.historyExhausted)
@@ -221,7 +224,7 @@ export class ToolCallViewModel {
         const epoch = this.#epoch;
         const selection = this.#contextSelection;
         try {
-            const calls = await this.#transport(instance).listCalls(listQuery({ ctxId, before }));
+            const calls = await readHistoryPage((pageSignal) => this.#transport(instance).listCalls(listQuery({ ctxId, before }), pageSignal), signal);
             const current = this.#state.context;
             if (!this.#current(epoch) || selection !== this.#contextSelection ||
                 current?.instance !== instance ||
@@ -239,7 +242,7 @@ export class ToolCallViewModel {
             return calls.length;
         } catch (error) {
             const current = this.#state.context;
-            if (this.#current(epoch) && selection === this.#contextSelection &&
+            if (!signal?.aborted && this.#current(epoch) && selection === this.#contextSelection &&
                 current?.instance === instance &&
                 current.ctxId === ctxId && current.historyBefore === before) {
                 this.#state.context = { ...current, failure: toError(error) };
@@ -249,15 +252,16 @@ export class ToolCallViewModel {
         }
     }
 
-    async #loadOlder(instance: string): Promise<number> {
+    async #loadOlder(instance: string, signal?: AbortSignal): Promise<number> {
         const initial = this.#state.instances[instance];
         const before = initial?.historyBefore;
         if (before === undefined || initial?.historyExhausted) return 0;
         const epoch = this.#epoch;
         const query = this.#queries.get(instance);
-        const calls = await this.#transport(instance).listCalls(
+        const calls = await readHistoryPage((pageSignal) => this.#transport(instance).listCalls(
             listQuery({ ...query, before }),
-        );
+            pageSignal,
+        ), signal);
         if (!this.#current(epoch) || this.#queries.get(instance) !== query ||
             this.#state.instances[instance]?.historyBefore !== before)
             return 0;

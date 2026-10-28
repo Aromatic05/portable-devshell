@@ -39,7 +39,7 @@ export interface ToolTransport {
         options?: ToolCallOptions,
     ): Promise<JsonValue>;
     closeSession(): Promise<Record<string, never>>;
-    listCalls(query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+    listCalls(query?: ToolCallQuery, signal?: AbortSignal): Promise<ToolCallRecord[]>;
     readFailureSummary(
         sinceMs: number,
         untilMs: number,
@@ -76,7 +76,7 @@ export function createToolTransport(
             return await streamToolCall(stream, options);
         },
         closeSession: () => port.request<Record<string, never>>("closeSession", {}),
-        listCalls: (query) => port.request<ToolCallRecord[]>("listCalls", query),
+        listCalls: (query, signal) => port.request<ToolCallRecord[]>("listCalls", query, signal),
         readFailureSummary: (sinceMs, untilMs) =>
             port.request<{ count: number; latest?: ToolCallRecord }>(
                 "failureSummary",

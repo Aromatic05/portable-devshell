@@ -1,3 +1,4 @@
+import { readHistoryPage } from "./HistoryRequest.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
@@ -440,14 +441,14 @@ export class MessageHistoryViewModel {
     }
 
     /** A Context's history is queried before applying the page limit. */
-    async loadContext(instance: string, ctxId: string): Promise<void> {
+    async loadContext(instance: string, ctxId: string, signal?: AbortSignal): Promise<void> {
         const current = this.#state.context;
         if (current?.instance !== instance || current.ctxId !== ctxId) {
             this.#contextSelection++;
             this.#state.context = { ctxId, entries: [], instance, loading: true };
             this.#emit();
         }
-        await this.#refreshContext(instance, ctxId);
+        await this.#refreshContext(instance, ctxId, signal);
     }
 
     clearContext(instance: string, ctxId: string): void {
@@ -458,17 +459,17 @@ export class MessageHistoryViewModel {
         this.#emit();
     }
 
-    async loadOlderContext(instance: string, ctxId: string): Promise<number> {
+    async loadOlderContext(instance: string, ctxId: string, signal?: AbortSignal): Promise<number> {
         const initial = this.#state.context;
         if (initial?.instance !== instance || initial.ctxId !== ctxId ||
             initial.historyBefore === undefined || initial.historyExhausted) return 0;
         const before = initial.historyBefore;
         const epoch = this.#epoch;
         const selection = this.#contextSelection;
-        const result = await this.#transport.listMessageEntries(instance, {
+        const result = await readHistoryPage((pageSignal) => this.#transport.listMessageEntries(instance, {
             ctxId, before, limit: MESSAGE_HISTORY_LIST_LIMIT,
             maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
-        });
+        }, pageSignal), signal);
         const current = this.#state.context;
         if (!this.#current(epoch) || selection !== this.#contextSelection ||
             current?.instance !== instance || current.ctxId !== ctxId ||
@@ -485,7 +486,7 @@ export class MessageHistoryViewModel {
         return result.entries.length;
     }
 
-    async #refreshContext(instance: string, ctxId: string): Promise<void> {
+    async #refreshContext(instance: string, ctxId: string, signal?: AbortSignal): Promise<void> {
         const context = this.#state.context;
         if (context?.instance !== instance || context.ctxId !== ctxId) return;
         const epoch = this.#epoch;
@@ -494,17 +495,22 @@ export class MessageHistoryViewModel {
         this.#state.context = { ...context, loading: true };
         this.#emit();
         try {
-            const result = await this.#transport.listMessageEntries(instance, {
+            const result = await readHistoryPage((pageSignal) => this.#transport.listMessageEntries(instance, {
                 ctxId, limit: MESSAGE_HISTORY_LIST_LIMIT,
                 maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
-            });
+            }, pageSignal), signal);
+            const cursors = new Set<string>();
             const known = new Set(context.historyLoaded ? context.entries.map((entry) => entry.id) : []);
             let page = result.entries;
             while (known.size > 0 && page.length > 0 && !page.some((entry) => known.has(entry.id))) {
-                const older = await this.#transport.listMessageEntries(instance, {
+                if (!this.#current(epoch) || selection !== this.#contextSelection || version !== this.#contextRefreshVersion) return;
+                const before = page[0]!.id;
+                if (cursors.has(before)) throw new Error("History could not advance. Retry the operation.");
+                cursors.add(before);
+                const older = await readHistoryPage((pageSignal) => this.#transport.listMessageEntries(instance, {
                     ctxId, before: page[0]!.id, limit: MESSAGE_HISTORY_LIST_LIMIT,
                     maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
-                });
+                }, pageSignal), signal);
                 page = older.entries;
                 result.entries.unshift(...page);
             }

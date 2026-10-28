@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MessageHistoryViewModel, ToolCallViewModel } from "@portable-devshell/shared";
+import { asInstanceName, MessageHistoryViewModel, ToolCallViewModel } from "@portable-devshell/shared";
+import type { MessageListResult } from "../../../../shared/src/workspace/message/Model.js";
 import type { MessageTransport } from "../../../../shared/src/workspace/message/Transport.js";
 import type { ToolTransport } from "../../../../shared/src/execution/toolcall/Transport.js";
 import { afterEach, expect, it, vi } from "vitest";
@@ -33,7 +34,7 @@ async function exportSetup(list: MessageTransport["listMessageEntries"]) {
 }
 
 it("exports every page and the empty boundary with one click, using message merge and order semantics", async () => {
-    const boundary = deferred<typeof empty>();
+    const boundary = deferred<MessageListResult>();
     const list = vi.fn<MessageTransport["listMessageEntries"]>()
         .mockResolvedValueOnce(initial)
         .mockResolvedValueOnce({ entries: [report, message], lastSeq: 1 })
@@ -73,7 +74,7 @@ it("does not download partial history after failure and retries from the failed 
 });
 
 it("cancels an export when Context changes, without downloading the old selection", async () => {
-    const page = deferred<typeof empty>();
+    const page = deferred<MessageListResult>();
     const list = vi.fn<MessageTransport["listMessageEntries"]>().mockResolvedValueOnce(initial)
         .mockReturnValueOnce(page.promise).mockResolvedValue(empty);
     const { mounted, view, download } = await exportSetup(list);
@@ -101,7 +102,7 @@ const olderCall = { ...call, callId: "old", toolName: "needle" };
 async function auditSetup(list: ToolTransport["listCalls"]) {
     const domains = new WebTestDomains();
     domains.setInstances([{ name: "alpha" }]);
-    const history = new ToolCallViewModel({ cursor: async () => 0, transport: () => ({ listCalls: list } as ToolTransport) });
+    const history = new ToolCallViewModel({ cursor: async () => 0, transport: () => ({ listCalls: list } as unknown as ToolTransport) });
     Object.assign(domains.domains, { toolCalls: history });
     const store = new WebStore(domains.domains);
     const view = (ctxId = "ctx") => withWebDomains(domains, <Audit store={store} navigate={() => undefined}
@@ -176,11 +177,11 @@ it.each(["instance", "all"] as const)("searches paginated instance ledgers for %
     domains.setInstances([{ name: "alpha" }, { name: "beta" }]);
     const alpha = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([call])
         .mockResolvedValueOnce([{ ...call, callId: "middle" }]).mockResolvedValueOnce([olderCall]).mockResolvedValueOnce([]);
-    const beta = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([{ ...call, instance: "beta" }])
-        .mockResolvedValueOnce([{ ...olderCall, instance: "beta" }]).mockResolvedValueOnce([]);
+    const beta = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([{ ...call, instance: asInstanceName("beta") }])
+        .mockResolvedValueOnce([{ ...olderCall, instance: asInstanceName("beta") }]).mockResolvedValueOnce([]);
     const transports = { alpha, beta };
     const history = new ToolCallViewModel({ cursor: async () => 0,
-        transport: (instance) => ({ listCalls: transports[instance as keyof typeof transports] } as ToolTransport) });
+        transport: (instance) => ({ listCalls: transports[instance as keyof typeof transports] } as unknown as ToolTransport) });
     await Promise.all([history.refresh("alpha"), history.refresh("beta")]);
     Object.assign(domains.domains, { toolCalls: history });
     render(withWebDomains(domains, <Audit store={new WebStore(domains.domains)} navigate={() => undefined}
@@ -197,7 +198,7 @@ it.each(["instance", "all"] as const)("searches paginated instance ledgers for %
 
 
 it("blocks a download if connectivity is lost during export and permits retry after reconnecting", async () => {
-    const page = deferred<typeof empty>();
+    const page = deferred<MessageListResult>();
     const list = vi.fn<MessageTransport["listMessageEntries"]>().mockResolvedValueOnce(initial)
         .mockReturnValueOnce(page.promise).mockResolvedValue(empty);
     const { domains, download } = await exportSetup(list);
@@ -211,4 +212,105 @@ it("blocks a download if connectivity is lost during export and permits retry af
     await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
     fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
     await waitFor(() => expect(download).toHaveBeenCalledOnce());
+});
+
+it("times out an unresolved second export page, aborts its signal and retries without accepting a late page", async () => {
+    const page = deferred<MessageListResult>();
+    const list = vi.fn<MessageTransport["listMessageEntries"]>().mockResolvedValueOnce(initial)
+        .mockReturnValueOnce(page.promise).mockResolvedValueOnce(empty);
+    const { download, history } = await exportSetup(list);
+    vi.useFakeTimers();
+    try {
+        fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+        expect(list).toHaveBeenCalledTimes(2);
+        const signal = list.mock.calls[1]![2]!;
+        expect(signal.aborted).toBe(false);
+        await act(async () => vi.advanceTimersByTimeAsync(30_000));
+        expect(signal.aborted).toBe(true);
+        expect(screen.getByRole("alert")).toHaveTextContent("timed out");
+        expect(screen.getByRole("button", { name: "Export Markdown" })).toBeEnabled();
+        expect(download).not.toHaveBeenCalled();
+        await act(async () => fireEvent.click(screen.getByRole("button", { name: "Export Markdown" })));
+        expect(download).toHaveBeenCalledOnce();
+        await act(async () => page.resolve({ entries: [report], lastSeq: 1 }));
+        expect(history.state.context?.entries.map((entry) => entry.id)).toEqual(["new"]);
+        expect(download).toHaveBeenCalledOnce();
+    } finally {
+        vi.useRealTimers();
+    }
+});
+
+it.each(["unmount", "route"] as const)("aborts an unresolved export page on %s without a partial download", async (reason) => {
+    const page = deferred<MessageListResult>();
+    const list = vi.fn<MessageTransport["listMessageEntries"]>().mockResolvedValueOnce(initial)
+        .mockReturnValueOnce(page.promise).mockResolvedValue(empty);
+    const { mounted, view, download, history } = await exportSetup(list);
+    fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+    expect(list).toHaveBeenCalledTimes(2);
+    const signal = list.mock.calls[1]![2]!;
+    const actions = { unmount: () => mounted.unmount(), route: () => mounted.rerender(view("other")) };
+    actions[reason]();
+    await act(async () => undefined);
+    expect(signal.aborted).toBe(true);
+    expect(download).not.toHaveBeenCalled();
+    await act(async () => page.resolve({ entries: [report], lastSeq: 1 }));
+    expect(history.state.context?.entries.some((entry) => entry.id === "old")).not.toBe(true);
+    expect(download).not.toHaveBeenCalled();
+});
+
+it("cancels an unresolved export page and retries before its late response", async () => {
+    const page = deferred<MessageListResult>();
+    const list = vi.fn<MessageTransport["listMessageEntries"]>().mockResolvedValueOnce(initial)
+        .mockReturnValueOnce(page.promise).mockResolvedValue(empty);
+    const { download, history } = await exportSetup(list);
+    fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+    const signal = list.mock.calls[1]![2]!;
+    fireEvent.click(screen.getByRole("button", { name: "Cancel export" }));
+    await act(async () => undefined);
+    expect(signal.aborted).toBe(true);
+    expect(download).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Export Markdown" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Export Markdown" }));
+    await waitFor(() => expect(download).toHaveBeenCalledOnce());
+    await act(async () => page.resolve({ entries: [report], lastSeq: 1 }));
+    expect(history.state.context?.entries.map((entry) => entry.id)).toEqual(["new"]);
+    expect(download).toHaveBeenCalledOnce();
+});
+
+it("continues all-instance history search after alpha fails and exposes beta's match with alpha's failure", async () => {
+    const domains = new WebTestDomains();
+    domains.setInstances([{ name: "alpha" }, { name: "beta" }]);
+    const alpha = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([call])
+        .mockRejectedValue(new Error("Alpha archive unavailable"));
+    const beta = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([{ ...call, instance: asInstanceName("beta") }])
+        .mockResolvedValueOnce([{ ...olderCall, instance: asInstanceName("beta") }]).mockResolvedValueOnce([]);
+    const transports = { alpha, beta };
+    const history = new ToolCallViewModel({ cursor: async () => 0,
+        transport: (instance) => ({ listCalls: transports[instance as keyof typeof transports] } as unknown as ToolTransport) });
+    await Promise.all([history.refresh("alpha"), history.refresh("beta")]);
+    Object.assign(domains.domains, { toolCalls: history });
+    render(withWebDomains(domains, <Audit store={new WebStore(domains.domains)} navigate={() => undefined}
+        route={{ page: "audit", view: "timeline", scope: { kind: "all" } }} />));
+    fireEvent.change(screen.getByLabelText("Search audit"), { target: { value: "needle" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search older Tool Calls" }));
+    await waitFor(() => expect(beta).toHaveBeenCalledTimes(3));
+    expect(screen.getByText("needle")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("alpha: Alpha archive unavailable");
+    expect(screen.queryByText("No tool calls match these filters.")).not.toBeInTheDocument();
+});
+
+it("cancels an unresolved audit page and retries immediately without merging its late response", async () => {
+    const page = deferred<typeof call[]>();
+    const list = vi.fn<ToolTransport["listCalls"]>().mockResolvedValueOnce([call])
+        .mockReturnValueOnce(page.promise).mockResolvedValueOnce([olderCall]).mockResolvedValueOnce([]);
+    const { history } = await auditSetup(list);
+    fireEvent.click(screen.getByRole("button", { name: "Search older Tool Calls" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Search older Tool Calls" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(4));
+    expect(screen.getByText("needle")).toBeInTheDocument();
+    await act(async () => page.resolve([{ ...olderCall, callId: "late" }]));
+    expect(history.state.context?.calls.map((item) => item.callId)).toEqual(["new", "old"]);
+    expect(list).toHaveBeenCalledTimes(4);
 });

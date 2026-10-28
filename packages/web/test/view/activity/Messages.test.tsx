@@ -300,7 +300,7 @@ describe("Messages", () => {
             });
         const loadOlder = vi.spyOn(domains.messageHistory, "loadOlderContext").mockResolvedValue(0);
         await renderMessages(domains, threadRoute, webStore(domains));
-        expect(loadContext).toHaveBeenCalledWith("alpha", "ctx-old-active");
+        expect(loadContext).toHaveBeenCalledWith("alpha", "ctx-old-active", expect.any(AbortSignal));
         expect(screen.getByText("Scoped old Comment")).toBeInTheDocument();
         expect(screen.queryByText("Other Context preview")).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Load older Comments and Reports" }));

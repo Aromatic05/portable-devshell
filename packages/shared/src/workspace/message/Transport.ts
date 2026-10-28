@@ -31,6 +31,7 @@ export interface MessageTransport {
     listMessageEntries(
         instance: string,
         input?: MessageListInput,
+        signal?: AbortSignal,
     ): Promise<MessageListResult>;
     queueContextMessage(
         instance: string,
@@ -73,10 +74,11 @@ export function createMessageTransport(endpoint: Endpoint): MessageTransport {
                 "listContextMessages",
                 input ?? {},
             ),
-        listMessageEntries: (instance, input) =>
+        listMessageEntries: (instance, input, signal) =>
             port(instance).request<MessageListResult>(
                 "listMessageEntries",
                 input ?? {},
+                signal,
             ),
         queueContextMessage: (instance, input) =>
             port(instance).request<ContextMessageRecord>(

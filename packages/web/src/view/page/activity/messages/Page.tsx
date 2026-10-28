@@ -59,8 +59,12 @@ export function Messages({
 
     useEffect(() => {
         if (route.view !== "thread" || server.status !== "online") return;
-        void domains.messageHistory.loadContext(route.instance, route.ctxId);
-        return () => domains.messageHistory.clearContext(route.instance, route.ctxId);
+        const controller = new AbortController();
+        void domains.messageHistory.loadContext(route.instance, route.ctxId, controller.signal);
+        return () => {
+            controller.abort();
+            domains.messageHistory.clearContext(route.instance, route.ctxId);
+        };
     }, [domains, server.status, route.view,
         route.view === "thread" ? route.instance : undefined,
         route.view === "thread" ? route.ctxId : undefined]);
@@ -118,6 +122,11 @@ export function Messages({
     if (exportSelection.current.key !== threadKey) exportSelection.current = { key: threadKey };
     const [exportError, setExportError] = useState<string>();
     const exportPending = useRef<typeof exportSelection.current>();
+    const exportController = useRef<AbortController>();
+    useEffect(() => {
+        if (server.status !== "online") exportController.current?.abort(new Error("Reconnect and retry exporting."));
+    }, [server.status]);
+    useEffect(() => () => exportController.current?.abort(new Error("Export cancelled.")), [threadKey]);
     useEffect(() => {
         if (exportPending.current !== undefined && exportPending.current !== exportSelection.current) {
             exportPending.current = undefined;
@@ -125,12 +134,19 @@ export function Messages({
         }
     }, [threadKey]);
 
-    async function loadExportEntries() {
+    async function loadExportEntries(signal: AbortSignal) {
         if (route.view !== "thread") throw new Error("Select a Context first.");
+        const controller = new AbortController();
+        exportController.current = controller;
+        const abort = () => controller.abort(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        const operationSignal = controller.signal;
         const selection = exportSelection.current;
         exportPending.current = selection;
         setExportError(undefined);
         const currentHistory = () => {
+            operationSignal.throwIfAborted();
             if (exportSelection.current !== selection) {
                 throw new Error("Selected Context changed.");
             }
@@ -143,7 +159,7 @@ export function Messages({
         try {
             let history = currentHistory();
             if (history.loading || history.failure !== undefined || history.historyExhausted === undefined) {
-                await domains.messageHistory.loadContext(route.instance, route.ctxId);
+                await domains.messageHistory.loadContext(route.instance, route.ctxId, operationSignal);
                 history = currentHistory();
             }
             if (history.failure !== undefined || history.loading) throw new Error("Context history could not be read. Retry exporting.");
@@ -153,7 +169,7 @@ export function Messages({
                 const before = history.historyBefore;
                 if (before === undefined || cursors.has(before)) throw new Error("History could not be completed. Retry exporting.");
                 cursors.add(before);
-                await domains.messageHistory.loadOlderContext(route.instance, route.ctxId);
+                await domains.messageHistory.loadOlderContext(route.instance, route.ctxId, operationSignal);
                 history = currentHistory();
                 if (!history.historyExhausted && history.historyBefore === before)
                     throw new Error("History could not be completed. Retry exporting.");
@@ -163,6 +179,8 @@ export function Messages({
             if (history.failure !== undefined || history.loading) throw new Error("Context history could not be read. Retry exporting.");
             return selectWebMessageEntries({ ...projection, message: domains.messageHistory.state }, route.instance, route.ctxId);
         } finally {
+            signal.removeEventListener("abort", abort);
+            if (exportController.current === controller) exportController.current = undefined;
             if (exportPending.current === selection) exportPending.current = undefined;
         }
     }

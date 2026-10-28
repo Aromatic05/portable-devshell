@@ -94,13 +94,17 @@ export function Audit({
     const [olderError, setOlderError] = useState<string>();
     const olderRequest = useRef(0);
     const olderBusy = useRef(false);
+    const olderController = useRef<AbortController>();
     useEffect(() => {
         olderRequest.current += 1;
         olderBusy.current = false;
         setLoadingOlder(false);
         setOlderError(undefined);
         setToolCallPage(0);
-        return () => { olderRequest.current += 1; };
+        return () => {
+            olderRequest.current += 1;
+            olderController.current?.abort(new Error("Search cancelled."));
+        };
     }, [routeKey, filters, contextStatus, server.status, disabled]);
     const [detailRetry, setDetailRetry] = useState(0);
     const [directCall, setDirectCall] = useState<{
@@ -139,8 +143,8 @@ export function Audit({
         return ledger?.historyBefore !== undefined && ledger.historyExhausted !== true;
     });
     const historyComplete = scope.kind === "context"
-        ? contextHistory?.historyExhausted === true && contextHistory.failure === undefined
-        : scopedInstanceNames.every((instance) => toolCallsState.instances[instance]?.historyExhausted === true &&
+        ? olderError === undefined && contextHistory?.historyExhausted === true && contextHistory.failure === undefined
+        : olderError === undefined && scopedInstanceNames.every((instance) => toolCallsState.instances[instance]?.historyExhausted === true &&
             toolCallsState.instances[instance]?.failure === undefined);
     const contextHasOlder = contextHistory?.historyBefore !== undefined &&
         contextHistory.historyExhausted !== true;
@@ -261,38 +265,44 @@ export function Audit({
     async function loadOlder(): Promise<void> {
         if (!interactive || olderBusy.current || (!contextHasOlder && historyInstances.length === 0)) return;
         const request = ++olderRequest.current;
+        const controller = new AbortController();
+        olderController.current = controller;
         olderBusy.current = true;
         setLoadingOlder(true);
         setOlderError(undefined);
         try {
             const targets = scope.kind === "context" ? [scope.instance] : historyInstances;
+            const failures: string[] = [];
             for (const instance of targets) {
-                const history = () => scope.kind === "context"
-                    ? domains.toolCalls.state.context
-                    : domains.toolCalls.state.instances[instance];
-                const cursors = new Set<string>();
-                while (request === olderRequest.current) {
-                    const current = history();
-                    if (current?.historyExhausted === true) break;
-                    const before = current?.historyBefore;
-                    if (before === undefined || cursors.has(before))
-                        throw new Error("Search could not advance. Retry searching.");
-                    cursors.add(before);
-                    if (scope.kind === "context")
-                        await domains.toolCalls.loadOlderContext(instance, scope.ctxId);
-                    else await domains.toolCalls.loadOlder(instance);
+                try {
+                    const history = () => scope.kind === "context"
+                        ? domains.toolCalls.state.context
+                        : domains.toolCalls.state.instances[instance];
+                    const cursors = new Set<string>();
+                    while (request === olderRequest.current) {
+                        const current = history();
+                        if (current?.historyExhausted === true) break;
+                        const before = current?.historyBefore;
+                        if (before === undefined || cursors.has(before))
+                            throw new Error("Search could not advance. Retry searching.");
+                        cursors.add(before);
+                        if (scope.kind === "context")
+                            await domains.toolCalls.loadOlderContext(instance, scope.ctxId, controller.signal);
+                        else await domains.toolCalls.loadOlder(instance, controller.signal);
+                        if (request !== olderRequest.current) return;
+                        const next = history();
+                        if (next?.historyExhausted !== true && next?.historyBefore === before)
+                            throw new Error("Search could not advance. Retry searching.");
+                        if (!active) break;
+                        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                    }
+                } catch (error) {
                     if (request !== olderRequest.current) return;
-                    const next = history();
-                    if (next?.historyExhausted !== true && next?.historyBefore === before)
-                        throw new Error("Search could not advance. Retry searching.");
-                    if (!active) break;
-                    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                    failures.push(`${instance}: ${error instanceof Error ? error.message : String(error)}`);
+                    setOlderError(failures.join("; "));
                 }
                 if (request !== olderRequest.current) return;
             }
-        } catch (error) {
-            if (request === olderRequest.current)
-                setOlderError(error instanceof Error ? error.message : String(error));
         } finally {
             if (request === olderRequest.current) {
                 olderBusy.current = false;
@@ -530,6 +540,7 @@ export function Audit({
                             </button>
                             {loadingOlder && <button type="button" onClick={() => {
                                 olderRequest.current += 1;
+                                olderController.current?.abort(new Error("Search cancelled."));
                                 olderBusy.current = false;
                                 setLoadingOlder(false);
                             }}>Cancel</button>}

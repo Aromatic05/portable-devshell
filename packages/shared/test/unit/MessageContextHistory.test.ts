@@ -106,3 +106,31 @@ test("paged Context refresh bridges more than 400 new messages and preserves the
     assert.equal(model.state.context?.historyBefore, "message-0");
     assert.deepEqual(model.state.context?.entries.map((item) => item.id), all.map((item) => item.id));
 });
+
+test("aborting a Context page releases an unresolved read and ignores it after retry", async (t) => {
+    let resolveOld!: (value: { entries: MessageEntry[]; lastSeq: number }) => void;
+    const oldPage = new Promise<{ entries: MessageEntry[]; lastSeq: number }>((resolve) => { resolveOld = resolve; });
+    let pageSignal: AbortSignal | undefined;
+    let reads = 0;
+    const model = new MessageHistoryViewModel({ transport: {
+        listMessageEntries: (_instance, query, signal) => {
+            reads++;
+            if (reads === 2) { pageSignal = signal; return oldPage; }
+            return Promise.resolve({ entries: query?.before === undefined ? [entry(1, "ctx-a")] : [], lastSeq: 1 });
+        },
+    } as MessageTransport });
+    t.after(() => model.close());
+    await model.loadContext("alpha", "ctx-a");
+    const controller = new AbortController();
+    const pending = model.loadOlderContext("alpha", "ctx-a", controller.signal);
+    const rejected = assert.rejects(pending, /Read cancelled/u);
+    controller.abort(new Error("Read cancelled"));
+    await rejected;
+    assert.equal(pageSignal?.aborted, true);
+    assert.equal(model.state.context?.historyBefore, "message-1");
+    assert.equal(await model.loadOlderContext("alpha", "ctx-a"), 0);
+    resolveOld({ entries: [entry(0, "ctx-a")], lastSeq: 1 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(model.state.context?.entries.map((item) => item.id), ["message-1"]);
+    assert.equal(model.state.context?.historyExhausted, true);
+});

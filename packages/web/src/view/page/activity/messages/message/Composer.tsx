@@ -35,7 +35,7 @@ export function MessageComposer({
 }: {
     draft: MessageDraft;
     onDraftChange(update: (draft: MessageDraft) => MessageDraft): void;
-    loadExportEntries(): Promise<readonly WebMessageEntry[]>;
+    loadExportEntries(signal: AbortSignal): Promise<readonly WebMessageEntry[]>;
     onActivity(): void;
     route: Extract<WebRoute, { page: "messages"; view: "thread" }>;
     store: WebStore;
@@ -115,20 +115,22 @@ export function MessageComposer({
     }
 
     const [exporting, setExporting] = useState(false);
-    const exportPending = useRef(false);
+    const exportPending = useRef<AbortController>();
     const mounted = useRef(true);
     useEffect(() => {
         mounted.current = true;
-        return () => { mounted.current = false; };
+        return () => { mounted.current = false; exportPending.current?.abort(new Error("Export cancelled.")); };
     }, []);
 
     async function exportMarkdown(): Promise<void> {
         if (exportPending.current) return;
-        exportPending.current = true;
+        const controller = new AbortController();
+        exportPending.current = controller;
         setExporting(true);
         setFeedback(undefined);
         try {
-            const entries = await loadExportEntries();
+            const entries = await loadExportEntries(controller.signal);
+            controller.signal.throwIfAborted();
             if (!mounted.current) return;
             downloadMarkdown(
                 markdownExportFilename(title, route.instance, route.ctxId),
@@ -140,7 +142,7 @@ export function MessageComposer({
             if (mounted.current) setFeedback({ kind: "error",
                 text: `Export failed: ${error instanceof Error ? error.message : String(error)}` });
         } finally {
-            exportPending.current = false;
+            if (exportPending.current === controller) exportPending.current = undefined;
             if (mounted.current) setExporting(false);
         }
     }
@@ -242,6 +244,7 @@ export function MessageComposer({
             >
                 {exporting ? "Exporting…" : "↓"}
             </button>
+            {exporting && <button type="button" onClick={() => exportPending.current?.abort(new Error("Export cancelled. Retry when ready."))}>Cancel export</button>}
             <button
                 aria-label="Send Comment"
                 className="primary"
