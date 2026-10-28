@@ -449,7 +449,7 @@ function InstanceDetail({
                     )}
                     <p>
                         Runtime: {snapshot.status}; daemon:{" "}
-                        {snapshot.daemonState}; sequence: {snapshot.lastSeq}
+                        {snapshot.daemonState}
                     </p>
                     {selfManaged ? (
                         <p className="hint">

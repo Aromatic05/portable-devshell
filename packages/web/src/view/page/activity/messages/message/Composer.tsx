@@ -235,7 +235,6 @@ export function MessageComposer({
             >
                 {operations[operation] !== undefined ? "…" : "➤"}
             </button>
-            {historyComplete ? null : <p className="hint">Markdown export includes loaded messages only. Load older Comments and Reports to include earlier history.</p>}
             {draft.length > composerLengthHintThreshold ? (
                 <p aria-live="off" className="messages-composer-length">
                     {draft.length} / {composerMaxLength}

@@ -240,8 +240,6 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                             </li>;
                         })}
                     </ol> : <p className="dashboard-empty">No recent audited ToolCalls for this Context.</p>}
-                <p className="dashboard-help">Recent Context audit. Task transcripts collect available
-                    reads; results do not require the original Inline cards to stay mounted.</p>
             </>}
         </section>
     </div>;

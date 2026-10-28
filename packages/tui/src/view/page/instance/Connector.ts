@@ -389,13 +389,6 @@ export function buildConnectorPageBoxes(
             ],
             title: "Page Actions",
         }),
-        makeBox(state, "connections", instanceName, {
-            detailLines: ["validation=available before save"],
-            id: "validation",
-            status: "normal",
-            summaryLines: [compactSummary(["namespaceAuth", "valid"])],
-            title: "Configuration Validation",
-        }),
     ];
     return instanceName === undefined
         ? boxes.filter((box) => box.id !== "mcp-endpoint" && box.id !== "auth")

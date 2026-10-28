@@ -68,8 +68,7 @@ function FileReadView({ result }: ToolCallPresentation): ReactNode {
                     <CodeLines text={content} language={fileLanguage(path)} /> :
                     <Notice>No content returned for this file.</Notice>}
             {file.truncated === true || file.nextSelector
-                ? <InfoStrip>More lines available{file.nextSelector ? " · next selector: " +
-                    String(file.nextSelector) : ""}</InfoStrip> : null}
+                ? <InfoStrip>More lines available</InfoStrip> : null}
         </section>;
     })}</div>;
 }
@@ -95,7 +94,7 @@ function SearchView({ input, result }: ToolCallPresentation): ReactNode {
                     <InfoStrip>More matches after line {number(file.nextLine)!}</InfoStrip>}
             </section>;
         })}
-        {string(output?.nextCursor) && <Notice>More files exist. Continue this search using its cursor.</Notice>}
+        {string(output?.nextCursor) && <Notice>More files exist.</Notice>}
     </div>;
 }
 
@@ -160,8 +159,7 @@ function EditView({ input, result }: ToolCallPresentation): ReactNode {
             </section>;
         })}
         {operations.length > 0 && !operations.some((item) => typeof item.diff === "string") &&
-            <Notice>Only change counts were returned; no actual diff was provided.
-                Request resultDetail: diff to inspect resulting changes.</Notice>}
+            <Notice>Only change counts were returned; no actual diff was provided.</Notice>}
         {!operations.length && <Notice>No individual file operation results were returned.</Notice>}
         {!operations.some((item) => typeof item.diff === "string") && string(record(input)?.changes) &&
             <details className="tc-technical"><summary>Submitted patch (not a verified diff)</summary>

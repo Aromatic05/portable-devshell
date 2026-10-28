@@ -479,7 +479,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
             <header className="workspace-head">
                 <span className="workspace-name">DevShell <span>{view === "workspace" ? "Workspace" : view === "interaction" ? "Interaction" : "ToolCall"}</span></span>
                 <span className="workspace-toolbar">
-                    {view === "workspace" && <label className="workspace-setting" title="Only changes the display of cards already provided by the Host. Does not enable server Inline ToolCalls or change fullscreen.">
+                    {view === "workspace" && <label className="workspace-setting">
                         <input type="checkbox" checked={toolCallEnabled}
                             onChange={(event) => setToolCallEnabled(event.target.checked)} />
                         Show provided ToolCall cards

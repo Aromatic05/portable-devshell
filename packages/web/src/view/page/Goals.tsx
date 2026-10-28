@@ -33,7 +33,7 @@ export function Goals() {
                         <article className="card" data-goal-id={goal.goalId}
                             data-goal-status={goal.status} key={`${instance}-${goal.goalId}`}>
                             <h4>{goal.objective}</h4>
-                            <p>{instance} · {workspaceFolderName(goal.workspace)} · revision {goal.revision}</p>
+                            <p>{instance} · {workspaceFolderName(goal.workspace)}</p>
                             <strong>{goal.status}</strong>
                             {goal.note === undefined ? null : <p>{goal.note}</p>}
                         </article>
