@@ -25,6 +25,7 @@ import type {
     ToolCallTarget,
 } from "@portable-devshell/shared";
 import { createErrorFromBody } from "./Error.js";
+import { assertMcpOutboundResult, mcpOutboundResult } from "./Presentation.js";
 import { attachToolCallErrorPayload } from "./ErrorPayload.js";
 import {
     interpretTerminalValue,
@@ -167,6 +168,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         let toolExecutionSucceeded = false;
         let executionStarted = false;
         let executionCompleted = false;
+        let hasNativePresentation = false;
         let mutationActivityFailure: unknown;
         let failureStage: ToolCallFailureStage | undefined;
         let progressTail = Promise.resolve();
@@ -289,6 +291,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 presented
                     ? executed.presentation
                     : undefined;
+            hasNativePresentation = presentation !== undefined;
             const rawResult =
                 presented
                     ? executed.result
@@ -328,9 +331,14 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         value: {
                             ...hookValue,
                             kind: "result",
-                            payload: adaptedResult,
+                            payload: presentation === undefined
+                                ? adaptedResult
+                                : mcpOutboundResult(adaptedResult, presentation),
                         },
                     }));
+                if (presentation !== undefined && hookValue.kind !== "error") {
+                    assertMcpOutboundResult(hookValue.payload);
+                }
             } catch (error) {
                 failureStage = "outboundHook";
                 reportOutboundFailure("result", error);
@@ -430,6 +438,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     classifiedFailure,
                     hookValue,
                 );
+                if (hasNativePresentation && outerFailure.value.kind !== "error") {
+                    assertMcpOutboundResult(outerFailure.value.payload);
+                }
             } catch (error) {
                 failureStage = "outboundHook";
                 reportOutboundFailure("error", error, failure);

@@ -164,11 +164,12 @@ test("worker calls resolve Context and preserve the shared presentation", async 
                     (await invocationInput?.(input, "call-1", value)) ?? input,
                 value,
             };
-            return await transformResult!(
+            const structuredContent = await transformResult!(
                 { exitCode: 0, stdout: accepted.input },
                 "call-1",
                 presentation,
             );
+            return { structuredContent, content: [{ type: "text", text: "command completed" }] };
         },
     };
     const dispatch = new McpEndpointDispatch({

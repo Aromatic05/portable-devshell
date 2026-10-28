@@ -146,7 +146,7 @@ export class McpEndpointDispatch {
             signal,
         );
         let accepted: McpAcceptedCall | undefined;
-        let presentation: import("@portable-devshell/shared").ToolCallPresentation | undefined;
+        let nativeResult = false;
         const prepareCall = async (
             callId: string,
             finalValue: ToolCallHookValue,
@@ -166,7 +166,7 @@ export class McpEndpointDispatch {
                 context,
                 signal,
                 async (structured, _callId, nextPresentation) => {
-                    presentation = nextPresentation;
+                    nativeResult = nextPresentation !== undefined;
                     if (accepted !== undefined) onExecuted?.(_callId, accepted.value, structured);
                     return structured;
                 },
@@ -176,7 +176,7 @@ export class McpEndpointDispatch {
                 },
             );
         return appendWorkspaceAdvice(
-            presentMcpEndpointResult(result, presentation),
+            presentMcpEndpointResult(result, nativeResult),
             accepted?.workspaceAdvice ?? [],
         );
     }

@@ -3,7 +3,6 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
-    type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
 export function mcpEndpointToolNotExposed(
@@ -58,23 +57,22 @@ function mcpEndpointCancellationError(reason: unknown) {
 
 export function presentMcpEndpointResult(
     result: JsonValue,
-    presentation: ToolCallPresentation | undefined,
+    nativeResult: boolean,
 ): McpEndpointResult {
-    if (presentation === undefined) return result;
+    if (!nativeResult) return result;
+    // The execution target has validated and audited this rewritten envelope.
+    // Never re-attach the original presentation after outbound Rewrite.
+    const envelope = result as {
+        content: CallToolResult["content"];
+        isError?: boolean;
+        structuredContent: JsonValue;
+    };
     return new McpNativeToolResult({
-        content: (presentation.content ?? []).map((entry) =>
-            entry.type === "text"
-                ? { text: entry.text, type: "text" as const }
-                : {
-                      data: entry.data,
-                      mimeType: entry.mediaType,
-                      type: "image" as const,
-                  },
-        ),
-        ...(presentation.isError === undefined
+        content: envelope.content,
+        ...(envelope.isError === undefined
             ? {}
-            : { isError: presentation.isError }),
-        structuredContent: result,
+            : { isError: envelope.isError }),
+        structuredContent: envelope.structuredContent,
     });
 }
 

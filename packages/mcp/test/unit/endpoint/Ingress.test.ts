@@ -102,7 +102,7 @@ test("workspace calls pass through Control callbacks and preserve worker present
             const acceptedInput = await invocationInput!(input, "call-1", hookValue);
             const result = { exitCode: 0, stdout: acceptedInput } as JsonValue;
             await transformResult!(result, "call-1", presentation);
-            return result;
+            return { structuredContent: result, content: [{ type: "text", text: "command completed" }] };
         },
     };
     const endpoint = new McpEndpoint({

@@ -3,22 +3,23 @@ import test from "node:test";
 
 import { McpNativeToolResult, presentMcpEndpointResult } from "../../../src/protocol/call/Boundary.ts";
 
-test("ToolCall image presentation maps to native MCP image content", () => {
+test("rewritten ToolCall native envelope preserves MCP image content", () => {
     const result = presentMcpEndpointResult(
         {
-            imageRef: "image.png",
-            mediaType: "image/png",
-            name: "image.png",
-        },
-        {
+            structuredContent: {
+                imageRef: "image.png",
+                mediaType: "image/png",
+                name: "image.png",
+            },
             content: [
                 {
                     data: "png-base64",
-                    mediaType: "image/png",
+                    mimeType: "image/png",
                     type: "image",
                 },
             ],
         },
+        true,
     );
     assert.ok(result instanceof McpNativeToolResult);
     assert.deepEqual(result.content, [
