@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
@@ -217,6 +218,82 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
         },
     );
     assert.equal(forged.status, 400);
+    assert.match(forged.headers.get("content-type")!, /^text\/html/u);
+    const html = await forged.text();
+    assert.match(html, /<h1>Sign-in incomplete<\/h1>/u);
+    assert.match(html, /href="\/web\/oauth\/start"/u);
+    assert.doesNotMatch(html, /OAuth state|"error"|forged/u);
+});
+
+test("browser OAuth failures return safe retry HTML while API metadata stays JSON", async (t) => {
+    for (const scenario of ["discovery", "state-invalid", "token-rejected", "token-missing", "token-invalid", "token-malformed"] as const) {
+        await t.test(scenario, async (t) => {
+            const origin = "https://web.test";
+            const routes = new Map<string, (request: IncomingMessage, response: ServerResponse) => void | Promise<void>>();
+            const http = {
+                registerRawRoute(_method: string, path: string, handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>) {
+                    routes.set(path, handler);
+                    return () => { routes.delete(path); };
+                },
+                registerMiddleware: () => () => undefined,
+            };
+            const navigate = (path: string, cookie?: string): Promise<Response> => new Promise((resolve) => {
+                const headers = new Headers();
+                const response = {
+                    statusCode: 200, headersSent: false,
+                    setHeader: (name: string, value: string) => { headers.set(name, value); },
+                    end(body?: string) { resolve(new Response(body ?? null, { status: this.statusCode, headers })); },
+                };
+                routes.get(new URL(path, origin).pathname)!({ url: path, headers: { cookie } } as IncomingMessage, response as unknown as ServerResponse);
+            });
+            const config = { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME };
+            const resource = {
+                issuerUrl: new URL("https://issuer.test"),
+                registerResource: () => () => undefined,
+                registerFirstPartyWebClient: async () => "web-client",
+                protectedResourceMetadata: () => ({ resource: `${origin}/prefix/web` }),
+                verifyAccessToken: async () => { throw new Error("secret provider diagnostic"); },
+            } as unknown as McpOAuthProtectedResource;
+            const flow = new ControlWebOAuthFlow({ basePath: "/prefix/web", config,
+                ownsProvider: false, publicBaseUrl: origin, protectedResource: resource,
+                sessions: new ControlWebSessionService({ auth: { mode: "oauth2", oauth2: config }, basePath: "/prefix/web" }),
+            });
+            const uninstall = flow.install(http);
+            await flow.warmup();
+            const originalFetch = globalThis.fetch;
+            globalThis.fetch = async (input) => {
+                const url = new URL(String(input));
+                assert.equal(url.hostname, "issuer.test");
+                if (url.pathname === "/.well-known/openid-configuration")
+                    return scenario === "discovery" ? new Response("unavailable", { status: 503 })
+                        : Response.json({ authorization_endpoint: "https://issuer.test/authorize", token_endpoint: "https://issuer.test/token" });
+                if (scenario === "token-rejected") return new Response("secret", { status: 401 });
+                if (scenario === "token-malformed") return new Response("not-json");
+                return Response.json(scenario === "token-missing" ? {} : { access_token: "private-token" });
+            };
+            t.after(async () => {
+                globalThis.fetch = originalFetch;
+                uninstall(); flow.close();
+            });
+            const metadata = await navigate("/.well-known/oauth-protected-resource/prefix/web");
+            assert.match(metadata.headers.get("content-type")!, /^application\/json/u);
+            assert.deepEqual(await metadata.json(), { resource: `${origin}/prefix/web` });
+            const start = await navigate("/prefix/web/oauth/start?returnTo=https://evil.test/%3Cscript%3E");
+            let failure = start;
+            if (scenario !== "discovery") {
+                assert.equal(start.status, 302);
+                const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+                failure = await navigate(`/prefix/web/oauth/callback?code=secret&state=${state}`, `devshell_web_oauth_state=${scenario === "state-invalid" ? "forged" : state}`);
+            }
+            assert.equal(failure.status, scenario === "state-invalid" ? 400 : scenario === "discovery" || scenario === "token-malformed" ? 500 : 401);
+            assert.match(failure.headers.get("content-type")!, /^text\/html; charset=utf-8$/u);
+            assert.equal(failure.headers.get("cache-control"), "no-store");
+            const html = await failure.text();
+            assert.match(html, /<h1>Sign-in incomplete<\/h1>/u);
+            assert.match(html, /href="\/prefix\/web\/oauth\/start"/u);
+            assert.doesNotMatch(html, /"error"|secret|private-token|evil.test|<script/u);
+        });
+    }
 });
 
 test("web oauth2 persists its first-party PKCE client without public registration", async (t) => {

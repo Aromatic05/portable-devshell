@@ -133,7 +133,7 @@ export class ControlWebOAuthFlow {
             `${this.#basePath}/oauth/start`,
             (request, response) => {
                 void this.#start(request, response).catch(() =>
-                    writeJson(response, 500, { error: "OAuth start failed" }),
+                    writeLoginError(response, 500, this.#basePath),
                 );
             },
         );
@@ -142,9 +142,7 @@ export class ControlWebOAuthFlow {
             `${this.#basePath}/oauth/callback`,
             (request, response) => {
                 void this.#callback(request, response).catch(() =>
-                    writeJson(response, 500, {
-                        error: "OAuth callback failed",
-                    }),
+                    writeLoginError(response, 500, this.#basePath),
                 );
             },
         );
@@ -220,9 +218,7 @@ export class ControlWebOAuthFlow {
             stateCookie !== state ||
             pending === undefined
         ) {
-            writeJson(response, 400, {
-                error: "OAuth state validation failed",
-            });
+            writeLoginError(response, 400, this.#basePath);
             return;
         }
         this.#pending.delete(state);
@@ -240,16 +236,14 @@ export class ControlWebOAuthFlow {
             method: "POST",
         });
         if (!tokenResponse.ok) {
-            writeJson(response, 401, { error: "OAuth token exchange failed" });
+            writeLoginError(response, 401, this.#basePath);
             return;
         }
         const tokens = (await tokenResponse.json()) as {
             access_token?: unknown;
         };
         if (typeof tokens.access_token !== "string") {
-            writeJson(response, 401, {
-                error: "OAuth token exchange returned no access token",
-            });
+            writeLoginError(response, 401, this.#basePath);
             return;
         }
         try {
@@ -258,9 +252,7 @@ export class ControlWebOAuthFlow {
                 tokens.access_token,
             );
         } catch {
-            writeJson(response, 401, {
-                error: "OAuth access token is not valid for this resource",
-            });
+            writeLoginError(response, 401, this.#basePath);
             return;
         }
 
@@ -425,6 +417,25 @@ function writeJson(
     response.statusCode = statusCode;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Content-Length", Buffer.byteLength(payload));
+    response.end(payload);
+}
+
+function writeLoginError(response: ServerResponse, statusCode: number, basePath: string): void {
+    if (response.headersSent) {
+        response.end();
+        return;
+    }
+    const retryPath = `${basePath}/oauth/start`.replace(/[&<>"']/gu, (character) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+    const message = statusCode === 400 ? "This sign-in request is invalid or has expired."
+        : statusCode === 401 ? "Sign-in could not be verified."
+        : "Sign-in is temporarily unavailable.";
+    const payload = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in incomplete</title><body><main><h1>Sign-in incomplete</h1><p>${message} Please try signing in again.</p><a href="${retryPath}">Try signing in again</a></main></body></html>`;
+    response.statusCode = statusCode;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
     response.setHeader("Content-Length", Buffer.byteLength(payload));
     response.end(payload);
 }
