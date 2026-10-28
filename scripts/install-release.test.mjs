@@ -1327,6 +1327,139 @@ test(
     },
 );
 
+test("Windows release installer blocks rollback before starting a migration child", async () => {
+    const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
+    const started = source.indexOf("            $migrationStarted = $true");
+    const child = source.indexOf("& node $cliPath migrate", started);
+    const committed = source.indexOf("            $migrationCommitted = $true", child);
+    assert.ok(started > source.indexOf("        if ($migrationRequired) {"));
+    assert.ok(child > started);
+    assert.ok(committed > child);
+    assert.match(source, /if \(-not \$activated -and -not \$migrationStarted\) \{/u);
+    assert.doesNotMatch(source.slice(started, committed), /\$activated = \$true|\$runtimeWasStopped = \$false/u);
+});
+
+test(
+    "Windows release installer preserves candidate and aliases after a child dies following its first durable migration",
+    { skip: process.platform !== "win32" },
+    async () => {
+        await verifyWindowsMigrationFailure({
+            crash: true,
+            expectedEvents: ["stop", "context-committed"],
+            expectedAudit: { version: 2, sentinel: "audit" },
+            expectedError: /migration 未成功完成/u,
+        });
+    },
+);
+
+test(
+    "Windows release installer keeps committed migration when candidate Control restore fails",
+    { skip: process.platform !== "win32" },
+    async () => {
+        await verifyWindowsMigrationFailure({
+            crash: false,
+            expectedEvents: ["stop", "context-committed", "audit-committed", "candidate-start-failed", "stop"],
+            expectedAudit: { version: 3, sentinel: "audit" },
+            expectedError: /persistent migration 已提交/u,
+        });
+    },
+);
+
+async function verifyWindowsMigrationFailure({ crash, expectedEvents, expectedAudit, expectedError }) {
+    const root = await createTestTempDirectory("windows-release-migration-failure");
+    const release = resolve(root, "release");
+    const app = resolve(root, "app");
+    const installRoot = resolve(root, "installed");
+    const binDirectory = resolve(root, "bin");
+    const devshellHome = resolve(root, "devshell-home");
+    const runtimeLog = resolve(root, "runtime.log");
+    const environment = {
+        ...process.env,
+        HOME: resolve(root, "home"),
+        USERPROFILE: resolve(root, "home"),
+        LOCALAPPDATA: resolve(root, "local-app-data"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_LIVE_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_RUNTIME_LOG: runtimeLog,
+    };
+    let oldControl;
+    try {
+        await writeTransactionalReleaseFixture({ app, release, version: "9.8.7-old-windows", workerContent: "old-worker\n" });
+        const installed = runInstallerRaw(environment, true);
+        assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+        oldControl = await startFakeControl(resolve(installRoot, "current"), devshellHome);
+        await writeFile(resolve(devshellHome, "context.json"), JSON.stringify({ version: 1, sentinel: "context" }));
+        await writeFile(resolve(devshellHome, "audit.json"), JSON.stringify({ version: 2, sentinel: "audit" }));
+
+        await writeTransactionalReleaseFixture({
+            app, release, version: "9.8.8-new-windows", workerContent: "new-worker\n", failRuntimeRestore: true,
+        });
+        // Simulate independently committed domains, with the child killed after the first.
+        const cli = resolve(app, "custom", "devshell-entry.js");
+        const original = await readFile(cli, "utf8");
+        const migration = [
+            "import { openSync, writeFileSync, fsyncSync, closeSync, renameSync } from 'node:fs';",
+            "if (process.argv[2] === 'migrate') {",
+            "  const home = process.env.PORTABLE_DEVSHELL_HOME;",
+            "  const commit = (domain, version) => {",
+            "    const pending = `${home}/${domain}.pending`;",
+            "    const fd = openSync(pending, 'w');",
+            "    writeFileSync(fd, JSON.stringify({ version, sentinel: domain }));",
+            "    fsyncSync(fd); closeSync(fd);",
+            "    renameSync(pending, `${home}/${domain}.json`);",
+            "    appendFileSync(process.env.PORTABLE_DEVSHELL_TEST_RUNTIME_LOG, `${domain}-committed\\n`);",
+            "  };",
+            "  commit('context', 2);",
+            ...(crash ? ["  process.kill(process.pid, 'SIGKILL');"] : []),
+            "  commit('audit', 3);",
+            "  process.exit(0);",
+            "}",
+        ].join("\n");
+        await writeFile(cli, original.replace("const command =", `${migration}\nconst command =`));
+        const manifestPath = resolve(app, "portable-devshell-install.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        await writeFile(manifestPath, JSON.stringify({ ...manifest, updatePreflight: true }));
+        const control = resolve(app, "node_modules", "@portable-devshell", "control");
+        await mkdir(resolve(control, "dist", "migration"), { recursive: true });
+        await writeFile(resolve(control, "package.json"), '{"type":"module"}\n');
+        await writeFile(resolve(control, "dist", "migration", "Control.js"),
+            "export async function preflightControlUpdate() { return { extensions: { checkedGenerations: 0 }, migration: { required: true }, rollback: { feasible: false } }; }\n");
+        const archive = resolve(release, applicationAssetName());
+        run("tar.exe", ["-czf", archive, "-C", app, "."]);
+        await writeChecksum(archive);
+
+        const failed = runInstallerRaw({ ...environment, PORTABLE_DEVSHELL_TEST_RUNNING: "1" }, true);
+        assert.equal(failed.error, undefined);
+        assert.notEqual(failed.status, 0, `${failed.stdout}${failed.stderr}`);
+        assert.match(failed.stderr, expectedError);
+        assert.match(failed.stderr, /禁止自动降级/u);
+        assert.equal(failed.stdout.includes("Persistent migration 已提交"), !crash);
+        assert.doesNotMatch(failed.stdout, /已安装 portable-devshell/u);
+        assert.equal(JSON.parse(await readFile(resolve(installRoot, "current", "package.json"), "utf8")).version, "9.8.8-new-windows");
+        assert.equal(JSON.parse(await readFile(resolve(installRoot, "versions", "9.8.8-new-windows", "package.json"), "utf8")).version, "9.8.8-new-windows");
+        assert.equal(await readFile(resolve(devshellHome, "bin", workerAssetName()), "utf8"), "new-worker\n");
+        assert.equal(await readFile(resolve(devshellHome, "bin", "devshell-worker.exe"), "utf8"), "new-worker\n");
+        const command = await readFile(resolve(binDirectory, "devshell.cmd"), "utf8");
+        assert.ok(command.includes(resolve(installRoot, "current", "custom", "devshell-entry.js")));
+        assert.deepEqual(JSON.parse(await readFile(resolve(devshellHome, "context.json"), "utf8")), { version: 2, sentinel: "context" });
+        assert.deepEqual(JSON.parse(await readFile(resolve(devshellHome, "audit.json"), "utf8")), expectedAudit);
+        assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), expectedEvents);
+        const backups = (await readdir(installRoot)).filter((name) => name.startsWith(".current-backup-"));
+        assert.equal(backups.length, 1);
+        assert.equal(JSON.parse(await readFile(resolve(installRoot, backups[0], "package.json"), "utf8")).version, "9.8.7-old-windows");
+        const workerBackups = (await readdir(devshellHome)).filter((name) => name.startsWith(".install-worker-backup-"));
+        assert.equal(workerBackups.length, 1);
+        assert.equal(await readFile(resolve(devshellHome, workerBackups[0], "devshell-worker.exe"), "utf8"), "old-worker\n");
+        await assert.rejects(lstat(resolve(devshellHome, "control", "control.pid")), { code: "ENOENT" });
+    } finally {
+        oldControl?.kill("SIGKILL");
+        await rm(root, { force: true, recursive: true });
+    }
+}
+
 test("Windows release installer prepares rollback state before entering Control shutdown", async () => {
     const source = await readFile(
         resolve(repositoryRoot, "scripts", "install-release.ps1"),

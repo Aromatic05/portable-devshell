@@ -559,6 +559,7 @@ try {
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
     $candidateControlRestoreAttempted = $false
+    $migrationStarted = $false
     $migrationCommitted = $false
     $activated = $false
     try {
@@ -582,11 +583,15 @@ try {
         Assert-CliStarts $commandPath "安装结果验证失败" $true
         if ($migrationRequired) {
             Write-InstallDetail "执行候选版本 persistent migration"
-            & node $cliPath migrate | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "候选版本 migration 失败。" }
+            # Separate durable domains may commit before the child fails or is killed.
+            $migrationStarted = $true
+            try {
+                & node $cliPath migrate | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "migration 子进程退出码：$LASTEXITCODE" }
+            } catch {
+                throw "候选版本 migration 未成功完成，持久状态可能已部分迁移；禁止自动降级。候选程序、命令和 Worker 保持激活，Control 未自动启动。恢复材料保留在 $installRoot 和 $workerBackupDirectory。请使用候选命令 $commandPath migrate 完成迁移，确认成功后再恢复 Control 和实例；不要启动旧版本。 $($_.Exception.Message)"
+            }
             $migrationCommitted = $true
-            $activated = $true
-            $runtimeWasStopped = $false
             Write-InstallDetail "Persistent migration 已提交；后续失败将禁止自动降级"
         }
         $candidateControlRestoreAttempted = [bool]$runtimeState.ControlRunning
@@ -599,9 +604,9 @@ try {
             }
             throw
         }
-        if (-not $migrationCommitted) { $activated = $true }
+        $activated = $true
     } finally {
-        if (-not $activated) {
+        if (-not $activated -and -not $migrationStarted) {
             if ($candidateControlRestoreAttempted) {
                 try {
                     Stop-InstalledControl $commandPath $devshellHome
