@@ -37,6 +37,7 @@ use channel::LocalIpcStream;
 
 const ENVELOPE_SERVICE: &str = "envelope";
 const RECEIVE_WINDOW: u32 = 256 * 1024;
+const NOTIFICATION_PENDING_BYTES: usize = 256 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
@@ -439,6 +440,7 @@ impl ActiveStream {
 
 struct PendingOutput {
     _credit: Option<OutputCredit>,
+    notification: bool,
     data: Vec<u8>,
     offset: usize,
 }
@@ -977,7 +979,30 @@ fn drain_notifications(
     let Some(peer_host) = peer_host else {
         return Ok(());
     };
-    while let Some(notification) = context.router.try_pop_notification()? {
+    drain_notification_queue(&context.host, peer_host, pending, || {
+        context.router.try_pop_notification()
+    })
+}
+
+fn drain_notification_queue(
+    host: &str,
+    peer_host: &str,
+    pending: &mut VecDeque<PendingOutput>,
+    mut pop: impl FnMut() -> Result<Option<Value>, String>,
+) -> Result<(), String> {
+    // Keep the entire encoded allocation charged through partial Frame writes.
+    // Permit one envelope to cross the threshold so large control events are
+    // never dropped or permanently stuck behind a size check. The hard ceiling
+    // is this threshold plus ENVELOPE_MAX_SIZE and its length delimiter.
+    let mut bytes = pending
+        .iter()
+        .filter(|item| item.notification)
+        .map(|item| item.data.len())
+        .sum::<usize>();
+    while bytes < NOTIFICATION_PENDING_BYTES {
+        let Some(notification) = pop()? else {
+            break;
+        };
         let method = notification
             .get("method")
             .and_then(Value::as_str)
@@ -995,7 +1020,7 @@ fn drain_notifications(
             pending,
             Envelope {
                 source: Address {
-                    host: context.host.clone(),
+                    host: host.to_string(),
                     port: port.to_string(),
                 },
                 dest: Address {
@@ -1008,6 +1033,9 @@ fn drain_notifications(
                 }),
             },
         )?;
+        let queued = pending.back_mut().unwrap();
+        queued.notification = true;
+        bytes += queued.data.len();
     }
     Ok(())
 }
@@ -1015,6 +1043,7 @@ fn drain_notifications(
 fn queue_envelope(pending: &mut VecDeque<PendingOutput>, envelope: Envelope) -> Result<(), String> {
     pending.push_back(PendingOutput {
         _credit: None,
+        notification: false,
         data: encode_envelope(&envelope)?,
         offset: 0,
     });
@@ -1188,6 +1217,101 @@ mod tests {
             host: "endpoint-fixture-worker".to_string(),
             port: port.to_string(),
         }
+    }
+
+    #[test]
+    fn notification_backlog_stays_bounded_at_zero_window_then_resumes() {
+        use crate::capability::rpc::notification::WorkerNotificationQueue;
+        let queue = WorkerNotificationQueue::new(64 * 1024);
+        let mut pending = VecDeque::new();
+        let mut frame = FrameProtocol::new(FrameRole::Acceptor);
+        let mut peer = FrameProtocol::new(FrameRole::Opener);
+        let (stream_id, open) = peer.open("envelope".into(), Vec::new(), 1).unwrap();
+        frame.accept_frame(open).unwrap();
+        frame.accept_open(stream_id, RECEIVE_WINDOW).unwrap();
+        let mut wire = Vec::new();
+        // Spend the single initial byte. All subsequent drains have zero credit.
+        for seq in 1..=500 {
+            queue.push_lossy_json(&serde_json::json!({
+                "method": "terminal.output", "params": {"seq": seq, "dataBase64": "x".repeat(8192)}
+            })).unwrap();
+            drain_notification_queue("worker", "host", &mut pending, || queue.try_pop()).unwrap();
+            flush_output(&mut frame, stream_id, &mut pending, &mut wire).unwrap();
+            let bytes: usize = pending.iter().map(|item| item.data.len()).sum();
+            assert!(bytes < NOTIFICATION_PENDING_BYTES + 9000);
+        }
+        assert_eq!(pending.front().unwrap().offset, 1);
+        let frozen = pending.iter().map(|item| item.data.len()).sum::<usize>();
+        queue
+            .push_json(&serde_json::json!({"method": "terminal.exit", "params": {"exitCode": 0}}))
+            .unwrap();
+        queue.push_json(&serde_json::json!({"method": "devshell.command.close", "params": {"id": "command"}})).unwrap();
+        queue
+            .push_lossy_json(
+                &serde_json::json!({"method": "tool.progress", "params": {"sequence": 1}}),
+            )
+            .unwrap();
+        drain_notification_queue("worker", "host", &mut pending, || queue.try_pop()).unwrap();
+        assert_eq!(
+            pending.iter().map(|item| item.data.len()).sum::<usize>(),
+            frozen
+        );
+        // Restore ample credit, then drain the bounded queue and decode events.
+        frame
+            .accept_frame(Frame::Window {
+                stream_id,
+                credit_delta: 1024 * 1024,
+            })
+            .unwrap();
+        flush_output(&mut frame, stream_id, &mut pending, &mut wire).unwrap();
+        drain_notification_queue("worker", "host", &mut pending, || queue.try_pop()).unwrap();
+        flush_output(&mut frame, stream_id, &mut pending, &mut wire).unwrap();
+        assert!(pending.is_empty());
+        assert!(queue.try_pop().unwrap().is_none());
+        let frames = FrameDecoder::default().push(&wire).unwrap();
+        let mut decoder = EnvelopeDecoder::default();
+        let mut events = Vec::new();
+        for frame in frames {
+            if let Frame::Data { data, .. } = frame {
+                events.extend(decoder.push(&data).unwrap());
+            }
+        }
+        let events: Vec<_> = events
+            .into_iter()
+            .map(|envelope| {
+                let Packet::Event(event) = envelope.packet else {
+                    panic!("expected event")
+                };
+                event
+            })
+            .collect();
+        let sequences: Vec<_> = events
+            .iter()
+            .filter(|event| event.name == "output")
+            .map(|event| event.message.as_ref().unwrap()["seq"].as_u64().unwrap())
+            .collect();
+        assert_eq!(sequences[0], 1);
+        assert_eq!(*sequences.last().unwrap(), 500);
+        assert!(sequences.windows(2).any(|pair| pair[1] > pair[0] + 1));
+        assert!(events.iter().any(|event| event.name == "exit"));
+        assert!(events.iter().any(|event| event.name == "command.close"));
+        assert!(events.iter().any(|event| event.name == "progress"));
+        // A disconnected endpoint drops all pending encoded allocations. A new
+        // endpoint can immediately consume notifications with a fresh budget.
+        queue
+            .push_lossy_json(
+                &serde_json::json!({"method": "terminal.output", "params": {"seq": 501}}),
+            )
+            .unwrap();
+        drain_notification_queue("worker", "host", &mut pending, || queue.try_pop()).unwrap();
+        assert_eq!(pending.len(), 1);
+        drop(pending);
+        queue
+            .push_json(&serde_json::json!({"method": "terminal.exit"}))
+            .unwrap();
+        let mut replacement = VecDeque::new();
+        drain_notification_queue("worker", "host", &mut replacement, || queue.try_pop()).unwrap();
+        assert_eq!(replacement.len(), 1);
     }
 
     #[cfg(unix)]

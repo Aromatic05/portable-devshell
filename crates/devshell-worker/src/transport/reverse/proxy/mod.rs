@@ -1,13 +1,12 @@
+pub(crate) mod deadline;
 mod http;
 mod socks;
 
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::Instant;
 
 use reqwest::blocking::ClientBuilder;
 use url::Url;
-
-const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) fn parse_proxy_url(value: &str) -> Result<Url, String> {
     let url = Url::parse(value).map_err(|error| format!("invalid reverse proxy URL: {error}"))?;
@@ -46,13 +45,20 @@ pub(crate) fn apply_http_client_proxy(
     Ok(builder.proxy(proxy))
 }
 
-pub(crate) fn connect_tcp(proxy_url: &str, target: &Url) -> Result<TcpStream, String> {
-    let proxy = parse_proxy_url(proxy_url)?;
-    let proxy_host = proxy
+pub(crate) fn connect_tcp(
+    proxy_url: Option<&str>,
+    target: &Url,
+    deadline: Instant,
+    stopping: impl Fn() -> bool + Send + 'static,
+) -> Result<(TcpStream, deadline::SocketDeadline), String> {
+    let proxy = proxy_url.map(parse_proxy_url).transpose()?;
+    let destination = proxy.as_ref().unwrap_or(target);
+    let proxy_host = destination
         .host_str()
-        .ok_or_else(|| "reverse proxy URL requires a host".to_string())?;
-    let proxy_port = proxy.port().unwrap_or(match proxy.scheme() {
-        "http" => 80,
+        .ok_or_else(|| "reverse connection URL requires a host".to_string())?;
+    let proxy_port = destination.port().unwrap_or(match destination.scheme() {
+        "http" | "ws" => 80,
+        "https" | "wss" => 443,
         "socks5" | "socks5h" => 1080,
         _ => unreachable!(),
     });
@@ -65,15 +71,25 @@ pub(crate) fn connect_tcp(proxy_url: &str, target: &Url) -> Result<TcpStream, St
         scheme => return Err(format!("unsupported reverse target URL scheme: {scheme}")),
     });
 
+    // OS DNS resolution (including SOCKS5 local target DNS) is synchronous:
+    // socket shutdown cannot bound it. TCP connect uses the remaining attempt
+    // time; stop can interrupt established sockets within the 50ms poll, but
+    // a connect in progress may take the remaining attempt time to return.
     let mut last_error = None;
     let mut stream = None;
     for address in (proxy_host, proxy_port)
         .to_socket_addrs()
         .map_err(|error| {
-            format!("failed to resolve reverse proxy {proxy_host}:{proxy_port}: {error}")
+            format!("failed to resolve reverse connection {proxy_host}:{proxy_port}: {error}")
         })?
     {
-        match TcpStream::connect_timeout(&address, PROXY_CONNECT_TIMEOUT) {
+        if stopping() {
+            return Err("reverse websocket attempt stopped".into());
+        }
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| "reverse websocket attempt timed out".to_string())?;
+        match TcpStream::connect_timeout(&address, remaining) {
             Ok(candidate) => {
                 stream = Some(candidate);
                 break;
@@ -83,36 +99,26 @@ pub(crate) fn connect_tcp(proxy_url: &str, target: &Url) -> Result<TcpStream, St
     }
     let mut stream = stream.ok_or_else(|| {
         format!(
-            "failed to connect reverse proxy {proxy_host}:{proxy_port}: {}",
+            "failed to connect reverse connection {proxy_host}:{proxy_port}: {}",
             last_error
                 .map(|error| error.to_string())
-                .unwrap_or_else(|| "proxy did not resolve to an address".to_string())
+                .unwrap_or_else(|| "connection host did not resolve to an address".to_string())
         )
     })?;
-    stream
-        .set_read_timeout(Some(PROXY_CONNECT_TIMEOUT))
-        .map_err(|error| format!("failed to configure reverse proxy read timeout: {error}"))?;
-    stream
-        .set_write_timeout(Some(PROXY_CONNECT_TIMEOUT))
-        .map_err(|error| format!("failed to configure reverse proxy write timeout: {error}"))?;
-
-    match proxy.scheme() {
-        "http" => http::connect(&mut stream, target_host, target_port)?,
-        "socks5" => socks::connect(&mut stream, target_host, target_port, false)?,
-        "socks5h" => socks::connect(&mut stream, target_host, target_port, true)?,
-        _ => unreachable!(),
+    let guard = deadline::SocketDeadline::new(&stream, deadline, stopping)?;
+    if let Some(proxy) = proxy {
+        match proxy.scheme() {
+            "http" => http::connect(&mut stream, target_host, target_port)?,
+            "socks5" => socks::connect(&mut stream, target_host, target_port, false)?,
+            "socks5h" => socks::connect(&mut stream, target_host, target_port, true)?,
+            _ => unreachable!(),
+        }
     }
 
     stream
-        .set_read_timeout(None)
-        .map_err(|error| format!("failed to clear reverse proxy read timeout: {error}"))?;
-    stream
-        .set_write_timeout(None)
-        .map_err(|error| format!("failed to clear reverse proxy write timeout: {error}"))?;
-    stream
         .set_nodelay(true)
-        .map_err(|error| format!("failed to enable reverse proxy TCP_NODELAY: {error}"))?;
-    Ok(stream)
+        .map_err(|error| format!("failed to enable reverse TCP_NODELAY: {error}"))?;
+    Ok((stream, guard))
 }
 
 #[cfg(test)]
@@ -125,6 +131,101 @@ mod tests {
     use reqwest::blocking::Client;
 
     use super::apply_http_client_proxy;
+
+    // The server holds every socket until the client finishes; failures must
+    // come from the attempt deadline, never from fixture EOF.
+    fn stalled_attempt(proxy_scheme: Option<&str>, target_scheme: &str, tunnel: bool) {
+        use std::sync::mpsc;
+        use std::time::Instant;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release, wait) = mpsc::channel();
+        let proxy_scheme_owned = proxy_scheme.map(str::to_string);
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            if tunnel {
+                match proxy_scheme_owned.as_deref().unwrap() {
+                    "http" => {
+                        let mut header = Vec::new();
+                        let mut byte = [0];
+                        while !header.ends_with(b"\r\n\r\n") {
+                            socket.read_exact(&mut byte).unwrap();
+                            header.push(byte[0]);
+                        }
+                        socket.write_all(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
+                    }
+                    "socks5h" => {
+                        let mut greeting = [0; 3];
+                        socket.read_exact(&mut greeting).unwrap();
+                        assert_eq!(greeting, [5, 1, 0]);
+                        socket.write_all(&[5, 0]).unwrap();
+                        let mut header = [0; 5];
+                        socket.read_exact(&mut header).unwrap();
+                        assert_eq!(&header[..4], &[5, 1, 0, 3]);
+                        let mut rest = vec![0; header[4] as usize + 2];
+                        socket.read_exact(&mut rest).unwrap();
+                        socket.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            wait.recv_timeout(Duration::from_secs(4)).unwrap();
+        });
+        let target = url::Url::parse(&format!(
+            "{target_scheme}://localhost:{}/stall",
+            address.port()
+        ))
+        .unwrap();
+        let proxy_url =
+            proxy_scheme.map(|scheme| format!("{scheme}://127.0.0.1:{}", address.port()));
+        let started = Instant::now();
+        let result = super::connect_tcp(
+            proxy_url.as_deref(),
+            &target,
+            started + Duration::from_millis(300),
+            || false,
+        )
+        .and_then(|(stream, guard)| {
+            let result =
+                tungstenite::client_tls(target.as_str(), stream).map_err(|error| error.to_string());
+            drop(guard);
+            result.map(|_| ())
+        });
+        let elapsed = started.elapsed();
+        release.send(()).unwrap();
+        server.join().unwrap();
+        assert!(result.is_err());
+        assert!(elapsed >= Duration::from_millis(250), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(3), "{elapsed:?}");
+    }
+
+    #[test]
+    fn direct_upgrade_stall_obeys_attempt_deadline() {
+        stalled_attempt(None, "ws", false);
+    }
+
+    #[test]
+    fn http_connect_stall_obeys_attempt_deadline() {
+        stalled_attempt(Some("http"), "wss", false);
+    }
+
+    #[test]
+    fn http_connect_success_then_tls_blackhole_obeys_attempt_deadline() {
+        stalled_attempt(Some("http"), "wss", true);
+    }
+
+    #[test]
+    fn socks_connect_success_then_tls_blackhole_obeys_attempt_deadline() {
+        stalled_attempt(Some("socks5h"), "wss", true);
+    }
+
+    #[test]
+    fn proxy_upgrade_stall_obeys_attempt_deadline() {
+        stalled_attempt(Some("http"), "ws", true);
+    }
 
     #[test]
     fn explicit_proxy_routes_blocking_http_requests() {

@@ -5,12 +5,14 @@ use reqwest::header::AUTHORIZATION;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Error as WebSocketError, Message, WebSocket, client_tls, connect};
+use tungstenite::{Error as WebSocketError, Message, WebSocket, client_tls};
 
 use crate::daemon::log::append_log;
 
 use super::{ReverseConnector, proxy, reverse_endpoint};
 
+const WSS_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
+const WSS_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const HEARTBEAT_TIMEOUT_ERROR: &str = "reverse websocket heartbeat timed out";
@@ -90,14 +92,17 @@ impl ReverseConnector {
             HeaderValue::from_static("devshell-worker-transport.v1, devshell-worker-transport.v2"),
         );
 
-        let (mut socket, response) = if let Some(proxy_url) = self.config.proxy_url.as_deref() {
-            let stream = proxy::connect_tcp(proxy_url, &endpoint)?;
-            client_tls(request, stream)
-                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
-        } else {
-            connect(request)
-                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
-        };
+        let bridge = self.bridge.clone();
+        let (stream, attempt) = proxy::connect_tcp(
+            self.config.proxy_url.as_deref(),
+            &endpoint,
+            Instant::now() + WSS_ATTEMPT_TIMEOUT,
+            move || bridge.is_stopping(),
+        )?;
+        let result = client_tls(request, stream)
+            .map_err(|error| format!("failed to connect reverse websocket: {error}"));
+        drop(attempt);
+        let (mut socket, response) = result?;
         let acknowledged = response
             .headers()
             .get("sec-websocket-protocol")
@@ -133,8 +138,7 @@ impl ReverseConnector {
         let mut heartbeat = WssHeartbeat::new(Instant::now());
         while !self.bridge.is_stopping() {
             if let Some(token) = heartbeat.tick(Instant::now())? {
-                socket
-                    .send(Message::Ping(token.into()))
+                self.send_wss(&mut socket, Message::Ping(token.into()))
                     .map_err(|error| error.to_string())?;
             }
             self.flush_wss_responses(&mut socket, acknowledged, &mut sent_through)?;
@@ -144,7 +148,7 @@ impl ReverseConnector {
                         if acknowledged {
                             self.bridge.requeue_front(response)?;
                         } else if let Err(error) =
-                            socket.send(Message::Binary(response.clone().into()))
+                            self.send_wss(&mut socket, Message::Binary(response.clone().into()))
                         {
                             self.bridge.requeue_front(response)?;
                             return Err(error.to_string());
@@ -159,8 +163,7 @@ impl ReverseConnector {
                     }
                 }
                 Ok(Message::Ping(payload)) => {
-                    socket
-                        .send(Message::Pong(payload))
+                    self.send_wss(&mut socket, Message::Pong(payload))
                         .map_err(|error| error.to_string())?;
                 }
                 Ok(Message::Close(_)) => return Err("controller closed websocket".to_string()),
@@ -198,7 +201,8 @@ impl ReverseConnector {
     ) -> Result<(), String> {
         if !acknowledged {
             while let Some(response) = self.bridge.try_pop_outbound()? {
-                if let Err(error) = socket.send(Message::Binary(response.clone().into())) {
+                if let Err(error) = self.send_wss(socket, Message::Binary(response.clone().into()))
+                {
                     self.bridge.requeue_front(response)?;
                     return Err(error.to_string());
                 }
@@ -213,12 +217,22 @@ impl ReverseConnector {
             packet.extend_from_slice(&response);
             // The frame stays in the bounded inflight queue even after send Ok;
             // only an application ACK can retire it. Never replay the ToolCall.
-            socket
-                .send(Message::Binary(packet.into()))
+            self.send_wss(socket, Message::Binary(packet.into()))
                 .map_err(|error| error.to_string())?;
             *sent_through = seq;
         }
         Ok(())
+    }
+
+    fn send_wss(
+        &self,
+        socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+        message: Message,
+    ) -> Result<(), String> {
+        let bridge = self.bridge.clone();
+        send_with_deadline(socket, message, WSS_WRITE_TIMEOUT, move || {
+            bridge.is_stopping()
+        })
     }
 
     fn accept_wss_ack(&self, ack: &str, sent_through: u64) -> Result<(), String> {
@@ -243,15 +257,38 @@ fn set_websocket_read_timeout(
     socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
     timeout: Option<Duration>,
 ) -> Result<(), String> {
+    let stream = websocket_tcp(socket)?;
+    stream
+        .set_read_timeout(timeout)
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(WSS_WRITE_TIMEOUT))
+        .map_err(|error| error.to_string())
+}
+
+fn send_with_deadline(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    message: Message,
+    timeout: Duration,
+    stopping: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    let guard = proxy::deadline::SocketDeadline::new(
+        websocket_tcp(socket)?,
+        Instant::now() + timeout,
+        stopping,
+    )?;
+    let result = socket.send(message).map_err(|error| error.to_string());
+    drop(guard);
+    result
+}
+
+fn websocket_tcp(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+) -> Result<&mut TcpStream, String> {
     match socket.get_mut() {
-        MaybeTlsStream::Plain(stream) => stream
-            .set_read_timeout(timeout)
-            .map_err(|error| format!("failed to configure websocket read timeout: {error}")),
-        MaybeTlsStream::Rustls(stream) => stream
-            .sock
-            .set_read_timeout(timeout)
-            .map_err(|error| format!("failed to configure websocket read timeout: {error}")),
-        _ => Ok(()),
+        MaybeTlsStream::Plain(stream) => Ok(stream),
+        MaybeTlsStream::Rustls(stream) => Ok(&mut stream.sock),
+        _ => Err("unsupported reverse websocket TLS backend".into()),
     }
 }
 
@@ -259,6 +296,53 @@ fn set_websocket_read_timeout(
 mod heartbeat_tests {
     use super::{HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, WssHeartbeat};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn established_blocking_write_is_interrupted_by_deadline() {
+        use std::net::{TcpListener, TcpStream};
+        use tungstenite::{Message, WebSocket, protocol::Role, stream::MaybeTlsStream};
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_unread_peer, _) = listener.accept().unwrap();
+        let mut socket =
+            WebSocket::from_raw_socket(MaybeTlsStream::Plain(client), Role::Client, None);
+        let started = Instant::now();
+        let result = super::send_with_deadline(
+            &mut socket,
+            Message::Binary(vec![0; 32 * 1024 * 1024].into()),
+            Duration::from_millis(200),
+            || false,
+        );
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn stop_interrupts_blocked_handshake_without_waiting_for_deadline() {
+        use std::io::Read;
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_unread_peer, _) = listener.accept().unwrap();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let signal = stopped.clone();
+        let guard = super::proxy::deadline::SocketDeadline::new(
+            &client,
+            Instant::now() + Duration::from_secs(30),
+            move || signal.load(Ordering::SeqCst),
+        )
+        .unwrap();
+        stopped.store(true, Ordering::SeqCst);
+        let started = Instant::now();
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).unwrap(), 0);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(guard);
+    }
 
     #[test]
     fn silent_half_open_socket_times_out_after_unanswered_ping() {

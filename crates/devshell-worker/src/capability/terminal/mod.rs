@@ -472,7 +472,7 @@ impl TerminalManager {
                 }
             })
         };
-        self.inner.notifications.push_json(&notification)
+        self.inner.notifications.push_lossy_json(&notification)
     }
 
     fn finish_session(
@@ -675,6 +675,90 @@ mod tests {
         TerminalAttachInput, TerminalCommandInput, TerminalManager, TerminalOpenInput,
         TerminalResizeInput, TerminalWriteInput,
     };
+
+    #[test]
+    fn output_overflow_preserves_replay_gap_and_critical_exit_without_blocking() {
+        use super::*;
+        struct Child;
+        impl TerminalChild for Child {
+            fn kill(&self) -> Result<(), String> {
+                Ok(())
+            }
+            fn resize(&self, _: u16, _: u16) -> Result<(), String> {
+                Ok(())
+            }
+            fn wait(&self) -> Result<(i32, i32), String> {
+                Ok((0, 0))
+            }
+        }
+        let manager = TerminalManager::with_limits(16, 1024, 1);
+        let session = Arc::new(TerminalSession {
+            child: Box::new(Child),
+            writer: Mutex::new(Box::new(Vec::<u8>::new())),
+            state: Mutex::new(TerminalSessionState {
+                cols: 80,
+                rows: 24,
+                created_at_ms: 0,
+                exit: None,
+                generation: 1,
+                latest_seq: 0,
+                replay: VecDeque::new(),
+                replay_bytes: 0,
+                terminal_id: "fixture".into(),
+                version: 1,
+            }),
+        });
+        manager
+            .inner
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("fixture".into(), session.clone());
+        manager
+            .inner
+            .notifications
+            .push_json(&json!({"method": "devshell.command.close"}))
+            .unwrap();
+        // No consumer drains the queue while the PTY output callback advances.
+        for _ in 0..1000 {
+            manager.append_output(&session, b"12345678").unwrap();
+        }
+        assert_eq!(session.state.lock().unwrap().latest_seq, 1000);
+        let gap = manager
+            .attach(TerminalAttachInput {
+                terminal_id: "fixture".into(),
+                generation: 1,
+                from_seq: 0,
+            })
+            .unwrap_err();
+        assert_eq!(gap.code, "stream.gap");
+        let replay = manager
+            .attach(TerminalAttachInput {
+                terminal_id: "fixture".into(),
+                generation: 1,
+                from_seq: 998,
+            })
+            .unwrap();
+        assert_eq!(
+            replay
+                .replay
+                .iter()
+                .map(|frame| frame.seq)
+                .collect::<Vec<_>>(),
+            vec![999, 1000]
+        );
+        manager.finish_session(&session, 0, 0).unwrap();
+        let mut notifications = Vec::new();
+        while let Some(value) = manager.inner.notifications.try_pop().unwrap() {
+            notifications.push(value);
+        }
+        assert_eq!(
+            notifications.first().unwrap()["method"],
+            "devshell.command.close"
+        );
+        assert_eq!(notifications.last().unwrap()["method"], "terminal.exit");
+        assert_eq!(notifications.last().unwrap()["params"]["exitCode"], 0);
+    }
 
     #[test]
     fn real_terminal_replays_output_resizes_and_kills_explicitly() {
