@@ -2,7 +2,7 @@ import type {
     ContextEnvironmentCleanup,
     ContextRecord,
 } from "@portable-devshell/shared";
-import type { ContextCleanupLedgerPort } from "../Api.js";
+import type { ContextCleanupLedgerPort, ContextEnvironmentRetiredEvent } from "../Api.js";
 import type { ContextStatePort } from "./Record.js";
 import {
     invalidContext,
@@ -27,10 +27,30 @@ export class ContextCleanupLedger implements ContextCleanupLedgerPort {
                 .filter(
                     (record) =>
                         record.cleanupPending === true ||
-                        (record.status === "disabled" &&
+                        (record.status !== "active" &&
                             record.cleanupPending === undefined),
                 )
                 .map(cloneRecord);
+        });
+    }
+
+    async listRetiredEnvironmentInstances(ctxId: string): Promise<string[]> {
+        return this.#host.run(async () => {
+            this.#host.assertInitialized();
+            return [...(this.#host.records.get(ctxId)?.retiredEnvironmentInstances ?? [])];
+        });
+    }
+
+    async settleEnvironmentRetirement(event: ContextEnvironmentRetiredEvent): Promise<void> {
+        await this.#host.run(async () => {
+            this.#host.assertInitialized();
+            const record = this.#host.records.get(event.ctxId);
+            if (record === undefined || record.status === "active")
+                throw invalidContext(event.ctxId);
+            if (record.retiredEnvironmentInstances?.includes(event.instance)) return;
+            await this.#host.mutate(() => {
+                record.retiredEnvironmentInstances = [...(record.retiredEnvironmentInstances ?? []), event.instance];
+            });
         });
     }
 

@@ -1,6 +1,16 @@
 import type { ContextBinding, ContextEnvironment, ContextEnvironmentBinding, ContextEnvironmentCleanup, ContextExternalBinding, ContextInstanceReference, ContextMaskedInstance, ContextQuery, ContextRecord, ContextResolveInput, ContextSnapshot, ContextValidationBinding, EnvironmentTransport, InstanceRuntimeTransport, JsonValue, ProcessTransport, } from "@portable-devshell/shared";
 
+export interface ContextEnvironmentRetiredEvent {
+    ctxId: string;
+    instance: string;
+    reason: "disabled" | "expired";
+}
+
+export type ContextEnvironmentRetiredCallback = (event: ContextEnvironmentRetiredEvent) => Promise<void>;
+
 export interface ContextCleanupLedgerPort {
+    listRetiredEnvironmentInstances(ctxId: string): Promise<string[]>;
+    settleEnvironmentRetirement(event: ContextEnvironmentRetiredEvent): Promise<void>;
     listCleanupPending(): Promise<ContextRecord[]>;
     listEnvironmentCleanup(
         ctxId?: string,
@@ -181,6 +191,7 @@ export interface ContextApi {
 
 export interface ContextRuntimeOptions {
     contextFile: string;
+    environmentRetired?: ContextEnvironmentRetiredCallback;
     environment(instance: string): EnvironmentTransport;
     leaseInstance(instance: string): { release(): void };
     process(instance: string): ProcessTransport;

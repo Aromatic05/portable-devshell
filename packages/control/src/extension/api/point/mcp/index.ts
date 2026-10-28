@@ -22,7 +22,6 @@ export class McpExtensionService {
     readonly #extensions: Pick<
         ExtensionHost,
         | "acquireRegistration"
-        | "contextEnvironmentRetired"
         | "listDeclarations"
         | "onChange"
     >;
@@ -31,7 +30,6 @@ export class McpExtensionService {
         extensions: Pick<
             ExtensionHost,
             | "acquireRegistration"
-            | "contextEnvironmentRetired"
             | "listDeclarations"
             | "onChange"
         >,
@@ -134,18 +132,6 @@ export class McpExtensionService {
         } finally {
             lease.release();
         }
-    }
-
-    async contextTerminated(
-        instance: string,
-        ctxId: string,
-        reason: "disabled" | "expired",
-    ): Promise<void> {
-        await this.#extensions.contextEnvironmentRetired({
-            ctxId,
-            instance,
-            reason,
-        });
     }
 
     #definitions(): ToolDefinition[] {

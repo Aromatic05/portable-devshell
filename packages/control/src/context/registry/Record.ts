@@ -176,12 +176,17 @@ export function parseRecord(value: unknown): ContextStoredRecord | undefined {
     ) {
         return undefined;
     }
+    if (raw.retiredEnvironmentInstances !== undefined &&
+        (!Array.isArray(raw.retiredEnvironmentInstances) ||
+         raw.retiredEnvironmentInstances.some((instance) => typeof instance !== "string")))
+        throw new Error("Invalid Context environment retirement state.");
     const environments = parseContextEnvironments(record.environments);
     if (environments === undefined) return undefined;
     return {
         ...(raw.cleanupPending === undefined
             ? {}
             : { cleanupPending: raw.cleanupPending as boolean }),
+        retiredEnvironmentInstances: record.retiredEnvironmentInstances,
         createdAt: record.createdAt,
         ctxId: record.ctxId,
         environments,

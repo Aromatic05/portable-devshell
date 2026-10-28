@@ -538,10 +538,28 @@ export class ContextRegistry implements ContextRegistryPort {
         });
     }
 
-    listCleanupPending(
-        ...args: Parameters<ContextCleanupLedger["listCleanupPending"]>
-    ): ReturnType<ContextCleanupLedger["listCleanupPending"]> {
-        return this.#ledger.listCleanupPending(...args);
+    async listCleanupPending(): Promise<ContextRecord[]> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            if ([...this.#contexts.values()].some((record) =>
+                (record.status === "active" && Date.parse(record.expiresAt) <= this.#now()) ||
+                (record.status !== "active" && record.cleanupPending === undefined)))
+                await this.#mutateAndPersist(() => {
+                    this.#expireOverdue(this.#now());
+                    for (const record of this.#contexts.values())
+                        if (record.status !== "active" && record.cleanupPending === undefined)
+                            record.cleanupPending = true;
+                });
+        });
+        return this.#ledger.listCleanupPending();
+    }
+
+    listRetiredEnvironmentInstances(...args: Parameters<ContextCleanupLedger["listRetiredEnvironmentInstances"]>) {
+        return this.#ledger.listRetiredEnvironmentInstances(...args);
+    }
+
+    settleEnvironmentRetirement(...args: Parameters<ContextCleanupLedger["settleEnvironmentRetirement"]>) {
+        return this.#ledger.settleEnvironmentRetirement(...args);
     }
 
     listEnvironmentCleanup(
@@ -676,6 +694,8 @@ export class ContextRegistry implements ContextRegistryPort {
         const now = this.#now();
         await this.#mutateAndPersist(() => {
             record.status = "active";
+            record.cleanupPending = undefined;
+            record.retiredEnvironmentInstances = undefined;
             record.lastAccessedAt = new Date(now).toISOString();
             record.expiresAt = new Date(now + this.#ttlMs).toISOString();
         });

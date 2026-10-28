@@ -15,6 +15,7 @@ export interface ContextRemoteInstanceHandle {
 
 export interface ContextStoredRecord extends ContextRecord {
     cleanupPending?: boolean;
+    retiredEnvironmentInstances?: string[];
     externalBindings?: ContextExternalBinding[];
     maskedInstances?: string[];
     pendingEnvironmentCleanup?: ContextEnvironmentCleanup[];

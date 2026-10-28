@@ -1,22 +1,25 @@
 import type { ContextEnvironmentCleanup, ContextRecord, EnvironmentTransport, InstanceRuntimeTransport, } from "@portable-devshell/shared";
 
 import type {
-    ContextCleanupLedgerPort, ContextInstanceCleanupPort, ContextLifecycleCleanupPort, ContextRecordPort, } from "../Api.js";
+    ContextEnvironmentRetiredCallback, ContextCleanupLedgerPort, ContextInstanceCleanupPort, ContextLifecycleCleanupPort, ContextRecordPort, } from "../Api.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &
         Pick<ContextRecordPort, "list">;
     readonly #environment: (instance: string) => EnvironmentTransport;
     readonly #runtime: (instance: string) => InstanceRuntimeTransport;
+    readonly #environmentRetired?: ContextEnvironmentRetiredCallback;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
         contextRegistry: ContextCleanupLedgerPort &
             Pick<ContextRecordPort, "list">;
+        environmentRetired?: ContextEnvironmentRetiredCallback;
         environment(instance: string): EnvironmentTransport;
         runtime(instance: string): InstanceRuntimeTransport;
     }) {
         this.#registry = options.contextRegistry;
+        this.#environmentRetired = options.environmentRetired;
         this.#environment = options.environment;
         this.#runtime = options.runtime;
     }
@@ -39,6 +42,8 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 });
             return;
         }
+        for (const terminal of await this.#registry.listCleanupPending())
+            if (terminal.ctxId === ctxId) await this.terminate(terminal);
         await this.#reconcile(ctxId);
     }
 
@@ -59,6 +64,11 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 `Active Context ${terminal.ctxId} cannot be terminally cleaned.`,
             );
 
+        // Repeated disable requests must not replay a settled terminal epoch.
+        const pending = await this.#registry.listCleanupPending();
+        const current = pending.find((record) => record.ctxId === terminal.ctxId);
+        if (current === undefined) return;
+        terminal = current;
         const failures: unknown[] = [];
         const cleanup = async (
             operation: () => Promise<unknown> | unknown,
@@ -71,6 +81,17 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         };
         const terminalReason =
             terminal.status === "disabled" ? "disabled" : "expired";
+
+        const retired = await this.#registry.listRetiredEnvironmentInstances(terminal.ctxId);
+        // Start every attachment notification before awaiting any callback, so a
+        // concurrent reload cannot redirect later attachments to a new runtime.
+        await Promise.all(terminal.environments.filter(({ instance }) => !retired.includes(instance)).map(
+            async ({ instance }) => cleanup(async () => {
+                const event = { ctxId: terminal.ctxId, instance, reason: terminalReason } as const;
+                await this.#environmentRetired?.(event);
+                await this.#registry.settleEnvironmentRetirement(event);
+            }),
+        ));
 
         for (const environment of terminal.environments) {
             if (environment.workspace !== undefined) {
@@ -106,11 +127,9 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             });
         }
         if (failures.length > 0) {
-            console.warn(
-                new AggregateError(
-                    failures,
-                    `Context ${terminal.ctxId} was ${terminalReason}, but cleanup was incomplete.`,
-                ),
+            throw new AggregateError(
+                failures,
+                `Context ${terminal.ctxId} was ${terminalReason}, but cleanup was incomplete.`,
             );
         }
     }

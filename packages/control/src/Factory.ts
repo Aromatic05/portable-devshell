@@ -115,6 +115,11 @@ export class ControlFactory {
             closeInternalEndpoint = () => internalEndpoint.close();
             const contexts = createContextRuntime({
                 contextFile: controlPaths.contextsFile,
+                environmentRetired: async (event) => {
+                    if (composedState === undefined)
+                        throw new Error("Control composition is unavailable for Context retirement.");
+                    await composedState.retireContextEnvironment(event);
+                },
                 environment: (name) =>
                     createEnvironmentTransport(internalEndpoint, name),
                 leaseInstance: (name) => {

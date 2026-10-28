@@ -173,35 +173,3 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
         unbind();
     }
 });
-
-test("MCP Context terminal delegates to Extension Context environment retirement", async () => {
-    const calls: Array<{
-        ctxId: string;
-        instance: string;
-        reason: "disabled" | "expired";
-    }> = [];
-    const service = new McpExtensionService({
-        listDeclarations() {
-            return [];
-        },
-        async acquireRegistration() {
-            throw new Error("unexpected registration lookup");
-        },
-        async contextEnvironmentRetired(input: {
-            ctxId: string;
-            instance: string;
-            reason: "disabled" | "expired";
-        }) {
-            calls.push(input);
-        },
-    } as never);
-
-    await service.contextTerminated("remote-server", "ctx-one", "expired");
-    assert.deepEqual(calls, [
-        {
-            ctxId: "ctx-one",
-            instance: "remote-server",
-            reason: "expired",
-        },
-    ]);
-});

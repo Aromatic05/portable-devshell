@@ -7,7 +7,7 @@ import {
 
 import type { ArtifactRuntime } from "./artifact/Api.js";
 import { installArtifactTools } from "./artifact/tool/index.js";
-import type { ContextRuntime } from "./context/Api.js";
+import type { ContextEnvironmentRetiredEvent, ContextRuntime } from "./context/Api.js";
 import { installContextTools } from "./context/Public.js";
 import {
     ModelCommandBroker,
@@ -49,6 +49,7 @@ export class ControlState {
     readonly #toolCallHookUnregister: Array<() => void>;
     readonly #modelCommands: ModelCommandBroker;
     #closed = false;
+    #extensionsReady = false;
 
     constructor(options: ControlStateOptions) {
         this.artifact = options.artifact;
@@ -145,6 +146,13 @@ export class ControlState {
                 console.warn(`Builtin Extension ${source.id} unavailable:`, error);
             }
         }
+        this.#extensionsReady = true;
+    }
+
+    async retireContextEnvironment(event: ContextEnvironmentRetiredEvent): Promise<void> {
+        if (!this.#extensionsReady || this.#closed)
+            throw new Error("Extension runtime is unavailable for Context retirement.");
+        await this.extensions.contextEnvironmentRetired(event);
     }
 
     async reconcile(): Promise<void> {
@@ -162,6 +170,7 @@ export class ControlState {
                 failures.push(error);
             }
         }
+        this.#extensionsReady = false;
         await this.extensions.stop().catch((error) => failures.push(error));
         await this.debug.close().catch((error) => failures.push(error));
         await this.artifact.stop().catch((error) => failures.push(error));

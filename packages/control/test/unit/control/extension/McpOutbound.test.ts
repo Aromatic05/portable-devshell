@@ -54,7 +54,6 @@ async function fixture(t: TestContext, rewrite?: (value: ToolCallHookValue) => T
                 binding: async () => { effects++; return toolResult; },
             } } as never;
         },
-        async contextEnvironmentRetired() {},
     });
     const uninstall = service.install(registry);
     t.after(() => { uninstall(); unbind(); });
