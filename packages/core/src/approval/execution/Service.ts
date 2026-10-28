@@ -163,6 +163,7 @@ export class ApprovalService implements ApprovalApi {
                 createdAt: new Date(now).toISOString(),
                 expiresAt: new Date(now + this.#timeoutMs).toISOString(),
                 inputSummary: input.inputSummary,
+                ...(input.originalInput === undefined ? {} : { originalInput: input.originalInput }),
                 instance: this.#instance,
                 reason: `Approval required before running ${input.toolName}.`,
                 recording: input.recording ?? "host",

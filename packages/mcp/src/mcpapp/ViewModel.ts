@@ -34,7 +34,8 @@ export function projectMcpAppSnapshot(input: {
         (input.workspace !== undefined && input.goal.goal.workspace !== input.workspace)
         ? [] : [input.goal.goal];
     const approvals = input.approvals.approvals.filter((entry) =>
-        entry.ctxId === input.ctxId && entry.status === "pending",
+        entry.ctxId === input.ctxId && entry.status === "pending" &&
+        entry.instance === input.instance && entry.workspace === input.workspace,
     );
     const waits = (input.waits?.waits ?? []).filter((wait) => wait.ctxId === input.ctxId);
     const work: McpAppWorkItem[] = [
@@ -72,6 +73,7 @@ export function projectMcpAppSnapshot(input: {
                     title: "Approval required",
                     summary: approvals[0].toolName,
                     detail: approvals[0].inputSummary,
+                    inputAvailable: approvals[0].originalInput !== undefined,
                     actions: [
                         { id: "approve", label: "Approve", tone: "primary" as const },
                         { id: "deny", label: "Deny", tone: "danger" as const,
@@ -218,5 +220,12 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
     const activityImage = (instance: string, ctxId: string, callId: string) =>
         readMcpAppActivityImage(createToolTransport(endpoint, instance),
             createArtifactTransport(endpoint), ctxId, callId);
-    return { snapshot, watch, activity, activityOutput, activityImage };
+    const approvalInput = async (instance: string, ctxId: string, workspace: string | undefined, approvalId: string) => {
+        const pending = await createApprovalTransport(endpoint, instance).get(approvalId);
+        if (pending.status !== "pending" || pending.instance !== instance ||
+            pending.ctxId !== ctxId || pending.workspace !== workspace || pending.originalInput === undefined)
+            return undefined;
+        return { approvalId, originalInput: pending.originalInput };
+    };
+    return { snapshot, watch, activity, activityOutput, activityImage, approvalInput };
 }

@@ -39,6 +39,7 @@ export function registerApprovalToolCallReview(
                 ctxId,
                 workspace,
                 inputSummary: summarize(input.value.payload),
+                originalInput: JSON.stringify(input.value.payload),
                 recording: runtime.recording,
                 toolName: input.value.toolName,
             },

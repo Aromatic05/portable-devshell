@@ -15,6 +15,7 @@ export interface ApprovalEvaluationInput {
     ctxId?: string;
     workspace?: string;
     inputSummary: string;
+    readonly originalInput?: string;
     recording?: "caller" | "host";
     required?: boolean;
     toolName: string;

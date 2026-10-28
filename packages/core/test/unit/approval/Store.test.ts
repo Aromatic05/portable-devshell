@@ -81,7 +81,8 @@ test("instance approval store persists the latest approval record", async () => 
         await service.evaluate({
             callId: "call-1",
             source: "cli",
-            inputSummary: "{}",
+            inputSummary: "short",
+            originalInput: "x".repeat(16000) + "TAIL-DURABLE",
             toolName: "shell",
         });
         service.close();
@@ -100,12 +101,14 @@ test("instance approval store persists the latest approval record", async () => 
                 (await reopened.get("persisted-approval"))?.status,
                 "pending",
             );
+            assert.equal((await reopened.get("persisted-approval"))?.originalInput, "x".repeat(16000) + "TAIL-DURABLE");
             const recovered = new ApprovalService({
                 events: { append: async () => {} },
                 instanceName: asInstanceName("dev"),
                 store: reopened,
                 policy: { mode: "ask" },
             });
+            assert.equal((await recovered.getApproval("persisted-approval")).originalInput, "x".repeat(16000) + "TAIL-DURABLE");
             assert.equal(
                 (await recovered.getApproval("persisted-approval")).status,
                 "cancelled",

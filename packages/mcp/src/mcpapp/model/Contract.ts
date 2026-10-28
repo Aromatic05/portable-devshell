@@ -23,6 +23,7 @@ export type McpAppPrimaryItem = McpAppDecisionItem;
 export type McpAppItem = McpAppPrimaryItem | McpAppWorkItem | McpAppBackgroundItem;
 
 export interface McpAppDecisionItem {
+    inputAvailable?: boolean;
     kind: "decision";
     id: string;
     title: string;

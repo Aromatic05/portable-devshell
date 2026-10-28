@@ -245,7 +245,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.equal(boxes.some((box) => box.id === "audit-context-older"), true);
     });
 
-    test("Audit excludes caller-recorded delegated Worker activity", () => {
+    test("Audit includes pending caller-recorded approvals", () => {
         const domains = new TuiTestDomains();
         domains.setApprovals("alpha", [
             {
@@ -288,7 +288,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
             projectAuditContexts(domains.reader, "alpha").map((context) =>
                 context.key.kind === "context" ? context.key.ctxId : "unscoped",
             ),
-            ["ctx-host"],
+            ["ctx-host", "ext-agent-session"],
         );
     });
 }

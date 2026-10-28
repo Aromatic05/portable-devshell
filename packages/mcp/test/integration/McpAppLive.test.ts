@@ -49,6 +49,7 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
             },
         },
         view: {
+            async approvalInput() { return undefined; },
             async activity(instance, ctxId) {
                 assert.equal(instance, "demo");
                 assert.equal(ctxId, "ctx-a");
@@ -298,6 +299,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
             return testContextRecord(ctxId, instance);
         } },
         view: {
+            async approvalInput() { return undefined; },
             async activityOutput() { return undefined; },
             async activityImage() { return undefined; },
             async activity() { return []; },
@@ -349,6 +351,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
             return testContextRecord(ctxId, instance);
         } },
         view: {
+            async approvalInput() { return undefined; },
             async activityOutput() { return undefined; },
             async activityImage() { return undefined; },
             async activity() { return []; },

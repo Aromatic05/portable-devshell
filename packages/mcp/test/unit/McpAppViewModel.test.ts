@@ -105,7 +105,7 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
         revision: 1,
     });
     const approval = (approvalId: string, ctxId: string): ApprovalRequest => ({
-        approvalId, ctxId, callId: approvalId, createdAt: "", expiresAt: "",
+        approvalId, ctxId, workspace: "/allowed", callId: approvalId, createdAt: "", expiresAt: "",
         inputSummary: approvalId, instance: "test" as ApprovalRequest["instance"],
         reason: "", riskLevel: "low", source: "mcp", status: "pending", toolName: "bash_run",
     });

@@ -6,6 +6,7 @@ export interface McpAppItem {
     badge?: string;
     summary?: string;
     detail?: string;
+    inputAvailable?: boolean;
     current?: string;
     note?: string;
     progress?: { current: number; total: number };
@@ -176,4 +177,11 @@ export function mcpAppReadErrorMessage(error: unknown, subject: string, retrying
     const reason = error instanceof McpAppReadError && error.kind === "invalid"
         ? `${subject} returned an invalid response.` : `${subject} is temporarily unavailable.`;
     return `${reason} ${retrying ? "Reconnecting automatically." : "Please retry."}`;
+}
+
+export async function readMcpAppApprovalInput(session: McpAppSession, approvalId: string, signal: AbortSignal): Promise<string> {
+    const input = record(await request(session, `/approval-input?approvalId=${encodeURIComponent(approvalId)}`, signal));
+    if (input?.approvalId !== approvalId || typeof input.originalInput !== "string")
+        throw new McpAppReadError("invalid", "Invalid approval input");
+    return input.originalInput;
 }

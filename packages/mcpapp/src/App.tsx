@@ -9,6 +9,7 @@ import { McpAppReadError, mcpAppReadErrorMessage, readMcpAppSnapshot, watchMcpAp
 import { clearMcpAppSession, hasMcpAppFullscreenClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppFullscreenClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
 import { ToolCallInline } from "./ToolCallInline.js";
 import { useToolCallDisplay } from "./Preferences.js";
+import { ApprovalInput } from "./ApprovalInput.js";
 import { WorkspaceDashboard } from "./Workspace.js";
 
 declare const __MCPAPP_VERSION__: string;
@@ -518,7 +519,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                         {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
                             onAction={liveError === undefined && status === "connected" ? act : undefined}
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
-                            cancel={() => setPendingAction(undefined)} />}
+                            cancel={() => setPendingAction(undefined)} session={session} />}
                         {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
                         {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
                             <p>No pending approval or wait.</p>}
@@ -530,7 +531,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" || liveError !== undefined || status !== "connected" ? undefined : act}
                             epoch={epoch} cursor={snapshot.cursor} pendingAction={pendingAction} busyAction={busyAction}
-                            cancel={() => setPendingAction(undefined)} />} />
+                            cancel={() => setPendingAction(undefined)} session={session} />} />
                 </> : <div className="workspace-landing">
                     <h1>{authorizationExpired ? "Workspace authorization expired" : ctxId || session ? liveError ? "Workspace unavailable" : status === "disconnected" ? "Workspace disconnected" : "Connecting to workspace" : "Waiting for workspace"}</h1>
                     <p>{authorizationExpired ? "MCP App authorization expired. Reopen Workspace from the active DevShell Context to obtain fresh authorization." : liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Open an active DevShell Context to inspect its Tasks, Goals and background activity.")}</p>
@@ -545,7 +546,8 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     );
 }
 
-function WorkspaceItem({ item, kind, onAction, epoch = 0, cursor = 0, pendingAction, busyAction, cancel }: {
+function WorkspaceItem({ item, kind, onAction, epoch = 0, cursor = 0, pendingAction, busyAction, cancel, session }: {
+    session?: McpAppSession;
     item: McpAppItem;
     kind: string;
     epoch?: number;
@@ -559,6 +561,7 @@ function WorkspaceItem({ item, kind, onAction, epoch = 0, cursor = 0, pendingAct
         <div className="workspace-item-head"><strong>{item.title}</strong>{item.badge && <span>{item.badge}</span>}</div>
         {item.summary && <p>{item.summary}</p>}
         {item.detail && <p>{item.detail}</p>}
+        {item.inputAvailable && session && <ApprovalInput key={JSON.stringify([session, item.id])} session={session} approvalId={item.id} />}
         {item.current && <p>{item.current}</p>}
         {item.note && <p>{item.note}</p>}
         {item.progress && <p>{item.progress.current} / {item.progress.total}</p>}

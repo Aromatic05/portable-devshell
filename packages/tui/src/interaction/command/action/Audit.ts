@@ -129,12 +129,12 @@ export class TuiCommandDispatcherAudit {
             case "back":
                 return this.returnToPage();
             case "input": {
-                const toolCall = await this.#readToolCall(
+                const toolCall = approval.originalInput === undefined ? await this.#readToolCall(
                     overlay.instance,
                     approval.callId,
-                );
+                ) : undefined;
                 return await this.#dispatch({
-                    body: this.#projection.auditInputText(
+                    body: approval.originalInput ?? this.#projection.auditInputText(
                         toolCall?.input,
                         approval.inputSummary,
                     ),

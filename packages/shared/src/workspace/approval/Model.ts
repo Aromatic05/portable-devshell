@@ -38,6 +38,8 @@ export interface ApprovalRequest {
     decision?: ApprovalDecision;
     expiresAt: string;
     inputSummary: string;
+    /** Complete serialized input captured before Review permits Rewrite or execution. */
+    readonly originalInput?: string;
     instance: InstanceName;
     reason: string;
     recording?: "caller" | "host";

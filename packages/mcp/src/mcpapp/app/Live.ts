@@ -27,7 +27,7 @@ export function installMcpAppLive(options: {
         return 200;
     };
     const read = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity" | "timeline" | "image") => {
+        operation: "snapshot" | "watch" | "activity" | "timeline" | "image" | "approval-input") => {
         const watch = operation === "watch";
         setHeaders(response);
         const url = new URL(request.url ?? "/", "http://localhost");
@@ -55,6 +55,19 @@ export function installMcpAppLive(options: {
             return;
         }
         options.presence.touch(options.instance, ctxId);
+        if (operation === "approval-input") {
+            const approvalId = url.searchParams.get("approvalId") ?? "";
+            if (!approvalId || approvalId.length > 256) {
+                reply(response, 400, { error: "Invalid approval query" });
+                return;
+            }
+            const input = await options.view.approvalInput(options.instance, ctxId, workspace, approvalId);
+            const access = await revalidate(ctxId, token, workspace);
+            if (access !== 200) reply(response, access, { error: "MCP App authorization expired" });
+            else if (input === undefined) reply(response, 404, { error: "Approval unavailable" });
+            else reply(response, 200, input);
+            return;
+        }
         if (operation === "timeline") {
             const activity = await options.view.activity(options.instance, ctxId);
             const access = await revalidate(ctxId, token, workspace);
@@ -129,7 +142,7 @@ export function installMcpAppLive(options: {
         }
     };
     const safe = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity" | "timeline" | "image") => {
+        operation: "snapshot" | "watch" | "activity" | "timeline" | "image" | "approval-input") => {
         try { await read(request, response, operation); }
         catch (error) {
             // Never return internal RPC failures or bearer tokens to callers,
@@ -149,6 +162,8 @@ export function installMcpAppLive(options: {
         if (failures.length > 0) throw new AggregateError(failures, 'MCP App Live route cleanup failed');
     };
     try {
+        releases.push(options.host.registerRawRoute("get", `${base}/approval-input`, (req, res) => safe(req, res, "approval-input")));
+        releases.push(options.host.registerRawRoute("options", `${base}/approval-input`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, "snapshot")));
         releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, "watch")));
         releases.push(options.host.registerRawRoute("get", `${base}/activity`, (req, res) => safe(req, res, "activity")));

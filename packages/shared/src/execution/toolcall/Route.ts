@@ -95,7 +95,7 @@ export function createToolIngressRouteModule(
                             source: context.peer,
                             workspace,
                         },
-                        undefined,
+                        context.signal,
                         undefined,
                         undefined,
                         undefined,

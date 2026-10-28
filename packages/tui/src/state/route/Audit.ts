@@ -92,7 +92,7 @@ export function projectAuditContexts(
     if (contextHistory?.instance === instance)
         resolve(contextHistory.ctxId).calls = [...contextHistory.calls];
     for (const approval of approvals) {
-        if (approval.recording === "caller") continue;
+        if (approval.recording === "caller" && approval.status !== "pending") continue;
         resolve(approval.ctxId).approvals.push(approval);
     }
     const result = [...contextMap.values()]

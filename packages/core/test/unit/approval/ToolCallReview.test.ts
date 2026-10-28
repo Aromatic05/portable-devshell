@@ -127,6 +127,7 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
             ctxId: "ctx-1",
             workspace: "/workspace",
             inputSummary: '{"command":"pwd"}',
+            originalInput: '{"command":"pwd"}',
             recording: "caller",
             toolName: "shell",
         },

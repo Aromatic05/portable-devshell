@@ -13,6 +13,8 @@ export function ApprovalActions({ approval, disabled, pending, onReview }: {
     onReview(selection: ApprovalReviewSelection): void;
 }) {
     return (
+        <>
+        <ApprovalInput approval={approval} />
         <span className="audit-approval-actions" onClick={(event) => {
             event.preventDefault(); event.stopPropagation();
         }}>
@@ -21,6 +23,7 @@ export function ApprovalActions({ approval, disabled, pending, onReview }: {
             <button className="danger subtle" disabled={disabled || pending}
                 onClick={() => onReview({ approval, decision: "deny" })} type="button">Deny</button>
         </span>
+        </>
     );
 }
 
@@ -67,4 +70,19 @@ export function ApprovalReview({ selection, available, disabled, pending, store,
         onConfirm={() => void confirm()}
         variant={decision === "deny" ? "destructive" : "default"}
     />;
+}
+
+/** Kept separate from the compact list summary; mounted only when requested. */
+export function ApprovalInput({ approval }: { approval: ApprovalRequest }) {
+    const [expanded, setExpanded] = useState(false);
+    if (approval.originalInput === undefined) return null;
+    return <div onClick={(event) => event.stopPropagation()}>
+        <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            {expanded ? "Hide full input" : "Show full input"}
+        </button>
+        {expanded && <pre tabIndex={0} aria-label="Original approval input"
+            style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflow: "auto" }}>
+            {approval.originalInput}
+        </pre>}
+    </div>;
 }

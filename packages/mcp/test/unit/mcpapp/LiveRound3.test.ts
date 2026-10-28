@@ -10,7 +10,7 @@ import { McpAppLeaseStore } from "../../../src/mcpapp/app/Lease.ts";
 import { McpAppPresenceStore } from "../../../src/mcpapp/app/Presence.ts";
 import { installMcpAppLive } from "../../../src/mcpapp/app/Live.ts";
 
-type Operation = "snapshot" | "activity" | "image";
+type Operation = "snapshot" | "activity" | "image" | "approval-input";
 
 async function liveRead(operation: Operation, query = "") {
     const contexts = new ContextRegistry();
@@ -36,11 +36,11 @@ async function liveRead(operation: Operation, query = "") {
             routes.set(key, handler);
             return () => { routes.delete(key); };
         } } as Pick<McpHttpRoute, "registerRawRoute"> as McpHttpRoute,
-        view: { snapshot: projection, activityOutput: projection, activityImage: projection } as never,
+        view: { snapshot: projection, activityOutput: projection, activityImage: projection, approvalInput: projection } as never,
     });
     const request = new IncomingMessage(new Socket());
     request.method = "GET";
-    request.url = `/api/live/demo/workspace/${operation}?ctxId=${context.ctxId}&callId=call-owned${query}`;
+    request.url = `/api/live/demo/workspace/${operation}?ctxId=${context.ctxId}&callId=call-owned&approvalId=approval-owned${query}`;
     request.headers = { authorization: `Bearer ${token}`, "if-none-match": '"foreign-context-stale-generation"' };
     const chunks: Buffer[] = [];
     const socket = new Duplex({ read() {}, write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
@@ -62,7 +62,7 @@ async function liveRead(operation: Operation, query = "") {
     };
 }
 
-for (const operation of ["snapshot", "activity", "image"] as const) {
+for (const operation of ["snapshot", "activity", "image", "approval-input"] as const) {
     test(`round3 Live ${operation} withholds an already-computed result after workspace replacement`, async () => {
         const fixture = await liveRead(operation);
         try {
