@@ -74,6 +74,7 @@ export type ExtensionSandboxInvokeOperation =
     | { instance: string; kind: "instanceGenerationRetired" };
 
 export type ExtensionSandboxCapabilityOperation =
+    | "artifacts.retainText"
     | "artifacts.cancelTransfer"
     | "artifacts.createShare"
     | "artifacts.getTransfer"

@@ -16,6 +16,9 @@ import { ArtifactService } from "../../../src/artifact/Service.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 class MemoryShareEndpoint implements WorkerArtifactApi {
+    async retainText(): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }> {
+        throw new Error("unused");
+    }
     readonly closed: string[] = [];
     readonly #bytes: Buffer;
 

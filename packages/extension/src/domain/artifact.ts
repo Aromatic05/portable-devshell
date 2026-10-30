@@ -105,6 +105,7 @@ export interface ExtensionArtifactTransferResult {
 
 /** Host-owned Artifact management operations available to an Extension generation. */
 export interface ExtensionArtifactCapability {
+    retainText(instance: string, text: string): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }>;
     cancelTransfer(
         transferId: string,
     ): Promise<ExtensionArtifactTransferResult>;

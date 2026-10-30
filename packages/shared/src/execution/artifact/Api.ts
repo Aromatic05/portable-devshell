@@ -4,6 +4,7 @@ import type {
 } from "./Model.js";
 
 export interface WorkerArtifactApi {
+    retainText(text: string): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }>;
     openArtifactPayload(
         input:
             | { expiresAtMs: number; handle: string; path?: never }

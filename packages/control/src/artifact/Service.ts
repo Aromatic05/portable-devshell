@@ -26,9 +26,11 @@ import {
     type ArtifactShareAccess,
 } from "./Share.js";
 import { ArtifactTransferService } from "./Transfer.js";
+import { requireArtifactEndpoint } from "./Source.js";
 import type { ArtifactApi } from "./Api.js";
 
 export class ArtifactService implements ArtifactApi {
+    readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #eventLog: ArtifactEventLog;
     readonly #imageService: ArtifactImageService;
     readonly #recordStore: ArtifactRecordStore;
@@ -38,6 +40,7 @@ export class ArtifactService implements ArtifactApi {
     #cleanupPending = false;
 
     constructor(options: ArtifactServiceOptions) {
+        this.#resolveEndpoint = options.resolveEndpoint;
         const chunkBytes = options.chunkBytes ?? DEFAULT_ARTIFACT_CHUNK_BYTES;
         if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
             throw new TypeError(
@@ -145,6 +148,10 @@ export class ArtifactService implements ArtifactApi {
             throw new Error("ArtifactService is not initialized.");
         }
         return await this.#imageService.read(imageRef);
+    }
+
+    async retainText(instance: string, text: string): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }> {
+        return await requireArtifactEndpoint(this.#resolveEndpoint, instance, instance).retainText(text);
     }
 
     async createShare(

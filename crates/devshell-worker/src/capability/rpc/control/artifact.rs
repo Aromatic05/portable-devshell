@@ -32,6 +32,24 @@ struct ArtifactPayloadCloseInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactRetainTextInput {
+    text: String,
+}
+
+pub fn retain_text(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactRetainTextInput = parse_params(request)?;
+        let reference = payloads.retain_text(&input.text).map_err(RpcError::from)?;
+        serialize(serde_json::json!({
+            "path": crate::capability::artifact::result_path::tool_result_path(&reference),
+            "sourceBytes": reference.source_bytes,
+            "expiresAtMs": reference.expires_at_ms
+        }))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtifactReceiveBeginRpcInput {
     descriptor: ArtifactPayloadDescriptor,
     #[serde(default)]

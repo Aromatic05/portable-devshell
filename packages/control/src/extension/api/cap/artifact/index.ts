@@ -39,6 +39,11 @@ export class ExtensionArtifactCapabilityControl implements ExtensionArtifactCapa
         this.#service = options.service;
     }
 
+    async retainText(instance: string, text: string): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }> {
+        this.#assertAllowed();
+        return await this.#service.retainText(requireText(instance, "instance"), text);
+    }
+
     async createShare(
         input: ExtensionArtifactShareInput,
     ): Promise<ExtensionArtifactShareRecord> {

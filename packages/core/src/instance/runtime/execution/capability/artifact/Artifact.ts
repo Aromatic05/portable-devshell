@@ -36,6 +36,7 @@ export function createWorkerArtifact(
 ): WorkerArtifactApi {
     const port = createPortClient(endpoint, workerHost, "artifact");
     return {
+        retainText: async (text) => await port.request("artifact.result.retainText", { text }),
         openArtifactPayload: async (input, signal) =>
             await port.request(
                 "artifact.payload.open",

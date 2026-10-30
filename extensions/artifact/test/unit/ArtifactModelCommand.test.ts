@@ -20,6 +20,9 @@ const invocation: CliModelCommandInvocationContext = {
 
 function capability(calls: unknown[]): ExtensionArtifactCapability {
     return {
+        async retainText() {
+            throw new Error("unused");
+        },
         async cancelTransfer(transferId) {
             calls.push(["cancel", transferId]);
             return { operation: "cancel", transfer: localTransfer(transferId) };

@@ -92,7 +92,11 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "artifact.payload.close".to_string(),
-        artifact::payload_close(payloads),
+        artifact::payload_close(Arc::clone(&payloads)),
+    );
+    handlers.insert(
+        "artifact.result.retainText".to_string(),
+        artifact::retain_text(payloads),
     );
     handlers.insert(
         "extension.resource.prepare".to_string(),

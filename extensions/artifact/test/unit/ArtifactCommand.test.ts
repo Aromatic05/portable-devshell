@@ -7,6 +7,9 @@ import { executeArtifactCommand } from "../../src/builtin/ArtifactCommand.ts";
 
 function fakeCapability(calls: unknown[]): ExtensionArtifactCapability {
     return {
+        async retainText() {
+            throw new Error("unused");
+        },
         async cancelTransfer(transferId) {
             calls.push(["cancel", transferId]);
             return { operation: "cancel", transfer: record(transferId) };

@@ -58,6 +58,7 @@ export interface ArtifactImageApi {
 }
 
 export interface ArtifactManagementApi {
+    retainText(instance: string, text: string): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }>;
     createShare(
         input: ArtifactShareInput,
         defaultInstance: string,

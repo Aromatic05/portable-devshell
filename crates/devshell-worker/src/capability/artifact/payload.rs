@@ -148,6 +148,23 @@ struct ArtifactPayloadStoreState {
 }
 
 impl ArtifactPayloadStore {
+    /// Retain model-facing text in the same store and virtual file namespace as bash_run output.
+    pub fn retain_text(
+        &self,
+        text: &str,
+    ) -> Result<crate::capability::artifact::types::ArtifactReference, ToolError> {
+        let mut draft = self.artifacts.begin(ArtifactStream::Stdout)?;
+        draft.write_chunk(text.as_bytes())?;
+        let reference = self.artifacts.persist(draft)?;
+        if reference.artifact_truncated {
+            return Err(ToolError::new(
+                "artifact.storageFailed",
+                "retained text exceeds the artifact stream limit",
+            ));
+        }
+        Ok(reference)
+    }
+
     pub fn new(root: PathBuf, artifacts: Arc<ArtifactStore>) -> Result<Arc<Self>, ToolError> {
         let temp_dir = root.join("tmp");
         fs::create_dir_all(&temp_dir)

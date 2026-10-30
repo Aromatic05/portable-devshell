@@ -565,6 +565,11 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 return await this.#artifactCapability.createShare(
                     input as SandboxArtifactShareInput,
                 );
+            case "artifacts.retainText":
+                return await this.#artifactCapability.retainText(
+                    readStringField(input, "instance"),
+                    readStringField(input, "text"),
+                );
             case "artifacts.getTransfer":
                 return await this.#artifactCapability.getTransfer(
                     readStringField(input, "transferId"),

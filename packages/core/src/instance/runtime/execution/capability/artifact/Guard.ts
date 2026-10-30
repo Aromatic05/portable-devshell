@@ -6,6 +6,10 @@ export function guardArtifact(
 ): WorkerArtifactApi {
 
     return {
+        retainText: async (text) => {
+            assertReady();
+            return await artifact.retainText(text);
+        },
         abortArtifactReceive: async (receiveId) => {
             assertReady();
             await artifact.abortArtifactReceive(receiveId);

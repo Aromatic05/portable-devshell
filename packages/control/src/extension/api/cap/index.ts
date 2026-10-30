@@ -273,6 +273,7 @@ function unavailableArtifacts(
         );
     };
     return Object.freeze({
+        retainText: async () => unavailable(),
         cancelTransfer: async () => unavailable(),
         createShare: async () => unavailable(),
         getTransfer: async () => unavailable(),

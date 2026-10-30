@@ -1892,6 +1892,9 @@ function createSandbox(options: {
 
 function fakeArtifacts(calls: string[]): ExtensionArtifactCapability {
     return {
+        async retainText() {
+            throw new Error("unused fake Artifact retention");
+        },
         async cancelTransfer(transferId) {
             calls.push(`artifacts.cancelTransfer:${transferId}`);
             throw new Error("unused fake Artifact transfer");

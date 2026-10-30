@@ -35,6 +35,13 @@ export class ArtifactHostBridge {
 
     endpointFor(context: ArtifactHostAccessContext): WorkerArtifactApi {
         return {
+            retainText: async () => {
+                throw createRemoteError({
+                    code: "artifact.hostHandleUnsupported",
+                    message: "Retained tool-result text requires a Worker instance.",
+                    retryable: false,
+                });
+            },
             abortArtifactReceive: async (receiveId) =>
                 await this.#receives.abort(receiveId),
             beginArtifactReceive: async (input) =>

@@ -465,6 +465,10 @@ function createCoreConfigCapability(): ExtensionCoreConfigCapability {
 
 function createArtifactCapability(): ExtensionArtifactCapability {
     return Object.freeze({
+        retainText: async (instance: string, text: string) =>
+            (await requestCapability("artifacts.retainText", { instance, text })) as Awaited<
+                ReturnType<ExtensionArtifactCapability["retainText"]>
+            >,
         cancelTransfer: async (transferId: string) =>
             (await requestCapability("artifacts.cancelTransfer", {
                 transferId,

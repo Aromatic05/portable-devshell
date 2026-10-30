@@ -60,6 +60,9 @@ async function waitWithAbort(
 }
 
 class MemoryArtifactEndpoint implements WorkerArtifactApi {
+    async retainText(): Promise<{ path: string; sourceBytes: number; expiresAtMs: number }> {
+        throw new Error("unused");
+    }
     readonly closedPayloads: string[] = [];
     readonly payloadClosed = new Deferred();
     readonly abortedReceives: string[] = [];
