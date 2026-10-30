@@ -11,6 +11,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import {
     createCommentAdvice,
     createCommentDelivery,
+    createCommentRetention,
     createCommentToolCallGate,
     type CommentControlDecision,
     type CommentPort,
@@ -256,6 +257,46 @@ test("Comment delivery hook writes the queued Comment and the advice hook append
         stdout: "",
         termination: "exited",
     });
+});
+
+test("Comment is delivered on failed ToolCalls and retained unchanged when too long", async () => {
+    const longComment = "用户后续要求：" + "检查甲乙丙。".repeat(800);
+    const retained: Array<{ instance: string; text: string }> = [];
+    const delivery = createCommentDelivery(createPort({
+        async consumePending(_instance, _ctxId, callId) {
+            return { callId, comment: longComment, messages: [] };
+        },
+    }));
+    const retention = createCommentRetention(async (instance, text) => {
+        retained.push({ instance, text });
+        return { path: "/.devshell/tool-results/retained/stdout", sourceBytes: Buffer.byteLength(text), expiresAtMs: 12345 };
+    });
+    const input = {
+        ...base,
+        direction: "outbound" as const,
+        value: {
+            ...base.value,
+            kind: "error" as const,
+            payload: { error: { code: "tool.invalidArguments", message: "Invalid arguments", retryable: false } },
+        },
+    };
+    const delivered = await delivery(input, unusedInvocation);
+    const projected = await retention({ ...input, value: delivered }, unusedInvocation);
+    const output = projected.payload as Record<string, unknown>;
+    assert.deepEqual(retained, [{ instance: "demo", text: longComment }]);
+    assert.equal(output.commentPath, "/.devshell/tool-results/retained/stdout");
+    assert.equal(output.commentInstance, "demo");
+    assert.match(String((output.comment as string[])[0]), /file_read/u);
+    assert.ok(String((output.comment as string[])[0]).length < 2_000);
+    assert.deepEqual((delivered.payload as { comment: string[] }).comment, [longComment]);
+});
+
+test("Comment retention failure leaves the full user message in the tool result", async () => {
+    const full = "C".repeat(3_000);
+    const hook = createCommentRetention(async () => { throw new Error("artifact unavailable"); });
+    const input = { ...base, direction: "outbound" as const,
+        value: { ...base.value, kind: "result" as const, payload: { comment: [full] } } };
+    assert.equal((await hook(input, unusedInvocation)).payload, input.value.payload);
 });
 
 test("Comment toolcall gate maps push stop and resume to rejected ToolCalls", async () => {

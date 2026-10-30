@@ -230,11 +230,14 @@ function toCallToolResult(result: McpEndpointResult) {
 
 function toMcpError(error: unknown): ProtocolError {
     const body = toRemoteErrorBody(error);
-    const comment = readToolCallComments(readToolCallErrorPayload(error));
+    const payload = readToolCallErrorPayload(error);
+    const comment = readToolCallComments(payload);
+    const recovery = readToolCallRecovery(payload);
     if (error instanceof McpToolSchemaUnavailableError) {
         return new ProtocolError(-32002, error.message, {
             code: error.code,
             ...(comment === undefined ? {} : { comment }),
+            ...recovery,
         });
     }
 
@@ -245,6 +248,7 @@ function toMcpError(error: unknown): ProtocolError {
             ...sanitized,
             code: "mcp.instanceNotReady",
             ...(comment === undefined ? {} : { comment }),
+            ...recovery,
         });
     }
 
@@ -257,6 +261,7 @@ function toMcpError(error: unknown): ProtocolError {
             {
                 ...sanitizeErrorBody(body),
                 ...(comment === undefined ? {} : { comment }),
+                ...recovery,
             },
         );
     }
@@ -265,14 +270,14 @@ function toMcpError(error: unknown): ProtocolError {
         return new ProtocolError(
             ProtocolErrorCode.InternalError,
             error.message,
-            comment === undefined ? undefined : { comment },
+            { ...(comment === undefined ? {} : { comment }), ...recovery },
         );
     }
 
     return new ProtocolError(
         ProtocolErrorCode.InternalError,
         "Unknown MCP error.",
-        comment === undefined ? undefined : { comment },
+        { ...(comment === undefined ? {} : { comment }), ...recovery },
     );
 }
 
@@ -286,6 +291,17 @@ function isCorrectableToolError(code: string): boolean {
         code === "file.unreadRange" ||
         code === "file.patchAmbiguous" ||
         code === "tmux.invalidCwd";
+}
+
+function readToolCallRecovery(payload: JsonValue | undefined): Record<string, JsonValue> {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return {};
+    return {
+        ...(typeof payload.commentPath === "string" ? { commentPath: payload.commentPath } : {}),
+        ...(typeof payload.commentInstance === "string" ? { commentInstance: payload.commentInstance } : {}),
+        ...(typeof payload.commentBytes === "number" ? { commentBytes: payload.commentBytes } : {}),
+        ...(typeof payload.commentExpiresAtMs === "number"
+            ? { commentExpiresAtMs: payload.commentExpiresAtMs } : {}),
+    };
 }
 
 function readToolCallComments(

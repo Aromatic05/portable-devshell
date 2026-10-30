@@ -1,8 +1,13 @@
-import { readToolCallErrorPayload, type JsonValue } from "@portable-devshell/shared";
+import { readToolCallErrorPayload, toRemoteErrorBody, type JsonValue } from "@portable-devshell/shared";
 
 export interface AgentToolErrorPayload {
+    cause?: JsonValue;
     code?: string;
     comment?: string[];
+    commentPath?: string;
+    commentInstance?: string;
+    commentBytes?: number;
+    commentExpiresAtMs?: number;
     details?: JsonValue;
     message: string;
     retryable?: boolean;
@@ -17,6 +22,8 @@ export function encodeAgentToolError(error: unknown): AgentToolErrorPayload {
         payload.retryable = error.retryable;
     if ("details" in error && isJsonValue(error.details))
         payload.details = error.details;
+    const cause = toRemoteErrorBody(error)?.cause;
+    if (cause !== undefined) payload.cause = cause as unknown as JsonValue;
     // ToolCall's Comment Hook attaches advice to its error payload, not to
     // Error.details. Preserve it across both Agent provider boundaries.
     const attached = readToolCallErrorPayload(error);
@@ -30,6 +37,16 @@ export function encodeAgentToolError(error: unknown): AgentToolErrorPayload {
         );
         if (entries.length > 0) payload.comment = entries;
     }
+    const recovery = typeof attached === "object" && attached !== null &&
+        !Array.isArray(attached) ? attached : undefined;
+    const path = recovery?.commentPath ?? ("commentPath" in error ? error.commentPath : undefined);
+    const instance = recovery?.commentInstance ?? ("commentInstance" in error ? error.commentInstance : undefined);
+    const bytes = recovery?.commentBytes ?? ("commentBytes" in error ? error.commentBytes : undefined);
+    const expires = recovery?.commentExpiresAtMs ?? ("commentExpiresAtMs" in error ? error.commentExpiresAtMs : undefined);
+    if (typeof path === "string") payload.commentPath = path;
+    if (typeof instance === "string") payload.commentInstance = instance;
+    if (typeof bytes === "number") payload.commentBytes = bytes;
+    if (typeof expires === "number") payload.commentExpiresAtMs = expires;
     return payload;
 }
 
@@ -43,7 +60,9 @@ export function formatAgentToolError(error: unknown): string {
             : `[${payload.code}] ${payload.message}`,
         ...(payload.retryable === undefined ? [] : [`retryable=${payload.retryable}`]),
         ...(payload.details === undefined ? [] : [`details=${JSON.stringify(payload.details)}`]),
+        ...(payload.cause === undefined ? [] : [`cause=${JSON.stringify(payload.cause)}`]),
         ...(payload.comment === undefined ? [] : [`comment:\n${payload.comment.join("\n")}`]),
+        ...(payload.commentPath === undefined ? [] : [`commentRecovery=${payload.commentPath}; read via file_read${payload.commentInstance === undefined ? "" : ` on instance=${payload.commentInstance}`}`]),
     ].join("\n");
 }
 

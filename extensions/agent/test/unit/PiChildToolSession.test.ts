@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, attachToolCallErrorPayload } from "@portable-devshell/shared";
+import { asInstanceName, attachToolCallErrorPayload, createRemoteError } from "@portable-devshell/shared";
 
 import { PiChildToolSession } from "../../src/provider/pi/adapt/ChildToolSession.ts";
 import { encodeAgentToolError, formatAgentToolError } from "../../src/builtin/provider/AgentToolError.ts";
@@ -51,6 +51,28 @@ test("Pi and OpenCode propagate Comment advice attached to tool errors", () => {
     assert.deepEqual(encoded.comment, ["User declined this operation; do not retry."]);
     assert.deepEqual(encodePiToolError(decodePiToolError(encoded, "fallback")), encoded);
     assert.match(formatAgentToolError(error), /User declined this operation; do not retry/u);
+});
+
+test("Pi and OpenCode keep nested error causes and retained Comment recovery", () => {
+    const cause = createRemoteError({
+        code: "core.providerFailed", message: "worker connection lost", retryable: true,
+    });
+    const error = attachToolCallErrorPayload(createRemoteError({
+        code: "core.workerStartFailed", message: "cannot start worker", retryable: true, cause,
+    }), {
+        comment: ["Read the retained message before retrying"],
+        commentPath: "/.devshell/tool-results/retained/stdout",
+        commentInstance: "worker-a",
+        commentBytes: 20_000,
+        commentExpiresAtMs: 12345,
+    });
+    const encoded = encodePiToolError(error);
+    assert.deepEqual((encoded.cause as { code?: string })?.code, "core.providerFailed");
+    assert.equal(encoded.commentInstance, "worker-a");
+    assert.equal(encoded.commentPath, "/.devshell/tool-results/retained/stdout");
+    assert.deepEqual(encodePiToolError(decodePiToolError(encoded, "fallback")), encoded);
+    assert.match(formatAgentToolError(error), /core.providerFailed/u);
+    assert.match(formatAgentToolError(error), /commentRecovery=/u);
 });
 
 test("Pi child tool progress updates the pending call without resolving it", async () => {

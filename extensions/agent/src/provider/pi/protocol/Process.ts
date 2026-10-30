@@ -124,11 +124,20 @@ export function decodePiToolError(
     const error = new Error(payload?.message ?? fallback) as Error & {
         code?: string;
         comment?: string[];
+        commentPath?: string;
+        commentInstance?: string;
+        commentBytes?: number;
+        commentExpiresAtMs?: number;
         details?: JsonValue;
         retryable?: boolean;
     };
     if (payload?.code !== undefined) error.code = payload.code;
     if (payload?.comment !== undefined) error.comment = payload.comment;
+    if (payload?.commentPath !== undefined) error.commentPath = payload.commentPath;
+    if (payload?.commentInstance !== undefined) error.commentInstance = payload.commentInstance;
+    if (payload?.commentBytes !== undefined) error.commentBytes = payload.commentBytes;
+    if (payload?.commentExpiresAtMs !== undefined) error.commentExpiresAtMs = payload.commentExpiresAtMs;
+    if (payload?.cause !== undefined) error.cause = payload.cause;
     if (payload?.details !== undefined) error.details = payload.details;
     if (payload?.retryable !== undefined) error.retryable = payload.retryable;
     return error;

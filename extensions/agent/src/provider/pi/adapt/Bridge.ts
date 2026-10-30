@@ -370,9 +370,14 @@ function structuredPiToolErrorResult(error: PiToolErrorPayload): JsonValue {
     if (error.code !== undefined) structured.code = error.code;
     if (error.details !== undefined) structured.details = error.details;
     if (error.retryable !== undefined) structured.retryable = error.retryable;
+    if (error.cause !== undefined) structured.cause = error.cause;
     return {
         error: structured,
         ...(error.comment === undefined ? {} : { comment: error.comment }),
+        ...(error.commentPath === undefined ? {} : { commentPath: error.commentPath }),
+        ...(error.commentInstance === undefined ? {} : { commentInstance: error.commentInstance }),
+        ...(error.commentBytes === undefined ? {} : { commentBytes: error.commentBytes }),
+        ...(error.commentExpiresAtMs === undefined ? {} : { commentExpiresAtMs: error.commentExpiresAtMs }),
     };
 }
 

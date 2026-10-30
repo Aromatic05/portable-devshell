@@ -150,6 +150,17 @@ test("file_read preserves file identity and resumes its original paged selector"
     assert.match(String((data(projected).comment as string[] | undefined)?.[0]), /nextSelector/u);
 });
 
+test("MCP truncation preserves a delivered user Comment before appending recovery advice", () => {
+    const original = {
+        files: [{ path: "/project/a.ts", content: Array.from({ length: 200 }, (_, i) =>
+            `${i + 1}:${"x".repeat(140)}`).join("\n"), view: "content" }],
+        comment: ["User instruction: do not change another file"],
+    };
+    const result = data(projectMcpModelOutput("file_read", original));
+    assert.equal((result.comment as string[])[0], original.comment[0]);
+    assert.match((result.comment as string[])[1] ?? "", /nextSelector/u);
+});
+
 test("file_read outline previews never fabricate an invalid content selector", () => {
     const original = { files: [{
         path: "src/engine.ts", view: "outline", parseStatus: "complete",

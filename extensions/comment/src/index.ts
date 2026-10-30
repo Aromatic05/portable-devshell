@@ -441,6 +441,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const gate = createCommentToolCallGate(comment.comment);
     const delivery = createCommentDelivery(comment.comment);
     const advice = createCommentAdvice();
+    const retention = createCommentRetention((instance, text) =>
+        context.capabilities.artifacts!.retainText(instance, text));
     context.register(review, "toolcall-gate", async (input, invocation) => {
         await source.refresh();
         return await gate(input, invocation);
@@ -453,6 +455,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await source.refresh();
         return await advice(input, invocation);
     });
+    context.register(rewrite, "comment-retention", retention);
     registerMailing(context, mailing);
     registerCommentRoutes(context, source, comment);
     context.register(
@@ -539,7 +542,7 @@ export function createCommentDelivery(
     return async (input: ToolCallRewriteInvocation) => {
         if (
             input.direction !== "outbound" ||
-            input.value.kind !== "result" ||
+            (input.value.kind !== "result" && input.value.kind !== "error") ||
             // Context-scoped Extension work (including automatic Memory
             // binding) returns to the Extension, not the Context's caller.
             // Leave its queued Comments for the caller's own tool result.
@@ -573,6 +576,47 @@ export function createCommentAdvice(): ToolCallRewriteBinding {
                   ...input.value,
                   payload: appendOutputComments(input.value.payload, comments),
               };
+    };
+}
+
+const INLINE_COMMENT_LIMIT = 2_000;
+
+export function createCommentRetention(
+    retainText: (instance: string, text: string) => Promise<{ path: string; sourceBytes: number; expiresAtMs: number }>,
+): ToolCallRewriteBinding {
+    return async (input: ToolCallRewriteInvocation) => {
+        if (input.direction !== "outbound" ||
+            (input.value.kind !== "result" && input.value.kind !== "error"))
+            return input.value;
+        const payload = input.value.payload;
+        if (typeof payload !== "object" || payload === null || Array.isArray(payload) ||
+            !Array.isArray(payload.comment)) return input.value;
+        const comments = payload.comment.filter(
+            (entry): entry is string => typeof entry === "string" && entry.length > 0,
+        );
+        const full = comments.join("\n\n");
+        if (full.length <= INLINE_COMMENT_LIMIT) return input.value;
+        // Retain before replacing any text. A failed artifact write must never
+        // turn a completed ToolCall into a failure or discard the Comment.
+        let retained: { path: string; sourceBytes: number; expiresAtMs: number };
+        try {
+            retained = await retainText(input.value.context.instance, full);
+        } catch {
+            return input.value;
+        }
+        return {
+            ...input.value,
+            payload: {
+                ...payload,
+                comment: [
+                    `${full.slice(0, 1_000)}\n... [Comment preview; full ${retained.sourceBytes} bytes retained. Before continuing, use file_read with path=${retained.path} and instance=${input.value.context.instance}.]`,
+                ],
+                commentPath: retained.path,
+                commentInstance: input.value.context.instance,
+                commentBytes: retained.sourceBytes,
+                commentExpiresAtMs: retained.expiresAtMs,
+            },
+        };
     };
 }
 

@@ -90,7 +90,10 @@ export function projectMcpModelOutput(
     if (isRecord(result) && result !== (native ? original.structuredContent : original)) {
         const hint = modelRecoveryHint(toolName, result);
         if (hint !== undefined) {
-            const annotated = { ...result, comment: [hint] };
+            const existing = Array.isArray(result.comment)
+                ? result.comment.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            const annotated = { ...result, comment: [...existing, hint] };
             if (resultBytes(annotated, content) <= budget) result = annotated;
         }
     }
