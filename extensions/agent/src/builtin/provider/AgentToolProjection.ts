@@ -140,7 +140,21 @@ export function projectAgentModelToolResult(
     toolName: string,
     value: ExtensionJsonValue,
 ): string {
-    return limitModelToolResult(renderAgentModelToolResult(toolName, value));
+    const rendered = renderAgentModelToolResult(toolName, value);
+    if (!isRecord(value) || !AGENT_MODEL_TOOL_PROJECTIONS.has(toolName) ||
+        !Array.isArray(value.comment))
+        return limitModelToolResult(rendered);
+    const comments = value.comment.filter(
+        (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    );
+    if (comments.length === 0) return limitModelToolResult(rendered);
+    // Comment may contain a new user instruction; reserve it before clipping
+    // routine tool output, rather than losing it in the semantic projection.
+    const advice = `comment:\n${comments.join("\n")}\n`;
+    const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - advice.length;
+    return remaining <= 0
+        ? `${advice}[tool result omitted: comment exceeds the result budget]`
+        : `${advice}${limitModelToolResult(rendered, remaining)}`;
 }
 
 function projectAgentModelInputSchema(
@@ -176,6 +190,9 @@ function renderAgentModelToolResult(
     value: ExtensionJsonValue,
 ): string {
     if (!isRecord(value)) return renderToolResult(value);
+    // Structured tool failures need their own path: a success projector such
+    // as bash_run or tmux_read otherwise renders this error as empty output.
+    if (isRecord(value.error)) return `error=${renderToolResult(value.error)}`;
     return (
         AGENT_MODEL_TOOL_PROJECTIONS.get(toolName)?.projectResult(value) ??
         renderToolResult(value)
@@ -692,13 +709,18 @@ function previewText(
     };
 }
 
-function limitModelToolResult(value: string): string {
-    if (value.length <= MAX_MODEL_TOOL_RESULT_CHARACTERS) return value;
+function limitModelToolResult(
+    value: string,
+    maxCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS,
+): string {
+    if (value.length <= maxCharacters) return value;
     const marker = `\n... [tool result truncated: ${value.length} characters total] ...\n`;
-    const retainedCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS - marker.length;
+    if (marker.length > maxCharacters)
+        return "[tool result omitted]".slice(0, maxCharacters);
+    const retainedCharacters = Math.max(0, maxCharacters - marker.length);
     const headCharacters = Math.ceil(retainedCharacters / 2);
     const tailCharacters = retainedCharacters - headCharacters;
-    return `${value.slice(0, headCharacters)}${marker}${value.slice(-tailCharacters)}`;
+    return `${value.slice(0, headCharacters)}${marker}${tailCharacters === 0 ? "" : value.slice(-tailCharacters)}`;
 }
 
 function asJsonValue(value: unknown): ExtensionJsonValue {

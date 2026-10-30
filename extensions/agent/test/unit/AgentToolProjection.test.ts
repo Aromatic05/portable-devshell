@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { JsonValue } from "@portable-devshell/shared";
 import { projectAgentModelToolResult, projectAgentModelTools } from "../../src/builtin/provider/AgentToolProjection.ts";
 
 test("Agent model tools use the Worker tool description and field documentation", () => {
@@ -15,6 +16,50 @@ test("Agent model tools use the Worker tool description and field documentation"
     assert.equal(tools[0]?.description, "Worker's canonical edit instructions");
     const input = tools[0]?.inputSchema as { properties?: { changes?: { description?: string } } };
     assert.equal(input.properties?.changes?.description, "Worker's five operations and edit syntax");
+});
+
+test("Agent model tool results retain Comment advice and user instructions", () => {
+    const comment = [
+        "[file.partialRead] Continue with nextSelector.",
+        "User requested a change of direction",
+    ];
+    const results: Array<[string, Record<string, JsonValue>]> = [
+        ["file_read", { files: [{ path: "example.ts", view: "content", content: "1:hello", nextSelector: "2" }] }],
+        ["bash_run", { stdout: "ok", stderr: "", exitCode: 0 }],
+        ["file_edit", { operations: [{ action: "patch", path: "example.ts", status: "applied" }] }],
+        ["tmux_read", { task: { id: "task-1", status: "0" }, output: ["done"] }],
+    ];
+    for (const [toolName, value] of results) {
+        const text = projectAgentModelToolResult(toolName, { ...value, comment });
+        assert.ok(text.startsWith(`comment:\n${comment.join("\n")}\n`), toolName);
+        assert.equal(text.split(comment[1]).length - 1, 1, toolName);
+        assert.ok(text.length <= 12_000, toolName);
+    }
+});
+
+test("Agent tool result truncation reserves Comment ahead of long output", () => {
+    const instruction = "User asked to stop the current approach";
+    const text = projectAgentModelToolResult("bash_run", {
+        comment: [instruction],
+        exitCode: 0,
+        stdout: "x".repeat(50_000),
+        stderr: "",
+    });
+    assert.ok(text.startsWith(`comment:\n${instruction}\n`));
+    assert.ok(text.length <= 12_000);
+});
+
+test("Agent success renderers do not swallow a structured tool error", () => {
+    for (const toolName of ["bash_run", "tmux_read", "tmux_run", "file_edit"]) {
+        const text = projectAgentModelToolResult(toolName, {
+            error: { code: "file.unreadRange", message: "read coverage required", retryable: true },
+            comment: ["[file.unreadRange] Read the missing source lines."],
+        });
+        assert.match(text, /file\.unreadRange/u, toolName);
+        assert.match(text, /read coverage required/u, toolName);
+        assert.match(text, /Read the missing source lines/u, toolName);
+        assert.ok(text.startsWith("comment:\n"), toolName);
+    }
 });
 
 test("256-operation Agent edit projection preserves the middle failure and batch outcomes", () => {

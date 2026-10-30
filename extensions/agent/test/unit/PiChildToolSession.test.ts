@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName } from "@portable-devshell/shared";
+import { asInstanceName, attachToolCallErrorPayload } from "@portable-devshell/shared";
 
 import { PiChildToolSession } from "../../src/provider/pi/adapt/ChildToolSession.ts";
-import { encodePiToolError } from "../../src/provider/pi/protocol/Process.ts";
+import { encodeAgentToolError, formatAgentToolError } from "../../src/builtin/provider/AgentToolError.ts";
+import { decodePiToolError, encodePiToolError } from "../../src/provider/pi/protocol/Process.ts";
 import type {
     PiChildMessage,
     PiParentMessage,
@@ -24,6 +25,32 @@ test("Pi tool error encoding drops cyclic details without failing", () => {
         message: "snapshot required",
         retryable: true,
     });
+});
+
+test("Pi and OpenCode preserve the same actionable tool error fields", () => {
+    const error = Object.assign(new Error("read coverage required"), {
+        code: "file.unreadRange",
+        details: { path: "example.ts", missingLines: [12] },
+        retryable: true,
+    });
+    assert.deepEqual(encodePiToolError(error), encodeAgentToolError(error));
+    const openCodeText = formatAgentToolError(error);
+    assert.match(openCodeText, /\[file\.unreadRange\] read coverage required/u);
+    assert.match(openCodeText, /retryable=true/u);
+    assert.match(openCodeText, /details=.*missingLines.*12/u);
+});
+
+test("Pi and OpenCode propagate Comment advice attached to tool errors", () => {
+    const error = attachToolCallErrorPayload(
+        Object.assign(new Error("approval denied"), {
+            code: "core.approvalDenied", retryable: false,
+        }),
+        { comment: ["User declined this operation; do not retry."], error: { code: "core.approvalDenied" } },
+    );
+    const encoded = encodePiToolError(error);
+    assert.deepEqual(encoded.comment, ["User declined this operation; do not retry."]);
+    assert.deepEqual(encodePiToolError(decodePiToolError(encoded, "fallback")), encoded);
+    assert.match(formatAgentToolError(error), /User declined this operation; do not retry/u);
 });
 
 test("Pi child tool progress updates the pending call without resolving it", async () => {

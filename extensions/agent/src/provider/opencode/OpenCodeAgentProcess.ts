@@ -9,6 +9,7 @@ import type {
 } from "@portable-devshell/extension/process";
 
 import type { AgentProviderHandle } from "../../builtin/provider/AgentProvider.js";
+import { formatAgentToolError } from "../../builtin/provider/AgentToolError.js";
 import {
     prepareAgentModelToolInput,
     projectAgentModelToolResult,
@@ -295,7 +296,7 @@ class OpenCodeManagedProcess {
         } catch (error) {
             await this.#send({
                 callId: message.callId,
-                error: toError(error).message,
+                error: formatAgentToolError(error),
                 ok: false,
                 type: "tool.result",
             });

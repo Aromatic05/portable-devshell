@@ -370,7 +370,10 @@ function structuredPiToolErrorResult(error: PiToolErrorPayload): JsonValue {
     if (error.code !== undefined) structured.code = error.code;
     if (error.details !== undefined) structured.details = error.details;
     if (error.retryable !== undefined) structured.retryable = error.retryable;
-    return { error: structured };
+    return {
+        error: structured,
+        ...(error.comment === undefined ? {} : { comment: error.comment }),
+    };
 }
 
 function isNamespacedToolErrorCode(code: string): boolean {
