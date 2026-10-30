@@ -85,6 +85,16 @@ export function projectMcpModelOutput(
             result = projectFileEdit(result, budget, content);
     }
 
+    // Reuse existing continuation data; provide a short next action only when
+    // the model projection shortened the original result and budget permits.
+    if (isRecord(result) && result !== (native ? original.structuredContent : original)) {
+        const hint = modelRecoveryHint(toolName, result);
+        if (hint !== undefined) {
+            const annotated = { ...result, comment: [hint] };
+            if (resultBytes(annotated, content) <= budget) result = annotated;
+        }
+    }
+
     // A presentation's text and structuredContent share the same model budget.
     // Do not duplicate arbitrary extension text if structured data already
     // consumes the budget. Images are intentionally not converted to text.
@@ -110,6 +120,20 @@ export function projectMcpModelOutput(
         isError: original.isError,
         structuredContent: result,
     });
+}
+
+function modelRecoveryHint(toolName: string, output: RecordValue): string | undefined {
+    if (toolName === "bash_run" &&
+        (typeof output.stdoutPath === "string" || typeof output.stderrPath === "string") &&
+        (output.stdoutTruncated === true || output.stderrTruncated === true))
+        return "Output truncated: use file_read with stdoutPath or stderrPath to retrieve omitted content.";
+    if (toolName === "file_read" && Array.isArray(output.files) &&
+        output.files.some((file) => isRecord(file) && typeof file.nextSelector === "string"))
+        return "Continue file_read with the file path and its nextSelector as selector.";
+    if (toolName === "file_grep" && Array.isArray(output.files) &&
+        output.files.some((file) => isRecord(file) && typeof file.nextLine === "number"))
+        return "Continue file_grep for that exact file using its nextLine as startLine; use nextCursor alone for more files.";
+    return undefined;
 }
 
 function projectBash(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {

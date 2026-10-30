@@ -37,14 +37,14 @@ function environmentInfoDefinition(): ToolDefinition {
                         readOnlyHint: false,
                     },
                     inputHints: {
-                        workspace: "Absolute workspace to attach or switch.",
+                        workspace: "Absolute workspace to attach or switch; if unknown, ask the user for its absolute path.",
                     },
                     title: "Create environment",
                 },
             },
         },
         description:
-            "Prepare and inspect the workspace environment for the current portable-devshell Context. This is the Context bootstrap tool: with workspace it creates or attaches a Context when needed, stable external bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools.",
+            "Prepare the current Context before using other DevShell tools. If no Context is bound, use the workspace path already supplied by the user, or ask the user for its absolute path. Existing Contexts and expired leases can be reused.",
         group: "environ",
         inputSchema: {
             additionalProperties: false,
@@ -89,7 +89,7 @@ function remoteEnvironmentDefinition(): ToolDefinition {
                         readOnlyHint: false,
                     },
                     inputHints: {
-                        command: "Use help to list current operations.",
+                        command: "help (list operations), attach (requires handle; optional workspace), mask (requires handle; irreversible for this Context).",
                         handle: "Opaque instance handle from devshell instance list/status.",
                         workspace: "Absolute workspace for attach operations.",
                     },
@@ -104,7 +104,7 @@ function remoteEnvironmentDefinition(): ToolDefinition {
             additionalProperties: false,
             properties: {
                 command: {
-                    minLength: 1,
+                    enum: ["help", "attach", "mask"],
                     type: "string",
                 },
                 handle: {

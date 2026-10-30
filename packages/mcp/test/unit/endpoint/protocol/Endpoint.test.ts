@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import { parseMcpHttpResponse } from "../../../TestMcpHttpResponse.ts";
 
-import { attachToolCallErrorPayload } from "@portable-devshell/shared";
+import { attachToolCallErrorPayload, createRemoteError } from "@portable-devshell/shared";
 
 import {
     McpEndpointBinding,
@@ -807,6 +807,33 @@ test("tools/call returns a structured hint when the tool fails", async () => {
         assert.equal(response.status, 200);
         const comments = response.body.error?.data?.comment as string[];
         assert.match(comments[0] ?? "", /^\[error\.unknown\] /);
+    } finally {
+        await server.close();
+    }
+});
+
+test("tools/call exposes correctable input errors without masking their code", async () => {
+    const harness = createWorkerHarness({
+        async callHandler() {
+            throw createRemoteError({
+                code: "tool.invalidArguments",
+                message: "Use an absolute workspace path.",
+                retryable: false,
+            });
+        },
+    });
+    const server = await createBindingServer(createBinding(harness));
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers,
+        );
+        assert.equal(response.body.error?.code, -32602);
+        assert.equal(response.body.error?.data?.code, "tool.invalidArguments");
+        assert.match(response.body.error?.message ?? "", /absolute workspace path/u);
     } finally {
         await server.close();
     }

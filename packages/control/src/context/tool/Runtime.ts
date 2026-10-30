@@ -1,6 +1,6 @@
 import type { ToolCallRegistration } from "@portable-devshell/shared";
 import {
-    contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, type EnvironmentTransport, type JsonValue, type ProcessTransport, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";
+    contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, toRemoteErrorBody, type EnvironmentTransport, type JsonValue, type ProcessTransport, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
 import {
     contextToolDefinitions,
@@ -17,6 +17,8 @@ type CurrentMemory = {
     directory: string;
     mailbox: string;
 };
+
+const workspaceAdvice = "No workspace is attached to this Context. If the user already supplied an absolute workspace path, call environ_info with that path. Otherwise ask the user for the absolute workspace path, then call environ_info with workspace.";
 
 export function installContextTools(
     contexts: ContextApi,
@@ -83,25 +85,34 @@ class ContextToolRuntime {
     ): Promise<JsonValue> {
         const allowContextId = context.contextMode !== "openai-session";
         const parsed = readEnvironmentInfoInput(input, allowContextId);
-        let resolution = await this.#resolveContext(
-            {
-                ...((parsed.ctxId ?? context.ctxId) === undefined
-                    ? {}
-                    : { ctxId: parsed.ctxId ?? context.ctxId }),
-                ...((parsed.workspace ?? context.workspace) === undefined
-                    ? {}
-                    : { workspace: parsed.workspace ?? context.workspace }),
-            },
-            context,
-            false,
-        );
+        let resolution;
+        try {
+            resolution = await this.#resolveContext(
+                {
+                    ...((parsed.ctxId ?? context.ctxId) === undefined
+                        ? {}
+                        : { ctxId: parsed.ctxId ?? context.ctxId }),
+                    ...((parsed.workspace ?? context.workspace) === undefined
+                        ? {}
+                        : { workspace: parsed.workspace ?? context.workspace }),
+                },
+                context,
+                false,
+            );
+        } catch (error) {
+            const body = toRemoteErrorBody(error);
+            if (body?.code === contextErrorCodes.invalid &&
+                body.message.startsWith("No Context is bound to this request."))
+                return { comment: [workspaceAdvice] };
+            throw error;
+        }
         let record = resolution.record;
         const workspace =
             parsed.workspace ??
             context.workspace ??
             contextWorkspace(record, context.instance);
         if (workspace === undefined)
-            throw contextWorkspaceRequired(record.ctxId, context.instance);
+            return { ...this.#expose(record, context), comment: [workspaceAdvice] };
 
         let committed = false;
         let alertCleanupWorkspace: string | undefined;
@@ -443,15 +454,6 @@ function contextWorkspace(
     return record.environments.find(
         (environment) => environment.instance === instance,
     )?.workspace;
-}
-
-function contextWorkspaceRequired(ctxId: string, instance: string) {
-    return createRemoteError({
-        code: contextErrorCodes.workspaceRequired,
-        details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for ${ctxId}. Use environ_remote command='attach' with its handle and an absolute workspace.`,
-        retryable: false,
-    });
 }
 
 function conflictingExternalBindings() {

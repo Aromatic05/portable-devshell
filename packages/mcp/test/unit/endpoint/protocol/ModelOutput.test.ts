@@ -147,6 +147,7 @@ test("file_read preserves file identity and resumes its original paged selector"
     assert.equal(file[0]?.truncated, true);
     assert.match(file[0]?.nextSelector as string, /^\d+-200:raw;next=201$/u);
     assert.equal((file[0]?.content as string).startsWith("1:"), true);
+    assert.match(String((data(projected).comment as string[] | undefined)?.[0]), /nextSelector/u);
 });
 
 test("file_read outline previews never fabricate an invalid content selector", () => {
@@ -178,6 +179,7 @@ test("file_grep keeps exact-file continuation and individual hit identities", ()
     assert.equal(typeof file.nextLine, "number");
     assert.equal((file.nextLine as number) <= 180, true);
     assert.equal(output.nextCursor, "cursor-123");
+    assert.match(String((output.comment as string[] | undefined)?.[0]), /startLine/u);
 });
 
 test("file_edit explicitly accounts for omitted applied operations", () => {

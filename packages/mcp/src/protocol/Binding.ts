@@ -250,7 +250,9 @@ function toMcpError(error: unknown): ProtocolError {
 
     if (body !== undefined) {
         return new ProtocolError(
-            ProtocolErrorCode.InternalError,
+            isCorrectableToolError(body.code)
+                ? ProtocolErrorCode.InvalidParams
+                : ProtocolErrorCode.InternalError,
             body.message,
             {
                 ...sanitizeErrorBody(body),
@@ -272,6 +274,18 @@ function toMcpError(error: unknown): ProtocolError {
         "Unknown MCP error.",
         comment === undefined ? undefined : { comment },
     );
+}
+
+function isCorrectableToolError(code: string): boolean {
+    return code === "tool.invalidArguments" ||
+        code === "control.invalidTarget" ||
+        code === "mcp.contextInvalid" ||
+        code === "mcp.contextExpired" ||
+        code === "mcp.contextWorkspaceRequired" ||
+        code.startsWith("file.invalid") ||
+        code === "file.unreadRange" ||
+        code === "file.patchAmbiguous" ||
+        code === "tmux.invalidCwd";
 }
 
 function readToolCallComments(
