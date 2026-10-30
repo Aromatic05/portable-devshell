@@ -165,7 +165,7 @@ pub struct FileReadBatchOutput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
-    /// Ordered edit document using the *** Begin Edit / *** End Edit format described by this tool.
+    /// One *** Begin Edit / *** End Edit change set. Use *** Write File:, *** Patch File:, *** Rewrite File:, *** Delete File:, or *** Move File:; a move needs *** To:. Patch hunks use @@, @@ BOF, or @@ EOF and context/-/+ lines. Write and Rewrite bodies are literal text.
     #[schemars(length(min = 1))]
     pub changes: String,
     /// Result detail. Defaults to summary.

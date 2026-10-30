@@ -419,10 +419,35 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         const input = tool.inputSchema as Record<string, unknown>;
         assert.equal(input.$schema, undefined);
         assert.equal(input.title, undefined);
-        assert.deepEqual(
-            Object.keys((input.$defs as Record<string, unknown>) ?? {}),
-            ["Used"],
-        );
+        assert.deepEqual((properties?.mode as unknown as { enum: string[] })?.enum, ["safe"]);
+        assert.equal(input.$defs, undefined);
         assert.deepEqual(tool.outputSchema, { type: "object" });
+    });
+
+    test("MCP model schema expands nested scalar enums without expanding object references", () => {
+        const adapter = new McpToolSchemaAdapter();
+        const tool = adapter.toMcpTool({
+            ...bashRun,
+            name: "file_read",
+            inputSchema: {
+                type: "object",
+                properties: { files: { type: "array", items: { $ref: "#/$defs/FileRequest" } } },
+                $defs: {
+                    FileRequest: { type: "object", properties: {
+                        view: { $ref: "#/$defs/View", default: "auto" },
+                    } },
+                    View: { type: "string", enum: ["auto", "content", "metadata", "outline"] },
+                },
+            },
+        }, "Read files", { modelFacing: true });
+        const schema = tool.inputSchema as {
+            $defs?: Record<string, {
+                properties?: Record<string, { enum?: string[]; default?: string }>;
+            }>;
+        };
+        assert.deepEqual(schema.$defs?.FileRequest?.properties?.view?.enum,
+            ["auto", "content", "metadata", "outline"]);
+        assert.equal(schema.$defs?.FileRequest?.properties?.view?.default, "auto");
+        assert.equal(schema.$defs?.View, undefined);
     });
 }

@@ -27,7 +27,6 @@ type AgentModelToolResultProjector = (
 ) => string;
 
 interface AgentModelToolProjectionSpec {
-    description: string;
     projectResult: AgentModelToolResultProjector;
 }
 
@@ -38,109 +37,61 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
     [
         "bash_run",
         {
-            description:
-                "Run a short, bounded, non-interactive shell command. Prefer this when the work fits the command timeout and does not need a PTY; use tmux_run for long-running or interactive work. If stdoutRecovery or stderrRecovery is returned, use file_read on that path for omitted output.",
             projectResult: renderBashModelToolResult,
         },
     ],
     [
         "file_edit",
         {
-            description:
-                "Apply an ordered multi-file change set. Establish edit coverage with file_read or file_grep before the first change to existing content. Successful edits carry valid coverage forward, so re-read only when coverage is missing, stale, or the next edit touches unseen existing lines. Keep one coherent change set; if an operation fails, later operations are not executed.",
             projectResult: renderFileEditModelToolResult,
         },
     ],
     [
         "file_glob",
         {
-            description:
-                "Discover files and directories by exact path or glob pattern. Use this for path discovery rather than content search, and continue paged results with cursor alone.",
             projectResult: renderFileGlobModelToolResult,
         },
     ],
     [
         "file_grep",
         {
-            description:
-                "Search text in files, directories, or globs. Use this to locate relevant lines and establish edit coverage before file_edit; continue a truncated file with startLine and paged traversal with cursor alone.",
             projectResult: renderFileGrepModelToolResult,
         },
     ],
     [
         "file_read",
         {
-            description:
-                "Read file content, structural outline, metadata, or a retained tool-result path. Use focused selectors for large files. Returned content lines and exact signature lines rendered by outline establish edit coverage; metadata and retained tool-result reads do not. Follow nextSelector when a content read is truncated.",
             projectResult: renderFileReadModelToolResult,
         },
     ],
     [
         "tmux_input",
         {
-            description:
-                "Send terminal input to a managed task or persistent pane. Address managed executions by task id and persistent interactions by pane; use tmux_read for task transcript output and tmux_inspect for pane screen state. Caret notation sends control keys.",
             projectResult: renderTmuxTaskModelToolResult,
         },
     ],
     [
         "tmux_inspect",
         {
-            description:
-                "Observe pane terminal state without consuming a managed task transcript. Use this for main or persistent panes and curses/TUI screen state; use tmux_read when the durable managed-task transcript is the source of truth.",
             projectResult: renderTmuxInspectModelToolResult,
         },
     ],
     [
         "tmux_manage",
         {
-            description:
-                "Manage tmux resources: command=list discovers panes and active tasks, command=create opens a persistent interactive pane, and command=close terminates a task or closes a persistent pane. Use force only when intentionally terminating a running or busy resource.",
             projectResult: renderTmuxManageModelToolResult,
         },
     ],
     [
         "tmux_read",
         {
-            description:
-                "Wait for or consume a managed task transcript using its task id. Use this for durable task output; use tmux_inspect for non-consuming pane screen state. Positive line consumes the oldest unread lines. Negative line also consumes all unread transcript data, discards the earlier portion, and returns only the requested tail after waiting.",
             projectResult: renderTmuxTaskModelToolResult,
         },
     ],
     [
         "tmux_run",
         {
-            description:
-                "Start long-running or PTY/interactive work as a managed task. Prefer wait=block when completion is on the current critical path and there is no useful parallel work; use wait=nonblock when intentionally continuing other work. Continue task output with tmux_read and interact with tmux_input.",
             projectResult: renderTmuxTaskModelToolResult,
-        },
-    ],
-]);
-
-const AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS = new Map<
-    string,
-    Readonly<Record<string, string>>
->([
-    [
-        "bash_run",
-        {
-            timeoutMs:
-                "Hard command timeout in milliseconds, up to 100000. Use tmux_run instead when work may exceed this bound.",
-        },
-    ],
-    [
-        "file_edit",
-        {
-            changes:
-                "Ordered *** Begin Edit / *** End Edit change set using *** Patch File:, *** Write File:, *** Rewrite File:, *** Delete File:, or *** Move File: operations.",
-        },
-    ],
-    [
-        "tmux_run",
-        {
-            timeout:
-                "Maximum block-wait deadline from task start; reaching it leaves the task running. Set it to cover the expected critical-path wait.",
-            wait: "Prefer block when this task must finish before continuing and there is no useful parallel work; use nonblock when intentionally continuing other work or planning later interaction.",
         },
     ],
 ]);
@@ -159,7 +110,7 @@ export function projectAgentModelTools(
                     `Missing Agent model tool projection: ${tool.name}`,
                 );
             return {
-                description: projection.description,
+                description: tool.description,
                 inputSchema: projectAgentModelInputSchema(
                     tool.name,
                     tool.inputSchema,
@@ -207,18 +158,6 @@ function projectAgentModelInputSchema(
         ...(TOOL_INTERNAL_INPUT_PROPERTIES.get(toolName) ?? []),
     ]);
     for (const property of hidden) delete properties[property];
-
-    const propertyDescriptions =
-        AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS.get(toolName);
-    if (propertyDescriptions !== undefined) {
-        for (const [property, description] of Object.entries(
-            propertyDescriptions,
-        )) {
-            const propertySchema = properties[property];
-            if (isRecord(propertySchema))
-                properties[property] = { ...propertySchema, description };
-        }
-    }
 
     const required = Array.isArray(schema.required)
         ? schema.required.filter(

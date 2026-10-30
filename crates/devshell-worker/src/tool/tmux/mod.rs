@@ -34,9 +34,9 @@ use crate::transport::endpoint::channel::EndpointPaths;
 pub use backend::retire::retire_instance_runtime;
 
 #[cfg(unix)]
-const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. Prefer wait=block for work that must complete on the current critical path; use wait=nonblock when continuing other work or planning later interaction through tmux_read/tmux_input.";
+const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. wait defaults to nonblock; use block for critical-path tasks and nonblock to work concurrently. A block-wait timeout does not terminate the task; continue with tmux_read or tmux_input.";
 #[cfg(windows)]
-const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. Prefer wait=block for work that must complete on the current critical path; use wait=nonblock when continuing other work or planning later interaction through tmux_read/tmux_input.";
+const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. wait defaults to nonblock; use block for critical-path tasks and nonblock to work concurrently. A block-wait timeout does not terminate the task; continue with tmux_read or tmux_input.";
 
 fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
     TmuxWarning {
@@ -230,7 +230,7 @@ pub fn register_tools(
                     "cwd": "Initial task directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                     "line": "Output lines returned with the task.",
                     "timeout": "Block-wait deadline; the task keeps running after it expires.",
-                    "wait": "block waits for progress; nonblock returns after start."
+                    "wait": "Defaults to nonblock. block waits for progress; nonblock returns after start. A wait timeout leaves the task running."
                 },
                 "title": "Run tmux task"
             }}

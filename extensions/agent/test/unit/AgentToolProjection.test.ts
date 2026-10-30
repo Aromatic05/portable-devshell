@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectAgentModelToolResult } from "../../src/builtin/provider/AgentToolProjection.ts";
+import { projectAgentModelToolResult, projectAgentModelTools } from "../../src/builtin/provider/AgentToolProjection.ts";
+
+test("Agent model tools use the Worker tool description and field documentation", () => {
+    const tools = projectAgentModelTools([{
+        name: "file_edit",
+        description: "Worker's canonical edit instructions",
+        inputSchema: {
+            type: "object",
+            properties: { changes: { type: "string", description: "Worker's five operations and edit syntax" } },
+            required: ["changes"],
+        },
+    }]);
+    assert.equal(tools[0]?.description, "Worker's canonical edit instructions");
+    const input = tools[0]?.inputSchema as { properties?: { changes?: { description?: string } } };
+    assert.equal(input.properties?.changes?.description, "Worker's five operations and edit syntax");
+});
 
 test("256-operation Agent edit projection preserves the middle failure and batch outcomes", () => {
     const operations = Array.from({ length: 256 }, (_, index) => ({

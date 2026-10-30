@@ -96,12 +96,34 @@ function compactModelInputSchema(
     );
     return pruneUnusedLocalDefinitions(
         compactModelInputDescriptions(
-            normalized,
+            inlineScalarReferences(normalized, normalized),
             options.inputHints ?? {},
             undefined,
             options.preserveInputDescriptions === true,
         ),
     );
+}
+
+// Inline only small enumerated scalar references so model-facing schemas expose
+// valid choices directly (e.g. file_read.files[].view), without expanding
+// recursive objects or increasing the model token budget unnecessarily.
+function inlineScalarReferences(value: JsonValue, root: JsonValue): JsonValue {
+    if (Array.isArray(value))
+        return value.map((entry) => inlineScalarReferences(entry, root));
+    if (!isRecord(value)) return value;
+    if (typeof value.$ref === "string" && isRecord(root)) {
+        const definition = resolveLocalDefinition(root, value.$ref);
+        if (definition !== undefined &&
+            (Array.isArray(definition.enum) || definition.const !== undefined) &&
+            (definition.type === "string" || definition.type === "integer" ||
+                definition.type === "number" || definition.type === "boolean")) {
+            const { $ref: _reference, ...rest } = value;
+            return { ...definition, ...rest };
+        }
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+        key, inlineScalarReferences(entry, root),
+    ]));
 }
 
 function hideModelInputProperties(
