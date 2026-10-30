@@ -81,6 +81,7 @@ impl ToolHandler for BashRunTool {
                         "readOnlyHint": false
                     },
                     "inputHints": {
+                        "command": "Shell command. Run devshell help to discover authorized MCP model CLI commands.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                         "stdin": "Omit to send EOF.",
                         "timeoutMs": "Required timeout in milliseconds."

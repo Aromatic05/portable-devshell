@@ -209,6 +209,18 @@ test("file_glob and file_grep paging is diagnosed but empty results are not fail
     assert.deepEqual(resolveResultHints("file_grep", { files: [] }), []);
 });
 
+test("file_grep reports exact-file nextLine independently of traversal cursor", () => {
+    const singleFile = resolveResultHints("file_grep", {
+        files: [{ path: "example.ts", nextLine: 81 }],
+    });
+    assert.deepEqual(codes(singleFile), ["file.partialFileResults"]);
+    assert.match(singleFile[0]?.text ?? "", /startLine/u);
+    assert.deepEqual(codes(resolveResultHints("file_grep", {
+        files: [{ path: "example.ts", nextLine: 81 }],
+        nextCursor: "c2",
+    })), ["file.partialFileResults", "file.partialResults"]);
+});
+
 test("file_read metadata missing paths are observations, not failures", () => {
     assert.deepEqual(
         resolveResultHints("file_read", {
@@ -502,14 +514,17 @@ test("context expired, disabled, and invalid remain distinct error classes", () 
     assert.deepEqual(codes(disabled), ["mcp.contextDisabled"]);
     assert.match(
         disabled[0]?.text ?? "",
-        /environ_info with workspace to establish a new active Context/u,
+        /ask the user for its absolute path/u,
     );
     const invalid = resolveErrorHints("bash_run", body("mcp.contextInvalid"));
     assert.deepEqual(codes(invalid), ["mcp.contextInvalid"]);
     assert.match(
         invalid[0]?.text ?? "",
-        /environ_info with workspace to establish or recover the current Context/u,
+        /ask the user for its absolute path/u,
     );
+    const invalidTarget = resolveErrorHints("environ_remote", body("control.invalidTarget"));
+    assert.deepEqual(codes(invalidTarget), ["control.invalidTarget"]);
+    assert.match(invalidTarget[0]?.text ?? "", /invalid argument or target/u);
 });
 
 test("unclassified errors fall back to a safe unknown hint", () => {

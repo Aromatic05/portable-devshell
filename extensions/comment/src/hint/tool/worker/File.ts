@@ -59,8 +59,16 @@ export function fileGlobResultHints(result: JsonValue): ToolDiagnosticHint[] {
 export function fileGrepResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
-    if (asString(record.nextCursor) === undefined) return [];
-    return [diagnosticHint("file.partialResults", "Continue with nextCursor.")];
+    const hints: ToolDiagnosticHint[] = [];
+    if (asArray(record.files)?.some((entry) =>
+        asNumber(asRecord(entry)?.nextLine) !== undefined))
+        hints.push(diagnosticHint(
+            "file.partialFileResults",
+            "Continue file_grep on the exact file path with startLine from its nextLine.",
+        ));
+    if (asString(record.nextCursor) !== undefined)
+        hints.push(diagnosticHint("file.partialResults", "Continue with nextCursor alone for more files."));
+    return hints;
 }
 
 export function fileEditResultHints(result: JsonValue): ToolDiagnosticHint[] {

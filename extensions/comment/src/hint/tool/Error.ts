@@ -58,14 +58,14 @@ const crossToolHints: Record<string, string> = {
     "mcp.contextExpired":
         "Call environ_info to renew the current Context, adding workspace only if it is not already attached.",
     "mcp.contextDisabled":
-        "Call environ_info with workspace to establish a new active Context.",
+        "Call environ_info with an already known workspace; otherwise ask the user for its absolute path.",
     "mcp.contextInstanceMasked":
         "This instance is permanently unavailable for the lifetime of the current Context; do not retry or attempt to unmask it.",
     "mcp.contextInvalid":
-        "Call environ_info with workspace to establish or recover the current Context.",
+        "Call environ_info with an already known workspace to recover Context; otherwise ask the user for its absolute path.",
     "mcp.contextWorkspaceRequired":
         "Obtain the instance handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.",
-    "control.invalidTarget": "Use a valid instance target.",
+    "control.invalidTarget": "Correct the invalid argument or target named in the error message.",
     "control.clientIdentityRequired":
         "Supply the required client identity.",
     "control.clientIdentityInvalid": "Correct the client identity.",
