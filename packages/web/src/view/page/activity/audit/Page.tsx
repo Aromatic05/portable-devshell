@@ -43,6 +43,7 @@ import { useNow } from "../../../Clock.js";
 
 const toolCallPageSize = 20;
 const activeContextWindowMs = 30 * 60 * 1_000;
+const auditRefreshIntervalMs = 30_000;
 
 export function Audit({
     disabled = false,
@@ -61,6 +62,25 @@ export function Audit({
     const instancesState = useDomainSnapshot(domains.instances);
     const contextState = useDomainSnapshot(domains.context);
     const toolCallsState = useDomainSnapshot(domains.toolCalls);
+    useEffect(() => {
+        if (server.status !== "online") return;
+        let pending = false;
+        const refresh = () => {
+            if (pending || document.visibilityState === "hidden") return;
+            pending = true;
+            // Keep a long-lived Audit view current even if its event stream went quiet.
+            // Avoid refreshAudit(), which also reloads logs, messages and approvals.
+            void Promise.allSettled(instancesState.instances.map(({ name }) =>
+                domains.toolCalls.refresh(name),
+            )).then(() => { pending = false; });
+        };
+        const timer = window.setInterval(refresh, auditRefreshIntervalMs);
+        document.addEventListener("visibilitychange", refresh);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", refresh);
+        };
+    }, [domains, server.status, instancesState.instances]);
     const storeState = useSyncExternalStore(
         store.subscribe,
         () => store.state,

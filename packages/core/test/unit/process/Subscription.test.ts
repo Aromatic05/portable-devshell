@@ -288,6 +288,9 @@ function createStreamContext(
             cancelListeners.add(listener);
             return () => cancelListeners.delete(listener);
         },
+        async close() {
+            for (const listener of closeListeners) listener();
+        },
     } as unknown as MessageStream;
     return {
         context: {

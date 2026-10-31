@@ -226,6 +226,7 @@ export class WebTestDomains {
         }),
         {
             load: asyncVoid,
+            refresh: asyncVoid,
             loadContext: async (instance: string, ctxId: string) => {
                 this.toolCalls.patch({ context: {
                     calls: (this.toolCalls.state.instances[instance]?.calls ?? [])

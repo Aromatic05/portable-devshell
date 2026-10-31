@@ -299,6 +299,9 @@ export class ProcessSubscriptionManager {
         this.#subscriptions.delete(key);
         subscription.detach();
         subscription.controller.abort();
+        // A server-side failure or Instance retirement must wake the remote reader.
+        // Otherwise it remains live forever without a producer to send events.
+        void subscription.stream.close().catch((error: unknown) => console.warn(error));
         this.#stopPollingWhenIdle();
     }
 
