@@ -299,6 +299,77 @@ test("Comment retention failure leaves the full user message in the tool result"
     assert.equal((await hook(input, unusedInvocation)).payload, input.value.payload);
 });
 
+test("MCP native presentations deliver Comment and retained recovery in structuredContent", async () => {
+    const text = "User requires the complete message: " + "important detail ".repeat(200);
+    const input = {
+        ...base,
+        direction: "outbound" as const,
+        value: {
+            ...base.value,
+            kind: "result" as const,
+            toolName: "artifact_viewImage",
+            payload: {
+                content: [{ type: "image", data: "image-data", mimeType: "image/png" }],
+                structuredContent: { name: "image.png" },
+            },
+        },
+    };
+    const delivery = createCommentDelivery(createPort({
+        async consumePending(_instance, _ctxId, callId) {
+            return { callId, comment: text, messages: [] };
+        },
+    }));
+    const retention = createCommentRetention(async (_instance, full) => {
+        assert.equal(full, text);
+        return { path: "/.devshell/tool-results/comment/stdout", sourceBytes: Buffer.byteLength(full), expiresAtMs: 12345 };
+    });
+    const delivered = await delivery(input, unusedInvocation);
+    const projected = await retention({ ...input, value: delivered }, unusedInvocation);
+    const payload = projected.payload as typeof input.value.payload & {
+        structuredContent: { name: string; comment: string[]; commentPath: string; commentInstance: string };
+    };
+    assert.deepEqual(payload.content, input.value.payload.content);
+    assert.equal("comment" in payload, false);
+    assert.equal(payload.structuredContent.name, "image.png");
+    assert.equal(payload.structuredContent.commentPath, "/.devshell/tool-results/comment/stdout");
+    assert.equal(payload.structuredContent.commentInstance, "demo");
+    assert.match(payload.structuredContent.comment[0] ?? "", /file_read/u);
+});
+
+test("cancelled tool results keep queued Comment for the next deliverable call", async (t) => {
+    const root = await createTestTempDirectory("comment-cancel-delivery");
+    const filePath = join(root, "message.sqlite3");
+    const store = new MessageStore({ filePath, instanceName: "demo", openDatabase: () => databaseConnection(filePath) });
+    t.after(() => store.close());
+    const service = new CommentService({
+        store,
+        instanceName: "demo",
+        appendEvent: async () => undefined,
+    });
+    const queued = await service.queue({ ctxId: base.value.context.ctxId, text: "Reply with this constraint" });
+    const delivery = createCommentDelivery({
+        consumePending: async (_instance, ctxId, callId) => await service.consumePending(ctxId, callId),
+    });
+    const cancelled = {
+        ...base,
+        direction: "outbound" as const,
+        value: {
+            ...base.value,
+            kind: "error" as const,
+            payload: { error: { code: "core.toolCallCancelled", message: "client cancelled" } },
+        },
+    };
+    assert.deepEqual(await delivery(cancelled, unusedInvocation), cancelled.value);
+    const aborted = new AbortController();
+    aborted.abort();
+    const ordinary = { ...cancelled, value: { ...cancelled.value, payload: { error: { code: "tool.invalidArguments" } } } };
+    assert.deepEqual(await delivery(ordinary, { ...unusedInvocation, signal: aborted.signal }), ordinary.value);
+    assert.equal((await service.list(base.value.context.ctxId))[0]?.status, "sent");
+    const result = await delivery(ordinary, unusedInvocation);
+    assert.deepEqual((result.payload as { comment: string[] }).comment, [queued.text]);
+    assert.equal((await service.list(base.value.context.ctxId))[0]?.status, "delivered");
+});
+
 test("Comment toolcall gate maps push stop and resume to rejected ToolCalls", async () => {
     const decisions: CommentControlDecision[] = [
         {

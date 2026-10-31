@@ -32,14 +32,15 @@ import {
     type ToolCallRewriteBinding,
     type ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
-import type {
-    ContextMessageReadResult,
-    ContextMessageRecord,
-    MessageEntry,
-    MessageListInput,
-    JsonValue,
-    ControlPortDefinition,
-    MessageEventType,
+import {
+    runtimeErrorCodes,
+    type ContextMessageReadResult,
+    type ContextMessageRecord,
+    type MessageEntry,
+    type MessageListInput,
+    type JsonValue,
+    type ControlPortDefinition,
+    type MessageEventType,
 } from "@portable-devshell/shared";
 
 import {
@@ -539,10 +540,12 @@ export function createCommentToolCallGate(
 export function createCommentDelivery(
     comment: Pick<CommentPort, "consumePending">,
 ): ToolCallRewriteBinding {
-    return async (input: ToolCallRewriteInvocation) => {
+    return async (input: ToolCallRewriteInvocation, invocation) => {
         if (
             input.direction !== "outbound" ||
             (input.value.kind !== "result" && input.value.kind !== "error") ||
+            invocation.signal.aborted ||
+            isCancelledToolCall(input.value) ||
             // Context-scoped Extension work (including automatic Memory
             // binding) returns to the Extension, not the Context's caller.
             // Leave its queued Comments for the caller's own tool result.
@@ -589,9 +592,9 @@ export function createCommentRetention(
             (input.value.kind !== "result" && input.value.kind !== "error"))
             return input.value;
         const payload = input.value.payload;
-        if (typeof payload !== "object" || payload === null || Array.isArray(payload) ||
-            !Array.isArray(payload.comment)) return input.value;
-        const comments = payload.comment.filter(
+        const output = commentOutput(payload);
+        if (output === undefined || !Array.isArray(output.comment)) return input.value;
+        const comments = output.comment.filter(
             (entry): entry is string => typeof entry === "string" && entry.length > 0,
         );
         const full = comments.join("\n\n");
@@ -606,8 +609,8 @@ export function createCommentRetention(
         }
         return {
             ...input.value,
-            payload: {
-                ...payload,
+            payload: replaceCommentOutput(payload, output, {
+                ...output,
                 comment: [
                     `${full.slice(0, 1_000)}\n... [Comment preview; full ${retained.sourceBytes} bytes retained. Before continuing, use file_read with path=${retained.path} and instance=${input.value.context.instance}.]`,
                 ],
@@ -615,34 +618,55 @@ export function createCommentRetention(
                 commentInstance: input.value.context.instance,
                 commentBytes: retained.sourceBytes,
                 commentExpiresAtMs: retained.expiresAtMs,
-            },
+            }),
         };
     };
+}
+
+function isCancelledToolCall(value: ToolCallRewriteInvocation["value"]): boolean {
+    if (value.kind !== "error") return false;
+    const body = commentOutput(value.payload)?.error;
+    if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+    return body.code === runtimeErrorCodes.toolCallCancelled || body.code === "tool.cancelled";
+}
+
+function commentOutput(payload: ExtensionJsonValue): Record<string, ExtensionJsonValue> | undefined {
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+    if (Array.isArray(payload.content) &&
+        payload.structuredContent !== null &&
+        typeof payload.structuredContent === "object" &&
+        !Array.isArray(payload.structuredContent)) return payload.structuredContent;
+    return payload;
+}
+
+function replaceCommentOutput(
+    payload: ExtensionJsonValue,
+    output: Record<string, ExtensionJsonValue>,
+    replacement: Record<string, ExtensionJsonValue>,
+): ExtensionJsonValue {
+    return payload === output ? replacement : { ...(payload as Record<string, ExtensionJsonValue>), structuredContent: replacement };
 }
 
 function appendOutputComments(
     payload: ExtensionJsonValue,
     comments: readonly string[],
 ): ExtensionJsonValue {
-    if (
-        typeof payload !== "object" ||
-        payload === null ||
-        Array.isArray(payload)
-    ) {
+    const output = commentOutput(payload);
+    if (output === undefined) {
         throw new TypeError(
             "ToolCall result must be an object when Comment delivery is pending.",
         );
     }
-    const existing = Array.isArray(payload.comment)
-        ? payload.comment.filter(
+    const existing = Array.isArray(output.comment)
+        ? output.comment.filter(
               (entry): entry is string =>
                   typeof entry === "string" && entry.length > 0,
           )
         : [];
-    return {
-        ...payload,
+    return replaceCommentOutput(payload, output, {
+        ...output,
         comment: [...new Set([...existing, ...comments])],
-    };
+    });
 }
 
 function registerCommentRoutes(
