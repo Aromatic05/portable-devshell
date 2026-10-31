@@ -23,6 +23,7 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
         { hook: "501-memory-auto", id: "memory-auto" },
         { hook: "502-tool-advice", id: "tool-advice" },
         { hook: "510-comment-delivery", id: "comment-delivery" },
+        { hook: "515-comment-retention", id: "comment-retention" },
         { hook: "520-mailing-trigger", id: "mailing-trigger" },
     ]);
 });
@@ -81,13 +82,14 @@ test("Comment Extension activates from observe and event-publish capabilities wi
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 14);
+    assert.equal(registrations.length, 15);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
             { id: "toolcall-gate", pointId: "toolcall.review" },
             { id: "comment-delivery", pointId: "toolcall.rewrite" },
             { id: "tool-advice", pointId: "toolcall.rewrite" },
+            { id: "comment-retention", pointId: "toolcall.rewrite" },
             { id: "memory-auto", pointId: "toolcall.rewrite" },
             { id: "mailing-trigger", pointId: "toolcall.rewrite" },
             { id: "memory", pointId: "cli.model-commands" },

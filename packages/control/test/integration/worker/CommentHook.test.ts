@@ -9,7 +9,7 @@ import {
     createCommentToolCallGate,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
-import { asInstanceName, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
+import { asInstanceName, presentToolCallResult, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
 import { CONTEXT_MESSAGE_PUSH_TOOL_BUDGET } from "@portable-devshell/shared/testing";
 
 import { createToolCallScope } from "../../../../core/src/toolcall/execution/Context.ts";
@@ -103,9 +103,12 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             },
         },
         toolInvoker: {
-            async invoke() {
+            async invoke(_toolName: string, input: { command?: string }) {
                 executions += 1;
-                return { exitCode: 0, stderr: "", stdout: "ok" };
+                const result = { exitCode: 0, stderr: "", stdout: "ok" };
+                return input.command === "printf native-comment"
+                    ? presentToolCallResult(result, { content: [{ type: "text", text: "native presentation" }] })
+                    : result;
             },
         },
     } as never);
@@ -252,6 +255,12 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
     );
     assert.equal(afterReport.error, undefined, JSON.stringify(afterReport));
     assert.equal(executions, 6);
+
+    await queueComment(comment, ctxId, "Native MCP results must deliver this Comment");
+    const native = await callBash(endpoint, headers, ctxId, "native-comment");
+    assert.equal(native.error, undefined, JSON.stringify(native));
+    assert.deepEqual(native.result?.structuredContent?.comment, ["Native MCP results must deliver this Comment"]);
+    assert.equal(executions, 7);
 });
 
 const instanceKey = {};

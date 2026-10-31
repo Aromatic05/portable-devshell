@@ -770,6 +770,7 @@ export function activate(context) {
     context.register({ id: "cli.native-commands" }, "test", async () => {
         const instances = await context.capabilities.instanceObserve.list();
         const shares = await context.capabilities.artifacts.listShares();
+        const retained = await context.capabilities.artifacts.retainText("local-test", "Comment to retain");
         const snapshot = await context.capabilities.instanceObserve.snapshot("local-test");
         await context.capabilities.instanceManage.enable("local-test");
         await context.capabilities.instanceManage.start("local-test");
@@ -777,6 +778,7 @@ export function activate(context) {
         return { kind: "json", value: {
             instanceNames: instances.map((value) => value.name),
             shareIds: shares.map((value) => value.shareId),
+            commentPath: retained.path,
             status: snapshot.status
         } };
     });
@@ -800,6 +802,7 @@ export function activate(context) {
     assert.deepEqual(await cliJson(sandbox, [], "instance-capabilities"), {
         instanceNames: ["local-test"],
         shareIds: ["share-1"],
+        commentPath: "/.devshell/tool-results/test/stdout",
         status: "ready",
     });
     assert.deepEqual(observeCalls, [
@@ -813,7 +816,7 @@ export function activate(context) {
     assert.deepEqual(eventCalls, [
         "instanceEventPublish.appendEvent:local-test:context.message.queued",
     ]);
-    assert.deepEqual(artifactCalls, ["artifacts.listShares"]);
+    assert.deepEqual(artifactCalls, ["artifacts.listShares", "artifacts.retainText:local-test:Comment to retain"]);
 });
 
 test("Extension sandbox does not bridge undeclared Instance capabilities", async (t) => {
@@ -1892,8 +1895,9 @@ function createSandbox(options: {
 
 function fakeArtifacts(calls: string[]): ExtensionArtifactCapability {
     return {
-        async retainText() {
-            throw new Error("unused fake Artifact retention");
+        async retainText(instance, text) {
+            calls.push(`artifacts.retainText:${instance}:${text}`);
+            return { path: "/.devshell/tool-results/test/stdout", sourceBytes: Buffer.byteLength(text), expiresAtMs: 12345 };
         },
         async cancelTransfer(transferId) {
             calls.push(`artifacts.cancelTransfer:${transferId}`);
