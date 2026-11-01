@@ -38,12 +38,14 @@ import {
     type ToolCallFilters as Filters,
 } from "./tool/Model.js";
 import type { WebStore } from "../../../../state/Store.js";
+import { withRequestTimeout } from "../../../../state/Request.js";
 import { approvalOperationKey } from "../../../../state/Operation.js";
 import { useNow } from "../../../Clock.js";
 
 const toolCallPageSize = 20;
 const activeContextWindowMs = 30 * 60 * 1_000;
 const auditRefreshIntervalMs = 30_000;
+const auditReadTimeoutMs = 60_000;
 
 export function Audit({
     disabled = false,
@@ -62,17 +64,22 @@ export function Audit({
     const instancesState = useDomainSnapshot(domains.instances);
     const contextState = useDomainSnapshot(domains.context);
     const toolCallsState = useDomainSnapshot(domains.toolCalls);
+    const instancesRef = useRef(instancesState.instances);
+    instancesRef.current = instancesState.instances;
     useEffect(() => {
         if (server.status !== "online") return;
-        let pending = false;
+        const pending = new Set<string>();
         const refresh = () => {
-            if (pending || document.visibilityState === "hidden") return;
-            pending = true;
+            if (document.visibilityState === "hidden") return;
             // Keep a long-lived Audit view current even if its event stream went quiet.
             // Avoid refreshAudit(), which also reloads logs, messages and approvals.
-            void Promise.allSettled(instancesState.instances.map(({ name }) =>
-                domains.toolCalls.refresh(name),
-            )).then(() => { pending = false; });
+            for (const { name } of instancesRef.current) {
+                if (pending.has(name)) continue;
+                pending.add(name);
+                void withRequestTimeout(domains.toolCalls.refresh(name), auditReadTimeoutMs, "Audit refresh")
+                    .catch(() => undefined)
+                    .finally(() => pending.delete(name));
+            }
         };
         const timer = window.setInterval(refresh, auditRefreshIntervalMs);
         document.addEventListener("visibilitychange", refresh);
@@ -80,7 +87,7 @@ export function Audit({
             window.clearInterval(timer);
             document.removeEventListener("visibilitychange", refresh);
         };
-    }, [domains, server.status, instancesState.instances]);
+    }, [domains, server.status]);
     const storeState = useSyncExternalStore(
         store.subscribe,
         () => store.state,

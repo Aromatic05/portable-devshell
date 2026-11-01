@@ -62,12 +62,13 @@ export class WebStore {
         if (this.#stopped) return Promise.resolve();
         if (this.#loading !== undefined) return this.#loading;
         const loading = (async () => {
+            const generation = this.#generation;
             try {
                 await this.domains.load();
-                if (this.#stopped) return;
+                if (!this.#current(generation)) return;
                 this.#set({ ...this.#state, error: undefined });
             } catch (error) {
-                if (!this.#stopped)
+                if (this.#current(generation))
                     this.#set({ ...this.#state, error: errorMessage(error) });
             }
         })();
@@ -81,6 +82,8 @@ export class WebStore {
     async reconnect(): Promise<void> {
         if (this.#stopped) return;
         this.#generation += 1;
+        this.#loading = undefined;
+        this.#auditRefresh = undefined;
         const generation = this.#generation;
         this.#operations.cancelAll(
             new Error("Web connection is reconnecting."),
@@ -143,7 +146,7 @@ export class WebStore {
     async refreshAudit(): Promise<void> {
         if (this.#auditRefresh !== undefined) return this.#auditRefresh;
         const generation = this.#generation;
-        const refresh = this.#refreshAudit().then(
+        const refresh = withRequestTimeout(this.#refreshAudit(), this.#requestTimeoutMs, "Audit refresh").then(
             () => {
                 if (this.#current(generation))
                     this.#set({ ...this.#state, error: undefined });
