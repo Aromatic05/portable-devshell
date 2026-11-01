@@ -80,6 +80,8 @@ export interface InstanceProcessEnvelope {
 }
 
 export interface InstanceListEntry {
+    /** Active Instance creation identity; absent when no runtime is installed. */
+    incarnation?: string;
     enabled: boolean;
     homeDirectory?: string;
     mcpEnabled: boolean;

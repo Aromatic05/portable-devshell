@@ -379,9 +379,9 @@ describe("WebStore", () => {
             false,
         );
         expect(disable).toHaveBeenCalledTimes(3);
-        expect(disable).toHaveBeenNthCalledWith(1, "ctx-a");
-        expect(disable).toHaveBeenNthCalledWith(2, "ctx-b");
-        expect(disable).toHaveBeenNthCalledWith(3, "ctx-c");
+        expect(disable).toHaveBeenNthCalledWith(1, "ctx-a", expect.any(AbortSignal));
+        expect(disable).toHaveBeenNthCalledWith(2, "ctx-b", expect.any(AbortSignal));
+        expect(disable).toHaveBeenNthCalledWith(3, "ctx-c", expect.any(AbortSignal));
         expect(store.state.error).toContain("ctx-b");
     });
 

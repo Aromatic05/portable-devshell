@@ -155,6 +155,7 @@ function readInstances(
         const homeDirectory = runtime?.supervision.handshake?.homeDirectory;
         return {
             enabled: instance.enabled,
+            incarnation: runtime?.incarnation,
             ...(homeDirectory === undefined ? {} : { homeDirectory }),
             mcpEnabled: instance.mcp.enabled,
             name: instance.name,

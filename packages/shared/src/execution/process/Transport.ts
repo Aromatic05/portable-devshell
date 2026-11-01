@@ -37,7 +37,7 @@ export interface ProcessTransport {
     refresh(signal?: AbortSignal): Promise<InstanceProcessEnvelope>;
     snapshot(signal?: AbortSignal): Promise<InstanceProcessEnvelope>;
     start(options?: ProcessStartOptions): Promise<ProcessStartHandle>;
-    stop(): Promise<InstanceSnapshot>;
+    stop(signal?: AbortSignal): Promise<InstanceSnapshot>;
     subscribe(fromSeq: number): Promise<InstanceEventStreamPort<ProcessEvent>>;
 }
 
@@ -55,8 +55,8 @@ export function createProcessTransport(
         readLogs: (query, signal) => port.request<InstanceLogEntry[]>("readLogs", query, signal),
         refresh: (signal) => port.request<InstanceProcessEnvelope>("refresh", undefined, signal),
         snapshot: (signal) => port.request<InstanceProcessEnvelope>("snapshot", undefined, signal),
-        start: (options = {}) => startProcess(() => open("start"), options),
-        stop: () => port.request<InstanceSnapshot>("stop"),
+        start: (options = {}) => startProcess(() => port.open("start", undefined, options.signal), options),
+        stop: (signal) => port.request<InstanceSnapshot>("stop", undefined, signal),
         subscribe: async (fromSeq) =>
             new InstanceEventStream<ProcessEvent>(
                 instanceName,
@@ -69,6 +69,7 @@ async function startProcess(
     openStart: () => Promise<MessageStream>,
     options: ProcessStartOptions,
 ): Promise<ProcessStartHandle> {
+    options.signal?.throwIfAborted();
     const stream = await openStart();
     options.onRequestId?.(stream.id);
     const offData = stream.onData((message) => {

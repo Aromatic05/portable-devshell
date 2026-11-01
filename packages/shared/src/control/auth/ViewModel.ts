@@ -43,7 +43,6 @@ export class AuthViewModel {
     #activeRead?: AbortController;
     #published: AuthViewModelState = emptyState();
     #refresh?: Promise<void>;
-    #refreshRequested = false;
     #state: AuthViewModelState = emptyState();
     #statusVersion = 0;
 
@@ -73,22 +72,14 @@ export class AuthViewModel {
 
     refresh(): Promise<void> {
         if (this.#refresh !== undefined) {
-            this.#refreshRequested = true;
             return this.#refresh;
         }
         const generation = this.#generation;
-        const pending = this.#runRefreshLoop(generation).finally(() => {
+        const pending = this.#refreshOnce(generation).finally(() => {
             if (this.#refresh === pending) this.#refresh = undefined;
         });
         this.#refresh = pending;
         return pending;
-    }
-
-    async #runRefreshLoop(generation: number): Promise<void> {
-        do {
-            this.#refreshRequested = false;
-            await this.#refreshOnce(generation);
-        } while (this.#refreshRequested && generation === this.#generation);
     }
 
     async #refreshOnce(generation: number): Promise<void> {
@@ -155,7 +146,6 @@ export class AuthViewModel {
         this.#activeRead?.abort();
         this.#activeRead = undefined;
         this.#refresh = undefined;
-        this.#refreshRequested = false;
         this.#decidedApprovals.clear();
         this.#listeners.clear();
         this.#state = emptyState();

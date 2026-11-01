@@ -584,7 +584,7 @@ export class MessageHistoryViewModel {
                 current?.instance !== instance || current.ctxId !== ctxId) return;
             this.#state.context = {
                 ...current, loading: false,
-                failure: error instanceof Error ? error : new Error(String(error)),
+                failure: signal?.aborted ? current.failure : error instanceof Error ? error : new Error(String(error)),
             };
             this.#emit();
         }

@@ -90,14 +90,16 @@ export class ContextViewModel {
     }
 
     async disable(ctxId: string, signal?: AbortSignal): Promise<ContextRecord> {
+        const generation = this.#generation;
         const record = await this.#transport.disable(ctxId, signal);
-        await this.refresh(signal);
+        if (generation === this.#generation && !signal?.aborted) await this.refresh(signal);
         return record;
     }
 
     async renew(ctxId: string, signal?: AbortSignal): Promise<ContextRecord> {
+        const generation = this.#generation;
         const record = await this.#transport.renew(ctxId, signal);
-        await this.refresh(signal);
+        if (generation === this.#generation && !signal?.aborted) await this.refresh(signal);
         return record;
     }
 

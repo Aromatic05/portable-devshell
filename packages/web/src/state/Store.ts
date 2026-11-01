@@ -226,9 +226,10 @@ export class WebStore {
             approvalOperationKey(instance, approvalId),
             "Approval recorded.",
             generation,
-            async () => {
+            async (signal) => {
                 const approval = this.domains.approval(instance);
-                await approval.load();
+                await approval.load(signal);
+                signal.throwIfAborted();
                 await approval.decide(approvalId, decision);
             },
         );
@@ -270,12 +271,14 @@ export class WebStore {
             "context-disable-batch",
             `${ids.length} Context${ids.length === 1 ? "" : "s"} disabled.`,
             generation,
-            async () => {
+            async (signal) => {
                 const failures: string[] = [];
                 for (const ctxId of ids) {
+                    signal.throwIfAborted();
                     try {
-                        await this.domains.context.disable(ctxId);
+                        await this.domains.context.disable(ctxId, signal);
                     } catch (error) {
+                        signal.throwIfAborted();
                         failures.push(`${ctxId}: ${errorMessage(error)}`);
                     }
                 }
@@ -313,9 +316,11 @@ export class WebStore {
             generation,
             async (signal) => {
                 const runtime = this.domains.runtime(instance);
-                await runtime.load();
-                await runtime.stop();
-                if (signal.aborted || !this.#current(generation)) return;
+                await runtime.load(signal);
+                signal.throwIfAborted();
+                await runtime.stop(signal);
+                signal.throwIfAborted();
+                if (!this.#current(generation)) return;
                 await runtime.start({ signal });
             },
         );
@@ -415,9 +420,11 @@ export class WebStore {
             `instance-create:${draft.name || "new"}`,
             `${draft.name || "Instance"} created.`,
             generation,
-            async () => {
+            async (signal) => {
                 const result = await this.domains.instances.create(draft);
+                signal.throwIfAborted();
                 await this.domains.instances.refresh();
+                signal.throwIfAborted();
                 if (draft.provider === "reverse") {
                     try {
                         const code = await this.domains.reverse.createCode(
@@ -565,9 +572,10 @@ export class WebStore {
             generation,
             async (signal) => {
                 const runtime = this.domains.runtime(instance);
-                await runtime.load();
+                await runtime.load(signal);
+                signal.throwIfAborted();
                 if (action === "start") await runtime.start({ signal });
-                else await runtime.stop();
+                else await runtime.stop(signal);
             },
         );
     }

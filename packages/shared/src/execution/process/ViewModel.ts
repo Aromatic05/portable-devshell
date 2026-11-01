@@ -69,20 +69,20 @@ export class ProcessViewModel {
 
     async start(options: ProcessStartOptions = {}): Promise<InstanceSnapshot> {
         const generation = ++this.#generation;
-        ++this.#readVersion;
+        const version = ++this.#readVersion;
         const handle = await this.#transport.start(options);
         const snapshot = await handle.snapshot;
-        if (generation !== this.#generation) return snapshot;
+        if (generation !== this.#generation || version !== this.#readVersion) return snapshot;
         this.#applySnapshot(snapshot, snapshot.lastSeq);
         void this.refresh().catch(() => undefined);
         return snapshot;
     }
 
-    async stop(): Promise<InstanceSnapshot> {
+    async stop(signal?: AbortSignal): Promise<InstanceSnapshot> {
         const generation = ++this.#generation;
-        ++this.#readVersion;
-        const snapshot = await this.#transport.stop();
-        if (generation !== this.#generation) return snapshot;
+        const version = ++this.#readVersion;
+        const snapshot = await this.#transport.stop(signal);
+        if (generation !== this.#generation || version !== this.#readVersion) return snapshot;
         this.#applySnapshot(snapshot, snapshot.lastSeq);
         void this.refresh().catch(() => undefined);
         return snapshot;

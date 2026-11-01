@@ -67,7 +67,7 @@ export class WebDomainSession {
     readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #messageTransport: MessageTransport;
     readonly #unsubscribeInstances: () => void;
-    #knownInstances?: Set<string>;
+    #knownInstances?: Map<string, string | undefined>;
     #generation = 0;
     #closed = false;
 
@@ -127,9 +127,10 @@ export class WebDomainSession {
             if (this.#closed) return;
             const state = this.instances.state;
             if (state.loading || state.refreshing || state.failure !== undefined || !state.supported) return;
-            const current = new Set(state.instances.map(({ name }) => name));
-            for (const instance of this.#knownInstances ?? [])
-                if (!current.has(instance)) this.releaseInstance(instance);
+            const current = new Map(state.instances.map(({ name, incarnation }) => [name, incarnation]));
+            for (const [instance, incarnation] of this.#knownInstances ?? [])
+                if (!current.has(instance) || current.get(instance) !== incarnation)
+                    this.releaseInstance(instance);
             this.#knownInstances = current;
         });
     }
@@ -196,8 +197,8 @@ export class WebDomainSession {
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
-            this.context.refresh(),
-            this.artifact.refresh(),
+            this.context.load(),
+            this.artifact.load(),
             this.overview.refresh(),
             this.mcp.refresh(),
             this.extension.refreshCatalogs(),

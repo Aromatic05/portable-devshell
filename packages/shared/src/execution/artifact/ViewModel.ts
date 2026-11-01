@@ -44,6 +44,7 @@ export class ArtifactViewModel {
     readonly #retryMaxMs: number;
     #active = false;
     #generation = 0;
+    #readVersion = 0;
     #published: ArtifactViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ArtifactViewModelState = emptyState();
@@ -83,31 +84,35 @@ export class ArtifactViewModel {
 
     async refresh(): Promise<void> {
         const generation = this.#generation;
+        const version = ++this.#readVersion;
         try {
-            await this.#reload();
+            await this.#reload(version);
         } catch (error) {
-            if (generation !== this.#generation) return;
+            if (generation !== this.#generation || version !== this.#readVersion) return;
             this.#state = { ...this.#state, failure: toError(error) };
             this.#emit();
         }
     }
 
     async revokeShare(shareId: string): Promise<void> {
+        const generation = this.#generation;
         await this.#transport.revokeShare(shareId);
-        await this.refresh();
+        if (generation === this.#generation) await this.refresh();
     }
 
     async cancelTransfer(transferId: string): Promise<void> {
+        const generation = this.#generation;
         await this.#transport.cancelTransfer(transferId);
-        await this.refresh();
+        if (generation === this.#generation) await this.refresh();
     }
 
     async createShare(
         defaultInstance: string,
         input: ArtifactShareInput,
     ): Promise<ArtifactShareResult> {
+        const generation = this.#generation;
         const share = await this.#transport.createShare(defaultInstance, input);
-        await this.refresh();
+        if (generation === this.#generation) await this.refresh();
         return share;
     }
 
@@ -115,11 +120,12 @@ export class ArtifactViewModel {
         defaultInstance: string,
         input: ArtifactTransferStartInput,
     ): Promise<ArtifactTransferResult> {
+        const generation = this.#generation;
         const result = await this.#transport.startTransfer(
             defaultInstance,
             input,
         );
-        await this.refresh();
+        if (generation === this.#generation) await this.refresh();
         return result;
     }
 
@@ -155,10 +161,12 @@ export class ArtifactViewModel {
         this.#subscription.start();
     }
 
-    async #reload(): Promise<void> {
+    async #reload(version = ++this.#readVersion): Promise<void> {
         const generation = this.#generation;
         const snapshot = await this.#transport.snapshot();
-        if (generation !== this.#generation) return;
+        // Read ownership, rather than a permanent sequence maximum, also accepts
+        // authoritative snapshots after a server restart resets its event log.
+        if (generation !== this.#generation || version !== this.#readVersion) return;
         this.#state = {
             failure: undefined,
             lastSeq: snapshot.lastSeq,

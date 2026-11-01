@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
     asInstanceName,
@@ -54,6 +55,8 @@ interface InstanceFields {
 }
 
 export class Instance {
+    /** Authority identity of this descriptor; Worker restarts keep it intact. */
+    readonly incarnation = randomUUID();
     readonly #commandClient?: WorkerCommandClient;
     readonly #eventLog: InstanceEventLog;
     readonly #subscriptions: ProcessSubscriptionManager;

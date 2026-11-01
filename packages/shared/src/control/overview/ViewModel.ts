@@ -46,7 +46,6 @@ export class OverviewViewModel {
     #intervalTimer?: ReturnType<typeof setInterval>;
     #published: Readonly<OverviewViewModelState> = emptyState();
     #refresh?: Promise<void>;
-    #refreshRequested = false;
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #activeRead?: AbortController;
     #state: OverviewViewModelState = emptyState();
@@ -78,22 +77,14 @@ export class OverviewViewModel {
 
     refresh(): Promise<void> {
         if (this.#refresh !== undefined) {
-            this.#refreshRequested = true;
             return this.#refresh;
         }
         const generation = this.#generation;
-        const pending = this.#runRefreshLoop(generation).finally(() => {
+        const pending = this.#refreshOnce(generation).finally(() => {
             if (this.#refresh === pending) this.#refresh = undefined;
         });
         this.#refresh = pending;
         return pending;
-    }
-
-    async #runRefreshLoop(generation: number): Promise<void> {
-        do {
-            this.#refreshRequested = false;
-            await this.#refreshOnce(generation);
-        } while (this.#refreshRequested && generation === this.#generation);
     }
 
     async #refreshOnce(generation: number): Promise<void> {
@@ -160,7 +151,6 @@ export class OverviewViewModel {
         this.#activeRead?.abort();
         this.#activeRead = undefined;
         this.#refresh = undefined;
-        this.#refreshRequested = false;
         this.#listeners.clear();
         this.#state = emptyState();
         this.#published = this.#state;
