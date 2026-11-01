@@ -27,6 +27,9 @@ export class ProcessViewModel {
     readonly #listeners = new Set<() => void>();
     readonly #transport: ProcessTransport;
     #generation = 0;
+    #readVersion = 0;
+    #logVersion = 0;
+    #subscribeRequested = false;
     #published: ProcessViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ProcessViewModelState = emptyState();
@@ -45,23 +48,28 @@ export class ProcessViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    async load(): Promise<void> {
+    async load(signal?: AbortSignal): Promise<void> {
         const generation = ++this.#generation;
-        const envelope = await this.#transport.refresh();
-        if (generation !== this.#generation) return;
+        this.#subscribeRequested = true;
+        const version = ++this.#readVersion;
+        const envelope = await this.#transport.refresh(signal);
+        if (signal?.aborted || generation !== this.#generation || version !== this.#readVersion) return;
         this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
         this.#ensureSubscription(envelope.lastSeq + 1);
     }
 
     async refresh(): Promise<void> {
         const generation = this.#generation;
+        const version = ++this.#readVersion;
         const envelope = await this.#transport.refresh();
-        if (generation !== this.#generation) return;
+        if (generation !== this.#generation || version !== this.#readVersion) return;
         this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
+        if (this.#subscribeRequested) this.#ensureSubscription(envelope.lastSeq + 1);
     }
 
     async start(options: ProcessStartOptions = {}): Promise<InstanceSnapshot> {
         const generation = ++this.#generation;
+        ++this.#readVersion;
         const handle = await this.#transport.start(options);
         const snapshot = await handle.snapshot;
         if (generation !== this.#generation) return snapshot;
@@ -72,6 +80,7 @@ export class ProcessViewModel {
 
     async stop(): Promise<InstanceSnapshot> {
         const generation = ++this.#generation;
+        ++this.#readVersion;
         const snapshot = await this.#transport.stop();
         if (generation !== this.#generation) return snapshot;
         this.#applySnapshot(snapshot, snapshot.lastSeq);
@@ -79,10 +88,11 @@ export class ProcessViewModel {
         return snapshot;
     }
 
-    async readLogs(query?: InstanceLogQuery): Promise<InstanceLogEntry[]> {
+    async readLogs(query?: InstanceLogQuery, signal?: AbortSignal): Promise<InstanceLogEntry[]> {
         const generation = this.#generation;
-        const logs = await this.#transport.readLogs(query);
-        if (generation !== this.#generation) return logs;
+        const version = ++this.#logVersion;
+        const logs = await this.#transport.readLogs(query, signal);
+        if (signal?.aborted || generation !== this.#generation || version !== this.#logVersion) return logs;
         this.#state = { ...this.#state, logs, logsLoaded: true };
         this.#emit();
         return logs;
@@ -90,6 +100,9 @@ export class ProcessViewModel {
 
     close(): void {
         this.#generation += 1;
+        this.#subscribeRequested = false;
+        ++this.#readVersion;
+        ++this.#logVersion;
         if (this.#refreshTimer !== undefined) {
             clearTimeout(this.#refreshTimer);
             this.#refreshTimer = undefined;
@@ -103,19 +116,25 @@ export class ProcessViewModel {
 
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
-        this.#subscription = new InstanceEventSubscription<ProcessEvent>(
+        const subscription: InstanceEventSubscription<ProcessEvent> = new InstanceEventSubscription<ProcessEvent>(
             fromSeq,
             {
-                onEvent: (event) => this.#onEvent(event),
-                onGap: () => this.#recover(),
+                onEvent: (event) => {
+                    if (this.#subscription === subscription) this.#onEvent(event);
+                },
+                onGap: () => this.#subscription === subscription
+                    ? this.#recover(subscription)
+                    : undefined,
                 onStatusChange: (status) => {
+                    if (this.#subscription !== subscription) return;
                     this.#state = { ...this.#state, connection: status };
                     this.#emit();
                 },
                 open: (cursor) => this.#transport.subscribe(cursor),
             },
         );
-        this.#subscription.start();
+        this.#subscription = subscription;
+        subscription.start();
     }
 
     #onEvent(event: ProcessEvent): void {
@@ -139,9 +158,13 @@ export class ProcessViewModel {
         }, 100);
     }
 
-    async #recover(): Promise<number | undefined> {
+    async #recover(subscription: InstanceEventSubscription<ProcessEvent>): Promise<number | undefined> {
+        const generation = this.#generation;
+        const version = ++this.#readVersion;
         try {
             const envelope = await this.#transport.refresh();
+            if (generation !== this.#generation || version !== this.#readVersion ||
+                this.#subscription !== subscription) return undefined;
             this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
             return envelope.lastSeq + 1;
         } catch {

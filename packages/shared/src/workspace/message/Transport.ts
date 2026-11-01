@@ -27,6 +27,7 @@ export interface MessageTransport {
     listContextMessages(
         instance: string,
         input?: ContextMessageListInput,
+        signal?: AbortSignal,
     ): Promise<ContextMessageListResult>;
     listMessageEntries(
         instance: string,
@@ -69,10 +70,11 @@ export function createMessageTransport(endpoint: Endpoint): MessageTransport {
     const port = (instance: string): PortClient =>
         createPortClient(endpoint, instance, "message");
     return {
-        listContextMessages: (instance, input) =>
+        listContextMessages: (instance, input, signal) =>
             port(instance).request<ContextMessageListResult>(
                 "listContextMessages",
                 input ?? {},
+                signal,
             ),
         listMessageEntries: (instance, input, signal) =>
             port(instance).request<MessageListResult>(

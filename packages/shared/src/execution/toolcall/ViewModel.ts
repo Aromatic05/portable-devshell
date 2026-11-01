@@ -70,7 +70,7 @@ interface ToolCallViewModelOptions {
      * `ToolTransport.listCalls` has no `lastSeq`; composition supplies it from
      * the Process snapshot.
      */
-    cursor(instance: string): Promise<number>;
+    cursor(instance: string, signal?: AbortSignal): Promise<number>;
     onEvent?(event: ToolEvent): void;
     refreshDelayMs?: number;
     retryBaseMs?: number;
@@ -80,7 +80,7 @@ interface ToolCallViewModelOptions {
 
 export class ToolCallViewModel {
     readonly #contextHistoryLoads = new Map<string, Promise<number>>();
-    readonly #cursor: (instance: string) => Promise<number>;
+    readonly #cursor: (instance: string, signal?: AbortSignal) => Promise<number>;
     readonly #listeners = new Set<() => void>();
     readonly #historyLoads = new Map<string, Promise<number>>();
     readonly #onEvent?: (event: ToolEvent) => void;
@@ -127,7 +127,8 @@ export class ToolCallViewModel {
      * again for the same instance re-reads the ledger without restarting the
      * subscription.
      */
-    async load(instance: string, query?: ToolCallQuery): Promise<void> {
+    async load(instance: string, query?: ToolCallQuery, signal?: AbortSignal): Promise<void> {
+        signal?.throwIfAborted();
         this.#wanted.add(instance);
         if (this.#queries.has(instance) &&
             JSON.stringify(this.#queries.get(instance)) !== JSON.stringify(query)) {
@@ -148,26 +149,26 @@ export class ToolCallViewModel {
         const version = this.#nextVersion(key);
         let cursor: number;
         try {
-            cursor = await this.#cursor(instance);
+            cursor = await this.#cursor(instance, signal);
         } catch (error) {
-            if (!this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
+            if (signal?.aborted || !this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
             this.#setFailure(instance, error);
             this.#emit();
             return;
         }
-        if (!this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
-        const applied = await this.#refreshInstance(instance, epoch);
-        if (!applied || !this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
+        if (signal?.aborted || !this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
+        const applied = await this.#refreshInstance(instance, epoch, signal);
+        if (!applied || signal?.aborted || !this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
         this.#ensureSubscription(instance, cursor + 1);
     }
 
     /** Re-reads the authoritative ledger for one materialized instance. */
-    async refresh(instance: string): Promise<void> {
+    async refresh(instance: string, signal?: AbortSignal): Promise<void> {
         if (this.#wanted.has(instance) && !this.#subscriptions.has(instance)) {
-            await this.load(instance, this.#queries.get(instance));
+            await this.load(instance, this.#queries.get(instance), signal);
             return;
         }
-        await this.#refreshInstance(instance, this.#epoch);
+        await this.#refreshInstance(instance, this.#epoch, signal);
     }
 
     /** Reads older ledger pages while retaining the live projection. */
@@ -389,14 +390,14 @@ export class ToolCallViewModel {
     }
 
     /** Returns true when the authoritative ledger was applied. */
-    async #refreshInstance(instance: string, epoch: number): Promise<boolean> {
+    async #refreshInstance(instance: string, epoch: number, signal?: AbortSignal): Promise<boolean> {
         const key = instanceKey(instance);
         const version = this.#nextVersion(key);
         const query = listQuery(this.#queries.get(instance));
         try {
             const state = this.#state.instances[instance];
-            const calls = await this.#readRefresh(instance, query, state?.historyLoaded ? state.calls : []);
-            if (!this.#valid(key, version, epoch)) return false;
+            const calls = await this.#readRefresh(instance, query, state?.historyLoaded ? state.calls : [], signal);
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return false;
             this.#updateInstance(instance, (state) => ({
                 ...state,
                 calls: orderCalls(state.historyLoaded ? mergeCalls(state.calls, calls) : calls),
@@ -410,7 +411,7 @@ export class ToolCallViewModel {
                 void this.#refreshContext(instance, context.ctxId);
             return true;
         } catch (error) {
-            if (!this.#valid(key, version, epoch)) return false;
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return false;
             this.#setFailure(instance, error);
             this.#emit();
             return false;
@@ -448,15 +449,15 @@ export class ToolCallViewModel {
         }
     }
 
-    async #readRefresh(instance: string, query: ToolCallQuery, existing: ToolCallRecord[]): Promise<ToolCallRecord[]> {
+    async #readRefresh(instance: string, query: ToolCallQuery, existing: ToolCallRecord[], signal?: AbortSignal): Promise<ToolCallRecord[]> {
         // Active calls follow all persisted records and move on completion, so
         // their IDs cannot establish a continuous persisted history window.
         const known = new Set(existing.filter(isPersistedCall).map((call) => call.callId));
-        const calls = await readHistoryPage((signal) => this.#transport(instance).listCalls(query, signal));
+        const calls = await readHistoryPage((pageSignal) => this.#transport(instance).listCalls(query, pageSignal), signal);
         let page = calls;
         // With only active history retained, read through the authoritative end.
         while (existing.length > 0 && page.length > 0 && !page.some((call) => isPersistedCall(call) && known.has(call.callId))) {
-            page = await readHistoryPage((signal) => this.#transport(instance).listCalls({ ...query, before: page[0]!.callId }, signal));
+            page = await readHistoryPage((pageSignal) => this.#transport(instance).listCalls({ ...query, before: page[0]!.callId }, pageSignal), signal);
             calls.unshift(...page);
         }
         return calls;
@@ -465,13 +466,16 @@ export class ToolCallViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription<ToolEvent>(fromSeq, {
+        const subscription: InstanceEventSubscription<ToolEvent> = new InstanceEventSubscription<ToolEvent>(fromSeq, {
             onEvent: (event) => {
-                if (this.#current(epoch)) this.#applyEvent(event);
+                if (this.#current(epoch) && this.#subscriptions.get(instance) === subscription)
+                    this.#applyEvent(event);
             },
-            onGap: () => this.#recover(instance, epoch),
+            onGap: () => this.#subscriptions.get(instance) === subscription
+                ? this.#recover(instance, epoch, subscription)
+                : undefined,
             onStatusChange: (status) => {
-                if (!this.#current(epoch)) return;
+                if (!this.#current(epoch) || this.#subscriptions.get(instance) !== subscription) return;
                 this.#updateInstance(instance, (state) => ({
                     ...state,
                     status,
@@ -501,13 +505,16 @@ export class ToolCallViewModel {
     async #recover(
         instance: string,
         epoch: number,
+        subscription: InstanceEventSubscription<ToolEvent>,
     ): Promise<number | undefined> {
+        const current = () => this.#current(epoch) &&
+            this.#subscriptions.get(instance) === subscription;
         try {
             // Sample the cursor before the ledger read so the read covers it.
             const cursor = await this.#cursor(instance);
-            if (!this.#current(epoch)) return undefined;
+            if (!current()) return undefined;
             const applied = await this.#refreshInstance(instance, epoch);
-            if (!applied || !this.#current(epoch)) return undefined;
+            if (!applied || !current()) return undefined;
             return cursor + 1;
         } catch {
             return undefined;

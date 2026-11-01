@@ -33,9 +33,9 @@ export interface ProcessStartHandle {
 }
 
 export interface ProcessTransport {
-    readLogs(query?: InstanceLogQuery): Promise<InstanceLogEntry[]>;
-    refresh(): Promise<InstanceProcessEnvelope>;
-    snapshot(): Promise<InstanceProcessEnvelope>;
+    readLogs(query?: InstanceLogQuery, signal?: AbortSignal): Promise<InstanceLogEntry[]>;
+    refresh(signal?: AbortSignal): Promise<InstanceProcessEnvelope>;
+    snapshot(signal?: AbortSignal): Promise<InstanceProcessEnvelope>;
     start(options?: ProcessStartOptions): Promise<ProcessStartHandle>;
     stop(): Promise<InstanceSnapshot>;
     subscribe(fromSeq: number): Promise<InstanceEventStreamPort<ProcessEvent>>;
@@ -52,9 +52,9 @@ export function createProcessTransport(
         payload?: JsonValue,
     ): Promise<MessageStream> => port.open(operation, payload);
     return {
-        readLogs: (query) => port.request<InstanceLogEntry[]>("readLogs", query),
-        refresh: () => port.request<InstanceProcessEnvelope>("refresh"),
-        snapshot: () => port.request<InstanceProcessEnvelope>("snapshot"),
+        readLogs: (query, signal) => port.request<InstanceLogEntry[]>("readLogs", query, signal),
+        refresh: (signal) => port.request<InstanceProcessEnvelope>("refresh", undefined, signal),
+        snapshot: (signal) => port.request<InstanceProcessEnvelope>("snapshot", undefined, signal),
         start: (options = {}) => startProcess(() => open("start"), options),
         stop: () => port.request<InstanceSnapshot>("stop"),
         subscribe: async (fromSeq) =>

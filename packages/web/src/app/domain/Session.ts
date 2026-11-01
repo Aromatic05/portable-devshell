@@ -66,6 +66,10 @@ export class WebDomainSession {
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #messageTransport: MessageTransport;
+    readonly #unsubscribeInstances: () => void;
+    #knownInstances?: Set<string>;
+    #generation = 0;
+    #closed = false;
 
     constructor(options: WebDomainSessionOptions) {
         this.#endpoint = new Endpoint({ connectChannel: options.connectChannel });
@@ -108,17 +112,26 @@ export class WebDomainSession {
                 createTaskTransport(this.#endpoint, instance),
         });
         this.toolCalls = new ToolCallViewModel({
-            cursor: async (instance) =>
+            cursor: async (instance, signal) =>
                 (
                     await createProcessTransport(
                         this.#endpoint,
                         instance,
-                    ).snapshot()
+                    ).snapshot(signal)
                 ).lastSeq,
             transport: (instance) =>
                 createToolTransport(this.#endpoint, instance),
         });
         this.reverse = createConnectionTransport(this.#endpoint);
+        this.#unsubscribeInstances = this.instances.subscribe(() => {
+            if (this.#closed) return;
+            const state = this.instances.state;
+            if (state.loading || state.refreshing || state.failure !== undefined || !state.supported) return;
+            const current = new Set(state.instances.map(({ name }) => name));
+            for (const instance of this.#knownInstances ?? [])
+                if (!current.has(instance)) this.releaseInstance(instance);
+            this.#knownInstances = current;
+        });
     }
 
     runtime(instance: string): ProcessViewModel {
@@ -150,10 +163,15 @@ export class WebDomainSession {
         this.#approvals.delete(instance);
         this.goals.release(instance);
         this.toolCalls.release(instance);
+        this.messages.release(instance);
+        this.messageHistory.release(instance);
     }
 
     async load(): Promise<void> {
+        if (this.#closed) return;
+        const generation = ++this.#generation;
         await this.server.connect();
+        if (this.#closed || generation !== this.#generation) return;
         await Promise.all([
             this.config.get(),
             this.instances.list(),
@@ -165,12 +183,16 @@ export class WebDomainSession {
             this.messageHistory.load(),
             this.messagePreferences.refresh(),
         ]);
+        if (this.#closed || generation !== this.#generation) return;
         this.overview.start();
         this.mcp.start();
     }
 
     async reconnect(): Promise<void> {
+        if (this.#closed) return;
+        const generation = ++this.#generation;
         await this.server.reconnect();
+        if (this.#closed || generation !== this.#generation) return;
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -181,9 +203,16 @@ export class WebDomainSession {
             this.extension.refreshCatalogs(),
             this.messagePreferences.refresh(),
         ]);
+        if (this.#closed || generation !== this.#generation) return;
+        this.overview.start();
+        this.mcp.start();
     }
 
     close(): void {
+        if (this.#closed) return;
+        this.#closed = true;
+        this.#generation += 1;
+        this.#unsubscribeInstances();
         for (const viewModel of this.#runtimes.values()) viewModel.close();
         for (const viewModel of this.#approvals.values()) viewModel.close();
         this.#runtimes.clear();

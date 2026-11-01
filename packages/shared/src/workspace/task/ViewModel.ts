@@ -164,13 +164,16 @@ export class GoalViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription<TaskEvent>(fromSeq, {
+        const subscription: InstanceEventSubscription<TaskEvent> = new InstanceEventSubscription<TaskEvent>(fromSeq, {
             onEvent: (event) => {
-                if (this.#current(epoch)) this.#applyEvent(event);
+                if (this.#current(epoch) && this.#subscriptions.get(instance) === subscription)
+                    this.#applyEvent(event);
             },
-            onGap: () => this.#recover(instance, epoch),
+            onGap: () => this.#subscriptions.get(instance) === subscription
+                ? this.#recover(instance, epoch, subscription)
+                : undefined,
             onStatusChange: (status) => {
-                if (!this.#current(epoch)) return;
+                if (!this.#current(epoch) || this.#subscriptions.get(instance) !== subscription) return;
                 this.#updateInstance(instance, (state) => ({
                     ...state,
                     status,
@@ -200,9 +203,11 @@ export class GoalViewModel {
     async #recover(
         instance: string,
         epoch: number,
+        subscription: InstanceEventSubscription<TaskEvent>,
     ): Promise<number | undefined> {
         const lastSeq = await this.#refreshInstance(instance, epoch);
-        if (!this.#current(epoch) || lastSeq === undefined) return undefined;
+        if (!this.#current(epoch) || lastSeq === undefined ||
+            this.#subscriptions.get(instance) !== subscription) return undefined;
         return lastSeq + 1;
     }
 

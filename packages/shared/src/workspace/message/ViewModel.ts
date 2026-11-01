@@ -38,7 +38,11 @@ export class MessageViewModel {
     readonly #transport: MessageTransport;
     readonly #listeners = new Set<() => void>();
     readonly #onEvent?: (event: MessageEvent) => void;
+    readonly #wanted = new Set<string>();
     readonly #versions = new Map<string, number>();
+    readonly #instanceGenerations = new Map<string, number>();
+    #versionSerial = 0;
+    #loadVersion = 0;
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #subscriptions = new Map<
         string,
@@ -69,23 +73,28 @@ export class MessageViewModel {
      */
     async load(instances: readonly string[] = []): Promise<void> {
         const epoch = this.#epoch;
+        const version = ++this.#loadVersion;
+        const names = new Set(instances);
+        for (const instance of this.#wanted)
+            if (!names.has(instance)) this.release(instance);
+        for (const instance of names) this.#wanted.add(instance);
         await Promise.all(
             instances.map((instance) => this.refreshInstance(instance)),
         );
-        if (!this.#current(epoch)) return;
+        if (!this.#current(epoch) || version !== this.#loadVersion) return;
         for (const instance of instances) {
             const state = this.#state.instances[instance];
-            if (state !== undefined)
+            if (state !== undefined && this.#wanted.has(instance))
                 this.#ensureSubscription(instance, state.lastSeq + 1);
         }
-        this.#closeOrphanSubscriptions(new Set(instances));
+        this.#closeOrphanSubscriptions(names);
     }
 
     /**
      * Reads the authoritative Context message snapshot. Returns the read-time
      * instance sequence so the caller can resume from lastSeq + 1.
      */
-    async refreshInstance(instance: string): Promise<number | undefined> {
+    async refreshInstance(instance: string, signal?: AbortSignal): Promise<number | undefined> {
         const key = this.#instanceVersionKey(instance);
         const epoch = this.#epoch;
         const version = this.#nextVersion(key);
@@ -93,8 +102,8 @@ export class MessageViewModel {
             const result = await this.#transport.listContextMessages(instance, {
                 limit: MESSAGE_LIST_LIMIT,
                 maxBytes: MESSAGE_LIST_MAX_BYTES,
-            });
-            if (!this.#valid(key, version, epoch)) return undefined;
+            }, signal);
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return undefined;
             this.#updateInstance(instance, (state) => ({
                 ...state,
                 lastSeq: Math.max(state.lastSeq, result.lastSeq),
@@ -105,9 +114,11 @@ export class MessageViewModel {
             }));
             this.#clearFailure(key);
             this.#emit();
+            if (this.#wanted.has(instance))
+                this.#ensureSubscription(instance, result.lastSeq + 1);
             return result.lastSeq;
         } catch (error) {
-            if (!this.#valid(key, version, epoch)) return undefined;
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return undefined;
             this.#setFailure(key, error);
             this.#emit();
             return undefined;
@@ -152,11 +163,14 @@ export class MessageViewModel {
         ctxId: string,
         text: string,
     ): Promise<ContextMessageRecord> {
+        const epoch = this.#epoch;
+        const generation = this.#instanceGenerations.get(instance) ?? 0;
         const queued = await this.#transport.queueContextMessage(instance, {
             ctxId,
             text,
         });
-        this.mergeMessage(instance, queued);
+        if (this.#current(epoch) && generation === (this.#instanceGenerations.get(instance) ?? 0))
+            this.mergeMessage(instance, queued);
         return queued;
     }
 
@@ -171,13 +185,34 @@ export class MessageViewModel {
     }
 
     ensureInstance(instance: string, fromSeq?: number): void {
+        this.#wanted.add(instance);
         const state = this.#state.instances[instance];
         if (state === undefined) return;
         this.#ensureSubscription(instance, fromSeq ?? state.lastSeq + 1);
     }
 
+    release(instance: string): void {
+        this.#wanted.delete(instance);
+        this.#instanceGenerations.set(instance, (this.#instanceGenerations.get(instance) ?? 0) + 1);
+        this.#versions.delete(this.#instanceVersionKey(instance));
+        const timer = this.#refreshTimers.get(instance);
+        if (timer !== undefined) clearTimeout(timer);
+        this.#refreshTimers.delete(instance);
+        const subscription = this.#subscriptions.get(instance);
+        this.#subscriptions.delete(instance);
+        subscription?.stop();
+        const instances = { ...this.#state.instances };
+        delete instances[instance];
+        this.#state.instances = instances;
+        this.#clearFailure(this.#instanceVersionKey(instance));
+        this.#emit();
+    }
+
     reset(): void {
         this.#epoch += 1;
+        this.#instanceGenerations.clear();
+        this.#loadVersion += 1;
+        this.#wanted.clear();
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#versions.clear();
@@ -194,15 +229,18 @@ export class MessageViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription<MessageEvent>(
+        const subscription: InstanceEventSubscription<MessageEvent> = new InstanceEventSubscription<MessageEvent>(
             fromSeq,
             {
                 onEvent: (event) => {
-                    if (this.#current(epoch)) this.#applyEvent(event);
+                    if (this.#current(epoch) && this.#subscriptions.get(instance) === subscription)
+                        this.#applyEvent(event);
                 },
-                onGap: () => this.#recover(instance, epoch),
+                onGap: () => this.#subscriptions.get(instance) === subscription
+                    ? this.#recover(instance, epoch, subscription)
+                    : undefined,
                 onStatusChange: (status) => {
-                    if (!this.#current(epoch)) return;
+                    if (!this.#current(epoch) || this.#subscriptions.get(instance) !== subscription) return;
                     this.#updateInstance(instance, (state) => ({
                         ...state,
                         status,
@@ -230,9 +268,11 @@ export class MessageViewModel {
     async #recover(
         instance: string,
         epoch: number,
+        subscription: InstanceEventSubscription<MessageEvent>,
     ): Promise<number | undefined> {
         const lastSeq = await this.refreshInstance(instance);
-        if (!this.#current(epoch) || lastSeq === undefined) return undefined;
+        if (!this.#current(epoch) || lastSeq === undefined ||
+            this.#subscriptions.get(instance) !== subscription) return undefined;
         return lastSeq + 1;
     }
 
@@ -246,10 +286,10 @@ export class MessageViewModel {
     }
 
     #closeOrphanSubscriptions(names: ReadonlySet<string>): void {
-        for (const [instance, subscription] of [...this.#subscriptions]) {
-            if (names.has(instance)) continue;
-            subscription.stop();
-            this.#subscriptions.delete(instance);
+        for (const instance of new Set([
+            ...this.#subscriptions.keys(), ...Object.keys(this.#state.instances),
+        ])) {
+            if (!names.has(instance)) this.release(instance);
         }
     }
 
@@ -291,7 +331,7 @@ export class MessageViewModel {
     }
 
     #nextVersion(key: string): number {
-        const version = (this.#versions.get(key) ?? 0) + 1;
+        const version = ++this.#versionSerial;
         this.#versions.set(key, version);
         return version;
     }
@@ -358,7 +398,10 @@ export class MessageHistoryViewModel {
     readonly #transport: MessageTransport;
     readonly #listeners = new Set<() => void>();
     readonly #onEvent?: (event: MessageEvent) => void;
+    readonly #wanted = new Set<string>();
     readonly #versions = new Map<string, number>();
+    #versionSerial = 0;
+    #loadVersion = 0;
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #subscriptions = new Map<
         string,
@@ -389,23 +432,28 @@ export class MessageHistoryViewModel {
     /** Hydrates and subscribes each instance. */
     async load(instances: readonly string[] = []): Promise<void> {
         const epoch = this.#epoch;
+        const version = ++this.#loadVersion;
+        const names = new Set(instances);
+        for (const instance of this.#wanted)
+            if (!names.has(instance)) this.release(instance);
+        for (const instance of names) this.#wanted.add(instance);
         await Promise.all(
             instances.map((instance) => this.refreshInstance(instance)),
         );
-        if (!this.#current(epoch)) return;
+        if (!this.#current(epoch) || version !== this.#loadVersion) return;
         for (const instance of instances) {
             const state = this.#state.instances[instance];
-            if (state !== undefined)
+            if (state !== undefined && this.#wanted.has(instance))
                 this.#ensureSubscription(instance, state.lastSeq + 1);
         }
-        this.#closeOrphanSubscriptions(new Set(instances));
+        this.#closeOrphanSubscriptions(names);
     }
 
     /**
      * Reads the authoritative Message snapshot. Returns the read-time
      * instance sequence so the caller can resume from lastSeq + 1.
      */
-    async refreshInstance(instance: string): Promise<number | undefined> {
+    async refreshInstance(instance: string, signal?: AbortSignal): Promise<number | undefined> {
         const key = this.#instanceVersionKey(instance);
         const epoch = this.#epoch;
         const version = this.#nextVersion(key);
@@ -415,9 +463,9 @@ export class MessageHistoryViewModel {
                 {
                     limit: MESSAGE_HISTORY_LIST_LIMIT,
                     maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
-                },
+                }, signal,
             );
-            if (!this.#valid(key, version, epoch)) return undefined;
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return undefined;
             this.#updateInstance(instance, (state) => ({
                 ...state,
                 entries: mergeMessageEntryList(
@@ -428,12 +476,14 @@ export class MessageHistoryViewModel {
             }));
             this.#clearFailure(key);
             this.#emit();
+            if (this.#wanted.has(instance))
+                this.#ensureSubscription(instance, result.lastSeq + 1);
             const context = this.#state.context;
             if (context?.instance === instance)
                 void this.#refreshContext(instance, context.ctxId);
             return result.lastSeq;
         } catch (error) {
-            if (!this.#valid(key, version, epoch)) return undefined;
+            if (signal?.aborted || !this.#valid(key, version, epoch)) return undefined;
             this.#setFailure(key, error);
             this.#emit();
             return undefined;
@@ -541,13 +591,36 @@ export class MessageHistoryViewModel {
     }
 
     ensureInstance(instance: string, fromSeq?: number): void {
+        this.#wanted.add(instance);
         const state = this.#state.instances[instance];
         if (state === undefined) return;
         this.#ensureSubscription(instance, fromSeq ?? state.lastSeq + 1);
     }
 
+    release(instance: string): void {
+        this.#wanted.delete(instance);
+        this.#versions.delete(this.#instanceVersionKey(instance));
+        const timer = this.#refreshTimers.get(instance);
+        if (timer !== undefined) clearTimeout(timer);
+        this.#refreshTimers.delete(instance);
+        const subscription = this.#subscriptions.get(instance);
+        this.#subscriptions.delete(instance);
+        subscription?.stop();
+        if (this.#state.context?.instance === instance) {
+            this.#contextSelection += 1;
+            this.#state.context = undefined;
+        }
+        const instances = { ...this.#state.instances };
+        delete instances[instance];
+        this.#state.instances = instances;
+        this.#clearFailure(this.#instanceVersionKey(instance));
+        this.#emit();
+    }
+
     reset(): void {
         this.#epoch += 1;
+        this.#loadVersion += 1;
+        this.#wanted.clear();
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#versions.clear();
@@ -564,15 +637,18 @@ export class MessageHistoryViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription<MessageEvent>(
+        const subscription: InstanceEventSubscription<MessageEvent> = new InstanceEventSubscription<MessageEvent>(
             fromSeq,
             {
                 onEvent: (event) => {
-                    if (this.#current(epoch)) this.#applyEvent(event);
+                    if (this.#current(epoch) && this.#subscriptions.get(instance) === subscription)
+                        this.#applyEvent(event);
                 },
-                onGap: () => this.#recover(instance, epoch),
+                onGap: () => this.#subscriptions.get(instance) === subscription
+                    ? this.#recover(instance, epoch, subscription)
+                    : undefined,
                 onStatusChange: (status) => {
-                    if (!this.#current(epoch)) return;
+                    if (!this.#current(epoch) || this.#subscriptions.get(instance) !== subscription) return;
                     this.#updateInstance(instance, (state) => ({
                         ...state,
                         status,
@@ -600,9 +676,11 @@ export class MessageHistoryViewModel {
     async #recover(
         instance: string,
         epoch: number,
+        subscription: InstanceEventSubscription<MessageEvent>,
     ): Promise<number | undefined> {
         const lastSeq = await this.refreshInstance(instance);
-        if (!this.#current(epoch) || lastSeq === undefined) return undefined;
+        if (!this.#current(epoch) || lastSeq === undefined ||
+            this.#subscriptions.get(instance) !== subscription) return undefined;
         return lastSeq + 1;
     }
 
@@ -616,10 +694,10 @@ export class MessageHistoryViewModel {
     }
 
     #closeOrphanSubscriptions(names: ReadonlySet<string>): void {
-        for (const [instance, subscription] of [...this.#subscriptions]) {
-            if (names.has(instance)) continue;
-            subscription.stop();
-            this.#subscriptions.delete(instance);
+        for (const instance of new Set([
+            ...this.#subscriptions.keys(), ...Object.keys(this.#state.instances),
+        ])) {
+            if (!names.has(instance)) this.release(instance);
         }
     }
 
@@ -661,7 +739,7 @@ export class MessageHistoryViewModel {
     }
 
     #nextVersion(key: string): number {
-        const version = (this.#versions.get(key) ?? 0) + 1;
+        const version = ++this.#versionSerial;
         this.#versions.set(key, version);
         return version;
     }
