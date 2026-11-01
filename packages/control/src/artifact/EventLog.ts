@@ -89,7 +89,7 @@ export class ArtifactEventLog {
             this.#events.length === 0
                 ? this.#lastSeq + 1
                 : this.#events[0]!.seq;
-        if (requested < oldest) {
+        if (requested < oldest || requested > this.#lastSeq + 1) {
             return {
                 kind: "gap",
                 lastSeq: this.#lastSeq,

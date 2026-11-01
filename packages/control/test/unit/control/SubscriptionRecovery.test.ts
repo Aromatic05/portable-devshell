@@ -4,6 +4,7 @@ import test from "node:test";
 
 import type { MessageStream } from "@portable-devshell/shared";
 import { ArtifactService } from "../../../src/artifact/Service.ts";
+import { ArtifactEventLog } from "../../../src/artifact/EventLog.ts";
 import { ConfigChangeHub } from "../../../src/config/change/Config.ts";
 import { createConfigRouteModule } from "../../../src/config/Route.ts";
 import { createContextRouteModule } from "../../../src/context/Route.ts";
@@ -15,6 +16,17 @@ import { createInstanceConfigRouteModule } from "../../../src/instance/Route.ts"
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const tick = async () => await new Promise<void>((resolve) => setImmediate(resolve));
+
+test("Artifact replay emits a gap for a cursor from the previous Control process", () => {
+    const old = new ArtifactEventLog(8);
+    old.record("alpha", "artifact.shareCreated" as never);
+    const next = new ArtifactEventLog(8);
+    assert.equal(next.read(old.lastSeq + 1).kind, "gap");
+    assert.equal(next.read(1).kind, "events");
+    next.record("alpha", "artifact.shareCreated" as never);
+    assert.equal(next.read(2).kind, "events");
+    assert.equal(next.read(3).kind, "gap");
+});
 
 test("all four Control subscriptions end remote streams after send failure", async () => {
     const cases = [

@@ -72,7 +72,7 @@ export class InstanceEventBuffer implements InstanceEventPort, InstanceEventSour
 
     readFrom(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
-        if (fromSeq < nextSeq) {
+        if (fromSeq < nextSeq || fromSeq > this.#lastSeq + 1) {
             return {
                 code: STREAM_GAP_CODE,
                 fromSeq,

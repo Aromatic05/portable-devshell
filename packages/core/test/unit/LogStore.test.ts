@@ -16,6 +16,7 @@ import { AuditEventStore } from "../../src/audit/event/index.ts";
 import type { InstanceLogEntry } from "../../src/audit/Api.ts";
 import { LogStoreInstance } from "../../src/audit/log/index.ts";
 import { InstancePaths } from "../../src/instance/model/Paths.ts";
+import { createInstanceEventLog } from "../../src/instance/model/EventLog.ts";
 import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
 import { ToolCallHistory } from "../../src/toolcall/execution/record/History.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
@@ -1060,6 +1061,21 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
     assert.equal(gap.kind, "gap");
     assert.equal(gap.code, STREAM_GAP_CODE);
     assert.equal(gap.nextSeq, 2);
+});
+
+test("Core Instance replay rejects cursors from a newer sequence generation", async () => {
+    const name = asInstanceName("restarted");
+    const buffer = new InstanceEventBuffer(name, 4);
+    await buffer.append({ at: "2026-01-01T00:00:00Z", type: "instance.started" });
+    assert.equal(buffer.readFrom(10).kind, "gap");
+    assert.equal(buffer.readFrom(2).kind, "events");
+
+    const log = createInstanceEventLog({ api: { events: {
+        readHighWater: () => 1,
+        readFrom: () => [],
+    } } } as never, name);
+    assert.equal(log.port.readFrom(10).kind, "gap");
+    assert.equal(log.port.readFrom(2).kind, "events");
 });
 
 test("AuditEventStore trims the collection to the configured replay window", async () => {

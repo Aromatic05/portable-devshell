@@ -21,7 +21,7 @@ export function createInstanceEventLog(
         const lastSeq = audit.api.events.readHighWater();
         const records = audit.api.events.readFrom(fromSeq);
         const nextSeq = audit.api.events.readFrom(1, 1)[0]?.seq ?? lastSeq + 1;
-        return fromSeq < nextSeq
+        return fromSeq < nextSeq || fromSeq > lastSeq + 1
             ? {
                   code: STREAM_GAP_CODE as typeof STREAM_GAP_CODE,
                   fromSeq,
