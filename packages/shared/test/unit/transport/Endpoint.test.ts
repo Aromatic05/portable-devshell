@@ -477,7 +477,7 @@ test("Endpoint retries transient channel establishment without replaying RPC", a
     assert.equal(executions, 1, "a recovered connection must not replay any RPC");
 });
 
-test("Endpoint does not retry non-transient errors or an aborted connection", async () => {
+test("Endpoint does not retry non-transient errors and cancels a caller's wait independently", async () => {
     let attempts = 0;
     const unrecoverable = new Endpoint({
         connectChannel: async () => {
@@ -499,8 +499,8 @@ test("Endpoint does not retry non-transient errors or an aborted connection", as
         },
     });
     await assert.rejects(interrupted.connect("worker", "core", controller.signal),
-        /connection reset/u);
-    assert.equal(attempts, 1, "caller cancellation prevents every reconnect attempt");
+        /user cancelled/u);
+    assert.equal(attempts, 1);
     interrupted.close();
 });
 

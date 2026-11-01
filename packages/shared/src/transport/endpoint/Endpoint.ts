@@ -43,6 +43,7 @@ export class Endpoint {
     #gateway?: Link;
     #standbyGateway?: Link;
     #connecting?: Promise<void>;
+    #lifecycle = new AbortController();
 
     constructor(options: EndpointOptions = {}) {
         this.host = options.host ?? createTransportId();
@@ -71,7 +72,11 @@ export class Endpoint {
         port: PortName,
         signal?: AbortSignal,
     ): Promise<Connection> {
+        const lifecycle = this.#lifecycle;
+        signal?.throwIfAborted();
         if (host !== this.host) await this.#connect(signal);
+        lifecycle.signal.throwIfAborted();
+        signal?.throwIfAborted();
         return this.bind(port).connect(host, port);
     }
 
@@ -178,6 +183,10 @@ export class Endpoint {
     }
 
     close(): void {
+        const lifecycle = this.#lifecycle;
+        this.#lifecycle = new AbortController();
+        this.#connecting = undefined;
+        lifecycle.abort(new Error("Endpoint closed."));
         for (const port of this.#ports.values()) port.close();
         this.#ports.clear();
         for (const link of [...this.#links]) this.#close(link);
@@ -186,37 +195,43 @@ export class Endpoint {
     }
 
     async #connect(signal?: AbortSignal): Promise<void> {
-        if (this.#connecting !== undefined) return await this.#connecting;
-        if (this.#gateway !== undefined) return;
-        const connecting = (async () => {
-            await this.#openLink(false, signal);
-        })();
-        this.#connecting = connecting;
-        try {
-            await connecting;
-        } finally {
-            this.#connecting = undefined;
+        signal?.throwIfAborted();
+        if (this.#connecting === undefined) {
+            if (this.#gateway !== undefined) return;
+            const connecting = this.#openLink(false).then(() => undefined).finally(() => {
+                if (this.#connecting === connecting) this.#connecting = undefined;
+            });
+            this.#connecting = connecting;
         }
+        await untilAborted(this.#connecting, signal === undefined ? this.#lifecycle.signal
+            : AbortSignal.any([signal, this.#lifecycle.signal]));
     }
 
-    async #openLink(staged: boolean, signal?: AbortSignal): Promise<Link> {
+    async #openLink(staged: boolean, callerSignal?: AbortSignal): Promise<Link> {
+        const signal = callerSignal === undefined ? this.#lifecycle.signal
+            : AbortSignal.any([callerSignal, this.#lifecycle.signal]);
         const connectChannel = this.#connectChannel;
         if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         // Retry only transport establishment, never RPC or tool execution.
         const channel = await connectChannelWithRetry(connectChannel, signal);
+        if (signal.aborted) {
+            channel.close(signal.reason instanceof Error ? signal.reason : undefined);
+            signal.throwIfAborted();
+        }
         const abort = () => channel.close(
-            signal?.reason instanceof Error ? signal.reason : new Error("Transport connection aborted."),
+            signal.reason instanceof Error ? signal.reason : new Error("Transport connection aborted."),
         );
-        signal?.addEventListener("abort", abort, { once: true });
-        if (signal?.aborted) abort();
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
         const frame = new FrameProtocol(channel, { role: "opener" });
         let codec: EnvelopeCodec;
         try {
             codec = new EnvelopeCodec(
                 new FrameStreamChannel(await frame.open(ENVELOPE_SERVICE)),
             );
+            signal.throwIfAborted();
         } catch (error) {
-            signal?.removeEventListener("abort", abort);
+            signal.removeEventListener("abort", abort);
             frame.close();
             throw error;
         }
@@ -232,21 +247,22 @@ export class Endpoint {
                 for (const listener of this.#closeListeners) listener(error);
         });
         try {
-            await this.#initializeConnection?.((host, port) =>
-                staged
+            await this.#initializeConnection?.((host, port) => {
+                signal.throwIfAborted();
+                return staged
                     ? this.bind(port).connectVia(host, port, codec, channel)
-                    : this.bind(port).connect(host, port),
-            );
+                    : this.bind(port).connect(host, port);
+            });
             if (!this.#links.has(link) || (!staged && this.#gateway !== link))
                 throw new Error("Endpoint connection closed during initialization.");
             // Aborting at this boundary must close the candidate through the
             // catch path, not leave an unowned Link behind.
-            signal?.throwIfAborted();
+            signal.throwIfAborted();
         } catch (error) {
             this.#close(link);
             throw error;
         } finally {
-            signal?.removeEventListener("abort", abort);
+            signal.removeEventListener("abort", abort);
         }
         if (!staged)
             for (const listener of this.#openListeners) listener();
@@ -321,7 +337,6 @@ async function untilAborted<T>(
 ): Promise<T | undefined> {
     if (work === undefined) return undefined;
     if (signal === undefined) return await work;
-    signal.throwIfAborted();
     return await new Promise<T>((resolve, reject) => {
         let settled = false;
         const abort = () => {

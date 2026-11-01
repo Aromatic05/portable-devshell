@@ -114,15 +114,12 @@ export class Rpc {
             if (pending === undefined) return;
             this.#pending.delete(id);
             const reason = signal!.reason;
-            if (!connection.connected) {
-                rejectCancellation!(reason);
-                return;
-            }
-            connection.send({ protocol: "rpc", type: "cancel", id }).then(
-                () => rejectCancellation!(reason),
-                (error) =>
-                    rejectCancellation!(connection.connected ? error : reason),
-            );
+            rejectCancellation!(reason);
+            if (connection.connected)
+                void connection.send({ protocol: "rpc", type: "cancel", id })
+                    .catch((error: unknown) => {
+                        if (connection.connected) console.warn(error);
+                    });
         };
         signal?.addEventListener("abort", abort, { once: true });
         try {

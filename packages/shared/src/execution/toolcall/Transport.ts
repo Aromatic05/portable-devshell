@@ -72,7 +72,7 @@ export function createToolTransport(
                     : { recording: options.recording }),
                 toolName,
                 workspace,
-            } satisfies JsonValue);
+            } satisfies JsonValue, options.signal);
             return await streamToolCall(stream, options);
         },
         closeSession: () => port.request<Record<string, never>>("closeSession", {}),
@@ -102,21 +102,10 @@ async function streamToolCall(
         if (envelope.name === "progress")
             options.onProgress?.(envelope.payload ?? null);
     });
-    const aborted = () => {
-        void stream.cancel({
-            message:
-                options.signal?.reason instanceof Error
-                    ? options.signal.reason.message
-                    : "Tool call was aborted.",
-        });
-    };
-    options.signal?.addEventListener("abort", aborted, { once: true });
-    if (options.signal?.aborted === true) aborted();
     try {
         return await streamTerminal(stream);
     } finally {
         offData();
-        options.signal?.removeEventListener("abort", aborted);
     }
 }
 

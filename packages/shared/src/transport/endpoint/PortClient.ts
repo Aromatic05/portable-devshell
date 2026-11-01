@@ -77,15 +77,14 @@ async function open(
 ): Promise<MessageStream> {
     signal?.throwIfAborted();
     const protocol = new Stream(await endpoint.connect(host, port, signal));
-    const stream = await protocol.open(operation, payload);
-    const close = () => protocol.close();
-    stream.onClose(close);
-    stream.onCancel(close);
-    if (signal !== undefined)
-        signal.addEventListener(
-            "abort",
-            () => void stream.cancel({ message: String(signal.reason) }),
-            { once: true },
-        );
-    return stream;
+    try {
+        const stream = await protocol.open(operation, payload, signal);
+        const close = () => protocol.close();
+        stream.onClose(close);
+        stream.onCancel(close);
+        return stream;
+    } catch (error) {
+        protocol.close();
+        throw error;
+    }
 }

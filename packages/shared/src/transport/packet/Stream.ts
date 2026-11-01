@@ -60,7 +60,8 @@ export class Stream {
         }
     }
 
-    async open(name: string, message?: Message): Promise<MessageStream> {
+    async open(name: string, message?: Message, signal?: AbortSignal): Promise<MessageStream> {
+        signal?.throwIfAborted();
         if (!(this.#target instanceof Connection))
             throw new Error("Stream open requires a Connection.");
         const connection = this.#target.retain();
@@ -72,14 +73,31 @@ export class Stream {
             connection,
             connection.channel,
         );
-        await connection.send({
-            protocol: "stream",
-            type: "open",
-            id,
-            name,
-            ...(message === undefined ? {} : { message }),
-        } satisfies StreamPacket);
-        return stream;
+        let rejectOpening: (reason: unknown) => void = () => undefined;
+        const cancellation = new Promise<never>((_resolve, reject) => { rejectOpening = reject; });
+        const abort = () => {
+            rejectOpening(signal!.reason);
+            void stream.cancel({ message: String(signal!.reason) }).catch((error: unknown) => console.warn(error));
+        };
+        const detach = () => signal?.removeEventListener("abort", abort);
+        stream.onClose(detach);
+        stream.onCancel(detach);
+        signal?.addEventListener("abort", abort, { once: true });
+        try {
+            signal?.throwIfAborted();
+            await Promise.race([connection.send({
+                protocol: "stream",
+                type: "open",
+                id,
+                name,
+                ...(message === undefined ? {} : { message }),
+            } satisfies StreamPacket), cancellation]);
+            signal?.throwIfAborted();
+            return stream;
+        } catch (error) {
+            stream.dispose();
+            throw error;
+        }
     }
 
     onOpen(
@@ -189,6 +207,7 @@ export class MessageStream {
     >();
     readonly #closeListeners = new Set<(message?: Message) => void>();
     readonly #cancelListeners = new Set<(error?: StreamError) => void>();
+    readonly #writes = new Set<(error: Error) => void>();
     readonly #pending: Array<{ bytes?: Uint8Array; message?: Message; seq: number; size: number }> = [];
     #pendingBytes = 0;
     #deliveringBytes = 0;
@@ -247,13 +266,13 @@ export class MessageStream {
     send(message?: Message): Promise<void> {
         if (this.#closed || this.#localFinished)
             throw new Error("Stream write side is closed.");
-        return this.#connection.send({
+        return this.#sending(this.#connection.send({
             protocol: "stream",
             type: "data",
             id: this.id,
             seq: ++this.#sendSeq,
             ...(message === undefined ? {} : { message }),
-        } satisfies StreamPacket);
+        } satisfies StreamPacket));
     }
 
     async write(data: Uint8Array): Promise<void> {
@@ -274,11 +293,11 @@ export class MessageStream {
         if (this.#closed || this.#localFinished) return;
         this.#localFinished = true;
         if (!this.#connection.connected) return;
-        await this.#connection.send({
+        await this.#sending(this.#connection.send({
             protocol: "stream",
             type: "fin",
             id: this.id,
-        } satisfies StreamPacket);
+        } satisfies StreamPacket));
     }
 
     async close(message?: Message): Promise<void> {
@@ -302,14 +321,16 @@ export class MessageStream {
         this.acceptCancel(error);
         try {
             if (this.#connection.connected)
-                await this.#connection.send({
+                void this.#connection.send({
                     protocol: "stream",
                     type: "cancel",
                     id: this.id,
                     ...(error === undefined ? {} : { error }),
-                } satisfies StreamPacket);
+                } satisfies StreamPacket).catch((cause: unknown) => {
+                    if (this.#connection.connected) console.warn(cause);
+                });
         } catch (cause) {
-            if (this.#connection.connected) throw cause;
+            if (this.#connection.connected) console.warn(cause);
         }
     }
 
@@ -408,6 +429,11 @@ export class MessageStream {
                 if (this.#terminal?.type === "cancel") break;
                 await listener(message, seq);
             }
+        } catch (error) {
+            // Consumer failures belong to this stream; malformed packets above
+            // still propagate to the transport's protocol error boundary.
+            void this.cancel({ message: error instanceof Error ? error.message : String(error) })
+                .catch((cause: unknown) => console.warn(cause));
         } finally {
             this.#deliveringBytes -= size;
             this.#deliveringCount -= 1;
@@ -417,13 +443,26 @@ export class MessageStream {
     #sendBytes(bytes: Uint8Array): Promise<void> {
         if (this.#closed || this.#localFinished)
             throw new Error("Stream write side is closed.");
-        return this.#connection.send({
+        return this.#sending(this.#connection.send({
             protocol: "stream",
             type: "data",
             id: this.id,
             seq: ++this.#sendSeq,
             bytes,
-        } satisfies StreamPacket);
+        } satisfies StreamPacket));
+    }
+
+    #sending(work: Promise<void>): Promise<void> {
+        // Keep the queued envelope intact even if its caller stops waiting.
+        return new Promise<void>((resolve, reject) => {
+            this.#writes.add(reject);
+            void work.then(resolve, reject).finally(() => this.#writes.delete(reject));
+            if (this.#closed) {
+                this.#writes.delete(reject);
+                reject(this.#terminal?.type === "cancel" ? streamError(this.#terminal.error)
+                    : new Error("Stream write side is closed."));
+            }
+        });
     }
 
     acceptFin(): void {
@@ -457,6 +496,10 @@ export class MessageStream {
     }
 
     #release(): void {
+        const error = this.#terminal?.type === "cancel" ? streamError(this.#terminal.error)
+            : new Error("Stream write side is closed.");
+        for (const reject of this.#writes) reject(error);
+        this.#writes.clear();
         this.#finish();
         this.#dataListeners.clear();
         this.#closeListeners.clear();
