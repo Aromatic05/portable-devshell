@@ -13,6 +13,7 @@ import type {
     OAuthApprovalRequest,
 } from "./Model.js";
 import type { AuthTransport } from "./Transport.js";
+import { withRequestTimeout } from "../../client/Request.js";
 
 export interface AuthViewModelState {
     /** Failure of the most recent approval read or decision, if any. */
@@ -26,16 +27,20 @@ export interface AuthViewModelState {
 interface AuthViewModelOptions {
     /** Poll cadence in milliseconds; values <= 0 disable polling. */
     pollIntervalMs?: number;
+    requestTimeoutMs?: number;
 }
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 export class AuthViewModel {
     readonly #listeners = new Set<() => void>();
     readonly #transport: AuthTransport;
     readonly #pollIntervalMs: number;
+    readonly #requestTimeoutMs: number;
     readonly #decidedApprovals = new Set<string>();
     #approvalVersion = 0;
     #generation = 0;
     #pollTimer?: ReturnType<typeof setInterval>;
+    #activeRead?: AbortController;
     #published: AuthViewModelState = emptyState();
     #refresh?: Promise<void>;
     #refreshRequested = false;
@@ -45,6 +50,7 @@ export class AuthViewModel {
     constructor(transport: AuthTransport, options: AuthViewModelOptions = {}) {
         this.#transport = transport;
         this.#pollIntervalMs = options.pollIntervalMs ?? 1_000;
+        this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     }
 
     get state(): Readonly<AuthViewModelState> {
@@ -59,6 +65,7 @@ export class AuthViewModel {
     /** Reads the status and the gated approval list once. */
     async load(): Promise<void> {
         const generation = ++this.#generation;
+        this.#activeRead?.abort();
         if (this.#refresh !== undefined) await this.#refresh;
         if (generation !== this.#generation) return;
         await this.refresh();
@@ -85,13 +92,20 @@ export class AuthViewModel {
     }
 
     async #refreshOnce(generation: number): Promise<void> {
-        const applied = await this.#refreshStatus(generation);
-        if (!applied) return;
-        if (!this.#oauthActive()) {
-            this.#clearApprovals();
-            return;
+        const controller = new AbortController();
+        this.#activeRead = controller;
+        try {
+            const applied = await this.#refreshStatus(generation, controller.signal);
+            if (!applied) return;
+            if (!this.#oauthActive()) {
+                this.#clearApprovals();
+                return;
+            }
+            await this.#refreshApprovals(generation, controller.signal);
+        } finally {
+            controller.abort();
+            if (this.#activeRead === controller) this.#activeRead = undefined;
         }
-        await this.#refreshApprovals(generation);
     }
 
     start(): void {
@@ -138,6 +152,8 @@ export class AuthViewModel {
     close(): void {
         this.stop();
         this.#generation += 1;
+        this.#activeRead?.abort();
+        this.#activeRead = undefined;
         this.#refresh = undefined;
         this.#refreshRequested = false;
         this.#decidedApprovals.clear();
@@ -146,10 +162,12 @@ export class AuthViewModel {
         this.#published = this.#state;
     }
 
-    async #refreshStatus(generation: number): Promise<boolean> {
+    async #refreshStatus(generation: number, signal: AbortSignal): Promise<boolean> {
         const version = ++this.#statusVersion;
         try {
-            const status = await this.#transport.status();
+            const status = await withRequestTimeout(
+                this.#transport.status(signal), this.#requestTimeoutMs, "Auth status",
+            );
             if (!this.#statusCurrent(generation, version)) return false;
             this.#state = {
                 ...this.#state,
@@ -166,10 +184,12 @@ export class AuthViewModel {
         }
     }
 
-    async #refreshApprovals(generation: number): Promise<void> {
+    async #refreshApprovals(generation: number, signal: AbortSignal): Promise<void> {
         const version = ++this.#approvalVersion;
         try {
-            const approvals = await this.#transport.listApprovals();
+            const approvals = await withRequestTimeout(
+                this.#transport.listApprovals(signal), this.#requestTimeoutMs, "Auth approvals",
+            );
             if (!this.#approvalCurrent(generation, version)) return;
             this.#applyApprovals(approvals);
         } catch (error) {

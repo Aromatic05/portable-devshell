@@ -27,6 +27,7 @@ export class WebStore {
     #controlRestartPromise?: Promise<boolean>;
     #loading?: Promise<void>;
     #auditRefresh?: Promise<void>;
+    #auditAbort?: AbortController;
     #generation = 0;
     #stopped = false;
 
@@ -83,6 +84,7 @@ export class WebStore {
         if (this.#stopped) return;
         this.#generation += 1;
         this.#loading = undefined;
+        this.#auditAbort?.abort();
         this.#auditRefresh = undefined;
         const generation = this.#generation;
         this.#operations.cancelAll(
@@ -146,7 +148,9 @@ export class WebStore {
     async refreshAudit(): Promise<void> {
         if (this.#auditRefresh !== undefined) return this.#auditRefresh;
         const generation = this.#generation;
-        const refresh = withRequestTimeout(this.#refreshAudit(), this.#requestTimeoutMs, "Audit refresh").then(
+        const controller = new AbortController();
+        this.#auditAbort = controller;
+        const refresh = withRequestTimeout(this.#refreshAudit(controller.signal), this.#requestTimeoutMs, "Audit refresh").then(
             () => {
                 if (this.#current(generation))
                     this.#set({ ...this.#state, error: undefined });
@@ -160,30 +164,38 @@ export class WebStore {
         try {
             await refresh;
         } finally {
+            controller.abort();
+            if (this.#auditAbort === controller) this.#auditAbort = undefined;
             if (this.#auditRefresh === refresh) this.#auditRefresh = undefined;
         }
     }
 
-    async #refreshAudit(): Promise<void> {
+    async #refreshAudit(signal: AbortSignal): Promise<void> {
         // An online socket is not the same as a fully loaded instance catalog.
         // A concurrent catalog read can supersede this one and leave Audit empty.
         await this.#loading;
+        signal.throwIfAborted();
         await Promise.all([
-            this.domains.instances.refresh(),
-            this.domains.context.refresh(),
+            this.domains.instances.refresh(signal),
+            this.domains.context.refresh(signal),
         ]);
+        signal.throwIfAborted();
         const instances = this.domains.instances.state.instances.map(
             ({ name }) => name,
         );
         await Promise.all(
             instances.map(async (instance) => {
+                signal.throwIfAborted();
                 const runtime = this.domains.runtime(instance);
                 await Promise.all([
-                    runtime.load().then(() => runtime.readLogs()),
-                    this.domains.approval(instance).load(),
-                    this.domains.toolCalls.load(instance),
-                    this.domains.messageHistory.refreshInstance(instance),
-                    this.domains.messages.refreshInstance(instance),
+                    runtime.load(signal).then(() => {
+                        signal.throwIfAborted();
+                        return runtime.readLogs(undefined, signal);
+                    }),
+                    this.domains.approval(instance).load(signal),
+                    this.domains.toolCalls.load(instance, undefined, signal),
+                    this.domains.messageHistory.refreshInstance(instance, signal),
+                    this.domains.messages.refreshInstance(instance, signal),
                 ]);
             }),
         );
@@ -536,6 +548,7 @@ export class WebStore {
         if (this.#stopped) return;
         this.#stopped = true;
         this.#generation += 1;
+        this.#auditAbort?.abort();
         this.#operations.cancelAll(new Error("Web store closed."));
         this.domains.close();
         this.#listeners.clear();

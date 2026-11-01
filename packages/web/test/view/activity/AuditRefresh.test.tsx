@@ -27,7 +27,7 @@ it("keeps Audit current while visible without repeatedly pulling every Web domai
         />));
 
         await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-        expect(refresh).toHaveBeenCalledExactlyOnceWith("alpha");
+        expect(refresh).toHaveBeenCalledExactlyOnceWith("alpha", expect.any(AbortSignal));
         expect(screen.getByText("file_read", { selector: "strong" })).toBeInTheDocument();
         expect(fullRefresh).not.toHaveBeenCalled();
 

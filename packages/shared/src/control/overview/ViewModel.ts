@@ -9,6 +9,7 @@
 
 import type { OperationalOverview } from "./Model.js";
 import type { OverviewTransport } from "./Transport.js";
+import { withRequestTimeout } from "../../client/Request.js";
 
 type OverviewViewModelStatus = "idle" | "ready" | "unsupported" | "failed";
 
@@ -19,6 +20,7 @@ export interface OverviewViewModelState {
 }
 
 interface OverviewViewModelOptions {
+    requestTimeoutMs?: number;
     /**
      * Periodic auto-refresh cadence. Defaults to the historical 5s; 0 disables
      * the interval.
@@ -31,6 +33,7 @@ interface OverviewViewModelOptions {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5_000;
 const DEFAULT_SCHEDULE_DELAY_MS = 100;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const METHOD_NOT_FOUND_CODE = "method_not_found";
 
 export class OverviewViewModel {
@@ -38,12 +41,14 @@ export class OverviewViewModel {
     readonly #transport: OverviewTransport;
     readonly #refreshIntervalMs: number;
     readonly #scheduleDelayMs: number;
+    readonly #requestTimeoutMs: number;
     #generation = 0;
     #intervalTimer?: ReturnType<typeof setInterval>;
     #published: Readonly<OverviewViewModelState> = emptyState();
     #refresh?: Promise<void>;
     #refreshRequested = false;
     #refreshTimer?: ReturnType<typeof setTimeout>;
+    #activeRead?: AbortController;
     #state: OverviewViewModelState = emptyState();
 
     constructor(
@@ -55,6 +60,7 @@ export class OverviewViewModel {
             options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
         this.#scheduleDelayMs =
             options.scheduleDelayMs ?? DEFAULT_SCHEDULE_DELAY_MS;
+        this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     }
 
     get state(): Readonly<OverviewViewModelState> {
@@ -91,8 +97,12 @@ export class OverviewViewModel {
     }
 
     async #refreshOnce(generation: number): Promise<void> {
+        const controller = new AbortController();
+        this.#activeRead = controller;
         try {
-            const overview = await this.#transport.get();
+            const overview = await withRequestTimeout(
+                this.#transport.get(controller.signal), this.#requestTimeoutMs, "Overview",
+            );
             if (generation !== this.#generation) return;
             this.#state = { overview, status: "ready" };
         } catch (error) {
@@ -104,6 +114,9 @@ export class OverviewViewModel {
                       failure: toError(error),
                       status: "failed",
                   };
+        } finally {
+            controller.abort();
+            if (this.#activeRead === controller) this.#activeRead = undefined;
         }
         this.#emit();
     }
@@ -144,6 +157,8 @@ export class OverviewViewModel {
     close(): void {
         this.stop();
         this.#generation += 1;
+        this.#activeRead?.abort();
+        this.#activeRead = undefined;
         this.#refresh = undefined;
         this.#refreshRequested = false;
         this.#listeners.clear();

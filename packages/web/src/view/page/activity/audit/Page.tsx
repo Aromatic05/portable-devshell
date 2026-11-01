@@ -68,17 +68,21 @@ export function Audit({
     instancesRef.current = instancesState.instances;
     useEffect(() => {
         if (server.status !== "online") return;
-        const pending = new Set<string>();
+        const pending = new Map<string, AbortController>();
         const refresh = () => {
             if (document.visibilityState === "hidden") return;
             // Keep a long-lived Audit view current even if its event stream went quiet.
             // Avoid refreshAudit(), which also reloads logs, messages and approvals.
             for (const { name } of instancesRef.current) {
                 if (pending.has(name)) continue;
-                pending.add(name);
-                void withRequestTimeout(domains.toolCalls.refresh(name), auditReadTimeoutMs, "Audit refresh")
+                const controller = new AbortController();
+                pending.set(name, controller);
+                void withRequestTimeout(domains.toolCalls.refresh(name, controller.signal), auditReadTimeoutMs, "Audit refresh")
                     .catch(() => undefined)
-                    .finally(() => pending.delete(name));
+                    .finally(() => {
+                        controller.abort();
+                        if (pending.get(name) === controller) pending.delete(name);
+                    });
             }
         };
         const timer = window.setInterval(refresh, auditRefreshIntervalMs);
@@ -86,6 +90,8 @@ export function Audit({
         return () => {
             window.clearInterval(timer);
             document.removeEventListener("visibilitychange", refresh);
+            for (const controller of pending.values()) controller.abort();
+            pending.clear();
         };
     }, [domains, server.status]);
     const storeState = useSyncExternalStore(

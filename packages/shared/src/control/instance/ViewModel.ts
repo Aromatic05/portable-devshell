@@ -69,8 +69,8 @@ export class InstanceConfigViewModel {
     }
 
     /** Re-reads the authoritative configured-instance catalog. */
-    refresh(): Promise<InstanceListEnvelope | undefined> {
-        return this.#read();
+    refresh(signal?: AbortSignal): Promise<InstanceListEnvelope | undefined> {
+        return this.#read(signal);
     }
 
     listCleanupDebts(): Promise<Array<Record<string, string>>> {
@@ -130,19 +130,19 @@ export class InstanceConfigViewModel {
         this.#published = this.#state;
     }
 
-    async #read(): Promise<InstanceListEnvelope | undefined> {
+    async #read(signal?: AbortSignal): Promise<InstanceListEnvelope | undefined> {
         const epoch = this.#epoch;
         const generation = ++this.#generation;
         this.#begin();
         try {
-            const envelope = await this.#transport.snapshotInstances();
-            if (epoch !== this.#epoch || generation !== this.#generation)
+            const envelope = await this.#transport.snapshotInstances(signal);
+            if (signal?.aborted || epoch !== this.#epoch || generation !== this.#generation)
                 return undefined;
             this.#apply(envelope);
             this.#ensureSubscription(envelope.revision + 1);
             return envelope;
         } catch (error) {
-            if (epoch !== this.#epoch || generation !== this.#generation)
+            if (signal?.aborted || epoch !== this.#epoch || generation !== this.#generation)
                 return undefined;
             if (isInstanceMethodNotFound(error)) {
                 this.#markUnsupported();
@@ -150,6 +150,11 @@ export class InstanceConfigViewModel {
             }
             this.#fail(error);
             return undefined;
+        } finally {
+            if (signal?.aborted && epoch === this.#epoch && generation === this.#generation) {
+                this.#state = { ...this.#state, loading: false, refreshing: false };
+                this.#emit();
+            }
         }
     }
 

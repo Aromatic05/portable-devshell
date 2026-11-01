@@ -12,8 +12,8 @@ export interface AuthTransport {
         approvalId: string,
         decision: OAuthApprovalDecision,
     ): Promise<OAuthApprovalRequest>;
-    listApprovals(): Promise<OAuthApprovalRequest[]>;
-    status(): Promise<AuthStatus>;
+    listApprovals(signal?: AbortSignal): Promise<OAuthApprovalRequest[]>;
+    status(signal?: AbortSignal): Promise<AuthStatus>;
 }
 
 export function createAuthTransport(endpoint: Endpoint): AuthTransport {
@@ -24,8 +24,8 @@ export function createAuthTransport(endpoint: Endpoint): AuthTransport {
                 approvalId,
                 decision,
             }),
-        listApprovals: () =>
-            port.request<OAuthApprovalRequest[]>("listApprovals"),
-        status: () => port.request<AuthStatus>("status"),
+        listApprovals: (signal) =>
+            port.request<OAuthApprovalRequest[]>("listApprovals", undefined, signal),
+        status: (signal) => port.request<AuthStatus>("status", undefined, signal),
     };
 }

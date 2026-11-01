@@ -4,12 +4,12 @@ import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import type { OperationalOverview } from "./Model.js";
 
 export interface OverviewTransport {
-    get(): Promise<OperationalOverview>;
+    get(signal?: AbortSignal): Promise<OperationalOverview>;
 }
 
 export function createOverviewTransport(endpoint: Endpoint): OverviewTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "overview");
     return {
-        get: () => port.request<OperationalOverview>("get"),
+        get: (signal) => port.request<OperationalOverview>("get", undefined, signal),
     };
 }

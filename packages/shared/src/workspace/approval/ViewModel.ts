@@ -52,7 +52,7 @@ export class ApprovalViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    async load(): Promise<void> {
+    async load(signal?: AbortSignal): Promise<void> {
         const generation = ++this.#generation;
         // A new load can belong to a restarted instance with a reset cursor.
         // Keep the rows and stream usable until its first successful snapshot,
@@ -60,7 +60,7 @@ export class ApprovalViewModel {
         this.#snapshotSeq = undefined;
         this.#deciding.clear();
         this.#subscribeRequested = true;
-        await this.#readSnapshot(generation);
+        await this.#readSnapshot(generation, signal);
     }
 
     async refresh(): Promise<void> {
@@ -170,12 +170,12 @@ export class ApprovalViewModel {
         }
     }
 
-    async #readSnapshot(generation: number): Promise<boolean> {
+    async #readSnapshot(generation: number, signal?: AbortSignal): Promise<boolean> {
         if (generation !== this.#generation) return false;
         const mutation = this.#mutation;
         const order = ++this.#readOrder;
-        const result = await this.#transport.snapshot({ pendingOnly: true });
-        if (generation !== this.#generation || mutation !== this.#mutation)
+        const result = await this.#transport.snapshot({ pendingOnly: true }, signal);
+        if (signal?.aborted || generation !== this.#generation || mutation !== this.#mutation)
             return false;
         this.#apply(result, order);
         this.#ensureSubscription(this.#state.lastSeq + 1, generation);

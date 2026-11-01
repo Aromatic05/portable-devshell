@@ -51,7 +51,7 @@ describe("WebStore", () => {
         releaseInitialLoad();
         await Promise.all([initialLoad, firstAudit, secondAudit]);
         expect(refreshInstances).toHaveBeenCalledOnce();
-        expect(loadToolCalls).toHaveBeenCalledExactlyOnceWith("demo");
+        expect(loadToolCalls).toHaveBeenCalledExactlyOnceWith("demo", undefined, expect.any(AbortSignal));
     });
 
     it("waits for the domain session before completing its load", async () => {
@@ -228,10 +228,10 @@ describe("WebStore", () => {
 
         await store.refreshAudit();
 
-        expect(loadToolCalls).toHaveBeenCalledWith("demo");
+        expect(loadToolCalls).toHaveBeenCalledWith("demo", undefined, expect.any(AbortSignal));
         expect(domains.toolCalls.state.instances.demo?.calls).toEqual([call]);
-        expect(messageRefresh).toHaveBeenCalledWith("demo");
-        expect(messagesRefresh).toHaveBeenCalledWith("demo");
+        expect(messageRefresh).toHaveBeenCalledWith("demo", expect.any(AbortSignal));
+        expect(messagesRefresh).toHaveBeenCalledWith("demo", expect.any(AbortSignal));
         expect(contextRefresh).toHaveBeenCalledOnce();
 
         expect(
@@ -357,9 +357,9 @@ describe("WebStore", () => {
         await store.refreshAudit();
 
         expect(contextRefresh).toHaveBeenCalledOnce();
-        expect(loadToolCalls).toHaveBeenCalledWith("demo");
-        expect(messageRefresh).toHaveBeenCalledWith("demo");
-        expect(messagesRefresh).toHaveBeenCalledWith("demo");
+        expect(loadToolCalls).toHaveBeenCalledWith("demo", undefined, expect.any(AbortSignal));
+        expect(messageRefresh).toHaveBeenCalledWith("demo", expect.any(AbortSignal));
+        expect(messagesRefresh).toHaveBeenCalledWith("demo", expect.any(AbortSignal));
         expect(runtimeLoad).toHaveBeenCalledOnce();
         expect(readLogs).toHaveBeenCalledOnce();
         expect(approvalLoad).toHaveBeenCalledOnce();
@@ -730,3 +730,32 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
     });
     return { promise, resolve };
 }
+
+it("aborts every underlying Audit RPC after timeout so retries cannot accumulate live calls", async () => {
+    const domains = new WebTestDomains();
+    domains.setInstances([{ name: "alpha" }]);
+    let opened = 0, active = 0, aborted = 0;
+    Object.assign(domains.toolCalls, {
+        load: async (_instance: string, _query: unknown, signal?: AbortSignal) => {
+            opened++;
+            active++;
+            await new Promise<void>((_resolve, reject) => {
+                if (signal?.aborted) { active--; aborted++; reject(new Error("aborted")); return; }
+                signal?.addEventListener("abort", () => {
+                    active--; aborted++;
+                    reject(new Error("aborted"));
+                }, { once: true });
+            });
+        },
+    });
+    const store = new WebStore(domains.domains, { requestTimeoutMs: 12 });
+    try {
+        for (let i = 0; i < 3; i++) {
+            await store.refreshAudit();
+            expect(active).toBe(0);
+            expect(store.state.error).toMatch(/Audit refresh timed out/);
+        }
+        expect(opened).toBe(3);
+        expect(aborted).toBe(3);
+    } finally { store.close(); }
+});

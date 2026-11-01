@@ -61,6 +61,7 @@ export class ContextViewModel {
             const snapshot = await this.#transport.snapshot(signal);
             const contexts = snapshot.contexts;
             if (
+                signal?.aborted ||
                 generation !== this.#generation ||
                 readGeneration !== this.#readGeneration
             )
@@ -77,6 +78,7 @@ export class ContextViewModel {
             return snapshot;
         } catch (error) {
             if (
+                signal?.aborted ||
                 generation !== this.#generation ||
                 readGeneration !== this.#readGeneration
             )

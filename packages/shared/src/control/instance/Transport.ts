@@ -31,7 +31,7 @@ export interface InstanceTransport {
     listInstances(): Promise<InstanceListEnvelope["instances"]>;
     listCleanupDebts(): Promise<Array<Record<string, string>>>;
     retryCleanupDebt(instanceName: string): Promise<Array<Record<string, string>>>;
-    snapshotInstances(): Promise<InstanceListEnvelope>;
+    snapshotInstances(signal?: AbortSignal): Promise<InstanceListEnvelope>;
     subscribeInstances(fromRevision: number): Promise<InstanceChangeStreamPort>;
     updateInstance(request: ConfigUpdateInstanceRequest): Promise<ConfigView>;
     validateInstanceCreate(
@@ -64,8 +64,8 @@ export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
             port.request<Array<Record<string, string>>>("retryCleanupDebt", { instanceName }),
         listInstances: () =>
             port.request<InstanceListEnvelope["instances"]>("listInstances"),
-        snapshotInstances: () =>
-            port.request<InstanceListEnvelope>("snapshotInstances"),
+        snapshotInstances: (signal) =>
+            port.request<InstanceListEnvelope>("snapshotInstances", undefined, signal),
         subscribeInstances: async (fromRevision) =>
             new InstanceChangeStream(
                 await port.open("subscribeInstances", { fromRevision }),

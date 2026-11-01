@@ -24,7 +24,7 @@ export interface ApprovalTransport {
     ): Promise<ApprovalRequest>;
     get(approvalId: string): Promise<ApprovalRequest>;
     list(options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
-    snapshot(options?: { pendingOnly?: boolean }): Promise<ApprovalListResult>;
+    snapshot(options?: { pendingOnly?: boolean }, signal?: AbortSignal): Promise<ApprovalListResult>;
     subscribe(fromSeq: number): Promise<InstanceEventStreamPort<ApprovalEvent>>;
 }
 
@@ -43,7 +43,7 @@ export function createApprovalTransport(
             }),
         get: (approvalId) => port.request<ApprovalRequest>("get", { approvalId }),
         list: (options) => port.request<ApprovalRequest[]>("list", options),
-        snapshot: (options) => port.request<ApprovalListResult>("snapshot", options),
+        snapshot: (options, signal) => port.request<ApprovalListResult>("snapshot", options, signal),
         subscribe: async (fromSeq) =>
             new InstanceEventStream<ApprovalEvent>(
                 instanceName,
