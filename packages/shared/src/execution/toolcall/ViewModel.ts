@@ -94,7 +94,9 @@ export class ToolCallViewModel {
         InstanceEventSubscription<ToolEvent>
     >();
     readonly #transport: (instance: string) => ToolTransport;
+    readonly #wanted = new Set<string>();
     readonly #versions = new Map<string, number>();
+    #versionSerial = 0;
     #contextSelection = 0;
     #epoch = 0;
     #published: ToolCallViewModelState = emptyState();
@@ -126,6 +128,7 @@ export class ToolCallViewModel {
      * subscription.
      */
     async load(instance: string, query?: ToolCallQuery): Promise<void> {
+        this.#wanted.add(instance);
         if (this.#queries.has(instance) &&
             JSON.stringify(this.#queries.get(instance)) !== JSON.stringify(query)) {
             // A changed query must not retain pages from another Context,
@@ -141,23 +144,29 @@ export class ToolCallViewModel {
         }
         this.#queries.set(instance, query);
         const epoch = this.#epoch;
+        const key = `tool:load:${instance}`;
+        const version = this.#nextVersion(key);
         let cursor: number;
         try {
             cursor = await this.#cursor(instance);
         } catch (error) {
-            if (!this.#current(epoch)) return;
+            if (!this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
             this.#setFailure(instance, error);
             this.#emit();
             return;
         }
-        if (!this.#current(epoch)) return;
-        await this.#refreshInstance(instance, epoch);
-        if (!this.#current(epoch)) return;
+        if (!this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
+        const applied = await this.#refreshInstance(instance, epoch);
+        if (!applied || !this.#wanted.has(instance) || !this.#valid(key, version, epoch)) return;
         this.#ensureSubscription(instance, cursor + 1);
     }
 
     /** Re-reads the authoritative ledger for one materialized instance. */
     async refresh(instance: string): Promise<void> {
+        if (this.#wanted.has(instance) && !this.#subscriptions.has(instance)) {
+            await this.load(instance, this.#queries.get(instance));
+            return;
+        }
         await this.#refreshInstance(instance, this.#epoch);
     }
 
@@ -322,12 +331,16 @@ export class ToolCallViewModel {
     /** Stops one instance's subscription, or every subscription when omitted. */
     stop(instance?: string): void {
         if (instance === undefined) {
+            for (const name of this.#wanted) this.#versions.delete(`tool:load:${name}`);
+            this.#wanted.clear();
             for (const timer of this.#refreshTimers.values())
                 clearTimeout(timer);
             this.#refreshTimers.clear();
             this.#closeSubscriptions();
             return;
         }
+        this.#versions.delete(`tool:load:${instance}`);
+        this.#wanted.delete(instance);
         const timer = this.#refreshTimers.get(instance);
         if (timer !== undefined) {
             clearTimeout(timer);
@@ -342,6 +355,7 @@ export class ToolCallViewModel {
         this.stop(instance);
         this.#queries.delete(instance);
         this.#versions.delete(instanceKey(instance));
+        this.#historyLoads.delete(instance);
         const hadContext = this.#state.context?.instance === instance;
         if (hadContext) {
             this.#contextSelection += 1;
@@ -361,6 +375,7 @@ export class ToolCallViewModel {
 
     close(): void {
         this.#epoch += 1;
+        this.#wanted.clear();
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#versions.clear();
@@ -437,11 +452,11 @@ export class ToolCallViewModel {
         // Active calls follow all persisted records and move on completion, so
         // their IDs cannot establish a continuous persisted history window.
         const known = new Set(existing.filter(isPersistedCall).map((call) => call.callId));
-        const calls = await this.#transport(instance).listCalls(query);
+        const calls = await readHistoryPage((signal) => this.#transport(instance).listCalls(query, signal));
         let page = calls;
         // With only active history retained, read through the authoritative end.
         while (existing.length > 0 && page.length > 0 && !page.some((call) => isPersistedCall(call) && known.has(call.callId))) {
-            page = await this.#transport(instance).listCalls({ ...query, before: page[0]!.callId });
+            page = await readHistoryPage((signal) => this.#transport(instance).listCalls({ ...query, before: page[0]!.callId }, signal));
             calls.unshift(...page);
         }
         return calls;
@@ -535,7 +550,7 @@ export class ToolCallViewModel {
     }
 
     #nextVersion(key: string): number {
-        const version = (this.#versions.get(key) ?? 0) + 1;
+        const version = ++this.#versionSerial;
         this.#versions.set(key, version);
         return version;
     }

@@ -38,7 +38,9 @@ export class GoalViewModel {
         InstanceEventSubscription<TaskEvent>
     >();
     readonly #transport: (instance: string) => TaskTransport;
+    readonly #wanted = new Set<string>();
     readonly #versions = new Map<string, number>();
+    #versionSerial = 0;
     #epoch = 0;
     #published: GoalViewModelState = emptyState();
     #state: GoalViewModelState = emptyState();
@@ -67,26 +69,37 @@ export class GoalViewModel {
      * again for the same instance re-reads without restarting the subscription.
      */
     async load(instance: string): Promise<void> {
+        this.#wanted.add(instance);
         const epoch = this.#epoch;
+        const key = `goal:load:${instance}`;
+        const version = this.#nextVersion(key);
         const lastSeq = await this.#refreshInstance(instance, epoch);
-        if (!this.#current(epoch) || lastSeq === undefined) return;
+        if (!this.#wanted.has(instance) || !this.#valid(key, version, epoch) || lastSeq === undefined) return;
         this.#ensureSubscription(instance, lastSeq + 1);
     }
 
     /** Re-reads the authoritative goal snapshot for one instance. */
     async refresh(instance: string): Promise<void> {
+        if (this.#wanted.has(instance) && !this.#subscriptions.has(instance)) {
+            await this.load(instance);
+            return;
+        }
         await this.#refreshInstance(instance, this.#epoch);
     }
 
     /** Stops one instance's subscription, or every subscription when omitted. */
     stop(instance?: string): void {
         if (instance === undefined) {
+            for (const name of this.#wanted) this.#versions.delete(`goal:load:${name}`);
+            this.#wanted.clear();
             for (const timer of this.#refreshTimers.values())
                 clearTimeout(timer);
             this.#refreshTimers.clear();
             this.#closeSubscriptions();
             return;
         }
+        this.#versions.delete(`goal:load:${instance}`);
+        this.#wanted.delete(instance);
         const timer = this.#refreshTimers.get(instance);
         if (timer !== undefined) {
             clearTimeout(timer);
@@ -109,6 +122,7 @@ export class GoalViewModel {
 
     close(): void {
         this.#epoch += 1;
+        this.#wanted.clear();
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#versions.clear();
@@ -221,7 +235,7 @@ export class GoalViewModel {
     }
 
     #nextVersion(key: string): number {
-        const version = (this.#versions.get(key) ?? 0) + 1;
+        const version = ++this.#versionSerial;
         this.#versions.set(key, version);
         return version;
     }

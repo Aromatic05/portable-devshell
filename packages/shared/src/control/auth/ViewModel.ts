@@ -58,7 +58,9 @@ export class AuthViewModel {
 
     /** Reads the status and the gated approval list once. */
     async load(): Promise<void> {
-        this.#generation += 1;
+        const generation = ++this.#generation;
+        if (this.#refresh !== undefined) await this.#refresh;
+        if (generation !== this.#generation) return;
         await this.refresh();
     }
 
@@ -136,6 +138,7 @@ export class AuthViewModel {
     close(): void {
         this.stop();
         this.#generation += 1;
+        this.#refresh = undefined;
         this.#refreshRequested = false;
         this.#decidedApprovals.clear();
         this.#listeners.clear();

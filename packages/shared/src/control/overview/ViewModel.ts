@@ -144,6 +144,7 @@ export class OverviewViewModel {
     close(): void {
         this.stop();
         this.#generation += 1;
+        this.#refresh = undefined;
         this.#refreshRequested = false;
         this.#listeners.clear();
         this.#state = emptyState();

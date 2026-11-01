@@ -74,9 +74,10 @@ export class ArtifactViewModel {
             await this.refresh();
             return;
         }
+        const generation = this.#generation;
         this.#active = true;
         await this.refresh();
-        if (!this.#active) return;
+        if (!this.#active || generation !== this.#generation) return;
         this.#openSubscription();
     }
 

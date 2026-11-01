@@ -244,6 +244,7 @@ export class EventSubscription<Event> {
     #attempt = 0;
     #cursor: number;
     #retryTimer?: ReturnType<typeof setTimeout>;
+    #runGeneration = 0;
     #status: SubscriptionStatus = "stopped";
     #stream?: EventStreamPort<Event>;
 
@@ -265,12 +266,13 @@ export class EventSubscription<Event> {
     start(): void {
         if (this.#active) return;
         this.#active = true;
-        void this.#run();
+        void this.#run(++this.#runGeneration);
     }
 
     stop(): void {
         if (!this.#active) return;
         this.#active = false;
+        this.#runGeneration += 1;
         if (this.#retryTimer !== undefined) {
             clearTimeout(this.#retryTimer);
             this.#retryTimer = undefined;
@@ -281,8 +283,8 @@ export class EventSubscription<Event> {
         this.#setStatus("stopped");
     }
 
-    async #run(): Promise<void> {
-        while (this.#active) {
+    async #run(generation: number): Promise<void> {
+        while (this.#current(generation)) {
             this.#setStatus(
                 this.#attempt === 0 ? "connecting" : "reconnecting",
             );
@@ -291,41 +293,42 @@ export class EventSubscription<Event> {
                 stream = await this.#options.open(this.#cursor);
             } catch (error) {
                 const gap = this.#options.readGapError(error);
-                if (gap !== undefined && this.#active) {
-                    const recovered = await this.#recover(gap);
+                if (gap !== undefined && this.#current(generation)) {
+                    const recovered = await this.#recover(gap, generation);
                     if (recovered !== undefined) {
                         this.#cursor = recovered;
                         continue;
                     }
                 }
-                if (!this.#active) return;
-                this.#scheduleRetry();
+                if (!this.#current(generation)) return;
+                this.#scheduleRetry(generation);
                 return;
             }
-            if (!this.#active) {
+            if (!this.#current(generation)) {
                 stream.close();
                 return;
             }
             this.#stream = stream;
             this.#attempt = 0;
             this.#setStatus("live");
-            const outcome = await this.#consume(stream);
-            this.#stream = undefined;
+            const outcome = await this.#consume(stream, generation);
+            if (this.#stream === stream) this.#stream = undefined;
             stream.close();
-            if (!this.#active) return;
+            if (!this.#current(generation)) return;
             if (outcome === "reopen") continue;
-            this.#scheduleRetry();
+            this.#scheduleRetry(generation);
             return;
         }
     }
 
     async #consume(
         stream: EventStreamPort<Event>,
+        generation: number,
     ): Promise<"reopen" | "retry"> {
         try {
-            while (this.#active) {
+            while (this.#current(generation)) {
                 const message = await stream.next();
-                if (!this.#active) return "retry";
+                if (!this.#current(generation)) return "retry";
                 if (message.kind === "event") {
                     this.#cursor = Math.max(
                         this.#cursor,
@@ -335,8 +338,8 @@ export class EventSubscription<Event> {
                     continue;
                 }
                 if (message.kind === "gap") {
-                    const recovered = await this.#recover(message.gap);
-                    if (!this.#active || recovered === undefined)
+                    const recovered = await this.#recover(message.gap, generation);
+                    if (!this.#current(generation) || recovered === undefined)
                         return "retry";
                     this.#cursor = recovered;
                     return "reopen";
@@ -349,17 +352,19 @@ export class EventSubscription<Event> {
         }
     }
 
-    async #recover(gap: StreamGap): Promise<number | undefined> {
+    async #recover(gap: StreamGap, generation: number): Promise<number | undefined> {
+        if (!this.#current(generation)) return undefined;
         this.#setStatus("reconnecting");
         try {
-            return await this.#options.onGap(gap);
+            const cursor = await this.#options.onGap(gap);
+            return this.#current(generation) ? cursor : undefined;
         } catch {
             return undefined;
         }
     }
 
-    #scheduleRetry(): void {
-        if (!this.#active || this.#retryTimer !== undefined) return;
+    #scheduleRetry(generation: number): void {
+        if (!this.#current(generation) || this.#retryTimer !== undefined) return;
         const delay = Math.min(
             this.#retryBaseMs * 2 ** this.#attempt,
             this.#retryMaxMs,
@@ -367,8 +372,12 @@ export class EventSubscription<Event> {
         this.#attempt += 1;
         this.#retryTimer = setTimeout(() => {
             this.#retryTimer = undefined;
-            if (this.#active) void this.#run();
+            if (this.#current(generation)) void this.#run(generation);
         }, delay);
+    }
+
+    #current(generation: number): boolean {
+        return this.#active && generation === this.#runGeneration;
     }
 
     #setStatus(status: SubscriptionStatus): void {

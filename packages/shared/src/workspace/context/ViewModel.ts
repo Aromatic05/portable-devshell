@@ -19,6 +19,9 @@ export class ContextViewModel {
     readonly #transport: ContextTransport;
     #generation = 0;
     #readGeneration = 0;
+    #eventRefresh?: Promise<void>;
+    #eventRefreshRequested = false;
+    #wantSubscription = false;
     #subscription?: EventSubscription<ContextChangeEvent>;
     #published: ContextViewModelState = emptyContextViewModelState();
     #state: ContextViewModelState = emptyContextViewModelState();
@@ -37,6 +40,7 @@ export class ContextViewModel {
     }
 
     async load(signal?: AbortSignal): Promise<void> {
+        this.#wantSubscription = true;
         const generation = this.#generation;
         const snapshot = await this.#read(signal);
         if (generation === this.#generation && snapshot !== undefined)
@@ -44,7 +48,10 @@ export class ContextViewModel {
     }
 
     async refresh(signal?: AbortSignal): Promise<void> {
-        await this.#read(signal);
+        const generation = this.#generation;
+        const snapshot = await this.#read(signal);
+        if (this.#wantSubscription && generation === this.#generation && snapshot !== undefined)
+            this.#startSubscription();
     }
 
     async #read(signal?: AbortSignal): Promise<ContextSnapshot | undefined> {
@@ -94,6 +101,9 @@ export class ContextViewModel {
 
     close(): void {
         this.#generation += 1;
+        this.#wantSubscription = false;
+        this.#eventRefresh = undefined;
+        this.#eventRefreshRequested = false;
         this.#subscription?.stop();
         this.#subscription = undefined;
         this.#listeners.clear();
@@ -111,7 +121,7 @@ export class ContextViewModel {
         this.#subscription = new EventSubscription(this.#state.revision + 1, {
             eventSeq: (event) => event.revision,
             onEvent: (event) => {
-                if (event.revision > this.#state.revision) void this.#read();
+                if (event.revision > this.#state.revision) this.#scheduleEventRefresh();
             },
             onGap: async () => {
                 const snapshot = await this.#read();
@@ -127,6 +137,23 @@ export class ContextViewModel {
             readGapError: readStreamGap,
         });
         this.#subscription.start();
+    }
+
+    #scheduleEventRefresh(): void {
+        if (this.#eventRefresh !== undefined) {
+            this.#eventRefreshRequested = true;
+            return;
+        }
+        const generation = this.#generation;
+        const pending = (async () => {
+            do {
+                this.#eventRefreshRequested = false;
+                await this.#read();
+            } while (this.#eventRefreshRequested && generation === this.#generation);
+        })().finally(() => {
+            if (this.#eventRefresh === pending) this.#eventRefresh = undefined;
+        });
+        this.#eventRefresh = pending;
     }
 
     #emit(): void {
