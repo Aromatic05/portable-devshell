@@ -194,6 +194,8 @@ export class ExtensionViewModel {
                 this.#pendingRevision = Math.max(this.#pendingRevision, gap.lastSeq);
                 this.#refreshDirty = true;
                 const revision = await this.#refreshSnapshot(epoch);
+                if (revision !== undefined && this.#subscription === undefined)
+                    this.#startSubscription(epoch);
                 return revision === undefined ? undefined : revision + 1;
             },
         });
@@ -221,7 +223,16 @@ export class ExtensionViewModel {
                     this.#refreshDirty = true;
                     continue;
                 }
-                if (snapshot.revision < this.#state.revision) return undefined;
+                if (snapshot.revision < this.#state.revision) {
+                    // Control restarted its revision clock. A subscription from
+                    // the previous generation cannot follow the new catalog.
+                    this.#subscription?.stop();
+                    this.#subscription = undefined;
+                    this.#pendingRevision = snapshot.revision;
+                    if (this.#refreshTimer !== undefined)
+                        clearTimeout(this.#refreshTimer);
+                    this.#refreshTimer = undefined;
+                }
                 const tuiPages = orderPages(snapshot.tuiPages);
                 const webPages = orderPages(snapshot.webPages);
                 this.#invalidateRemovedPages("tui:page:", tuiPages);

@@ -125,6 +125,7 @@ class ExtensionChangeStream {
         if (this.#closed) return;
         this.#closed = true;
         this.#unsubscribe();
+        void this.#stream.close().catch((error: unknown) => console.warn(error));
     }
 }
 

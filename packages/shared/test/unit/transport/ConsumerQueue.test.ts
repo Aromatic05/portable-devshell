@@ -7,6 +7,17 @@ import { STREAM_QUEUE_MAX_BYTES, STREAM_QUEUE_MAX_MESSAGES } from "../../../src/
 
 const turn = async () => await new Promise<void>((resolve) => setImmediate(resolve));
 
+test("closing a Stream protocol terminates remote subscriptions while the Channel remains live", async (t) => {
+    const open = await fixture(t);
+    const { local, remote } = await open();
+    const reading = local.readMessage();
+    // Model a route retiring a port without tearing down the common Channel.
+    // The sender-side protocol must send a terminal packet, not only dispose locally.
+    open.closeServer();
+    await assert.rejects(reading, /Stream protocol closed/);
+    await remote.close();
+});
+
 async function fixture(t: TestContext) {
     const up = new PassThrough(), down = new PassThrough();
     const client = new Endpoint({ host: "client", connectChannel: async () => new StreamChannel(down, up) });
@@ -16,13 +27,13 @@ async function fixture(t: TestContext) {
     await accepting;
     const sender = new Stream(connection), receiver = new Stream(server.bind("queue"));
     t.after(() => { sender.close(); receiver.close(); client.close(); server.close(); up.destroy(); down.destroy(); });
-    return async () => {
+    return Object.assign(async () => {
         const opening = new Promise<MessageStream>((resolve) => {
             const off = receiver.onOpen((stream) => { off(); resolve(stream); });
         });
         const local = await sender.open("queue");
         return { local, remote: await opening };
-    };
+    }, { closeServer: () => receiver.close() });
 }
 
 function events(stream: MessageStream) {

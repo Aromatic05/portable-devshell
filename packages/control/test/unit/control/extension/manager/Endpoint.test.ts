@@ -39,6 +39,7 @@ function streamRecorder() {
         async send(message: unknown) { sent.push(message); },
         onClose(listener: () => void) { close = listener; },
         onCancel(listener: () => void) { cancel = listener; },
+        async close() { close?.(); },
     } as unknown as MessageStream;
     return { cancel: () => cancel(), close: () => close(), sent, stream };
 }
@@ -89,6 +90,7 @@ test("extension subscription serializes replay and live sends until the prior se
         },
         onClose(listener: () => void) { close = listener; },
         onCancel(listener: () => void) { cancel = listener; },
+        async close() { close?.(); },
     } as unknown as MessageStream;
     subscribe(createExtensionRouteModule(createPort(), { changes: hub, async snapshot() { throw new Error("unused"); } }), stream, 1);
     await firstEntered;
@@ -135,6 +137,7 @@ test("extension subscription detaches after send rejection", async () => {
         },
         onClose(listener: () => void) { close = listener; },
         onCancel(listener: () => void) { cancel = listener; },
+        async close() { close?.(); },
     } as unknown as MessageStream;
     subscribe(createExtensionRouteModule(createPort(), { changes: hub, async snapshot() { throw new Error("unused"); } }), stream, 1);
     hub.publish(["first"]);

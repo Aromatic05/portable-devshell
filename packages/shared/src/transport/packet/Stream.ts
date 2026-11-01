@@ -98,8 +98,9 @@ export class Stream {
 
     close(): void {
         this.#unsubscribe();
-        for (const streams of this.#streams.values())
-            for (const stream of streams.values()) stream.dispose();
+        for (const streams of [...this.#streams.values()])
+            for (const stream of [...streams.values()])
+                void stream.cancel({ message: "Stream protocol closed." }).catch((error: unknown) => console.warn(error));
         this.#streams.clear();
         this.#openListeners.clear();
     }

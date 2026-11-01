@@ -198,6 +198,9 @@ async function readArtifactEvents(
         onCancel() {
             return () => undefined;
         },
+        async close() {
+            closed = true;
+        },
     } as unknown as MessageStream;
 
     await service.subscribe(stream, fromSeq);

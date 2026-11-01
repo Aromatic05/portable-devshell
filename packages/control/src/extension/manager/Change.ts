@@ -52,7 +52,7 @@ export class ExtensionChangeHub {
     readSince(fromRevision: number): ExtensionChangeSlice {
         const requested = Math.max(1, fromRevision);
         const oldestAvailableRevision = this.#history[0]?.revision ?? this.#revision + 1;
-        const kind = requested < oldestAvailableRevision ? "gap" : "events";
+        const kind = requested < oldestAvailableRevision || requested > this.#revision + 1 ? "gap" : "events";
         return Object.freeze({
             changes: Object.freeze(kind === "gap" ? [] : this.#history.filter(
                 (change) => change.revision >= requested,

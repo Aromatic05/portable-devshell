@@ -84,7 +84,7 @@ export class InstanceChangeHub {
     replay(fromRevision: number): InstanceChangeReplay {
         const requested = Math.max(1, Math.trunc(fromRevision));
         const oldest = this.#changes[0]?.revision ?? this.#revision + 1;
-        if (requested < oldest) {
+        if (requested < oldest || requested > this.#revision + 1) {
             return {
                 gap: Object.freeze({
                     lastRevision: this.#revision,

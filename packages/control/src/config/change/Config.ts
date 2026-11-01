@@ -79,7 +79,7 @@ export class ConfigChangeHub {
         const requested = Math.max(1, fromRevision);
         const oldestAvailableRevision =
             this.#history[0]?.revision ?? this.#revision + 1;
-        if (requested < oldestAvailableRevision) {
+        if (requested < oldestAvailableRevision || requested > this.#revision + 1) {
             return Object.freeze({
                 changes: Object.freeze([]),
                 kind: "gap",

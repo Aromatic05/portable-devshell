@@ -114,6 +114,7 @@ export function createInstanceConfigRouteModule(
                         // detach so the client reconnects and gap-recovers.
                         pending.length = 0;
                         unsubscribe();
+                        void stream.close().catch((error: unknown) => console.warn(error));
                     } finally {
                         flushing = false;
                     }

@@ -339,6 +339,7 @@ export class ArtifactService implements ArtifactApi {
         } finally {
             unsubscribe();
             signal?.removeEventListener("abort", onAbort);
+            void stream.close().catch((error: unknown) => console.warn(error));
         }
     }
 
