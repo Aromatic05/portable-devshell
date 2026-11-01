@@ -394,8 +394,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         );
         let tmux_run_description = tmux_run["description"].as_str().unwrap();
         assert!(tmux_run_description.contains("Start long-running or PTY/interactive work"));
-        assert!(tmux_run_description.contains("Prefer wait=block"));
-        assert!(tmux_run_description.contains("tmux_read/tmux_input"));
+        assert!(tmux_run_description.contains("wait defaults to nonblock"));
+        assert!(tmux_run_description.contains("use block for critical-path tasks"));
+        assert!(tmux_run_description.contains("continue with tmux_read or tmux_input"));
         assert_eq!(
             tmux_run["_meta"]["devshell"]["mcp"]["title"],
             "Run tmux task"
