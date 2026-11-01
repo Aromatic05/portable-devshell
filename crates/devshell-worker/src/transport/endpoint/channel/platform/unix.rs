@@ -85,3 +85,24 @@ impl Write for LocalIpcStream {
         self.inner.flush()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipc_fatal_exit_shuts_down_cloned_reader_while_peer_stays_silent() {
+        let root = crate::testing::temp_dir();
+        let context = crate::transport::endpoint::tests::context(root.path());
+        let (mut peer, socket) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let serving = std::thread::spawn(move || {
+            crate::transport::endpoint::serve_ipc(LocalIpcStream { inner: socket }, context)
+        });
+        // Frame type 255 is invalid. After this single packet, the peer sends
+        // nothing else, so a surviving reader clone would hide the fatal exit.
+        peer.write_all(&[0, 0, 0, 6, 1, 255, 0, 0, 0, 1]).unwrap();
+        assert!(serving.join().unwrap().is_err());
+        assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+    }
+}

@@ -133,10 +133,12 @@ impl ArtifactReceiveStore {
 
     pub fn begin(
         &self,
+        cancellation: &crate::tool::ToolCancellation,
         workspace: &Path,
         policy: &dyn SecurityPolicy,
         input: ArtifactReceiveBeginInput,
     ) -> Result<ArtifactReceiveBeginResult, ToolError> {
+        cancellation.check()?;
         validate_descriptor(&input.descriptor)?;
         let requested = parse_requested_path(&input.target_path)?;
         let capability = match requested.namespace {
@@ -198,6 +200,10 @@ impl ArtifactReceiveStore {
         };
         if let Err(error) = self.write_metadata(&metadata) {
             let _ = fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+        if let Err(error) = cancellation.check() {
+            self.rollback_and_remove_locked(&metadata)?;
             return Err(error);
         }
         state.active_receives = state.active_receives.saturating_add(1);
@@ -1008,16 +1014,31 @@ mod recovery_tests {
         };
 
         let admitted = store
-            .begin(&workspace, &DisabledSecurityPolicy, input("./admitted.bin"))
+            .begin(
+                &crate::tool::ToolCancellation::default(),
+                &workspace,
+                &DisabledSecurityPolicy,
+                input("./admitted.bin"),
+            )
             .unwrap();
         let error = store
-            .begin(&workspace, &DisabledSecurityPolicy, input("./rejected.bin"))
+            .begin(
+                &crate::tool::ToolCancellation::default(),
+                &workspace,
+                &DisabledSecurityPolicy,
+                input("./rejected.bin"),
+            )
             .unwrap_err();
         assert_eq!(error.code, "artifact.quotaExceeded");
 
         store.abort(&admitted.receive_id).unwrap();
         let reopened = store
-            .begin(&workspace, &DisabledSecurityPolicy, input("./reopened.bin"))
+            .begin(
+                &crate::tool::ToolCancellation::default(),
+                &workspace,
+                &DisabledSecurityPolicy,
+                input("./reopened.bin"),
+            )
             .unwrap();
         store.abort(&reopened.receive_id).unwrap();
     }
@@ -1034,6 +1055,7 @@ mod recovery_tests {
         let store = ArtifactReceiveStore::new(receive_root.clone()).unwrap();
         let begun = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -1088,6 +1110,7 @@ mod recovery_tests {
         let store = ArtifactReceiveStore::new(receive_root.clone()).unwrap();
         let begun = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -1147,6 +1170,7 @@ mod recovery_tests {
         let store = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
         let begun = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {

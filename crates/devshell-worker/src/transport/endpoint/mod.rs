@@ -445,11 +445,15 @@ struct PendingOutput {
     offset: usize,
 }
 
-pub fn serve_ipc(stream: LocalIpcStream, context: EndpointContext) -> Result<(), String> {
+pub fn serve_ipc(mut stream: LocalIpcStream, context: EndpointContext) -> Result<(), String> {
     let input = stream
         .try_clone()
         .map_err(|error| format!("failed to clone transport IPC stream: {error}"))?;
-    serve(input, stream, context)
+    let result = serve(input, &mut stream, context);
+    // The input thread owns a clone. Dropping only the writer can leave the
+    // peer waiting forever after a dispatcher failure.
+    let _ = stream.shutdown_both();
+    result
 }
 
 fn serve<R, W>(input: R, mut output: W, context: EndpointContext) -> Result<(), String>
@@ -529,24 +533,7 @@ where
                 finish_stream_if_ready(&id, &mut streams, &mut pending)?;
             }
             Ok(EndpointEvent::StreamFailed { id, error }) => {
-                if let Some(mut active) = streams.remove(&id) {
-                    active.service.reset();
-                    queue_envelope(
-                        &mut pending,
-                        stream_envelope(
-                            &active,
-                            StreamPacket::Cancel {
-                                id,
-                                error: Some(StreamError {
-                                    message: error,
-                                    code: None,
-                                    details: None,
-                                    retryable: None,
-                                }),
-                            },
-                        )?,
-                    )?;
-                }
+                fail_stream(id, error, &mut streams, &mut pending)?;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
@@ -564,6 +551,33 @@ where
             flush_output(&mut frame, stream_id, &mut pending, &mut output)?;
         }
     }
+}
+
+fn fail_stream(
+    id: String,
+    error: String,
+    streams: &mut HashMap<String, ActiveStream>,
+    pending: &mut VecDeque<PendingOutput>,
+) -> Result<(), String> {
+    if let Some(mut active) = streams.remove(&id) {
+        active.service.reset();
+        queue_envelope(
+            pending,
+            stream_envelope(
+                &active,
+                StreamPacket::Cancel {
+                    id,
+                    error: Some(StreamError {
+                        message: error,
+                        code: None,
+                        details: None,
+                        retryable: None,
+                    }),
+                },
+            )?,
+        )?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -832,25 +846,35 @@ fn dispatch_stream(
             streams.insert(id, active);
         }
         StreamPacket::Data { id, seq, bytes, .. } => {
-            let active = streams
-                .get_mut(&id)
-                .ok_or_else(|| format!("Unknown Stream {id}."))?;
+            // DATA already on the wire can arrive after a stream failed or
+            // was cancelled. Like FIN/CLOSE, it cannot kill the shared channel.
+            let Some(active) = streams.get_mut(&id) else {
+                return Ok(());
+            };
             if seq != active.recv_seq + 1 {
                 return Err(format!("Stream {id} sequence is invalid."));
             }
             active.recv_seq = seq;
             let bytes = bytes.ok_or_else(|| "Stream byte packet is invalid.".to_string())?;
-            active
-                .input
-                .send(StreamInputCommand::Data(bytes))
-                .map_err(|error| error.to_string())?;
+            if let Err(error) = active.input.send(StreamInputCommand::Data(bytes)) {
+                events
+                    .send(EndpointEvent::StreamFailed {
+                        id,
+                        error: error.to_string(),
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
         }
         StreamPacket::Fin { id } => {
             if let Some(active) = streams.get(&id) {
-                active
-                    .input
-                    .send(StreamInputCommand::Finish)
-                    .map_err(|error| error.to_string())?;
+                if let Err(error) = active.input.send(StreamInputCommand::Finish) {
+                    events
+                        .send(EndpointEvent::StreamFailed {
+                            id,
+                            error: error.to_string(),
+                        })
+                        .map_err(|error| error.to_string())?;
+                }
             }
         }
         StreamPacket::Close { id, .. } => {
@@ -1122,6 +1146,9 @@ fn spawn_stream_input(
                 StreamInputCommand::Finish => input.finish(),
             };
             if let Err(error) = result {
+                // Retire the writer queue before announcing failure. Already
+                // queued DATA is handled by the endpoint's stream failure path.
+                drop(commands);
                 let _ = events.send(EndpointEvent::StreamFailed {
                     id: id.clone(),
                     error,
@@ -1178,7 +1205,7 @@ fn spawn_stream_output(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::capability::artifact::store::ArtifactStore;
     use crate::instance::runtime::{PlatformInfo, WorkerRuntimeContext};
@@ -1187,7 +1214,7 @@ mod tests {
     use crate::instance::{InstanceName, build_config};
     use crate::tool::ToolRegistry;
 
-    fn context(path: &std::path::Path) -> EndpointContext {
+    pub(crate) fn context(path: &std::path::Path) -> EndpointContext {
         let instance = InstanceName::parse("endpoint-fixture").unwrap();
         let artifacts = ArtifactStore::new(path.join("artifacts")).unwrap();
         let payloads = ArtifactPayloadStore::new(path.join("payloads"), artifacts).unwrap();
@@ -1217,6 +1244,265 @@ mod tests {
             host: "endpoint-fixture-worker".to_string(),
             port: port.to_string(),
         }
+    }
+
+    #[test]
+    fn failed_artifact_writer_tolerates_in_flight_data_before_and_after_failure_dispatch() {
+        for failure_first in [false, true] {
+            let root = crate::testing::temp_dir();
+            let context = context(root.path());
+            let (events, receiver) = mpsc::channel();
+            let (input, commands) = mpsc::channel();
+            let offset_bytes = Arc::new(AtomicU64::new(0));
+            // A receive removed by its owner is a real artifact write failure.
+            // No socket, disk-full simulation, timing sleep or fake writer.
+            let receive_id = uuid::Uuid::new_v4().to_string();
+            let active = ActiveStream {
+                service: ByteService::ReceiveWrite {
+                    finished: false,
+                    offset_bytes: Arc::clone(&offset_bytes),
+                    receive_id: receive_id.clone(),
+                    receives: Arc::clone(&context.receives),
+                },
+                input,
+                source: address("artifact"),
+                dest: address("artifact"),
+                output_budget: Arc::new(OutputBudget::default()),
+                recv_seq: 0,
+                send_seq: 0,
+                output_eof: true,
+            };
+            spawn_stream_input(
+                "failed".into(),
+                StreamInput::ReceiveWrite {
+                    offset_bytes,
+                    receive_id,
+                    receives: Arc::clone(&context.receives),
+                },
+                commands,
+                events.clone(),
+            );
+            let mut streams = HashMap::from([("failed".to_string(), active)]);
+            let data = |seq| StreamPacket::Data {
+                id: "failed".into(),
+                seq,
+                message: None,
+                bytes: Some(vec![1, 2, 3]),
+            };
+            dispatch_stream(
+                address("artifact"),
+                address("artifact"),
+                data(1),
+                &mut streams,
+                &events,
+                &context,
+            )
+            .unwrap();
+            let EndpointEvent::StreamFailed { id, error } =
+                receiver.recv_timeout(Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected actual artifact writer failure");
+            };
+            let mut pending = VecDeque::new();
+            // Keep an unrelated reply in flight while the failure is handled.
+            dispatch_rpc(
+                address("transport"),
+                address("transport"),
+                RpcPacket::Request {
+                    id: "sibling".into(),
+                    method: "transport.peer.promote".into(),
+                    message: None,
+                },
+                &events,
+                &context,
+            )
+            .unwrap();
+            if failure_first {
+                fail_stream(id.clone(), error.clone(), &mut streams, &mut pending).unwrap();
+            }
+            dispatch_stream(
+                address("artifact"),
+                address("artifact"),
+                data(2),
+                &mut streams,
+                &events,
+                &context,
+            )
+            .unwrap();
+            dispatch_stream(
+                address("artifact"),
+                address("artifact"),
+                StreamPacket::Fin {
+                    id: "failed".into(),
+                },
+                &mut streams,
+                &events,
+                &context,
+            )
+            .unwrap();
+            if !failure_first {
+                fail_stream(id, error, &mut streams, &mut pending).unwrap();
+            }
+            // Drain duplicate writer-queue failure events and the sibling reply
+            // using the same production failure handler as serve().
+            let mut replied = false;
+            while !replied {
+                let event = receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+                match event {
+                    EndpointEvent::StreamFailed { id, error } => {
+                        fail_stream(id, error, &mut streams, &mut pending).unwrap()
+                    }
+                    EndpointEvent::Outbound(envelope) => {
+                        assert!(
+                            matches!(&envelope.packet, Packet::Rpc(RpcPacket::Reply { id, .. }) if id == "sibling")
+                        );
+                        queue_envelope(&mut pending, envelope).unwrap();
+                        replied = true;
+                    }
+                    _ => panic!("unexpected event"),
+                }
+            }
+            assert!(replied);
+            assert!(streams.is_empty());
+            let decoded: Vec<_> = pending
+                .iter()
+                .flat_map(|item| EnvelopeDecoder::default().push(&item.data).unwrap())
+                .collect();
+            assert_eq!(decoded.iter().filter(|e| matches!(&e.packet, Packet::Stream(StreamPacket::Cancel { id, .. }) if id == "failed")).count(), 1);
+            assert!(decoded.iter().any(
+                |e| matches!(&e.packet, Packet::Rpc(RpcPacket::Reply { id, .. }) if id == "sibling")
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_artifact_writer_keeps_serve_channel_and_sibling_rpc_alive() {
+        use std::os::unix::net::UnixStream;
+        let root = crate::testing::temp_dir();
+        let context = context(root.path());
+        let (mut peer, socket) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let input = socket.try_clone().unwrap();
+        let serving = thread::spawn(move || serve(input, socket, context));
+        let mut wire = encode_frame(&Frame::Open {
+            stream_id: 1,
+            service: ENVELOPE_SERVICE.into(),
+            metadata: Vec::new(),
+            receive_window: 1024 * 1024,
+        })
+        .unwrap();
+        let packets = vec![
+            Packet::Stream(StreamPacket::Open {
+                id: "failed".into(),
+                name: "receive.write".into(),
+                message: Some(
+                    serde_json::json!({"receiveId": uuid::Uuid::new_v4().to_string(), "offsetBytes": 0}),
+                ),
+            }),
+            Packet::Stream(StreamPacket::Data {
+                id: "failed".into(),
+                seq: 1,
+                bytes: Some(vec![1]),
+                message: None,
+            }),
+            Packet::Stream(StreamPacket::Data {
+                id: "failed".into(),
+                seq: 2,
+                bytes: Some(vec![2]),
+                message: None,
+            }),
+            Packet::Stream(StreamPacket::Fin {
+                id: "failed".into(),
+            }),
+        ];
+        for packet in packets {
+            let envelope = Envelope {
+                source: address("artifact"),
+                dest: address("artifact"),
+                packet,
+            };
+            wire.extend(
+                encode_frame(&Frame::Data {
+                    stream_id: 1,
+                    data: encode_envelope(&envelope).unwrap(),
+                })
+                .unwrap(),
+            );
+        }
+        peer.write_all(&wire).unwrap();
+        let mut frame_decoder = FrameDecoder::default();
+        let mut envelope_decoder = EnvelopeDecoder::default();
+        let mut buffer = [0; 4096];
+        let mut cancelled = false;
+        while !cancelled {
+            let read = peer.read(&mut buffer).unwrap();
+            assert!(read > 0, "writer failure must not close the channel");
+            for frame in frame_decoder.push(&buffer[..read]).unwrap() {
+                if let Frame::Data { data, .. } = frame {
+                    for envelope in envelope_decoder.push(&data).unwrap() {
+                        if matches!(envelope.packet, Packet::Stream(StreamPacket::Cancel { id, .. }) if id == "failed")
+                        {
+                            cancelled = true;
+                        }
+                    }
+                }
+            }
+        }
+        // Failure is now known to have retired the stream. More DATA/FIN may
+        // still be in flight, and must not prevent an unrelated reply.
+        for packet in [
+            Packet::Stream(StreamPacket::Data {
+                id: "failed".into(),
+                seq: 3,
+                bytes: Some(vec![3]),
+                message: None,
+            }),
+            Packet::Stream(StreamPacket::Fin {
+                id: "failed".into(),
+            }),
+            Packet::Rpc(RpcPacket::Request {
+                id: "sibling".into(),
+                method: "transport.peer.promote".into(),
+                message: None,
+            }),
+        ] {
+            let port = if matches!(&packet, Packet::Rpc(_)) {
+                "transport"
+            } else {
+                "artifact"
+            };
+            let envelope = Envelope {
+                source: address(port),
+                dest: address(port),
+                packet,
+            };
+            peer.write_all(
+                &encode_frame(&Frame::Data {
+                    stream_id: 1,
+                    data: encode_envelope(&envelope).unwrap(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let mut replied = false;
+        while !replied {
+            let read = peer.read(&mut buffer).unwrap();
+            assert!(read > 0);
+            for frame in frame_decoder.push(&buffer[..read]).unwrap() {
+                if let Frame::Data { data, .. } = frame {
+                    for envelope in envelope_decoder.push(&data).unwrap() {
+                        if matches!(envelope.packet, Packet::Rpc(RpcPacket::Reply { id, .. }) if id == "sibling")
+                        {
+                            replied = true;
+                        }
+                    }
+                }
+            }
+        }
+        peer.shutdown(Shutdown::Both).unwrap();
+        assert!(serving.join().unwrap().is_ok());
     }
 
     #[test]

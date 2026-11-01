@@ -132,6 +132,7 @@ pub fn receive_begin(
         }
         let result = receives
             .begin(
+                cancellation,
                 PathBuf::from(&input.workspace).as_path(),
                 policy.as_ref(),
                 ArtifactReceiveBeginInput {
@@ -141,7 +142,6 @@ pub fn receive_begin(
                 },
             )
             .map_err(RpcError::from)?;
-        cancellation.check().map_err(RpcError::from)?;
         serialize(result)
     })
 }
@@ -168,8 +168,9 @@ pub fn direct_receive_open(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn Contr
     cancellable_control_handler(move |request, cancellation| {
         cancellation.check().map_err(RpcError::from)?;
         let input: ArtifactDirectReceiveOpenInput = parse_params(request)?;
-        let result = direct.open_receiver(input).map_err(RpcError::from)?;
-        cancellation.check().map_err(RpcError::from)?;
+        let result = direct
+            .open_receiver(cancellation, input)
+            .map_err(RpcError::from)?;
         serialize(result)
     })
 }
@@ -192,4 +193,81 @@ pub fn direct_payload_push(direct: Arc<ArtifactDirectTransfer>) -> Arc<dyn Contr
         let input: ArtifactDirectPushInput = parse_params(request)?;
         serialize(direct.push_chunk(input).map_err(RpcError::from)?)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capability::artifact::payload::ArtifactPayloadType;
+    use crate::capability::rpc::request::RpcRequest;
+    use crate::instance::sandbox::path::FilesystemCapability;
+    use crate::instance::sandbox::policy::{SecurityError, DisabledSecurityPolicy};
+    use crate::tool::ToolCancellation;
+
+    struct CancelDuringBegin(ToolCancellation);
+    impl SecurityPolicy for CancelDuringBegin {
+        fn check_capability(&self, _: FilesystemCapability) -> Result<(), SecurityError> {
+            // The RPC entry check already passed. Cancellation arrives inside
+            // the allocator, before it publishes its receiveId.
+            self.0.cancel();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn cancelled_begin_rolls_back_files_metadata_and_receive_quota() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let storage = root.path().join("receives");
+        let receives = ArtifactReceiveStore::new(storage.clone()).unwrap();
+        let cancellation = ToolCancellation::default();
+        let handler = receive_begin(
+            Arc::clone(&receives),
+            Arc::new(CancelDuringBegin(cancellation.clone())),
+        );
+        let descriptor = ArtifactPayloadDescriptor {
+            payload_type: ArtifactPayloadType::File,
+            name: "empty.bin".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            payload_bytes: 0,
+            payload_blake3: blake3::hash(b"").to_hex().to_string(),
+            logical_bytes: None,
+            entry_count: None,
+            manifest_blake3: None,
+        };
+        let request = RpcRequest::request(
+            "begin",
+            "artifact.receive.begin",
+            serde_json::json!({
+                "workspace": workspace, "targetPath": "./cancelled.bin", "descriptor": descriptor,
+            }),
+        );
+        let error = handler
+            .handle_with_cancellation(&request, &cancellation)
+            .unwrap_err();
+        assert_eq!(error.code, "tool.cancelled");
+        assert_eq!(std::fs::read_dir(&storage).unwrap().count(), 0);
+        // The cancelled allocation must leave every running receive slot free.
+        let mut ids = Vec::new();
+        for index in 0..256 {
+            let result = receives
+                .begin(
+                    &ToolCancellation::default(),
+                    &workspace,
+                    &DisabledSecurityPolicy,
+                    ArtifactReceiveBeginInput {
+                        descriptor: descriptor.clone(),
+                        overwrite: false,
+                        target_path: format!("./receive-{index}.bin"),
+                    },
+                )
+                .unwrap();
+            ids.push(result.receive_id);
+        }
+        for id in ids {
+            receives.abort(&id).unwrap();
+        }
+        assert_eq!(std::fs::read_dir(storage).unwrap().count(), 0);
+    }
 }

@@ -49,6 +49,7 @@ mod tests {
         let bytes = b"received bytes";
         let begun = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -89,6 +90,7 @@ mod tests {
 
         let error = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -102,6 +104,7 @@ mod tests {
 
         let begun = store
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -152,6 +155,7 @@ mod tests {
         let receives = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
         let begun = receives
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &target_workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -192,6 +196,7 @@ mod tests {
         let begun = ArtifactReceiveStore::new(receive_root.clone())
             .unwrap()
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {

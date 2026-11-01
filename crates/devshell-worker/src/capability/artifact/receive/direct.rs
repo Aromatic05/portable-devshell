@@ -81,8 +81,10 @@ impl ArtifactDirectTransfer {
 
     pub fn open_receiver(
         &self,
+        cancellation: &crate::tool::ToolCancellation,
         input: ArtifactDirectReceiveOpenInput,
     ) -> Result<ArtifactDirectReceiveOpenResult, ToolError> {
+        cancellation.check()?;
         let now = unix_time_millis();
         if input.expires_at_ms <= now
             || input.expires_at_ms.saturating_sub(now) > MAX_RECEIVER_TTL_MS
@@ -118,6 +120,11 @@ impl ArtifactDirectTransfer {
                     stop: Arc::clone(&stop),
                 },
             );
+
+        if let Err(error) = cancellation.check() {
+            self.close_receiver(&receiver_id)?;
+            return Err(error);
+        }
 
         let receives = Arc::clone(&self.receives);
         let registry = Arc::clone(&self.receivers);
@@ -408,6 +415,7 @@ mod tests {
         let receives = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
         let receive = receives
             .begin(
+                &crate::tool::ToolCancellation::default(),
                 &target_workspace,
                 &DisabledSecurityPolicy,
                 ArtifactReceiveBeginInput {
@@ -419,10 +427,13 @@ mod tests {
             .unwrap();
         let direct = ArtifactDirectTransfer::new(Arc::clone(&payloads), Arc::clone(&receives));
         let receiver = direct
-            .open_receiver(ArtifactDirectReceiveOpenInput {
-                expires_at_ms: unix_time_millis() + 60_000,
-                receive_id: receive.receive_id.clone(),
-            })
+            .open_receiver(
+                &crate::tool::ToolCancellation::default(),
+                ArtifactDirectReceiveOpenInput {
+                    expires_at_ms: unix_time_millis() + 60_000,
+                    receive_id: receive.receive_id.clone(),
+                },
+            )
             .unwrap();
 
         let mut offset = 0;
