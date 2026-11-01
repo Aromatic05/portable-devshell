@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -292,7 +292,7 @@ test("retiring an installed sandbox stream releases its subscription while a sen
     assert.equal(closes, 2, "abort and watch cleanup both close the underlying subscription");
     assert.equal(streamCloses, 1);
     assert.deepEqual(h.host.listDeclarations("control.streams"), []);
-    await assert.rejects(stat(h.paths.runtimeDirectory("probe", installed.selectedGeneration!)), { code: "ENOENT" });
+    assert.deepEqual(await readdir(h.paths.runtimeDirectory("probe", installed.selectedGeneration!)), []);
     unblock();
 });
 

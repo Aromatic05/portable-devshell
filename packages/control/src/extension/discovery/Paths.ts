@@ -41,21 +41,3 @@ export async function assertPlainFile(
         throw new TypeError(`${label} must be a regular file, not a symlink.`);
     }
 }
-
-export function isMissing(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOENT"
-    );
-}
-
-export function isDirectoryNotEmpty(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOTEMPTY"
-    );
-}

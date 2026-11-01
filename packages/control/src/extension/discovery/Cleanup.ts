@@ -1,4 +1,4 @@
-import { rm, rmdir } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 
 import type { ExtensionModule } from "@portable-devshell/extension";
 
@@ -9,7 +9,6 @@ import type {
 } from "../api/cap/index.js";
 import type { ExtensionConfigRuntime } from "../api/cap/config/index.js";
 import type { ExtensionSandboxHost } from "../sandbox/bridge/index.js";
-import { isDirectoryNotEmpty, isMissing } from "./Paths.js";
 
 export async function throwInProcessActivationFailure(
     error: unknown,
@@ -21,7 +20,6 @@ export async function throwInProcessActivationFailure(
         processes: ExtensionProcessRuntime;
         releaseHostModules: () => void;
         runtimeDirectory: string;
-        runtimeRoot: string;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
     },
@@ -49,10 +47,9 @@ export async function throwInProcessActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
-    await cleanupRuntimeDirectory(
-        input.runtimeRoot,
-        input.runtimeDirectory,
-    ).catch((cleanupError) => cleanupFailures.push(cleanupError));
+    await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
+        (cleanupError) => cleanupFailures.push(cleanupError),
+    );
     try {
         input.releaseHostModules();
     } catch (cleanupError) {
@@ -72,7 +69,6 @@ export async function disposeInProcessGeneration(input: {
     processes: ExtensionProcessRuntime;
     releaseHostModules: () => void;
     runtimeDirectory: string;
-    runtimeRoot: string;
     workerDelegate: ExtensionWorkerRuntime;
     workerExecute: ExtensionWorkerRuntime;
 }): Promise<void> {
@@ -95,10 +91,9 @@ export async function disposeInProcessGeneration(input: {
         .closeAll()
         .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(
-        input.runtimeRoot,
-        input.runtimeDirectory,
-    ).catch((error) => failures.push(error));
+    await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
+        (error) => failures.push(error),
+    );
     try {
         input.releaseHostModules();
     } catch (error) {
@@ -120,7 +115,6 @@ export async function throwSandboxActivationFailure(
         extensionId: string;
         processes: ExtensionProcessRuntime;
         runtimeDirectory: string;
-        runtimeRoot: string;
         sandbox: ExtensionSandboxHost;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
@@ -149,10 +143,9 @@ export async function throwSandboxActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
-    await cleanupRuntimeDirectory(
-        input.runtimeRoot,
-        input.runtimeDirectory,
-    ).catch((cleanupError) => cleanupFailures.push(cleanupError));
+    await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
+        (cleanupError) => cleanupFailures.push(cleanupError),
+    );
     if (cleanupFailures.length === 0) throw error;
     throw new AggregateError(
         [error, ...cleanupFailures],
@@ -165,7 +158,6 @@ export async function disposeSandboxGeneration(input: {
     database: ExtensionDatabaseRuntime;
     processes: ExtensionProcessRuntime;
     runtimeDirectory: string;
-    runtimeRoot: string;
     sandbox: ExtensionSandboxHost;
     workerDelegate: ExtensionWorkerRuntime;
     workerExecute: ExtensionWorkerRuntime;
@@ -187,25 +179,13 @@ export async function disposeSandboxGeneration(input: {
         .closeAll()
         .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(
-        input.runtimeRoot,
-        input.runtimeDirectory,
-    ).catch((error) => failures.push(error));
+    await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
+        (error) => failures.push(error),
+    );
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1)
         throw new AggregateError(
             failures,
             "Extension sandbox generation cleanup failed.",
         );
-}
-
-async function cleanupRuntimeDirectory(
-    runtimeRoot: string,
-    runtimeDirectory: string,
-): Promise<void> {
-    await rm(runtimeDirectory, { force: true, recursive: true });
-    await rmdir(runtimeRoot).catch((error: unknown) => {
-        if (isMissing(error) || isDirectoryNotEmpty(error)) return;
-        throw error;
-    });
 }

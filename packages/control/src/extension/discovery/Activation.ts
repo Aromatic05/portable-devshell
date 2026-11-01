@@ -53,7 +53,6 @@ export interface ExtensionGenerationActivationInput {
     manifest: ExtensionManifest;
     registrations: ExtensionRegistrationBuilder;
     runtimeDirectory: string;
-    runtimeRoot: string;
 }
 
 export class ExtensionGenerationActivator {
@@ -108,7 +107,6 @@ export class ExtensionGenerationActivator {
                         processes: input.capabilities.processes,
                         releaseHostModules: hostModules.release,
                         runtimeDirectory: input.runtimeDirectory,
-                        runtimeRoot: input.runtimeRoot,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
                     }),
@@ -141,7 +139,6 @@ export class ExtensionGenerationActivator {
                 processes: input.capabilities.processes,
                 releaseHostModules: hostModules.release,
                 runtimeDirectory: input.runtimeDirectory,
-                runtimeRoot: input.runtimeRoot,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,
             });
@@ -224,7 +221,6 @@ export class ExtensionGenerationActivator {
                         database: input.capabilities.database,
                         processes: input.capabilities.processes,
                         runtimeDirectory: input.runtimeDirectory,
-                        runtimeRoot: input.runtimeRoot,
                         sandbox,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
@@ -258,7 +254,6 @@ export class ExtensionGenerationActivator {
                 extensionId: input.id,
                 processes: input.capabilities.processes,
                 runtimeDirectory: input.runtimeDirectory,
-                runtimeRoot: input.runtimeRoot,
                 sandbox,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,

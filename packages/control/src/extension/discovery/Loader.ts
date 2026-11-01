@@ -130,7 +130,6 @@ export class ExtensionLoader {
             manifest,
             registrations,
             runtimeDirectory,
-            runtimeRoot,
         });
     }
 

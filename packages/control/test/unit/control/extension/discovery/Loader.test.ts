@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
@@ -249,9 +249,19 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     lease.release();
     await candidate.retire();
     assert.deepEqual(events, ["module.deactivate", "worker.closeAll"]);
+    const retiredRuntimeDirectory = seenContext!.paths.runtimeDirectory;
     await assert.rejects(
-        access(harness.paths.runtimeDirectory(id, generation)),
+        access(retiredRuntimeDirectory),
     );
+    // A retired run does not own the shared generation root used by its replacement.
+    const runtimeRoot = harness.paths.runtimeDirectory(id, generation);
+    await access(runtimeRoot);
+    const replacement = await loader.load(id, generation);
+    assert.notEqual(seenContext!.paths.runtimeDirectory, retiredRuntimeDirectory);
+    await access(seenContext!.paths.runtimeDirectory);
+    await replacement.retire();
+    await assert.rejects(access(seenContext!.paths.runtimeDirectory));
+    await access(runtimeRoot);
 });
 
 test("Extension loader binds execute and delegate through independent Worker authority factories", async (t) => {
@@ -474,9 +484,9 @@ test("Extension loader isolates runtime directories for overlapping loads of the
 
     await second.retire();
     await assert.rejects(access(secondRuntime));
-    await assert.rejects(
-        access(harness.paths.runtimeDirectory(id, generation)),
-    );
+    const runtimeRoot = harness.paths.runtimeDirectory(id, generation);
+    await access(runtimeRoot);
+    assert.deepEqual(await readdir(runtimeRoot), []);
 });
 
 test("Extension loader rejects incompatible API without owning the CLI command namespace", async (t) => {
@@ -564,9 +574,12 @@ test("Extension loader rolls back Worker resources and runtime directory when ac
         /activation failed/u,
     );
     assert.deepEqual(events, ["worker.openSession", "worker.closeAll"]);
-    await assert.rejects(
-        access(harness.paths.runtimeDirectory(target.id, target.generation)),
+    const runtimeRoot = harness.paths.runtimeDirectory(
+        target.id,
+        target.generation,
     );
+    await access(runtimeRoot);
+    assert.deepEqual(await readdir(runtimeRoot), []);
 });
 
 test("Extension loader deactivates a module before rejecting an undeclared runtime binding", async (t) => {
