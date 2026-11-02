@@ -19,6 +19,7 @@ class RecordingChannel implements Channel {
     readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     #closed = false;
     #peer?: RecordingChannel;
+    #heldWrites?: Uint8Array[];
 
     get closed(): boolean {
         return this.#closed;
@@ -34,7 +35,24 @@ class RecordingChannel implements Channel {
         this.writes.push(copy);
         const peer = this.#peer;
         if (peer === undefined || peer.#closed) throw new Error("peer closed");
+        if (this.#heldWrites !== undefined) {
+            this.#heldWrites.push(copy);
+            return;
+        }
         queueMicrotask(() => peer.#accept(copy));
+    }
+
+    holdWrites(): void {
+        this.#heldWrites = [];
+    }
+
+    flushWrites(): void {
+        const writes = this.#heldWrites;
+        const peer = this.#peer;
+        assert.ok(writes);
+        assert.ok(peer);
+        this.#heldWrites = undefined;
+        peer.#accept(Buffer.concat(writes));
     }
 
     onData(listener: (data: Uint8Array) => void): () => void {
@@ -69,6 +87,7 @@ class RecordingChannel implements Channel {
 
 function pair(): {
     leftChannel: RecordingChannel;
+    rightChannel: RecordingChannel;
     opener: FrameProtocol;
     acceptor: FrameProtocol;
 } {
@@ -78,6 +97,7 @@ function pair(): {
     right.connect(left);
     return {
         leftChannel: left,
+        rightChannel: right,
         opener: new FrameProtocol(left, { role: "opener" }),
         acceptor: new FrameProtocol(right, { role: "acceptor" }),
     };
@@ -257,6 +277,82 @@ test("FIN resolves all pending readers after queued DATA", async (t) => {
 
     assert.deepEqual(await first, Uint8Array.of(7));
     assert.equal(await second, undefined);
+});
+
+test("batched DATA and FIN settle concurrent readers without resetting or releasing opposite credit", async (t) => {
+    const { leftChannel, rightChannel, opener, acceptor } = pair();
+    const sibling = pair();
+    t.after(() => {
+        opener.close(); acceptor.close();
+        sibling.opener.close(); sibling.acceptor.close();
+    });
+    const { local, remote } = await open(opener, acceptor, "batched-fin", 1);
+    const independent = await open(sibling.opener, sibling.acceptor, "independent", 1);
+    await remote.write(Uint8Array.of(8));
+    let writeSettled = false;
+    const blockedWrite = remote.write(Uint8Array.of(9)).then(() => {
+        writeSettled = true;
+    });
+    const results: (Uint8Array | undefined)[] = [];
+    const first = remote.read().then((value) => { results.push(value); return value; });
+    const second = remote.read().then((value) => { results.push(value); return value; });
+    leftChannel.holdWrites();
+    await local.write(Uint8Array.of(7));
+    await local.finish();
+    rightChannel.writes.length = 0;
+    leftChannel.flushWrites();
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(results, [Uint8Array.of(7), undefined]);
+    assert.deepEqual(await Promise.all([first, second]), [Uint8Array.of(7), undefined]);
+    assert.equal(await remote.read(), undefined);
+    assert.equal(writeSettled, false, "FIN must leave the opposite write waiting for WINDOW");
+    assert.deepEqual(rightChannel.writes, [], "consumption after FIN sends neither WINDOW nor RESET");
+    assert.equal(local.closed, false);
+    assert.equal(remote.closed, false);
+
+    await independent.local.write(Uint8Array.of(3));
+    assert.deepEqual(await independent.remote.read(), Uint8Array.of(3));
+    await independent.remote.write(Uint8Array.of(4));
+    assert.deepEqual(await independent.local.read(), Uint8Array.of(4));
+    assert.equal(writeSettled, false);
+
+    assert.deepEqual(await local.read(), Uint8Array.of(8));
+    await blockedWrite;
+    assert.equal(writeSettled, true);
+    assert.deepEqual(await local.read(), Uint8Array.of(9));
+    await remote.finish();
+    assert.equal(await local.read(), undefined);
+    assert.equal(local.closed, true);
+    assert.equal(remote.closed, true);
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+    assert.equal(sibling.opener.closed, false);
+    assert.equal(sibling.acceptor.closed, false);
+    assert.deepEqual(results, [Uint8Array.of(7), undefined]);
+});
+
+test("batched FIN preserves queued DATA until consumption", async (t) => {
+    const { leftChannel, rightChannel, opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const { local, remote } = await open(opener, acceptor, "queued-batched-fin", 3);
+    const first = remote.read();
+    leftChannel.holdWrites();
+    await local.write(Uint8Array.of(1));
+    await local.write(Uint8Array.of(2));
+    await local.write(Uint8Array.of(3));
+    await local.finish();
+    rightChannel.writes.length = 0;
+    leftChannel.flushWrites();
+
+    assert.deepEqual(await first, Uint8Array.of(1));
+    const second = remote.read();
+    const third = remote.read();
+    const eof = remote.read();
+    assert.deepEqual(await Promise.all([second, third, eof]), [Uint8Array.of(2), Uint8Array.of(3), undefined]);
+    assert.deepEqual(rightChannel.writes, []);
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
 });
 
 test("reset rejects an already pending read with its remote error", async (t) => {

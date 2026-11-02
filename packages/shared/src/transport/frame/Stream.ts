@@ -200,6 +200,7 @@ export class FrameStreamState implements FrameStream {
         } catch (error) {
             throw normalizeError(error);
         }
+        this.#flushFinishedReaders();
         return value;
     }
 
@@ -236,7 +237,11 @@ export class FrameStreamState implements FrameStream {
         if (this.#remoteFin)
             throw new Error("Frame stream received duplicate FIN.");
         this.#remoteFin = true;
-        if (this.#incoming.length === 0 && this.#unconsumedBytes === 0) {
+        this.#flushFinishedReaders();
+    }
+
+    #flushFinishedReaders(): void {
+        if (this.#remoteFin && this.#incoming.length === 0 && this.#unconsumedBytes === 0) {
             for (const waiter of this.#readWaiters.splice(0)) {
                 waiter.resolve(undefined);
             }
