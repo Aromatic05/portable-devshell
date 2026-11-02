@@ -230,6 +230,8 @@ export class WebStore {
                 const approval = this.domains.approval(instance);
                 await approval.load(signal);
                 signal.throwIfAborted();
+                if (!this.domains.ownsInstanceModel(instance, approval))
+                    throw new Error("Instance was replaced before approval.");
                 await approval.decide(approvalId, decision);
             },
         );
@@ -318,9 +320,13 @@ export class WebStore {
                 const runtime = this.domains.runtime(instance);
                 await runtime.load(signal);
                 signal.throwIfAborted();
+                if (!this.domains.ownsInstanceModel(instance, runtime))
+                    throw new Error("Instance was replaced before the operation.");
                 await runtime.stop(signal);
                 signal.throwIfAborted();
                 if (!this.#current(generation)) return;
+                if (!this.domains.ownsInstanceModel(instance, runtime))
+                    throw new Error("Instance was replaced during restart.");
                 await runtime.start({ signal });
             },
         );
@@ -574,6 +580,8 @@ export class WebStore {
                 const runtime = this.domains.runtime(instance);
                 await runtime.load(signal);
                 signal.throwIfAborted();
+                if (!this.domains.ownsInstanceModel(instance, runtime))
+                    throw new Error("Instance was replaced before the operation.");
                 if (action === "start") await runtime.start({ signal });
                 else await runtime.stop(signal);
             },

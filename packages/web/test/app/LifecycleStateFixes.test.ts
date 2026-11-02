@@ -1,3 +1,8 @@
+import { createElement } from "react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { createEmptyMessagePreferences } from "@portable-devshell/shared";
+import { WebDomainProvider } from "../../src/app/domain/Context.js";
+import { Messages } from "../../src/view/page/activity/messages/Page.js";
 import { afterEach, expect, it, vi } from "vitest";
 import {
     Endpoint, Rpc, Stream, type Channel, type MessageStream,
@@ -229,3 +234,160 @@ class MemoryChannel implements Channel {
         this.#peer?.close(error);
     }
 }
+
+for (const operation of ["start", "stop", "restart", "approval"] as const) {
+    it(`${operation} rejects a preflight belonging to a replaced incarnation over real RPC`, async () => {
+        const { server, session } = peer();
+        let replacement = false;
+        const entered = deferred<void>(), response = deferred<unknown>();
+        const writes: string[] = [];
+        const catalog = new Rpc(server.bind("instance", "@control"), {
+            snapshotInstances: () => ({ revision: replacement ? 2 : 1,
+                instances: [{ name: "alpha", incarnation: replacement ? "new" : "old" }] }),
+        });
+        const catalogStreams = new Stream(server.bind("instance", "@control"));
+        catalogStreams.onOpen(() => {});
+        const process = new Rpc(server.bind("process", "alpha"), {
+            refresh: async () => { entered.resolve(); return await response.promise; },
+            stop: () => { writes.push("stop"); return processSnapshot; },
+        });
+        const processStreams = new Stream(server.bind("process", "alpha"));
+        processStreams.onOpen((stream, request) => {
+            writes.push(request);
+            void stream.close(processSnapshot);
+        });
+        const approvals = new Rpc(server.bind("approval", "alpha"), {
+            snapshot: async () => { entered.resolve(); return await response.promise; },
+            decide: () => { writes.push("decide"); return {}; },
+        });
+        const store = new WebStore(session);
+        try {
+            await session.instances.list();
+            const pending = operation === "approval" ? store.decideTool("alpha", "id", "approve") : store[operation]("alpha");
+            await entered.promise;
+            replacement = true;
+            await session.instances.refresh();
+            response.resolve(operation === "approval" ? { lastSeq: 0, approvals: [] } : { lastSeq: 0, snapshot: processSnapshot });
+            expect(await pending).toBe(false);
+            expect(writes).toEqual([]);
+            expect(store.state.error).toMatch(/replaced/);
+        } finally {
+            store.close(); processStreams.close(); process.close(); approvals.close();
+            catalogStreams.close(); catalog.close(); server.close();
+        }
+    });
+}
+
+const processSnapshot = { name: "alpha", lastSeq: 0, status: "stopped", ready: false,
+    daemonState: "stopped", connectionState: "disconnected" };
+
+it("restart does not send start after an already sent stop crosses replacement", async () => {
+    const { server, session } = peer();
+    let replacement = false, stops = 0, starts = 0;
+    const entered = deferred<void>(), stopped = deferred<unknown>();
+    const catalog = new Rpc(server.bind("instance", "@control"), {
+        snapshotInstances: () => ({ revision: replacement ? 2 : 1,
+            instances: [{ name: "alpha", incarnation: replacement ? "new" : "old" }] }),
+    });
+    const catalogStreams = new Stream(server.bind("instance", "@control"));
+    catalogStreams.onOpen(() => {});
+    const process = new Rpc(server.bind("process", "alpha"), {
+        refresh: () => ({ lastSeq: 0, snapshot: processSnapshot }),
+        stop: async () => { stops++; entered.resolve(); return await stopped.promise; },
+    });
+    const streams = new Stream(server.bind("process", "alpha"));
+    streams.onOpen((stream, request) => {
+        if (request === "start") { starts++; void stream.close(processSnapshot); }
+    });
+    const store = new WebStore(session);
+    try {
+        await session.instances.list();
+        const pending = store.restart("alpha");
+        await entered.promise;
+        replacement = true;
+        await session.instances.refresh();
+        stopped.resolve(processSnapshot);
+        expect(await pending).toBe(false);
+        expect(stops).toBe(1);
+        expect(starts).toBe(0);
+    } finally { store.close(); streams.close(); process.close(); catalogStreams.close(); catalog.close(); server.close(); }
+});
+
+it("mounted Messages restores both projections and exactly one new stream each after replacement", async () => {
+    const { server, session } = peer();
+    let replacement = false;
+    const catalog = new Rpc(server.bind("instance", "@control"), {
+        snapshotInstances: () => ({ revision: replacement ? 2 : 1,
+            instances: [{ name: "alpha", incarnation: replacement ? "new" : "old" }] }),
+    });
+    const catalogStreams = new Stream(server.bind("instance", "@control"));
+    catalogStreams.onOpen(() => {});
+    const context = new Rpc(server.bind("context", "@control"), { snapshot: () => ({ revision: 0, contexts: [] }) });
+    const preferences = new Rpc(server.bind("message", "@control"), { preferences: createEmptyMessagePreferences });
+    const messages = new Rpc(server.bind("message", "alpha"), {
+        listMessageEntries: () => ({ lastSeq: 1, entries: [{ id: replacement ? "new" : "old", ctxId: "ctx",
+            kind: "report", text: replacement ? "NEW REPORT" : "OLD REPORT", createdAt: "2026-11-02T00:00:00Z" }] }),
+        listContextMessages: () => ({ lastSeq: 1, messages: [] }),
+    });
+    const messageStreams = new Stream(server.bind("message", "alpha"));
+    const opened: boolean[] = [], closed: boolean[] = [];
+    messageStreams.onOpen((stream) => {
+        const incarnation = replacement;
+        opened.push(incarnation);
+        stream.onClose(() => closed.push(incarnation));
+    });
+    vi.spyOn(session.server, "state", "get").mockReturnValue({ ...session.server.state, status: "online" });
+    const store = new WebStore(session);
+    await session.instances.list();
+    const view = render(createElement(WebDomainProvider, { domains: session, children:
+        createElement(Messages, { store, navigate: vi.fn(), route: { page: "messages", view: "thread", instance: "alpha", ctxId: "ctx" } }) }));
+    try {
+        await screen.findByText("OLD REPORT");
+        await waitFor(() => expect(opened).toEqual([false, false]));
+        await act(async () => { replacement = true; await session.instances.refresh(); });
+        await screen.findByText("NEW REPORT");
+        await waitFor(() => expect(opened).toEqual([false, false, true, true]));
+        await waitFor(() => expect(closed).toEqual([false, false]));
+        expect(session.messageHistory.state.context?.entries[0]?.text).toBe("NEW REPORT");
+        expect(session.messageHistory.state.instances.alpha?.entries[0]?.text).toBe("NEW REPORT");
+        expect(session.messages.state.instances.alpha).toBeDefined();
+        expect(screen.queryByText("OLD REPORT")).toBeNull();
+        await act(async () => { await session.instances.refresh(); });
+        expect(opened).toEqual([false, false, true, true]);
+    } finally {
+        view.unmount(); store.close(); vi.restoreAllMocks();
+        messageStreams.close(); messages.close(); preferences.close(); context.close();
+        catalogStreams.close(); catalog.close(); server.close();
+    }
+});
+
+it("replacing another instance does not invalidate alpha's pending operation", async () => {
+    const { server, session } = peer();
+    let replacement = false, stops = 0;
+    const entered = deferred<void>(), response = deferred<unknown>();
+    const catalog = new Rpc(server.bind("instance", "@control"), {
+        snapshotInstances: () => ({ revision: replacement ? 2 : 1, instances: [
+            { name: "alpha", incarnation: "same" },
+            { name: "beta", incarnation: replacement ? "new" : "old" },
+        ] }),
+    });
+    const catalogStreams = new Stream(server.bind("instance", "@control"));
+    catalogStreams.onOpen(() => {});
+    const process = new Rpc(server.bind("process", "alpha"), {
+        refresh: async () => { entered.resolve(); return await response.promise; },
+        stop: () => { stops++; return processSnapshot; },
+    });
+    const streams = new Stream(server.bind("process", "alpha"));
+    streams.onOpen(() => {});
+    const store = new WebStore(session);
+    try {
+        await session.instances.list();
+        const pending = store.stop("alpha");
+        await entered.promise;
+        replacement = true;
+        await session.instances.refresh();
+        response.resolve({ lastSeq: 0, snapshot: processSnapshot });
+        expect(await pending).toBe(true);
+        expect(stops).toBe(1);
+    } finally { store.close(); streams.close(); process.close(); catalogStreams.close(); catalog.close(); server.close(); }
+});

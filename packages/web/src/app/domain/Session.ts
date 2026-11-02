@@ -157,6 +157,10 @@ export class WebDomainSession {
         return viewModel;
     }
 
+    ownsInstanceModel(instance: string, model: ProcessViewModel | ApprovalViewModel): boolean {
+        return this.#runtimes.get(instance) === model || this.#approvals.get(instance) === model;
+    }
+
     releaseInstance(instance: string): void {
         this.#runtimes.get(instance)?.close();
         this.#runtimes.delete(instance);

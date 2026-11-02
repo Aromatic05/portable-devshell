@@ -57,6 +57,13 @@ export function Messages({
     const [olderError, setOlderError] = useState<string>();
     const olderRequest = useRef(0);
 
+    const instanceCatalogKey = JSON.stringify(
+        instancesState.instances.map(({ name, incarnation }) => [name, incarnation]),
+    );
+    const selectedIncarnation = route.view === "thread"
+        ? instancesState.instances.find(({ name }) => name === route.instance)?.incarnation
+        : undefined;
+
     useEffect(() => {
         if (route.view !== "thread" || server.status !== "online") return;
         const controller = new AbortController();
@@ -67,7 +74,7 @@ export function Messages({
         };
     }, [domains, server.status, route.view,
         route.view === "thread" ? route.instance : undefined,
-        route.view === "thread" ? route.ctxId : undefined]);
+        route.view === "thread" ? route.ctxId : undefined, selectedIncarnation]);
 
     const projection = useMemo<WebMessageProjection>(
         () => ({
@@ -194,7 +201,7 @@ export function Messages({
         return () => {
             cancelled = true;
         };
-    }, [server.status, store]);
+    }, [server.status, store, instanceCatalogKey]);
 
     useEffect(() => {
         let refreshPending = false;

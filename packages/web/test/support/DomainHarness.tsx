@@ -277,6 +277,8 @@ export class WebTestDomains {
             reverse: this.reverse,
             runtime: (instance: string) => this.runtime(instance),
             approval: (instance: string) => this.approval(instance),
+            ownsInstanceModel: (instance: string, model: unknown) =>
+                this.#runtimes.get(instance) === model || this.#approvals.get(instance) === model,
             releaseInstance: (instance: string) => {
                 this.#runtimes.delete(instance);
                 this.#approvals.delete(instance);

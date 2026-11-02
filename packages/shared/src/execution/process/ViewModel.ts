@@ -31,6 +31,9 @@ export class ProcessViewModel {
     #logVersion = 0;
     #subscribeRequested = false;
     #published: ProcessViewModelState = emptyState();
+    #logRefreshTimer?: ReturnType<typeof setTimeout>;
+    #logsRefreshing = false;
+    #logsDirtyGeneration?: number;
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ProcessViewModelState = emptyState();
     #subscription?: InstanceEventSubscription<ProcessEvent>;
@@ -107,6 +110,11 @@ export class ProcessViewModel {
             clearTimeout(this.#refreshTimer);
             this.#refreshTimer = undefined;
         }
+        if (this.#logRefreshTimer !== undefined) {
+            clearTimeout(this.#logRefreshTimer);
+            this.#logRefreshTimer = undefined;
+        }
+        this.#logsDirtyGeneration = undefined;
         this.#subscription?.stop();
         this.#subscription = undefined;
         this.#listeners.clear();
@@ -139,7 +147,7 @@ export class ProcessViewModel {
 
     #onEvent(event: ProcessEvent): void {
         if (event.type === "log.appended" && this.#state.logsLoaded) {
-            this.#scheduleRefresh();
+            this.#scheduleLogRefresh();
             return;
         }
         if (
@@ -148,6 +156,22 @@ export class ProcessViewModel {
             event.type.startsWith("reverse.")
         )
             this.#scheduleRefresh();
+    }
+
+    #scheduleLogRefresh(): void {
+        this.#logsDirtyGeneration = this.#generation;
+        if (this.#logRefreshTimer !== undefined || this.#logsRefreshing) return;
+        this.#logRefreshTimer = setTimeout(() => {
+            this.#logRefreshTimer = undefined;
+            const generation = this.#logsDirtyGeneration;
+            this.#logsDirtyGeneration = undefined;
+            if (generation !== this.#generation) return;
+            this.#logsRefreshing = true;
+            void this.readLogs().catch(() => undefined).finally(() => {
+                this.#logsRefreshing = false;
+                if (this.#logsDirtyGeneration === this.#generation) this.#scheduleLogRefresh();
+            });
+        }, 100);
     }
 
     #scheduleRefresh(): void {

@@ -83,6 +83,9 @@ async function realFixture() {
     const peer = await approvalPeer(["alpha", "beta"]); dispose.push(() => peer.close());
     const domains = new WebTestDomains(); domains.setInstances([{ name: "alpha" }, { name: "beta" }]);
     domains.domains.approval = (instance) => peer.models.get(instance)!;
+    const owns = domains.domains.ownsInstanceModel.bind(domains.domains);
+    domains.domains.ownsInstanceModel = (instance, model) =>
+        peer.models.get(instance) === model || owns(instance, model);
     const store = new WebStore(domains.domains);
     const view = (scope: AuditScope = { kind: "all" }) => withWebDomains(domains, <Audit store={store} navigate={() => undefined}
         route={{ page: "audit", view: "timeline", scope }} />);
