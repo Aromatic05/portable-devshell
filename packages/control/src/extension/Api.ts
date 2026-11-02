@@ -35,6 +35,7 @@ export interface ExtensionRuntime {
     acquireRegistration(
         pointId: string,
         id: string,
+        expected?: Pick<ExtensionCatalogRegistration, "extensionId" | "declaration">,
     ): Promise<ExtensionRegistrationLease>;
     contextEnvironmentRetired(
         input: ExtensionContextEnvironmentRetiredEvent,

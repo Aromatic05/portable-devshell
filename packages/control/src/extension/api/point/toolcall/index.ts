@@ -83,7 +83,7 @@ export class ToolCallExtensionBinding {
         )) {
             const { id } = declaration;
             const { extensionId, lease, registration } =
-                await this.#extensions.acquireRegistration(review.id, id);
+                await this.#extensions.acquireRegistration(review.id, id, declaration);
             releases.push(() => lease.release());
             const binding = registration.binding as ToolCallReviewBinding;
             entries.push({
@@ -115,7 +115,7 @@ export class ToolCallExtensionBinding {
         for (const declaration of this.#extensions.listDeclarations(rewrite.id)) {
             const { id } = declaration;
             const { extensionId, lease, registration } =
-                await this.#extensions.acquireRegistration(rewrite.id, id);
+                await this.#extensions.acquireRegistration(rewrite.id, id, declaration);
             releases.push(() => lease.release());
             let binding = registration.binding as ToolCallRewriteBinding;
             let currentLease = lease;
@@ -131,7 +131,7 @@ export class ToolCallExtensionBinding {
                     // replay a hook that has already started.
                     if (input.direction === "outbound" &&
                         currentLease.retirementSignal?.aborted === true) {
-                        const renewed = await this.#extensions.acquireRegistration(rewrite.id, id);
+                        const renewed = await this.#extensions.acquireRegistration(rewrite.id, id, declaration);
                         if (renewed.extensionId !== extensionId) {
                             renewed.lease.release();
                             throw new Error(

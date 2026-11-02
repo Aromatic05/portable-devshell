@@ -26,10 +26,14 @@ export class ExtensionRetirementTracker {
     }
 
     track(id: string, generation: ExtensionGeneration): void {
+        void this.retire(id, generation).catch(() => undefined);
+    }
+
+    retire(id: string, generation: ExtensionGeneration): Promise<void> {
         const retired = this.#retired.get(id) ?? new Set<ExtensionGeneration>();
         retired.add(generation);
         this.#retired.set(id, retired);
-        void this.#retire(id, generation).catch(() => undefined);
+        return this.#retire(id, generation);
     }
 
     #retire(id: string, generation: ExtensionGeneration): Promise<void> {

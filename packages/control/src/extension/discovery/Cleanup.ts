@@ -18,14 +18,14 @@ export async function throwInProcessActivationFailure(
         extensionId: string;
         module?: ExtensionModule;
         processes: ExtensionProcessRuntime;
-        releaseHostModules: () => void;
+        releaseHostModules?: () => void;
         runtimeDirectory: string;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
     },
 ): Promise<never> {
     const cleanupFailures: unknown[] = [];
-    await Promise.resolve(input.module?.deactivate?.()).catch(
+    await Promise.resolve().then(() => input.module?.deactivate?.()).catch(
         (cleanupError: unknown) => cleanupFailures.push(cleanupError),
     );
     try {
@@ -51,7 +51,7 @@ export async function throwInProcessActivationFailure(
         (cleanupError) => cleanupFailures.push(cleanupError),
     );
     try {
-        input.releaseHostModules();
+        input.releaseHostModules?.();
     } catch (cleanupError) {
         cleanupFailures.push(cleanupError);
     }
@@ -73,7 +73,7 @@ export async function disposeInProcessGeneration(input: {
     workerExecute: ExtensionWorkerRuntime;
 }): Promise<void> {
     const failures: unknown[] = [];
-    await Promise.resolve(input.module.deactivate?.()).catch((error) =>
+    await Promise.resolve().then(() => input.module.deactivate?.()).catch((error) =>
         failures.push(error),
     );
     try {
@@ -115,14 +115,14 @@ export async function throwSandboxActivationFailure(
         extensionId: string;
         processes: ExtensionProcessRuntime;
         runtimeDirectory: string;
-        sandbox: ExtensionSandboxHost;
+        sandbox?: ExtensionSandboxHost;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
     },
 ): Promise<never> {
     const cleanupFailures: unknown[] = [];
     await input.sandbox
-        .dispose()
+        ?.dispose()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
     try {
         input.database.closeAll();

@@ -126,3 +126,15 @@ test("faulted runtime lifecycle leases defer disposal without admitting new cons
     assert.equal(disposals, 1);
     assert.throws(() => generation.acquireLifecycleLease(), /cannot handle lifecycle events from disposed/u);
 });
+
+test("synchronous disposer failure remains retryable without a second concurrent disposal", async () => {
+    let attempts = 0;
+    const failure = new Error("sync dispose failed");
+    const runtime = new ExtensionGeneration({ generation: "sync", manifest, registrations: new ExtensionRegistrationSet([]), dispose: () => { attempts++; throw failure; } });
+    await assert.rejects(runtime.retire(), failure);
+    assert.equal(runtime.state, "dispose-failed");
+    const first = runtime.retire(); const second = runtime.retire();
+    assert.equal(first, second);
+    await assert.rejects(first, failure);
+    assert.equal(attempts, 2);
+});

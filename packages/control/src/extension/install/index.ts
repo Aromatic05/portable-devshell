@@ -169,6 +169,7 @@ export class ExtensionInstallService {
             const manifest = await readStagedManifest(stagingDirectory);
             assertInstallableManifest(manifest, builtinId);
             releaseOperation = await this.#acquireOperation(manifest.id);
+            await this.#host.waitForDrain(manifest.id);
             const digest = await hashExtensionDirectory(
                 stagingDirectory,
                 this.#limits,
@@ -246,6 +247,12 @@ export class ExtensionInstallService {
                         entry?.selectedGeneration === generation ||
                         entry?.lastKnownGoodGeneration === generation
                     ) throw error;
+                    try {
+                        await this.#host.waitForDrain(manifest.id);
+                    } catch (cleanupError) {
+                        throw new AggregateError([error, cleanupError],
+                            `Extension ${manifest.id} selection failed; retaining code until candidate drain succeeds.`);
+                    }
                     await rm(installedDirectory, {
                         force: true,
                         recursive: true,

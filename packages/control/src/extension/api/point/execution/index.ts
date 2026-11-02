@@ -5,6 +5,7 @@ import {
     type ExecutionDriverDescriptor,
 } from "@portable-devshell/extension/execution";
 
+import type { ExtensionCatalogRegistration } from "../../../discovery/Catalog.js";
 import type { ExtensionRuntime } from "../../../Api.js";
 
 type ExecutionSelection = NonNullable<ControlExecutionConfig["environment"]>[number];
@@ -45,7 +46,7 @@ export async function resolveExecutionDrivers(
             continue;
         }
         try {
-            const driver = await resolveDriver(extensions, environment.id, declaration.id);
+            const driver = await resolveDriver(extensions, environment.id, declaration.id, declaration);
             environmentSelections.push({
                 order,
                 name: declaration.id,
@@ -96,8 +97,9 @@ async function resolveDriver(
     extensions: Pick<ExtensionRuntime, "acquireRegistration">,
     pointId: string,
     name: string,
+    expected?: ExtensionCatalogRegistration,
 ): Promise<ExecutionDriverDescriptor> {
-    const acquired = await extensions.acquireRegistration(pointId, name);
+    const acquired = await extensions.acquireRegistration(pointId, name, expected);
     try {
         const binding = acquired.registration.binding as ExecutionDriverDescriptor;
         if (binding.name !== name || binding.version !== 1) {

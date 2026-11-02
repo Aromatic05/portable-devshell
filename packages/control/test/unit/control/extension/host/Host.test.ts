@@ -354,7 +354,8 @@ test("Extension manifest identity mismatch preserves candidate cleanup failure",
             return true;
         },
     );
-    await host.stop();
+    await assert.rejects(host.waitForDrain("example"), /failed to drain/);
+    await assert.rejects(host.stop(), /failed to dispose/);
 });
 
 test("Extension candidate fault during registry commit rolls back selection and preserves the old active generation", async () => {
@@ -438,7 +439,8 @@ test("Extension registry commit failure preserves candidate cleanup failure", as
     );
     assert.equal(registry.value.extensions.example?.selectedGeneration, "a");
     assert.equal((await host.list())[0]?.activeGeneration, "a");
-    await host.stop();
+    await assert.rejects(host.waitForDrain("example"), /failed to drain/);
+    await assert.rejects(host.stop(), /failed to dispose/);
 });
 
 test("Extension first-use activation falls back to last-known-good when the selected candidate faults", async () => {

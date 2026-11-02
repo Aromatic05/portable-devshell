@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -1833,6 +1834,7 @@ function createSandbox(options: {
     toolCallHistory?: ToolCallHistoryCapability;
     workerDelegate?: ExtensionWorkerCapability;
     workerExecute?: ExtensionWorkerCapability;
+    workerFactory?: ExtensionSandboxHostOptions["workerFactory"];
 }): ExtensionSandboxHost {
     const root = join(options.codeDirectory, "..", "runtime");
     return new ExtensionSandboxHost({
@@ -1890,6 +1892,7 @@ function createSandbox(options: {
         toolCallHistory: options.toolCallHistory ?? fakeToolCallHistory([]),
         workerDelegate: options.workerDelegate ?? fakeWorker([]),
         workerExecute: options.workerExecute ?? fakeWorker([]),
+        ...(options.workerFactory === undefined ? {} : { workerFactory: options.workerFactory }),
     });
 }
 
@@ -2277,3 +2280,38 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     }
     throw new Error("Timed out waiting for sandbox test condition.");
 }
+
+for (const stage of ["subscription", "worker"] as const) {
+    test(`sandbox partial ${stage} construction releases prior subscriptions`, () => {
+        const failure = new Error("construction failed");
+        let ownedUnsubscribes = 0; let coreUnsubscribes = 0;
+        assert.throws(() => createSandbox({
+            codeDirectory: "/unused", entryPath: "/unused/extension.mjs",
+            config: { onChange() { return () => { ownedUnsubscribes++; }; } } as never,
+            configCore: { onChange() {
+                if (stage === "subscription") throw failure;
+                return () => { coreUnsubscribes++; };
+            } } as never,
+            workerFactory() { throw failure; },
+        }), failure);
+        assert.equal(ownedUnsubscribes, 1);
+        assert.equal(coreUnsubscribes, stage === "worker" ? 1 : 0);
+    });
+}
+
+test("sandbox bootstrap send failure releases subscriptions and terminates the partial Worker", async () => {
+    const failure = new Error("bootstrap send failed");
+    let unsubscribes = 0; let terminations = 0;
+    const worker = Object.assign(new EventEmitter(), {
+        postMessage() { throw failure; },
+        async terminate() { terminations++; return 0; },
+    });
+    assert.throws(() => createSandbox({
+        codeDirectory: "/unused", entryPath: "/unused/extension.mjs",
+        config: { onChange() { return () => { unsubscribes++; }; } } as never,
+        workerFactory: () => worker as never,
+    }), failure);
+    await Promise.resolve();
+    assert.equal(unsubscribes, 1);
+    assert.equal(terminations, 1);
+});

@@ -67,11 +67,11 @@ for (const pointId of ["control.routes", "control.streams"]) {
             const same = Object.keys(change).length === 0;
             assert.deepEqual(calls, same ? ["g2"] : []);
             assert.equal(runtimes[0]!.inFlight, 0);
-            assert.equal(String(result.error), pointId === "control.routes" && !same
-                ? "Error: Control route same-id declaration changed." : "undefined");
+            assert.equal(String(result.error), !same
+                ? `Error: Extension registration ${pointId}/same-id declaration changed.` : "undefined");
             assert.equal(result.value, pointId === "control.routes" && same ? "g2" : undefined);
             assert.deepEqual(failures.map((error) => (error as { message: string }).message),
-                pointId === "control.streams" && !same ? ["Control route same-id declaration changed."] : []);
+                []);
             assert.equal(closes, pointId === "control.streams" && same ? 1 : 0);
         });
     }

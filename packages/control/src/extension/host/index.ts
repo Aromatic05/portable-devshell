@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { ExtensionManifest } from "@portable-devshell/extension";
 import type {
     ExtensionPublicRuntimeRecord,
@@ -151,12 +152,15 @@ export class ExtensionHost {
     async acquireRegistration(
         pointId: string,
         id: string,
+        expected?: Pick<ExtensionCatalogRegistration, "extensionId" | "declaration">,
     ): Promise<ExtensionRegistrationLease> {
         if (this.#stopping) throw new Error("Extension host is stopping.");
         const catalog = this.#catalog.get(pointId, id);
         if (catalog === undefined) {
             throw new Error(`No Extension registration for ${pointId}/${id}.`);
         }
+        const identity = expected ?? catalog;
+        assertRegistrationIdentity(identity, catalog);
         const active = this.#active.get(catalog.extensionId);
         if (
             active?.generation === catalog.generation &&
@@ -177,6 +181,7 @@ export class ExtensionHost {
                     `No Extension registration for ${pointId}/${id}.`,
                 );
             }
+            assertRegistrationIdentity(identity, current);
             const currentActive = this.#active.get(current.extensionId);
             if (currentActive?.state === "faulted")
                 await this.#recoverFaulted(current.extensionId, currentActive);
@@ -199,6 +204,7 @@ export class ExtensionHost {
                     `No Extension registration for ${pointId}/${id}.`,
                 );
             }
+            assertRegistrationIdentity(identity, resolved);
             const activated = this.#active.get(resolved.extensionId);
             if (
                 activated === undefined ||
@@ -228,6 +234,12 @@ export class ExtensionHost {
             throw new Error(
                 `Extension registration disappeared during acquisition: ${pointId}/${id}.`,
             );
+        }
+        const catalog = this.#catalog.get(pointId, id);
+        if (catalog === undefined || catalog.extensionId !== extensionId ||
+            !isDeepStrictEqual(catalog.declaration, registration.declaration)) {
+            lease.release();
+            throw new Error(`Extension registration ${pointId}/${id} declaration changed.`);
         }
         return { extensionId, lease, registration };
     }
@@ -305,8 +317,8 @@ export class ExtensionHost {
                 validationFailure = error;
             }
             const cleanupFailures: unknown[] = [];
-            await candidate
-                .retire()
+            await this.#retirement
+                .retire(id, candidate)
                 .catch((error) => cleanupFailures.push(error));
             if (validationFailure !== undefined || cleanupFailures.length > 0) {
                 const failures = [
@@ -726,7 +738,7 @@ export class ExtensionHost {
             if (current === undefined) {
                 const failure = extensionNotFound(id);
                 try {
-                    await candidate.retire();
+                    await this.#retirement.retire(id, candidate);
                 } catch (cleanupError) {
                     throw new AggregateError(
                         [failure, cleanupError],
@@ -779,7 +791,7 @@ export class ExtensionHost {
                 `Extension generation ${generation} declares id ${candidate.manifest.id}, expected ${id}.`,
             );
             try {
-                await candidate.retire();
+                await this.#retirement.retire(id, candidate);
             } catch (cleanupError) {
                 throw new AggregateError(
                     [failure, cleanupError],
@@ -821,8 +833,8 @@ export class ExtensionHost {
             candidate.activate();
         } catch (error) {
             const cleanupFailures: unknown[] = [];
-            await candidate
-                .retire()
+            await this.#retirement
+                .retire(id, candidate)
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
             const cause =
                 cleanupFailures.length === 0
@@ -840,8 +852,8 @@ export class ExtensionHost {
             await this.#registry.write(nextRegistry);
         } catch (error) {
             const cleanupFailures: unknown[] = [];
-            await candidate
-                .retire()
+            await this.#retirement
+                .retire(id, candidate)
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
@@ -860,8 +872,8 @@ export class ExtensionHost {
             await this.#registry
                 .write(previousRegistry)
                 .catch((error) => rollbackFailures.push(error));
-            await candidate
-                .retire()
+            await this.#retirement
+                .retire(id, candidate)
                 .catch((error) => rollbackFailures.push(error));
             if (rollbackFailures.length === 0) {
                 throw new ExtensionCandidatePublicationError(
@@ -939,10 +951,17 @@ export class ExtensionHost {
             this.#failures.delete(id);
             this.#runtimeFailures.delete(id);
         } catch (error) {
-            if (replacement !== undefined && this.#active.get(id) !== replacement)
-                await replacement.retire().catch(() => undefined);
-            this.#recordFailure(id, previous.generation, error);
-            throw extensionFailure(id, previous.generation, error);
+            let failure = error;
+            if (replacement !== undefined && this.#active.get(id) !== replacement) {
+                try {
+                    await this.#retirement.retire(id, replacement);
+                } catch (cleanupError) {
+                    failure = new AggregateError([error, cleanupError],
+                        `Extension ${id} recovery failed and candidate cleanup was incomplete.`);
+                }
+            }
+            this.#recordFailure(id, previous.generation, failure);
+            throw extensionFailure(id, previous.generation, failure);
         }
     }
 
@@ -1007,5 +1026,15 @@ export class ExtensionHost {
                 release();
             }
         }
+    }
+}
+
+function assertRegistrationIdentity(
+    expected: Pick<ExtensionCatalogRegistration, "extensionId" | "declaration">,
+    current: ExtensionCatalogRegistration,
+): void {
+    if (expected.extensionId !== current.extensionId ||
+        !isDeepStrictEqual(expected.declaration, current.declaration)) {
+        throw new Error(`Extension registration ${current.pointId}/${current.id} declaration changed.`);
     }
 }

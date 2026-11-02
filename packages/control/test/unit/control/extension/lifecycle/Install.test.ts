@@ -998,3 +998,33 @@ test("pre-rename registry file sync EIO cleans only the unselected new generatio
     assert.equal((await h.host.list())[0]?.selectedGeneration, first.selectedGeneration);
     assert.equal((await new ExtensionRegistryStore(h.paths.registryFile).read()).extensions.example?.selectedGeneration, first.selectedGeneration);
 });
+
+test("install retains failed candidate code and blocks name reuse until real drain", async (t) => {
+    const root = await createTestTempDirectory("extension-install-failed-candidate");
+    t.after(async () => await rm(root, { recursive: true, force: true }));
+    const paths = new ExtensionPathLayout({ dataHome: join(root, "data"), homeDirectory: join(root, "home"), runtimeRoot: join(root, "runtime") });
+    let healthy = false; let activations = 0; let disposals = 0;
+    const host = new ExtensionHost({ registry: new ExtensionRegistryStore(paths.registryFile), loader: new ExtensionLoader({
+        readToolCalls: async () => [], instances: { list: () => [] } as never, instanceRuntime: unusedInstanceRuntime,
+        paths, points: createControlExtensionPointRegistry(),
+        importer: async () => ({ activate() { activations++; }, deactivate() { disposals++; if (!healthy) throw new Error("candidate dispose failed"); } }),
+    }) });
+    await host.start(); t.after(async () => { healthy = true; await host.stop(); });
+    const installer = new ExtensionInstallService({ host, paths });
+    const source = join(root, "source"); await mkdir(source);
+    await writeFile(join(source, "extension.mjs"), "export function activate() {}\n");
+    await writeFile(join(source, "devshell-extension.json"), JSON.stringify({ id: "example", name: "Example", version: "1.0.0", activation: "lazy", apiVersion: EXTENSION_API_VERSION, schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION, entry: "extension.mjs", capabilities: [], extensions: {} }));
+    await assert.rejects(installer.install(source), /retaining code until candidate drain/);
+    const generations = await readdir(join(paths.codeRoot, "example"));
+    assert.equal(generations.length, 1);
+    await access(join(paths.codeRoot, "example", generations[0]!, "extension.mjs"));
+    await assert.rejects(installer.install(source), /failed to drain/);
+    assert.equal(activations, 1);
+    await assert.rejects(installer.remove("example", false), /not installed/);
+    healthy = true;
+    await installer.install(source);
+    assert.equal(activations, 2);
+    assert.equal(disposals, 5);
+    await installer.remove("example", false);
+    await assert.rejects(access(join(paths.codeRoot, "example")), { code: "ENOENT" });
+});

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { ExtensionSandboxHost } from "../../../../../src/extension/sandbox/bridge/index.ts";
+import { ExtensionHostModuleResolver } from "../../../../../src/extension/discovery/ModuleResolver.ts";
 import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -785,7 +787,7 @@ for (const stage of ["validate", "configFactory", "workerDelegateFactory"] as co
 test("Loader constructs the logger before allocating capability or runtime resources", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } } });
+    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } }, capabilities: ["worker.execute", "worker.delegate"] });
     const failure = new Error("logger factory failed");
     let configs = 0;
     const loader = new ExtensionLoader({
@@ -803,7 +805,7 @@ test("Loader constructs the logger before allocating capability or runtime resou
 test("Loader preserves validation and cleanup errors and still removes its run", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } } });
+    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } }, capabilities: ["worker.execute", "worker.delegate"] });
     const validation = new Error("invalid config");
     const cleanup = new Error("config close failed");
     const loader = new ExtensionLoader({
@@ -843,3 +845,81 @@ test("Sandbox activation failure and disposal remove only their own run director
     await live.retire();
     assert.deepEqual(await readdir(runtimeRoot), []);
 });
+
+for (const stage of ["sandboxFactory", "hostModuleResolver"] as const) {
+    test(`Loader owns assembled resources when ${stage} throws`, async (t) => {
+        const harness = await createHarness();
+        t.after(harness.cleanup);
+        const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } }, capabilities: ["worker.execute", "worker.delegate"] });
+        const events: string[] = [];
+        const failure = new Error("preactivation failed");
+        let fail = true;
+        let databaseCloses = 0; let processCloses = 0;
+        const resolver = new ExtensionHostModuleResolver();
+        t.after(() => resolver.dispose());
+        const register = resolver.register.bind(resolver);
+        resolver.register = (...args) => { if (fail) throw failure; return register(...args); };
+        const loader = new ExtensionLoader({
+            readToolCalls: async () => [], instanceRuntime: () => testInstanceRuntime,
+            instances: new InstanceRegistry([]), paths: harness.paths, points: createControlExtensionPointRegistry(),
+            configFactory: () => ({ close: () => { events.push("config.close"); }, validate: async () => {} }),
+            workerExecuteFactory: () => fakeWorker(events), workerDelegateFactory: () => fakeWorker(events),
+            ...(stage === "sandboxFactory" ? { sandboxFactory: (options) => {
+                if (fail) {
+                    const database = options.database!;
+                    const closeDatabase = database.closeAll.bind(database);
+                    database.closeAll = () => { databaseCloses++; closeDatabase(); };
+                    const processes = options.processes as unknown as { closeAll(): Promise<void> };
+                    const closeProcesses = processes.closeAll.bind(processes);
+                    processes.closeAll = async () => { processCloses++; await closeProcesses(); };
+                    throw failure;
+                }
+                return new ExtensionSandboxHost(options);
+            } }
+                : { importer: async () => ({ activate() {} }), hostModuleResolver: resolver }),
+        });
+        await assert.rejects(loader.load(id, generation), failure);
+        assert.deepEqual(events, ["config.close", "worker.closeAll", "worker.closeAll"]);
+        const root = harness.paths.runtimeDirectory(id, generation);
+        assert.deepEqual(await readdir(root), []);
+        fail = false;
+        const sibling = await loader.load(id, generation);
+        const runs = await readdir(root);
+        assert.equal(runs.length, 1);
+        await writeFile(join(root, runs[0]!, "marker"), "live");
+        fail = true;
+        events.length = 0;
+        await assert.rejects(loader.load(id, generation), failure);
+        assert.deepEqual(events, ["config.close", "worker.closeAll", "worker.closeAll"]);
+        assert.deepEqual(await readdir(root), runs);
+        assert.equal(databaseCloses, stage === "sandboxFactory" ? 2 : 0);
+        assert.equal(processCloses, stage === "sandboxFactory" ? 2 : 0);
+        await access(join(root, runs[0]!, "marker"));
+        await sibling.retire();
+        assert.deepEqual(await readdir(root), []);
+    });
+}
+
+for (const activationFails of [false, true]) {
+    test(`synchronous deactivate throw preserves cleanup after activation failure=${activationFails}`, async (t) => {
+        const harness = await createHarness(); t.after(harness.cleanup);
+        const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } }, capabilities: ["worker.execute", "worker.delegate"] });
+        const events: string[] = [];
+        const deactivate = new Error("sync deactivate failed");
+        const activate = new Error("activate failed");
+        const loader = new ExtensionLoader({
+            readToolCalls: async () => [], instanceRuntime: () => testInstanceRuntime,
+            instances: new InstanceRegistry([]), paths: harness.paths, points: createControlExtensionPointRegistry(),
+            configFactory: () => ({ close: () => { events.push("config.close"); }, validate: async () => {} }),
+            workerExecuteFactory: () => fakeWorker(events), workerDelegateFactory: () => fakeWorker(events),
+            importer: async () => ({ activate() { if (activationFails) throw activate; }, deactivate() { events.push("deactivate"); throw deactivate; } }),
+        });
+        const failure = activationFails ? loader.load(id, generation) : (await loader.load(id, generation)).retire();
+        await assert.rejects(failure, (error: unknown) => {
+            assert.deepEqual(error instanceof AggregateError ? error.errors : [error], activationFails ? [activate, deactivate] : [deactivate]);
+            return true;
+        });
+        assert.deepEqual(events, ["deactivate", "config.close", "worker.closeAll", "worker.closeAll"]);
+        assert.deepEqual(await readdir(harness.paths.runtimeDirectory(id, generation)), []);
+    });
+}

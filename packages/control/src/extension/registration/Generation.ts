@@ -87,6 +87,7 @@ export class ExtensionGeneration {
 
     activate(): void {
         if (this.#state !== "ready") {
+            if (this.#state === "faulted" && this.#faultError !== undefined) throw this.#faultError;
             throw new Error(
                 `Extension generation ${this.generation} cannot activate from ${this.#state}.`,
             );
@@ -186,7 +187,7 @@ export class ExtensionGeneration {
         )
             return;
         this.#disposeStarted = true;
-        void this.#dispose().then(
+        void Promise.resolve().then(() => this.#dispose()).then(
             () => {
                 this.#disposeError = undefined;
                 this.#state = "disposed";

@@ -30,6 +30,7 @@ import {
 import {
     sharedExtensionHostModuleResolver,
     type ExtensionHostModuleResolver,
+    type ExtensionHostModuleLease,
 } from "./ModuleResolver.js";
 
 export interface ExtensionGenerationActivatorOptions {
@@ -86,18 +87,20 @@ export class ExtensionGenerationActivator {
     async #activateInProcess(
         input: ExtensionGenerationActivationInput,
     ): Promise<ExtensionGeneration> {
-        const hostModules = this.#hostModuleResolver.register(
-            input.codeDirectory,
-            input.manifest.hostDependencies,
-        );
+        let hostModules: ExtensionHostModuleLease | undefined;
         let module: ExtensionModule | undefined;
         try {
+            hostModules = this.#hostModuleResolver.register(
+                input.codeDirectory,
+                input.manifest.hostDependencies,
+            );
             module = readExtensionModule(
                 await this.#importer!(pathToFileURL(input.entryPath).href),
                 input.id,
             );
             await module.activate(input.context);
             const bindings = await input.registrations.finalize();
+            const releaseHostModules = hostModules.release;
             return new ExtensionGeneration({
                 dispose: async () =>
                     await disposeInProcessGeneration({
@@ -105,7 +108,7 @@ export class ExtensionGenerationActivator {
                         database: input.capabilities.database,
                         module: module!,
                         processes: input.capabilities.processes,
-                        releaseHostModules: hostModules.release,
+                        releaseHostModules,
                         runtimeDirectory: input.runtimeDirectory,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
@@ -137,7 +140,7 @@ export class ExtensionGenerationActivator {
                 extensionId: input.id,
                 module,
                 processes: input.capabilities.processes,
-                releaseHostModules: hostModules.release,
+                releaseHostModules: hostModules?.release,
                 runtimeDirectory: input.runtimeDirectory,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,
@@ -149,70 +152,72 @@ export class ExtensionGenerationActivator {
         input: ExtensionGenerationActivationInput,
     ): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
-        const sandbox = this.#sandboxFactory({
-            artifacts: input.capabilities.artifacts,
-            assets: input.capabilities.assets,
-            capabilities: input.manifest.capabilities,
-            codeDirectory: input.codeDirectory,
-            config: input.capabilities.config?.owned,
-            configCore: input.capabilities.config?.core,
-            database: input.capabilities.database,
-            context: {
-                config: input.capabilities.config?.owned !== undefined,
-                generation: input.generation,
-                id: input.id,
-                paths: input.context.paths,
-                version: input.manifest.version,
-            },
-            contextObserve: input.capabilities.contextObserve,
-            entryUrl: pathToFileURL(input.entryPath).href,
-            hostDependencies: input.manifest.hostDependencies,
-            instanceEventPublish: input.capabilities.instanceEventPublish,
-            instanceManage: input.capabilities.instanceManage,
-            instanceObserve: input.capabilities.instanceObserve,
-            logger: input.logger,
-            onFault: (error) => {
-                candidate?.fault(error);
-                input.capabilities.config?.close();
-                try {
-                    input.capabilities.database.closeAll();
-                } catch (cleanupError) {
-                    input.logger.error(
-                        "Extension database cleanup failed after sandbox fault.",
-                        {
-                            message:
-                                cleanupError instanceof Error
-                                    ? cleanupError.message
-                                    : String(cleanupError),
-                        },
-                    );
-                }
-                void input.capabilities.processes
-                    .closeAll()
-                    .catch(() => undefined);
-                void input.capabilities.workerDelegate
-                    .closeAll()
-                    .catch(() => undefined);
-                void input.capabilities.workerExecute
-                    .closeAll()
-                    .catch(() => undefined);
-            },
-            processes: input.capabilities.processes,
-            ...(this.#sandboxResourceLimits === undefined
-                ? {}
-                : { resourceLimits: this.#sandboxResourceLimits }),
-            toolCallHistory: input.capabilities.toolCallHistory,
-            workerDelegate: input.capabilities.workerDelegate,
-            workerExecute: input.capabilities.workerExecute,
-        });
+        let sandbox: ExtensionSandboxHost | undefined;
         try {
+            sandbox = this.#sandboxFactory({
+                artifacts: input.capabilities.artifacts,
+                assets: input.capabilities.assets,
+                capabilities: input.manifest.capabilities,
+                codeDirectory: input.codeDirectory,
+                config: input.capabilities.config?.owned,
+                configCore: input.capabilities.config?.core,
+                database: input.capabilities.database,
+                context: {
+                    config: input.capabilities.config?.owned !== undefined,
+                    generation: input.generation,
+                    id: input.id,
+                    paths: input.context.paths,
+                    version: input.manifest.version,
+                },
+                contextObserve: input.capabilities.contextObserve,
+                entryUrl: pathToFileURL(input.entryPath).href,
+                hostDependencies: input.manifest.hostDependencies,
+                instanceEventPublish: input.capabilities.instanceEventPublish,
+                instanceManage: input.capabilities.instanceManage,
+                instanceObserve: input.capabilities.instanceObserve,
+                logger: input.logger,
+                onFault: (error) => {
+                    candidate?.fault(error);
+                    input.capabilities.config?.close();
+                    try {
+                        input.capabilities.database.closeAll();
+                    } catch (cleanupError) {
+                        input.logger.error(
+                            "Extension database cleanup failed after sandbox fault.",
+                            {
+                                message:
+                                    cleanupError instanceof Error
+                                        ? cleanupError.message
+                                        : String(cleanupError),
+                            },
+                        );
+                    }
+                    void input.capabilities.processes
+                        .closeAll()
+                        .catch(() => undefined);
+                    void input.capabilities.workerDelegate
+                        .closeAll()
+                        .catch(() => undefined);
+                    void input.capabilities.workerExecute
+                        .closeAll()
+                        .catch(() => undefined);
+                },
+                processes: input.capabilities.processes,
+                ...(this.#sandboxResourceLimits === undefined
+                    ? {}
+                    : { resourceLimits: this.#sandboxResourceLimits }),
+                toolCallHistory: input.capabilities.toolCallHistory,
+                workerDelegate: input.capabilities.workerDelegate,
+                workerExecute: input.capabilities.workerExecute,
+            });
+            const runningSandbox = sandbox;
             const descriptor = await sandbox.start();
             const bindings = await registrationsFromSandbox(
                 descriptor,
                 input.manifest,
                 input.codeDirectory,
                 this.#points,
-                sandbox,
+                runningSandbox,
             );
             candidate = new ExtensionGeneration({
                 dispose: async () =>
@@ -221,7 +226,7 @@ export class ExtensionGenerationActivator {
                         database: input.capabilities.database,
                         processes: input.capabilities.processes,
                         runtimeDirectory: input.runtimeDirectory,
-                        sandbox,
+                        sandbox: runningSandbox,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
                     }),
@@ -229,10 +234,10 @@ export class ExtensionGenerationActivator {
                 manifest: input.manifest,
                 registrations: bindings,
                 contextEnvironmentRetired: async (event) => {
-                    await sandbox.contextEnvironmentRetired(event);
+                    await runningSandbox.contextEnvironmentRetired(event);
                 },
                 instanceGenerationRetired: async (event) => {
-                    await sandbox.instanceGenerationRetired(event);
+                    await runningSandbox.instanceGenerationRetired(event);
                 },
                 retireInstanceHostResources: async (instance) => {
                     await Promise.all([

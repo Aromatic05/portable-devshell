@@ -257,85 +257,103 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             ((filename, workerOptions) => new Worker(filename, workerOptions));
         const channel = new MessageChannel();
         this.#port = channel.port1;
-        this.#configUnsubscribe = this.#config?.onChange((change) =>
-            this.#send({ change, type: "configChange" }),
-        );
-        this.#configCoreUnsubscribe = this.#configCore?.onChange((change) =>
-            this.#send({ change, type: "configCoreChange" }),
-        );
-        this.#worker = factory(sandboxWorkerModuleUrl(), {
-            env: { ...process.env, ESBUILD_WORKER_THREADS: "0" },
-            execArgv: extensionSandboxExecArgv(),
-            resourceLimits:
-                options.resourceLimits ??
-                DEFAULT_EXTENSION_SANDBOX_RESOURCE_LIMITS,
-            workerData,
-        });
-        this.#ready = new Promise<ExtensionSandboxReadyDescriptor>(
-            (resolve, reject) => {
-                this.#readyReject = reject;
-                this.#readyTimer = setTimeout(() => {
-                    if (this.#readySettled) return;
-                    const error = new Error(
-                        `Extension sandbox initialization timed out after ${this.#initializationTimeoutMs}ms.`,
-                    );
-                    this.#readySettled = true;
-                    this.#readyReject = undefined;
-                    reject(error);
-                    this.#fault(error);
-                }, this.#initializationTimeoutMs);
-                const ready = (message: ExtensionSandboxToHostMessage) => {
-                    if (message.type === "ready") {
-                        if (this.#readyTimer !== undefined)
-                            clearTimeout(this.#readyTimer);
-                        this.#readyTimer = undefined;
-                        this.#port.off("message", ready);
+        let worker: Worker | undefined;
+        let ready: Promise<ExtensionSandboxReadyDescriptor> | undefined;
+        try {
+            this.#configUnsubscribe = this.#config?.onChange((change) =>
+                this.#send({ change, type: "configChange" }),
+            );
+            this.#configCoreUnsubscribe = this.#configCore?.onChange((change) =>
+                this.#send({ change, type: "configCoreChange" }),
+            );
+            this.#worker = worker = factory(sandboxWorkerModuleUrl(), {
+                env: { ...process.env, ESBUILD_WORKER_THREADS: "0" },
+                execArgv: extensionSandboxExecArgv(),
+                resourceLimits:
+                    options.resourceLimits ??
+                    DEFAULT_EXTENSION_SANDBOX_RESOURCE_LIMITS,
+                workerData,
+            });
+            this.#ready = ready = new Promise<ExtensionSandboxReadyDescriptor>(
+                (resolve, reject) => {
+                    this.#readyReject = reject;
+                    this.#readyTimer = setTimeout(() => {
+                        if (this.#readySettled) return;
+                        const error = new Error(
+                            `Extension sandbox initialization timed out after ${this.#initializationTimeoutMs}ms.`,
+                        );
                         this.#readySettled = true;
-                        this.#readyReject = undefined;
-                        this.#scheduleHealthCheck();
-                        resolve(message.descriptor);
-                        return;
-                    }
-                    if (message.type === "initError") {
-                        if (this.#readyTimer !== undefined)
-                            clearTimeout(this.#readyTimer);
-                        this.#readyTimer = undefined;
-                        this.#port.off("message", ready);
-                        this.#readySettled = true;
-                        const error = deserializeSandboxError(message.error);
                         this.#readyReject = undefined;
                         reject(error);
                         this.#fault(error);
-                    }
-                };
-                this.#port.on("message", ready);
-            },
-        );
-        this.#port.on("message", (message: ExtensionSandboxToHostMessage) => {
-            void this.#accept(message).catch((error: unknown) =>
-                this.#fault(toError(error)),
+                    }, this.#initializationTimeoutMs);
+                    const ready = (message: ExtensionSandboxToHostMessage) => {
+                        if (message.type === "ready") {
+                            if (this.#readyTimer !== undefined)
+                                clearTimeout(this.#readyTimer);
+                            this.#readyTimer = undefined;
+                            this.#port.off("message", ready);
+                            this.#readySettled = true;
+                            this.#readyReject = undefined;
+                            this.#scheduleHealthCheck();
+                            resolve(message.descriptor);
+                            return;
+                        }
+                        if (message.type === "initError") {
+                            if (this.#readyTimer !== undefined)
+                                clearTimeout(this.#readyTimer);
+                            this.#readyTimer = undefined;
+                            this.#port.off("message", ready);
+                            this.#readySettled = true;
+                            const error = deserializeSandboxError(message.error);
+                            this.#readyReject = undefined;
+                            reject(error);
+                            this.#fault(error);
+                        }
+                    };
+                    this.#port.on("message", ready);
+                },
             );
-        });
-        this.#port.start();
-        this.#worker.on("error", (error) => this.#fault(error));
-        this.#worker.once("online", () => this.#scheduleMemoryWatch());
-        this.#worker.on("exit", (code) => {
-            if (!this.#closing && this.#faulted === undefined) {
-                this.#fault(
-                    new Error(
-                        `Extension sandbox worker exited unexpectedly with code ${code}.`,
-                    ),
+            this.#port.on("message", (message: ExtensionSandboxToHostMessage) => {
+                void this.#accept(message).catch((error: unknown) =>
+                    this.#fault(toError(error)),
                 );
-            }
-        });
-        try {
+            });
+            this.#port.start();
+            this.#worker.on("error", (error) => this.#fault(error));
+            this.#worker.once("online", () => this.#scheduleMemoryWatch());
+            this.#worker.on("exit", (code) => {
+                if (!this.#closing && this.#faulted === undefined) {
+                    this.#fault(
+                        new Error(
+                            `Extension sandbox worker exited unexpectedly with code ${code}.`,
+                        ),
+                    );
+                }
+            });
             this.#worker.postMessage(
                 { port: channel.port2, type: "extensionSandboxBootstrap" },
                 [channel.port2],
             );
         } catch (error) {
+            const failures: unknown[] = [error];
+            this.#closing = true;
+            if (this.#readyTimer !== undefined) clearTimeout(this.#readyTimer);
+            this.#clearHealthCheck();
+            if (this.#memoryWatchTimer !== undefined) clearTimeout(this.#memoryWatchTimer);
+            this.#readyReject?.(toError(error));
+            void ready?.catch(() => undefined);
+            for (const unsubscribe of [this.#configUnsubscribe, this.#configCoreUnsubscribe]) {
+                try { unsubscribe?.(); } catch (cleanupError) { failures.push(cleanupError); }
+            }
             this.#port.close();
-            void this.#worker.terminate();
+            channel.port2.close();
+            void worker?.terminate().catch((cleanupError) => {
+                this.#logger.error("Extension sandbox construction cleanup failed.", {
+                    message: toError(cleanupError).message,
+                });
+            });
+            if (failures.length > 1) throw new AggregateError(failures, "Extension sandbox construction failed and cleanup was incomplete.");
             throw error;
         }
     }
