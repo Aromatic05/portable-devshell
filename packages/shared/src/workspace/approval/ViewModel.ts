@@ -71,6 +71,7 @@ export class ApprovalViewModel {
         approvalId: string,
         decision: ApprovalDecisionValue,
         options?: ApprovalDecisionOptions,
+        signal?: AbortSignal,
     ): Promise<ApprovalRequest> {
         const generation = this.#generation;
         this.#mutation += 1;
@@ -81,6 +82,7 @@ export class ApprovalViewModel {
                 approvalId,
                 decision,
                 options,
+                signal,
             );
             return decided;
         } catch (error) {

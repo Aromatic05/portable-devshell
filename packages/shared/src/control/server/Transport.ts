@@ -12,7 +12,7 @@ import {
 export interface ServerTransport {
     hello(): Promise<ControlProtocolHelloResponse>;
     ping(): Promise<{ pong: boolean }>;
-    restart(): Promise<Record<string, JsonValue>>;
+    restart(signal?: AbortSignal): Promise<Record<string, JsonValue>>;
     shutdown(): Promise<Record<string, JsonValue>>;
     status(): Promise<ControlServerStatus>;
 }
@@ -29,7 +29,7 @@ export function createServerTransport(
                 protocolRange: CONTROL_PROTOCOL_RANGE,
             }),
         ping: () => port.request<{ pong: boolean }>("ping"),
-        restart: () => port.request<Record<string, JsonValue>>("restart"),
+        restart: (signal) => port.request<Record<string, JsonValue>>("restart", undefined, signal),
         shutdown: () => port.request<Record<string, JsonValue>>("shutdown"),
         status: () => port.request<ControlServerStatus>("status"),
     };

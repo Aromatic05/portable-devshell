@@ -82,27 +82,28 @@ export class InstanceConfigViewModel {
     }
 
     /** Enables an instance, then refreshes the configured-instance catalog. */
-    enable(instanceName: string): Promise<Record<string, JsonValue> | undefined> {
-        return this.#mutate(() => this.#transport.enableInstance(instanceName));
+    enable(instanceName: string, signal?: AbortSignal): Promise<Record<string, JsonValue> | undefined> {
+        return this.#mutate(() => this.#transport.enableInstance(instanceName, signal));
     }
 
     /** Disables an instance, then refreshes the configured-instance catalog. */
-    disable(instanceName: string): Promise<Record<string, JsonValue> | undefined> {
-        return this.#mutate(() => this.#transport.disableInstance(instanceName));
+    disable(instanceName: string, signal?: AbortSignal): Promise<Record<string, JsonValue> | undefined> {
+        return this.#mutate(() => this.#transport.disableInstance(instanceName, signal));
     }
 
     /** Deletes an instance, then refreshes the configured-instance catalog. */
     delete(
         instanceName: string,
+        signal?: AbortSignal,
     ): Promise<
         Awaited<ReturnType<InstanceTransport["deleteInstance"]>> | undefined
     > {
-        return this.#mutate(() => this.#transport.deleteInstance(instanceName));
+        return this.#mutate(() => this.#transport.deleteInstance(instanceName, signal));
     }
 
     /** Thin delegate; the create wizard owns the draft projection. */
-    create(draft: InstanceCreateDraft): Promise<InstanceCreateResult> {
-        return this.#transport.createInstance(draft);
+    create(draft: InstanceCreateDraft, signal?: AbortSignal): Promise<InstanceCreateResult> {
+        return this.#transport.createInstance(draft, signal);
     }
 
     /** Thin delegate; the create wizard owns the draft projection. */

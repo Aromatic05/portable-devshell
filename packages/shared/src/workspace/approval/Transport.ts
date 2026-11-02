@@ -21,6 +21,7 @@ export interface ApprovalTransport {
         approvalId: string,
         decision: ApprovalDecisionValue,
         options?: ApprovalDecisionOptions,
+        signal?: AbortSignal,
     ): Promise<ApprovalRequest>;
     get(approvalId: string): Promise<ApprovalRequest>;
     list(options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
@@ -35,12 +36,12 @@ export function createApprovalTransport(
     const instanceName = asInstanceName(instance);
     const port = createPortClient(endpoint, instanceName, "approval");
     return {
-        decide: (approvalId, decision, options = {}) =>
+        decide: (approvalId, decision, options = {}, signal) =>
             port.request<ApprovalRequest>("decide", {
                 approvalId,
                 decision,
                 ...options,
-            }),
+            }, signal),
         get: (approvalId) => port.request<ApprovalRequest>("get", { approvalId }),
         list: (options) => port.request<ApprovalRequest[]>("list", options),
         snapshot: (options, signal) => port.request<ApprovalListResult>("snapshot", options, signal),

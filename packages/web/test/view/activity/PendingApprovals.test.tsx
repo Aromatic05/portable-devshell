@@ -37,7 +37,7 @@ it("L03 RED: pending review is actionable with zero ToolCall audit rows, then ap
     expect(screen.getByText("Review alpha deployment")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(decide).toHaveBeenCalledExactlyOnceWith("review", "approve"));
+    await waitFor(() => expect(decide).toHaveBeenCalledExactlyOnceWith("review", "approve", undefined, expect.any(AbortSignal)));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(container.querySelectorAll(".tool-call-record")).toHaveLength(0);
     expect(domains.toolCalls.state.instances).toEqual({});
@@ -67,13 +67,17 @@ it("L03 RED: optimistic removal during a denied review must keep the pending dia
     fireEvent.click(screen.getByRole("button", { name: "Deny" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(decide).toHaveBeenCalledOnce());
+    expect(decide.mock.calls[0]![3]).toBeInstanceOf(AbortSignal);
+    expect((decide.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
     await act(async () => pending.reject(new Error("Reviewer revision 42 refused denial")));
     expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("Reviewer revision 42 refused denial");
     act(() => domains.setApprovals("alpha", [request()]));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(decide.mock.calls).toEqual([["review", "deny"], ["review", "deny"]]);
+    expect(decide.mock.calls).toEqual([["review", "deny", undefined, expect.any(AbortSignal)], ["review", "deny", undefined, expect.any(AbortSignal)]]);
+    expect((decide.mock.calls[0]![3] as AbortSignal).aborted).toBe(true);
+    expect((decide.mock.calls[1]![3] as AbortSignal).aborted).toBe(false);
 });
 
 const dispose: Array<() => void> = [];
@@ -192,13 +196,18 @@ it("identical approval ids from two instances can be pending concurrently and on
     fireEvent.click(within(betaRow).getByRole("button", { name: "Deny" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(decideBeta).toHaveBeenCalledOnce());
+    expect((decideAlpha.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
+    expect((decideBeta.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
+    expect(decideBeta.mock.calls[0]![3]).not.toBe(decideAlpha.mock.calls[0]![3]);
     await act(async () => alpha.reject(new Error("Alpha approval rejected")));
+    expect((decideAlpha.mock.calls[0]![3] as AbortSignal).aborted).toBe(true);
+    expect((decideBeta.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
     expect(screen.getByRole("dialog")).toHaveTextContent("Review beta deployment");
     expect(within(screen.getByRole("dialog")).queryByRole("alert")).not.toBeInTheDocument();
     await act(async () => beta.resolve());
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(decideAlpha).toHaveBeenCalledExactlyOnceWith("review", "approve");
-    expect(decideBeta).toHaveBeenCalledExactlyOnceWith("review", "deny");
+    expect(decideAlpha).toHaveBeenCalledExactlyOnceWith("review", "approve", undefined, expect.any(AbortSignal));
+    expect(decideBeta).toHaveBeenCalledExactlyOnceWith("review", "deny", undefined, expect.any(AbortSignal));
 });
 
 it("UI filters apply to standalone reviews while explicit Context scope remains authoritative", () => {
@@ -281,7 +290,7 @@ it("audit arrival moves the action onto its call without closing or duplicating 
     expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(2);
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(decide).toHaveBeenCalledExactlyOnceWith("review", "approve");
+    expect(decide).toHaveBeenCalledExactlyOnceWith("review", "approve", undefined, expect.any(AbortSignal));
 });
 
 it("recreated approval domains for the same instance name load fresh snapshots instead of retaining closed projections", async () => {

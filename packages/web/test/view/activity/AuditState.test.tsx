@@ -155,7 +155,9 @@ it("late approval failure cannot modify a replacement approval review on the sam
     expect(within(screen.getByRole("dialog")).queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(decide.mock.calls).toEqual([["approval-alpha", "approve"], ["replacement", "deny"]]);
+    expect(decide.mock.calls).toEqual([["approval-alpha", "approve", undefined, expect.any(AbortSignal)], ["replacement", "deny", undefined, expect.any(AbortSignal)]]);
+    expect((decide.mock.calls[0]![3] as AbortSignal).aborted).toBe(true);
+    expect((decide.mock.calls[1]![3] as AbortSignal).aborted).toBe(false);
 });
 
 

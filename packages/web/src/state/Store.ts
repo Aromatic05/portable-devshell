@@ -23,6 +23,7 @@ export class WebStore {
     readonly #listeners = new Set<() => void>();
     readonly #operations: WebOperationCoordinator;
     readonly #requestTimeoutMs: number;
+    readonly #writes = new AbortController();
     #messagePreferenceQueue = Promise.resolve();
     #controlRestartPromise?: Promise<boolean>;
     #loading?: Promise<void>;
@@ -117,7 +118,7 @@ export class WebStore {
         const run = async (): Promise<boolean> => {
             if (!this.#current(generation)) return false;
             try {
-                await this.domains.messagePreferences.update(patch);
+                await this.domains.messagePreferences.update(patch, this.#writes.signal);
                 return this.#current(generation);
             } catch (error) {
                 if (this.#current(generation))
@@ -227,12 +228,13 @@ export class WebStore {
             "Approval recorded.",
             generation,
             async (signal) => {
+                signal = this.domains.instanceSignal(instance, signal);
                 const approval = this.domains.approval(instance);
                 await approval.load(signal);
                 signal.throwIfAborted();
                 if (!this.domains.ownsInstanceModel(instance, approval))
                     throw new Error("Instance was replaced before approval.");
-                await approval.decide(approvalId, decision);
+                await approval.decide(approvalId, decision, undefined, signal);
             },
         );
     }
@@ -247,8 +249,8 @@ export class WebStore {
             `context-message:${instance}:${ctxId}`,
             undefined,
             generation,
-            async () => {
-                await this.domains.messages.queue(instance, ctxId, text);
+            async (signal) => {
+                await this.domains.messages.queue(instance, ctxId, text, this.domains.instanceSignal(instance, signal));
             },
         );
     }
@@ -259,8 +261,8 @@ export class WebStore {
             `context-disable:${ctxId}`,
             "Context disabled.",
             generation,
-            async () => {
-                await this.domains.context.disable(ctxId);
+            async (signal) => {
+                await this.domains.context.disable(ctxId, signal);
             },
         );
     }
@@ -296,8 +298,8 @@ export class WebStore {
             `context-renew:${ctxId}`,
             "Context renewed.",
             generation,
-            async () => {
-                await this.domains.context.renew(ctxId);
+            async (signal) => {
+                await this.domains.context.renew(ctxId, signal);
             },
         );
     }
@@ -317,6 +319,7 @@ export class WebStore {
             `${instance} restart requested.`,
             generation,
             async (signal) => {
+                signal = this.domains.instanceSignal(instance, signal);
                 const runtime = this.domains.runtime(instance);
                 await runtime.load(signal);
                 signal.throwIfAborted();
@@ -342,10 +345,11 @@ export class WebStore {
             "enabled:" + instance,
             instance + (enabled ? " enabled." : " disabled."),
             generation,
-            async () => {
+            async (signal) => {
+                signal = this.domains.instanceSignal(instance, signal);
                 const result = enabled
-                    ? await this.domains.instances.enable(instance)
-                    : await this.domains.instances.disable(instance);
+                    ? await this.domains.instances.enable(instance, signal)
+                    : await this.domains.instances.disable(instance, signal);
                 if (result?.cleanupPending === true)
                     cleanupNotice = instance + " configuration committed; lifecycle cleanup is still pending.";
             },
@@ -362,8 +366,8 @@ export class WebStore {
             `delete:${instance}`,
             `${instance} deleted.`,
             generation,
-            async () => {
-                const result = await this.domains.instances.delete(instance);
+            async (signal) => {
+                const result = await this.domains.instances.delete(instance, this.domains.instanceSignal(instance, signal));
                 if (result?.cleanupPending === true) {
                     cleanupNotice = `${instance} deregistered, but lifecycle cleanup is still pending. Review Control logs before reusing this name.`;
                 } else if (
@@ -372,7 +376,6 @@ export class WebStore {
                 ) {
                     cleanupNotice = `${instance} deregistered; remote provider resources could not be fully removed.`;
                 }
-                this.domains.releaseInstance(instance);
             },
         );
         if (
@@ -390,8 +393,8 @@ export class WebStore {
             `artifact:revoke:${shareId}`,
             `Artifact share ${shareId} revoked.`,
             generation,
-            async () => {
-                await this.domains.artifact.revokeShare(shareId);
+            async (signal) => {
+                await this.domains.artifact.revokeShare(shareId, signal);
             },
         );
     }
@@ -402,8 +405,8 @@ export class WebStore {
             `artifact:cancel:${transferId}`,
             `Artifact transfer ${transferId} cancellation requested.`,
             generation,
-            async () => {
-                await this.domains.artifact.cancelTransfer(transferId);
+            async (signal) => {
+                await this.domains.artifact.cancelTransfer(transferId, signal);
             },
         );
     }
@@ -427,7 +430,7 @@ export class WebStore {
             `${draft.name || "Instance"} created.`,
             generation,
             async (signal) => {
-                const result = await this.domains.instances.create(draft);
+                const result = await this.domains.instances.create(draft, signal);
                 signal.throwIfAborted();
                 await this.domains.instances.refresh();
                 signal.throwIfAborted();
@@ -435,6 +438,7 @@ export class WebStore {
                     try {
                         const code = await this.domains.reverse.createCode(
                             result.name,
+                            this.domains.instanceSignal(result.name, signal),
                         );
                         enrollment = [
                             "devshell-worker enroll",
@@ -479,8 +483,9 @@ export class WebStore {
             "config:update",
             "Configuration saved.",
             generation,
-            async () => {
-                await this.domains.config.update(request);
+            async (signal) => {
+                if (request.instance !== undefined) signal = this.domains.instanceSignal(request.instance.instanceName, signal);
+                await this.domains.config.update(request, signal);
                 if (request.mcp !== undefined) await this.domains.mcp.refresh();
             },
         );
@@ -488,8 +493,8 @@ export class WebStore {
 
     async createReverseCode(instance: string): Promise<string | undefined> {
         try {
-            const result = await withRequestTimeout(
-                this.domains.reverse.createCode(instance),
+            const result = await this.#writeRequest(
+                (signal) => this.domains.reverse.createCode(instance, this.domains.instanceSignal(instance, signal)),
                 this.#requestTimeoutMs,
                 "Creating the enrollment code",
                 "uncertain",
@@ -518,8 +523,8 @@ export class WebStore {
             `reverse:rotate:${instance}`,
             `${instance} device token rotated.`,
             generation,
-            async () => {
-                await this.domains.reverse.rotateToken(instance);
+            async (signal) => {
+                await this.domains.reverse.rotateToken(instance, this.domains.instanceSignal(instance, signal));
             },
         );
     }
@@ -530,8 +535,8 @@ export class WebStore {
             `reverse:revoke:${instance}`,
             `${instance} device token revoked.`,
             generation,
-            async () => {
-                await this.domains.reverse.revokeToken(instance);
+            async (signal) => {
+                await this.domains.reverse.revokeToken(instance, this.domains.instanceSignal(instance, signal));
             },
         );
     }
@@ -560,6 +565,7 @@ export class WebStore {
     close(): void {
         if (this.#stopped) return;
         this.#stopped = true;
+        this.#writes.abort(new Error("Web store closed."));
         this.#generation += 1;
         this.#auditAbort?.abort();
         this.#operations.cancelAll(new Error("Web store closed."));
@@ -577,6 +583,7 @@ export class WebStore {
             `${instance} ${action} requested.`,
             generation,
             async (signal) => {
+                signal = this.domains.instanceSignal(instance, signal);
                 const runtime = this.domains.runtime(instance);
                 await runtime.load(signal);
                 signal.throwIfAborted();
@@ -588,10 +595,19 @@ export class WebStore {
         );
     }
 
+    async #writeRequest<T>(action: (signal: AbortSignal) => Promise<T>, timeoutMs: number, label: string, outcome: "uncertain"): Promise<T> {
+        const controller = new AbortController();
+        try {
+            return await withRequestTimeout(action(AbortSignal.any([controller.signal, this.#writes.signal])), timeoutMs, label, outcome);
+        } finally {
+            controller.abort();
+        }
+    }
+
     async #restartControl(): Promise<boolean> {
         try {
-            await withRequestTimeout(
-                this.domains.server.restart(),
+            await this.#writeRequest(
+                (signal) => this.domains.server.restart(signal),
                 this.#requestTimeoutMs,
                 "Restarting Control",
                 "uncertain",

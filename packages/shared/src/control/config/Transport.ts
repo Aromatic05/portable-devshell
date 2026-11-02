@@ -24,9 +24,9 @@ export interface ConfigTransport {
     get(): Promise<ConfigView>;
     snapshot(): Promise<ConfigSnapshot>;
     subscribe(fromRevision: number): Promise<EventStreamPort<ConfigChangeEvent>>;
-    update(request: ConfigBatchUpdateRequest): Promise<ConfigView>;
-    updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<ConfigView>;
-    updateWeb(request: ConfigUpdateWebRequest): Promise<ConfigView>;
+    update(request: ConfigBatchUpdateRequest, signal?: AbortSignal): Promise<ConfigView>;
+    updateMcpEndpoint(request: ConfigUpdateMcpRequest, signal?: AbortSignal): Promise<ConfigView>;
+    updateWeb(request: ConfigUpdateWebRequest, signal?: AbortSignal): Promise<ConfigView>;
     validate(draft: ConfigDraft): Promise<ConfigView>;
 }
 
@@ -44,10 +44,10 @@ export function createConfigTransport(endpoint: Endpoint): ConfigTransport {
                     readGap: readStreamGapPayload,
                 },
             ),
-        update: (request) => port.request<ConfigView>("update", request),
-        updateMcpEndpoint: (request) =>
-            port.request<ConfigView>("updateMcpEndpoint", request),
-        updateWeb: (request) => port.request<ConfigView>("updateWeb", request),
+        update: (request, signal) => port.request<ConfigView>("update", request, signal),
+        updateMcpEndpoint: (request, signal) =>
+            port.request<ConfigView>("updateMcpEndpoint", request, signal),
+        updateWeb: (request, signal) => port.request<ConfigView>("updateWeb", request, signal),
         validate: (draft) => port.request<ConfigView>("validate", draft),
     };
 }

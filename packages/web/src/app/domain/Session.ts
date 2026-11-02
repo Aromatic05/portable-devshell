@@ -62,6 +62,7 @@ export class WebDomainSession {
     readonly server: ServerSession;
     readonly toolCalls: ToolCallViewModel;
 
+    readonly #instanceOwners = new Map<string, AbortController>();
     readonly #approvals = new Map<string, ApprovalViewModel>();
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
@@ -157,11 +158,23 @@ export class WebDomainSession {
         return viewModel;
     }
 
+    instanceSignal(instance: string, signal?: AbortSignal): AbortSignal {
+        let owner = this.#instanceOwners.get(instance);
+        if (owner === undefined) {
+            owner = new AbortController();
+            this.#instanceOwners.set(instance, owner);
+            if (this.#closed) owner.abort(new Error("Web session closed."));
+        }
+        return signal === undefined ? owner.signal : AbortSignal.any([owner.signal, signal]);
+    }
+
     ownsInstanceModel(instance: string, model: ProcessViewModel | ApprovalViewModel): boolean {
         return this.#runtimes.get(instance) === model || this.#approvals.get(instance) === model;
     }
 
     releaseInstance(instance: string): void {
+        this.#instanceOwners.get(instance)?.abort(new Error("Instance was replaced; the outcome of an already sent operation is unknown. Refresh before retrying."));
+        this.#instanceOwners.delete(instance);
         this.#runtimes.get(instance)?.close();
         this.#runtimes.delete(instance);
         this.#approvals.get(instance)?.close();
@@ -218,6 +231,8 @@ export class WebDomainSession {
         this.#closed = true;
         this.#generation += 1;
         this.#unsubscribeInstances();
+        for (const owner of this.#instanceOwners.values()) owner.abort(new Error("Web session closed."));
+        this.#instanceOwners.clear();
         for (const viewModel of this.#runtimes.values()) viewModel.close();
         for (const viewModel of this.#approvals.values()) viewModel.close();
         this.#runtimes.clear();

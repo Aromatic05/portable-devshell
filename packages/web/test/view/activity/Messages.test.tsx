@@ -562,10 +562,11 @@ describe("Messages", () => {
         });
         fireEvent.submit(composer.closest("form")!);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenCalledWith(
+            expect(queueContextMessage).toHaveBeenCalledExactlyOnceWith(
                 "alpha",
                 "ctx-old-active",
                 "Continue from Messages.",
+                expect.any(AbortSignal),
             ),
         );
         expect(
@@ -595,10 +596,11 @@ describe("Messages", () => {
         });
         fireEvent.submit(composer.closest("form")!);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenCalledWith(
+            expect(queueContextMessage).toHaveBeenCalledExactlyOnceWith(
                 "alpha",
                 "ctx-old-active",
                 "#push Answer before continuing.",
+                expect.any(AbortSignal),
             ),
         );
     });
@@ -615,10 +617,11 @@ describe("Messages", () => {
         fireEvent.click(screen.getByRole("button", { name: /^Stop/u }));
         fireEvent.submit(form);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenLastCalledWith(
-                "alpha",
+            expect(queueContextMessage).toHaveBeenNthCalledWith(
+                1, "alpha",
                 "ctx-old-active",
                 "#stop",
+                expect.any(AbortSignal),
             ),
         );
         fireEvent.click(
@@ -627,10 +630,11 @@ describe("Messages", () => {
         fireEvent.click(screen.getByRole("button", { name: /^Resume/u }));
         fireEvent.submit(form);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenLastCalledWith(
-                "alpha",
+            expect(queueContextMessage).toHaveBeenNthCalledWith(
+                2, "alpha",
                 "ctx-old-active",
                 "#resume",
+                expect.any(AbortSignal),
             ),
         );
     });
@@ -638,18 +642,24 @@ describe("Messages", () => {
     it("preserves a newer draft and control while the previous message is being queued", async () => {
         const domains = alphaDomains();
         const request = deferred<Awaited<ReturnType<typeof domains.messages.queue>>>();
-        const queueContextMessage = vi.spyOn(domains.messages, "queue").mockImplementation(() => request.promise);
+        let signal!: AbortSignal;
+        const queueContextMessage = vi.spyOn(domains.messages, "queue").mockImplementation((_instance: string, _ctxId: string, _text: string, requestSignal?: AbortSignal) => {
+            signal = requestSignal!;
+            return request.promise;
+        });
         await renderMessages(domains, threadRoute, webStore(domains));
         const composer = screen.getByRole("textbox", { name: "Comment" });
         fireEvent.change(composer, { target: { value: "Message A" } });
         fireEvent.submit(composer.closest("form")!);
-        expect(queueContextMessage).toHaveBeenCalledWith("alpha", "ctx-old-active", "Message A");
+        expect(queueContextMessage).toHaveBeenCalledExactlyOnceWith("alpha", "ctx-old-active", "Message A", expect.any(AbortSignal));
+        expect(signal.aborted).toBe(false);
         expect(composer).toBeEnabled();
         expect(screen.getByRole("button", { name: "Send Comment" })).toBeDisabled();
         fireEvent.change(composer, { target: { value: "Draft B" } });
         fireEvent.click(screen.getByRole("button", { name: "Add message control" }));
         fireEvent.click(screen.getByRole("button", { name: /StopStop model/u }));
         await act(async () => request.resolve({ ...baseMessages[0]!, text: "Message A" }));
+        expect(signal.aborted).toBe(false);
         expect(composer).toHaveValue("Draft B");
         expect(screen.getByText("#stop")).toBeInTheDocument();
     });
@@ -736,10 +746,11 @@ describe("Messages", () => {
         fireEvent.change(composer, { target: { value: "Still writable." } });
         fireEvent.submit(composer.closest("form")!);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenCalledWith(
+            expect(queueContextMessage).toHaveBeenCalledExactlyOnceWith(
                 "alpha",
                 "ctx-old-active",
                 "Still writable.",
+                expect.any(AbortSignal),
             ),
         );
     });
@@ -756,10 +767,11 @@ describe("Messages", () => {
         });
         fireEvent.submit(composer.closest("form")!);
         await waitFor(() =>
-            expect(queueContextMessage).toHaveBeenCalledWith(
+            expect(queueContextMessage).toHaveBeenCalledExactlyOnceWith(
                 "alpha",
                 "ctx-old-active",
                 "Message after disable.",
+                expect.any(AbortSignal),
             ),
         );
     });
@@ -817,11 +829,11 @@ describe("Messages", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(2, {
                 titles: {
                     "alpha\u0000ctx-second": "Messages navigation review",
                 },
-            }),
+            }, expect.any(AbortSignal)),
         );
 
         first.unmount();
@@ -896,14 +908,14 @@ describe("Messages", () => {
             value: originalElementFromPoint,
         });
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(2, {
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
                         "alpha\u0000ctx-second",
                     ],
                 },
-            }),
+            }, expect.any(AbortSignal)),
         );
         expect(
             list.querySelectorAll<HTMLElement>(".message-row")[0],
@@ -962,9 +974,9 @@ describe("Messages", () => {
             }),
         );
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(2, {
                 hiddenContexts: { "ctx-second": true },
-            }),
+            }, expect.any(AbortSignal)),
         );
         expect(
             screen.queryByRole("button", {
@@ -987,9 +999,9 @@ describe("Messages", () => {
             }),
         );
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenLastCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(3, {
                 hiddenContexts: { "ctx-second": null },
-            }),
+            }, expect.any(AbortSignal)),
         );
 
         fireEvent.click(screen.getByRole("button", { name: "Current" }));
@@ -999,12 +1011,12 @@ describe("Messages", () => {
             ).getByRole("button", { name: "Hide project" }),
         );
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenLastCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(4, {
                 hiddenContexts: {
                     "ctx-first": true,
                     "ctx-second": true,
                 },
-            }),
+            }, expect.any(AbortSignal)),
         );
         expect(
             screen.queryByRole("button", {
@@ -1049,7 +1061,7 @@ describe("Messages", () => {
         expect(updateMessagePreferences).not.toHaveBeenCalledWith(
             expect.objectContaining({
                 titles: { "alpha\u0000ctx-second": "Legacy title" },
-            }),
+            }), expect.any(AbortSignal),
         );
         expect(localStorage.getItem(key)).toBe(stale);
     });
@@ -1082,7 +1094,7 @@ describe("Messages", () => {
         expect(updateMessagePreferences).not.toHaveBeenCalledWith(
             expect.objectContaining({
                 hiddenContexts: { "ctx-first": true, "ctx-second": true },
-            }),
+            }), expect.any(AbortSignal),
         );
         expect(localStorage.getItem(key)).toBe(stale);
     });
@@ -1113,7 +1125,7 @@ describe("Messages", () => {
         );
 
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledExactlyOnceWith({
                 ifMissing: true,
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -1121,12 +1133,12 @@ describe("Messages", () => {
                         "alpha\u0000ctx-first",
                     ],
                 },
-            }),
+            }, expect.any(AbortSignal)),
         );
         expect(updateMessagePreferences).not.toHaveBeenCalledWith(
             expect.objectContaining({
                 workspaceOrder: ["/work/portable-devshell"],
-            }),
+            }), expect.any(AbortSignal),
         );
     });
 
@@ -1437,9 +1449,9 @@ describe("Messages", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(2, {
                 titles: { "alpha\u0000ctx-second": "Renamed from the menu" },
-            }),
+            }, expect.any(AbortSignal)),
         );
     });
 
@@ -1509,14 +1521,14 @@ describe("Messages", () => {
         fireEvent.click(screen.getByRole("button", { name: "Move up" }));
 
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenNthCalledWith(2, {
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
                         "alpha\u0000ctx-second",
                     ],
                 },
-            }),
+            }, expect.any(AbortSignal)),
         );
         expect(
             list.querySelectorAll<HTMLElement>(".message-row")[0],

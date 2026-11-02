@@ -225,6 +225,7 @@ it("keeps the trailing comma while typing model extensions and persists both ent
     expect(extensions).toHaveValue("instance, comment");
     fireEvent.click(screen.getByRole("button", { name: "Save Only" }));
     await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
-        instance: expect.objectContaining({ patch: expect.objectContaining({ extensions: { model: ["instance", "comment"] } }) }),
-    })));
+        instance: expect.objectContaining({ instanceName: "alpha", patch: expect.objectContaining({ extensions: { model: ["instance", "comment"] } }) }),
+    }), expect.any(AbortSignal)));
+    expect(await screen.findByText("Configuration saved.")).toBeInTheDocument();
 });

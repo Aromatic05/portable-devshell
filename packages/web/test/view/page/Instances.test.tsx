@@ -174,7 +174,11 @@ it.each(["Back to instances", "Cancel"])("%s leaves an in-flight creation withou
     const { domains, store } = setup({ config: localConfig(), instances: [localInstance("ready")] });
     vi.spyOn(domains.instances, "createSchema").mockResolvedValue(createSchema());
     const request = deferred<{ instance: string; name: string }>();
-    const create = vi.spyOn(domains.instances, "create").mockReturnValue(request.promise);
+    let signal!: AbortSignal;
+    const create = vi.spyOn(domains.instances, "create").mockImplementation((_draft: unknown, requestSignal?: AbortSignal) => {
+        signal = requestSignal!;
+        return request.promise;
+    });
     function CreationPage() {
         useSyncExternalStore(store.subscribe, () => store.state);
         return <Instances navigate={() => undefined} route={{ page: "instances" }} store={store} />;
@@ -183,14 +187,18 @@ it.each(["Back to instances", "Cancel"])("%s leaves an in-flight creation withou
     fireEvent.click(screen.getByRole("button", { name: "New instance" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "first" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(create).toHaveBeenCalledWith({ name: "first", provider: "local" });
+    expect(create).toHaveBeenCalledExactlyOnceWith({ name: "first", provider: "local" }, expect.any(AbortSignal));
+    expect(signal.aborted).toBe(false);
     expect(screen.getByRole("button", { name: "Creating…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: exit })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: exit }));
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(signal.aborted).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "New instance" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "second" } });
     await act(async () => request.resolve({ instance: "first", name: "first" }));
+    expect(signal.aborted).toBe(false);
+    expect(create).toHaveBeenCalledOnce();
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("second");
     expect(screen.queryByText("Instance created successfully.")).not.toBeInTheDocument();
 });

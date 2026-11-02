@@ -94,24 +94,25 @@ export class ArtifactViewModel {
         }
     }
 
-    async revokeShare(shareId: string): Promise<void> {
+    async revokeShare(shareId: string, signal?: AbortSignal): Promise<void> {
         const generation = this.#generation;
-        await this.#transport.revokeShare(shareId);
+        await this.#transport.revokeShare(shareId, signal);
         if (generation === this.#generation) await this.refresh();
     }
 
-    async cancelTransfer(transferId: string): Promise<void> {
+    async cancelTransfer(transferId: string, signal?: AbortSignal): Promise<void> {
         const generation = this.#generation;
-        await this.#transport.cancelTransfer(transferId);
+        await this.#transport.cancelTransfer(transferId, signal);
         if (generation === this.#generation) await this.refresh();
     }
 
     async createShare(
         defaultInstance: string,
         input: ArtifactShareInput,
+        signal?: AbortSignal,
     ): Promise<ArtifactShareResult> {
         const generation = this.#generation;
-        const share = await this.#transport.createShare(defaultInstance, input);
+        const share = await this.#transport.createShare(defaultInstance, input, signal);
         if (generation === this.#generation) await this.refresh();
         return share;
     }
@@ -119,11 +120,13 @@ export class ArtifactViewModel {
     async startTransfer(
         defaultInstance: string,
         input: ArtifactTransferStartInput,
+        signal?: AbortSignal,
     ): Promise<ArtifactTransferResult> {
         const generation = this.#generation;
         const result = await this.#transport.startTransfer(
             defaultInstance,
             input,
+            signal,
         );
         if (generation === this.#generation) await this.refresh();
         return result;

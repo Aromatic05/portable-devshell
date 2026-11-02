@@ -23,11 +23,11 @@ import {
 } from "./Revision.js";
 
 export interface InstanceTransport {
-    createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    createInstance(draft: InstanceCreateDraft, signal?: AbortSignal): Promise<InstanceCreateResult>;
     createInstanceSchema(): Promise<InstanceCreateSchema>;
-    deleteInstance(instanceName: string): Promise<Record<string, JsonValue>>;
-    disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
-    enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
+    deleteInstance(instanceName: string, signal?: AbortSignal): Promise<Record<string, JsonValue>>;
+    disableInstance(instanceName: string, signal?: AbortSignal): Promise<Record<string, JsonValue>>;
+    enableInstance(instanceName: string, signal?: AbortSignal): Promise<Record<string, JsonValue>>;
     listInstances(): Promise<InstanceListEnvelope["instances"]>;
     listCleanupDebts(): Promise<Array<Record<string, string>>>;
     retryCleanupDebt(instanceName: string): Promise<Array<Record<string, string>>>;
@@ -42,22 +42,22 @@ export interface InstanceTransport {
 export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "instance");
     return {
-        createInstance: (draft) =>
-            port.request<InstanceCreateResult>("createInstance", draft),
+        createInstance: (draft, signal) =>
+            port.request<InstanceCreateResult>("createInstance", draft, signal),
         createInstanceSchema: () =>
             port.request<InstanceCreateSchema>("createInstanceSchema"),
-        deleteInstance: (instanceName) =>
+        deleteInstance: (instanceName, signal) =>
             port.request<Record<string, JsonValue>>("deleteInstance", {
                 instanceName,
-            }),
-        disableInstance: (instanceName) =>
+            }, signal),
+        disableInstance: (instanceName, signal) =>
             port.request<Record<string, JsonValue>>("disableInstance", {
                 instanceName,
-            }),
-        enableInstance: (instanceName) =>
+            }, signal),
+        enableInstance: (instanceName, signal) =>
             port.request<Record<string, JsonValue>>("enableInstance", {
                 instanceName,
-            }),
+            }, signal),
         listCleanupDebts: () =>
             port.request<Array<Record<string, string>>>("listCleanupDebts"),
         retryCleanupDebt: (instanceName) =>

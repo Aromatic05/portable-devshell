@@ -185,10 +185,22 @@ export class ProcessViewModel {
     async #recover(subscription: InstanceEventSubscription<ProcessEvent>): Promise<number | undefined> {
         const generation = this.#generation;
         const version = ++this.#readVersion;
+        ++this.#logVersion;
         try {
             const envelope = await this.#transport.refresh();
             if (generation !== this.#generation || version !== this.#readVersion ||
                 this.#subscription !== subscription) return undefined;
+            if (this.#state.logsLoaded) {
+                // Invalidate any event read and absorb its pending timer into recovery.
+                if (this.#logRefreshTimer !== undefined) clearTimeout(this.#logRefreshTimer);
+                this.#logRefreshTimer = undefined;
+                this.#logsDirtyGeneration = undefined;
+                const reading = this.readLogs();
+                const logVersion = this.#logVersion;
+                await reading;
+                if (logVersion !== this.#logVersion || generation !== this.#generation || version !== this.#readVersion ||
+                    this.#subscription !== subscription) return undefined;
+            }
             this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
             return envelope.lastSeq + 1;
         } catch {

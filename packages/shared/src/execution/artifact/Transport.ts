@@ -22,18 +22,20 @@ import type {
 } from "./Model.js";
 
 export interface ArtifactTransport {
-    cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
+    cancelTransfer(transferId: string, signal?: AbortSignal): Promise<ArtifactTransferResult>;
     createShare(
         defaultInstance: string,
         input: ArtifactShareInput,
+        signal?: AbortSignal,
     ): Promise<ArtifactShareResult>;
     getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
     readImage(imageRef: string): Promise<ArtifactImageContent>;
-    revokeShare(shareId: string): Promise<ArtifactShareRevokeResult>;
+    revokeShare(shareId: string, signal?: AbortSignal): Promise<ArtifactShareRevokeResult>;
     snapshot(): Promise<ArtifactSnapshot>;
     startTransfer(
         defaultInstance: string,
         input: ArtifactTransferStartInput,
+        signal?: AbortSignal,
     ): Promise<ArtifactTransferResult>;
     subscribe(fromSeq: number): Promise<EventStreamPort<ArtifactEvent>>;
     viewImage(
@@ -45,27 +47,27 @@ export interface ArtifactTransport {
 export function createArtifactTransport(endpoint: Endpoint): ArtifactTransport {
     const port = createPortClient(endpoint, "@control", "artifact");
     return {
-        cancelTransfer: (transferId) =>
+        cancelTransfer: (transferId, signal) =>
             port.request<ArtifactTransferResult>("cancelTransfer", {
                 transferId,
-            }),
-        createShare: (defaultInstance, input) =>
+            }, signal),
+        createShare: (defaultInstance, input, signal) =>
             port.request<ArtifactShareResult>("createShare", {
                 ...input,
                 defaultInstance,
-            }),
+            }, signal),
         getTransfer: (transferId) =>
             port.request<ArtifactTransferRecord>("getTransfer", { transferId }),
         readImage: (imageRef) =>
             port.request<ArtifactImageContent>("readImage", { imageRef }),
-        revokeShare: (shareId) =>
-            port.request<ArtifactShareRevokeResult>("revokeShare", { shareId }),
+        revokeShare: (shareId, signal) =>
+            port.request<ArtifactShareRevokeResult>("revokeShare", { shareId }, signal),
         snapshot: () => port.request<ArtifactSnapshot>("snapshot"),
-        startTransfer: (defaultInstance, input) =>
+        startTransfer: (defaultInstance, input, signal) =>
             port.request<ArtifactTransferResult>("startTransfer", {
                 ...input,
                 defaultInstance,
-            }),
+            }, signal),
         subscribe: async (fromSeq) =>
             new EventStreamReader<ArtifactEvent>(
                 await port.open("subscribe", { fromSeq }),

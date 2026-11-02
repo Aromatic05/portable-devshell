@@ -110,14 +110,21 @@ it("round4: Audit refresh coalesces reentrant callers and reenables its control 
 
 it("round4: Instance Delete stays pinned through route change, preserves exact failure, and permits retry", async () => {
     const { domains, store, unmount } = setupConfig(); unmount();
-    const pending = deferred<void>(); const remove = vi.spyOn(domains.instances, "delete").mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined);
+    const pending = deferred<void>();
+    const signals: AbortSignal[] = [];
+    const remove = vi.spyOn(domains.instances, "delete")
+        .mockImplementationOnce((...args: unknown[]) => { signals.push(args[1] as AbortSignal); return pending.promise; })
+        .mockImplementationOnce(async (...args: unknown[]) => { signals.push(args[1] as AbortSignal); });
     const navigate = vi.fn();
     const view = (instance: string) => withWebDomains(domains, <StoreInstances store={store} instance={instance} navigate={navigate} />);
     const mounted = render(view("alpha"));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith("alpha"));
+    await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith("alpha", expect.any(AbortSignal)));
+    const signal = signals[0]!;
+    expect(signal.aborted).toBe(false);
     mounted.rerender(view("beta"));
+    expect(signal.aborted).toBe(false);
     expect(screen.getByRole("dialog")).toHaveTextContent("Delete alpha?");
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
@@ -126,7 +133,10 @@ it("round4: Instance Delete stays pinned through route change, preserves exact f
     expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("Delete alpha refused: resource lease 42");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(remove.mock.calls).toEqual([["alpha"], ["alpha"]]);
+    expect(remove.mock.calls).toEqual([["alpha", signal], ["alpha", expect.any(AbortSignal)]]);
+    expect(signal.aborted).toBe(true);
+    expect(signals[1]!.aborted).toBe(false);
+    expect(signals[1]).not.toBe(signal);
     expect(navigate).toHaveBeenCalledExactlyOnceWith({ page: "instances" });
 });
 
@@ -184,5 +194,9 @@ it("round4: detached approval completion cannot disable or clear a replacement i
     expect(screen.getByRole("dialog")).toHaveTextContent("on beta");
     expect(betaDecision).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(betaDecision).toHaveBeenCalledExactlyOnceWith("approval-beta", "approve"));
+    await waitFor(() => expect(betaDecision).toHaveBeenCalledExactlyOnceWith("approval-beta", "approve", undefined, expect.any(AbortSignal)));
+    expect(decide).toHaveBeenCalledExactlyOnceWith("approval-alpha", "approve", undefined, expect.any(AbortSignal));
+    expect((decide.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
+    expect((betaDecision.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
+    expect(betaDecision.mock.calls[0]![3]).not.toBe(decide.mock.calls[0]![3]);
 });

@@ -65,9 +65,12 @@ it("round3: Audit approval remains actionable without a Context registry entry a
     expect(approve).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Approving…" }));
     fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(decide).toHaveBeenCalledExactlyOnceWith("approval-alpha", "approve"));
+    await waitFor(() => expect(decide).toHaveBeenCalledExactlyOnceWith("approval-alpha", "approve", undefined, expect.any(AbortSignal)));
+    const signal = decide.mock.calls[0]![3] as AbortSignal;
+    expect(signal.aborted).toBe(false);
     expect(dialog).toHaveAttribute("aria-busy", "true");
     await act(async () => pending.resolve());
+    expect(signal.aborted).toBe(false);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 

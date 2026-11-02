@@ -108,7 +108,7 @@ describe("WebStore", () => {
         ).toBe(true);
         expect(updatePreferences).toHaveBeenCalledWith({
             titles: { "demo\u0000ctx-b": "Second browser" },
-        });
+        }, expect.any(AbortSignal));
         expect(
             domains.domains.messagePreferences.state.preferences.titles[
                 "demo\u0000ctx-b"
@@ -237,7 +237,7 @@ describe("WebStore", () => {
         expect(
             await store.queueContextMessage("demo", "ctx-demo", queued.text),
         ).toBe(true);
-        expect(queue).toHaveBeenCalledWith("demo", "ctx-demo", queued.text);
+        expect(queue).toHaveBeenCalledWith("demo", "ctx-demo", queued.text, expect.any(AbortSignal));
     });
 
     it("refreshes Messages without materializing Audit logs or Tool Calls", async () => {
@@ -312,12 +312,12 @@ describe("WebStore", () => {
         expect(domains.artifact.state.transfers).toEqual([transfer]);
 
         await expect(store.revokeArtifactShare("share-1")).resolves.toBe(true);
-        expect(revokeShare).toHaveBeenCalledWith("share-1");
+        expect(revokeShare).toHaveBeenCalledWith("share-1", expect.any(AbortSignal));
 
         await expect(store.cancelArtifactTransfer("transfer-1")).resolves.toBe(
             true,
         );
-        expect(cancelTransfer).toHaveBeenCalledWith("transfer-1");
+        expect(cancelTransfer).toHaveBeenCalledWith("transfer-1", expect.any(AbortSignal));
     });
 
     it("surfaces recorded Tool Call or log failures from a manual Tool Call refresh", async () => {
@@ -513,7 +513,7 @@ describe("WebStore", () => {
 
         expect(await store.setInstanceEnabled("demo", false)).toBe(true);
         expect(store.state.notice).toContain("lifecycle cleanup is still pending");
-        expect(disable).toHaveBeenCalledWith("demo");
+        expect(disable).toHaveBeenCalledWith("demo", expect.any(AbortSignal));
         store.close();
     });
 
@@ -551,9 +551,9 @@ describe("WebStore", () => {
 
         const result = await store.createInstance(draft);
 
-        expect(create).toHaveBeenCalledWith(draft);
+        expect(create).toHaveBeenCalledWith(draft, expect.any(AbortSignal));
         expect(refresh).toHaveBeenCalled();
-        expect(createCode).toHaveBeenCalledWith("reverse-web");
+        expect(createCode).toHaveBeenCalledWith("reverse-web", expect.any(AbortSignal));
         expect(result).toEqual({
             enrollment:
                 "devshell-worker enroll --controller https://controller.example.test --device-code device-code\nCode expires: 2026-09-16T12:00:00.000Z\nIf pairing fails, open this instance's Connections page to create a new code. Do not recreate the instance.",

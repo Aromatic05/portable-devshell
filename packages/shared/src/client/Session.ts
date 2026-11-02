@@ -91,9 +91,9 @@ export class ServerSession {
     }
 
     /** Delegates the server restart without refreshing any other domain. */
-    async restart(): Promise<Record<string, JsonValue>> {
+    async restart(signal?: AbortSignal): Promise<Record<string, JsonValue>> {
         if (this.#closed) throw closedError();
-        return await this.#transport.restart();
+        return await this.#transport.restart(signal);
     }
 
     close(): void {

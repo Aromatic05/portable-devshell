@@ -7,10 +7,11 @@ import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import type { ReverseDeviceCodeResult } from "./Model.js";
 
 export interface ConnectionTransport {
-    createCode(instance: string): Promise<ReverseDeviceCodeResult>;
-    revokeToken(instance: string): Promise<{ instance: string; revoked: true }>;
+    createCode(instance: string, signal?: AbortSignal): Promise<ReverseDeviceCodeResult>;
+    revokeToken(instance: string, signal?: AbortSignal): Promise<{ instance: string; revoked: true }>;
     rotateToken(
         instance: string,
+        signal?: AbortSignal,
     ): Promise<{ deviceToken: string; instance: string }>;
 }
 
@@ -19,16 +20,17 @@ export function createConnectionTransport(
 ): ConnectionTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "connection");
     return {
-        createCode: (instance) =>
-            port.request<ReverseDeviceCodeResult>("createCode", { instance }),
-        revokeToken: (instance) =>
+        createCode: (instance, signal) =>
+            port.request<ReverseDeviceCodeResult>("createCode", { instance }, signal),
+        revokeToken: (instance, signal) =>
             port.request<{ instance: string; revoked: true }>("revokeToken", {
                 instance,
-            }),
-        rotateToken: (instance) =>
+            }, signal),
+        rotateToken: (instance, signal) =>
             port.request<{ deviceToken: string; instance: string }>(
                 "rotateToken",
                 { instance },
+                signal,
             ),
     };
 }

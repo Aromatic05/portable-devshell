@@ -37,6 +37,7 @@ export interface MessageTransport {
     queueContextMessage(
         instance: string,
         input: ContextMessageQueueInput,
+        signal?: AbortSignal,
     ): Promise<ContextMessageRecord>;
     subscribe(
         instance: string,
@@ -48,6 +49,7 @@ export interface MessagePreferenceTransport {
     getMessagePreferences(): Promise<MessagePreferencesSnapshot>;
     updateMessagePreferences(
         patch: MessagePreferencesPatch,
+        signal?: AbortSignal,
     ): Promise<MessagePreferencesSnapshot>;
 }
 
@@ -58,10 +60,11 @@ export function createMessagePreferenceTransport(
     return {
         getMessagePreferences: () =>
             port.request<MessagePreferencesSnapshot>("preferences"),
-        updateMessagePreferences: (patch) =>
+        updateMessagePreferences: (patch, signal) =>
             port.request<MessagePreferencesSnapshot>(
                 "updatePreferences",
                 patch,
+                signal,
             ),
     };
 }
@@ -82,10 +85,11 @@ export function createMessageTransport(endpoint: Endpoint): MessageTransport {
                 input ?? {},
                 signal,
             ),
-        queueContextMessage: (instance, input) =>
+        queueContextMessage: (instance, input, signal) =>
             port(instance).request<ContextMessageRecord>(
                 "queueContextMessage",
                 input,
+                signal,
             ),
         subscribe: async (instance, fromSeq) =>
             new InstanceEventStream<MessageEvent>(

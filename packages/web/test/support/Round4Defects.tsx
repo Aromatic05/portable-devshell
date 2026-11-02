@@ -56,15 +56,19 @@ export function registerRound4WebDefects() {
         domains.setApprovals("beta", [{ ...alpha, instance: "beta" }]);
         domains.setToolCalls("beta", [{ ...auditCall, instance: "beta" }]);
         const pending = deferred<void>(); const entered = deferred<void>();
-        vi.spyOn(domains.approval("alpha"), "decide").mockImplementation(async () => { entered.resolve(); await pending.promise; });
+        const decideAlpha = vi.spyOn(domains.approval("alpha"), "decide").mockImplementation(async () => { entered.resolve(); await pending.promise; });
         const decideBeta = vi.spyOn(domains.approval("beta"), "decide");
         const alphaDecision = store.decideTool("alpha", alpha.approvalId, "approve"); await entered.promise;
         render(withWebDomains(domains, <Audit store={store} navigate={() => undefined}
             route={{ page: "audit", view: "timeline", scope: { kind: "instance", instance: "beta" } }} />));
         fireEvent.click(screen.getByRole("button", { name: "Approve" }));
         await act(async () => { fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" })); });
+        expect(decideAlpha).toHaveBeenCalledExactlyOnceWith(alpha.approvalId, "approve", undefined, expect.any(AbortSignal));
+        expect((decideAlpha.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
         pending.resolve(); await act(async () => { await alphaDecision; });
-        expect(decideBeta).toHaveBeenCalledExactlyOnceWith(alpha.approvalId, "approve");
+        expect(decideBeta).toHaveBeenCalledExactlyOnceWith(alpha.approvalId, "approve", undefined, expect.any(AbortSignal));
+        expect((decideBeta.mock.calls[0]![3] as AbortSignal).aborted).toBe(false);
+        expect(decideBeta.mock.calls[0]![3]).not.toBe(decideAlpha.mock.calls[0]![3]);
     });
 
 }

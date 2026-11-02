@@ -162,13 +162,14 @@ export class MessageViewModel {
         instance: string,
         ctxId: string,
         text: string,
+        signal?: AbortSignal,
     ): Promise<ContextMessageRecord> {
         const epoch = this.#epoch;
         const generation = this.#instanceGenerations.get(instance) ?? 0;
         const queued = await this.#transport.queueContextMessage(instance, {
             ctxId,
             text,
-        });
+        }, signal);
         if (this.#current(epoch) && generation === (this.#instanceGenerations.get(instance) ?? 0))
             this.mergeMessage(instance, queued);
         return queued;
@@ -824,9 +825,9 @@ export class MessagePreferenceViewModel {
         }
     }
 
-    async update(patch: MessagePreferencesPatch): Promise<MessagePreferencesSnapshot> {
+    async update(patch: MessagePreferencesPatch, signal?: AbortSignal): Promise<MessagePreferencesSnapshot> {
         const generation = ++this.#generation;
-        const preferences = await this.#transport.updateMessagePreferences(patch);
+        const preferences = await this.#transport.updateMessagePreferences(patch, signal);
         if (generation === this.#generation) {
             this.#state = { loading: false, preferences };
             this.#emit();

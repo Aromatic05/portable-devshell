@@ -61,20 +61,21 @@ export class ConfigViewModel {
         return this.#read();
     }
 
-    async update(request: ConfigBatchUpdateRequest): Promise<ConfigView> {
-        return await this.#mutate(() => this.#transport.update(request));
+    async update(request: ConfigBatchUpdateRequest, signal?: AbortSignal): Promise<ConfigView> {
+        return await this.#mutate(() => this.#transport.update(request, signal));
     }
 
     async updateMcpEndpoint(
         request: ConfigUpdateMcpRequest,
+        signal?: AbortSignal,
     ): Promise<ConfigView> {
         return await this.#mutate(() =>
-            this.#transport.updateMcpEndpoint(request),
+            this.#transport.updateMcpEndpoint(request, signal),
         );
     }
 
-    async updateWeb(request: ConfigUpdateWebRequest): Promise<ConfigView> {
-        return await this.#mutate(() => this.#transport.updateWeb(request));
+    async updateWeb(request: ConfigUpdateWebRequest, signal?: AbortSignal): Promise<ConfigView> {
+        return await this.#mutate(() => this.#transport.updateWeb(request, signal));
     }
 
     /** Validates a draft without persisting it, so the projection is untouched. */
