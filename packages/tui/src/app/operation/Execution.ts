@@ -43,10 +43,12 @@ export class TuiRuntimeExecutionOperations {
                     `Restart Worker: ${instance}`,
                     instance,
                     async (commandId) => {
-                        await this.#stopInstance(instance);
+                        const runtime = this.options.domains.runtime(instance);
+                        await this.#stopInstance(instance, runtime);
                         await this.#startInstanceWithinCommand(
                             instance,
                             commandId,
+                            runtime,
                         );
                     },
                 );
@@ -74,6 +76,8 @@ export class TuiRuntimeExecutionOperations {
             async () => {
                 const approval = this.options.domains.approval(instance);
                 await approval.load();
+                if (this.options.domains.approval(instance) !== approval)
+                    throw new Error(`Instance ${instance} changed during approval loading.`);
                 await approval.decide(approvalId, decision);
                 await this.#refreshInstanceBestEffort(instance);
             },
@@ -133,9 +137,13 @@ export class TuiRuntimeExecutionOperations {
     async #startInstanceWithinCommand(
         instance: string,
         commandId: string,
+        runtime = this.options.domains.runtime(instance),
     ): Promise<void> {
-        const runtime = this.options.domains.runtime(instance);
+        if (this.options.domains.runtime(instance) !== runtime)
+            throw new Error(`Instance ${instance} changed before start loading.`);
         await runtime.load();
+        if (this.options.domains.runtime(instance) !== runtime)
+            throw new Error(`Instance ${instance} changed during start loading.`);
         await runtime.start({
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
@@ -146,9 +154,10 @@ export class TuiRuntimeExecutionOperations {
         await this.#refreshInstanceBestEffort(instance);
     }
 
-    async #stopInstance(instance: string): Promise<void> {
-        const runtime = this.options.domains.runtime(instance);
+    async #stopInstance(instance: string, runtime = this.options.domains.runtime(instance)): Promise<void> {
         await runtime.load();
+        if (this.options.domains.runtime(instance) !== runtime)
+            throw new Error(`Instance ${instance} changed during stop loading.`);
         await runtime.stop();
     }
 

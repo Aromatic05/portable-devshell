@@ -566,6 +566,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             filePath: join(root, "message.sqlite3"),
             openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
             instanceName: "alpha",
+            // Keep seeded August history inside the store's 90-day retention window.
+            now: () => Date.parse("2026-08-03T00:10:00.000Z"),
         });
         const messages = new CommentService({
             appendEvent: async () => undefined,
@@ -589,6 +591,13 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 ctxId: call.ctxId,
                 text: call.input.message,
             });
+            assert.equal(
+                (await commentStore.list({ ctxId: call.ctxId })).find(
+                    (entry) => entry.kind === "report" && entry.id === call.callId,
+                )?.text,
+                call.input.message,
+                "seeded report must survive retention before the TUI starts",
+            );
         }
         const preferences = new MessagePreferenceStore(
             join(root, "message-preferences.json"),

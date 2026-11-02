@@ -185,15 +185,16 @@ import { selectMainScreenModel } from "../../src/view/projection/View.ts";
             },
             state: { lastSeq: 0 },
         };
+        const approval = {
+            async load() {
+                calls.push("approval.load:alpha");
+            },
+            async decide(approvalId: string, decision: "approve" | "deny") {
+                calls.push(`approval.${decision}:alpha:${approvalId}`);
+            },
+        };
         const domains = {
-            approval: () => ({
-                async load() {
-                    calls.push("approval.load:alpha");
-                },
-                async decide(approvalId: string, decision: "approve" | "deny") {
-                    calls.push(`approval.${decision}:alpha:${approvalId}`);
-                },
-            }),
+            approval: () => approval,
             artifact: {
                 async refresh() {
                     refreshed.push("artifacts");

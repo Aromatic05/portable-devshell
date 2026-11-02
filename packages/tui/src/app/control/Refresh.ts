@@ -28,7 +28,10 @@ export async function refreshTuiAuditInstances(
         ...instances.map(async (instance) => {
             const runtime = domains.runtime(instance);
             await Promise.all([
-                runtime.load().then(() => runtime.readLogs()),
+                runtime.load().then(() => {
+                    if (domains.runtime(instance) === runtime)
+                        return runtime.readLogs();
+                }),
                 domains.approval(instance).load(),
                 domains.toolCalls.load(instance),
                 domains.messageHistory.refreshInstance(instance),

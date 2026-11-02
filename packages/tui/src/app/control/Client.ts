@@ -79,6 +79,10 @@ export class TuiDomainSession {
     readonly #approvals = new Map<string, ApprovalViewModel>();
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
+    readonly #unsubscribeInstances: () => void;
+    #knownInstances?: Map<string, string | undefined>;
+    #generation = 0;
+    #closed = false;
 
     constructor(options: TuiClientOptions = {}) {
         const endpoint = new Endpoint({
@@ -125,6 +129,16 @@ export class TuiDomainSession {
             transport: (instance) => createToolTransport(endpoint, instance),
         });
         this.reverse = createConnectionTransport(endpoint);
+        this.#unsubscribeInstances = this.instances.subscribe(() => {
+            if (this.#closed) return;
+            const state = this.instances.state;
+            if (state.loading || state.refreshing || state.failure !== undefined || !state.supported) return;
+            const current = new Map(state.instances.map(({ name, incarnation }) => [name, incarnation]));
+            for (const [instance, incarnation] of this.#knownInstances ?? [])
+                if (!current.has(instance) || current.get(instance) !== incarnation)
+                    this.releaseInstance(instance);
+            this.#knownInstances = current;
+        });
     }
 
     runtime(instance: string): ProcessViewModel {
@@ -168,10 +182,15 @@ export class TuiDomainSession {
         this.#approvals.delete(instance);
         this.goals.release(instance);
         this.toolCalls.release(instance);
+        this.messages.release(instance);
+        this.messageHistory.release(instance);
     }
 
     async load(): Promise<void> {
+        if (this.#closed) return;
+        const generation = ++this.#generation;
         await this.server.connect();
+        if (this.#closed || generation !== this.#generation) return;
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -183,12 +202,16 @@ export class TuiDomainSession {
             this.messageHistory.load(),
             this.messagePreferences.refresh(),
         ]);
+        if (this.#closed || generation !== this.#generation) return;
         this.overview.start();
         this.mcp.start();
     }
 
     async reconnect(): Promise<void> {
+        if (this.#closed) return;
+        const generation = ++this.#generation;
         await this.server.reconnect();
+        if (this.#closed || generation !== this.#generation) return;
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -202,6 +225,11 @@ export class TuiDomainSession {
     }
 
     close(): void {
+        if (this.#closed) return;
+        this.#closed = true;
+        this.#generation += 1;
+        this.#unsubscribeInstances();
+        this.#knownInstances = undefined;
         for (const viewModel of this.#runtimes.values()) viewModel.close();
         for (const viewModel of this.#approvals.values()) viewModel.close();
         this.#runtimes.clear();
