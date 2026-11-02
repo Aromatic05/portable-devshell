@@ -127,6 +127,33 @@ export class ExtensionCapabilityAssembler {
         manifest: ExtensionManifest;
         stateDirectory: string;
     }): Promise<ExtensionCapabilitySet> {
+        const cleanups: (() => void | Promise<void>)[] = [];
+        try {
+            return await this.#assemble(input, cleanups);
+        } catch (error) {
+            const failures: unknown[] = [error];
+            for (const cleanup of cleanups.reverse()) {
+                try {
+                    await cleanup();
+                } catch (failure) {
+                    failures.push(failure);
+                }
+            }
+            if (failures.length === 1) throw error;
+            throw new AggregateError(failures, "Extension capability assembly cleanup failed.");
+        }
+    }
+
+    async #assemble(
+        input: {
+            dataDirectory: string;
+            extensionId: string;
+            generation: string;
+            manifest: ExtensionManifest;
+            stateDirectory: string;
+        },
+        cleanups: (() => void | Promise<void>)[],
+    ): Promise<ExtensionCapabilitySet> {
         const { extensionId, generation, manifest } = input;
         const config =
             manifest.config === undefined
@@ -142,12 +169,15 @@ export class ExtensionCapabilityAssembler {
                 `Extension ${extensionId} declares Config but the host does not provide Config support.`,
             );
         }
+        if (config !== undefined) cleanups.push(() => config.close());
         await config?.validate();
         const database = new ExtensionDatabaseCapabilityControl({
             allowed: manifest.capabilities.includes("database"),
             dataDirectory: input.dataDirectory,
             extensionId,
         });
+
+        cleanups.push(() => database.closeAll());
 
         const assets =
             this.#options.assetsFactory?.({
@@ -205,6 +235,7 @@ export class ExtensionCapabilityAssembler {
                   generation,
               }) ?? unavailableWorkerRuntime(extensionId, "worker.execute"))
             : unavailableWorkerRuntime(extensionId, "worker.execute");
+        cleanups.push(() => workerExecute.closeAll());
         const workerDelegate = manifest.capabilities.includes("worker.delegate")
             ? (this.#options.workerDelegateFactory?.({
                   allowed: true,
@@ -212,11 +243,13 @@ export class ExtensionCapabilityAssembler {
                   generation,
               }) ?? unavailableWorkerRuntime(extensionId, "worker.delegate"))
             : unavailableWorkerRuntime(extensionId, "worker.delegate");
+        cleanups.push(() => workerDelegate.closeAll());
         const processes = new ExtensionProcessCapabilityControl({
             allowed: manifest.capabilities.includes("processes"),
             extensionId,
             generation,
         });
+        cleanups.push(() => processes.closeAll());
         const contextCapabilities = projectExtensionCapabilities(
             manifest.capabilities,
             {

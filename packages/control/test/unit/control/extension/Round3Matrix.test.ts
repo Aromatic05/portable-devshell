@@ -174,12 +174,14 @@ test("round3 concurrent route failure does not release another instance's in-fli
         if (invocation.destination === "a") { entered.resolve(); await gate.promise; throw failure; }
         return { destination: invocation.destination, user: invocation.subject!.id };
     };
+    const declaration = { id: "read", module: "settings", operation: "read", scope: "instance" } as const;
     const service = new ControlExtensionRouteService({
         listDeclarations: (pointId: string) => pointId === "control.routes" ? [{ declaration: {
-            id: "read", module: "settings", operation: "read", scope: "instance",
+            ...declaration,
         }, id: "read", extensionId: "matrix", generation: "same-hash", pointId }] : [],
         onChange: () => () => {},
-        acquireRegistration: async () => ({ lease: runtime.acquire(), registration: { binding } }),
+        acquireRegistration: async () => ({ extensionId: "matrix", lease: runtime.acquire(),
+            registration: { binding, declaration, id: "read", pointId: "control.routes" } }),
     } as never);
     const handle = service.modules("instance")[0]!.operations[0]!.handle;
     const pending = handle({ id: "a", name: "read" }, context("a"));

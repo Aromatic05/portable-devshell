@@ -175,3 +175,31 @@ test("Extension catalog replacement and removal update static routing without bi
     assert.equal(catalog.getExtension("example"), undefined);
     assert.equal(catalog.get("cli.native-commands", "new"), undefined);
 });
+
+for (const pointId of ["control.routes", "control.streams"]) {
+    test(`Catalog rejects distinct IDs at the same address across ${pointId} and operations`, () => {
+        const catalog = new ExtensionCatalog(createControlExtensionPointRegistry());
+        const address = { scope: "instance", module: "messages", operation: "read" };
+        catalog.replace("first", "a", manifest("first", "a", { "control.routes": [{ ...address, id: "first" }] }));
+        const conflict = manifest("second", "b", { [pointId]: [{ ...address, id: "second" }] });
+        assert.throws(() => catalog.assertCanReplace("second", "b", conflict), /registered more than once/);
+        assert.throws(() => catalog.replace("second", "b", conflict), /registered more than once/);
+        assert.equal(catalog.getExtension("second"), undefined);
+        assert.equal(catalog.getExtension("first")!.generation, "a");
+        assert.throws(() => catalog.replace("first", "b", manifest("first", "b", {
+            [pointId]: [{ ...address, id: "one" }, { ...address, id: "two" }],
+        })), /registered more than once/);
+        catalog.replace("first", "b", manifest("first", "b", {
+            [pointId]: [{ ...address, id: "replacement" }],
+        }));
+        catalog.replace("second", "b", manifest("second", "b", {
+            [pointId]: [
+                { ...address, scope: "control", id: "control" },
+                { ...address, module: "settings", id: "settings" },
+                { ...address, operation: "write", id: "write" },
+            ],
+        }));
+        assert.equal(catalog.getExtension("first")!.generation, "b");
+        assert.equal(catalog.list(pointId).length, 4);
+    });
+}

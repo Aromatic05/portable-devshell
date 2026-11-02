@@ -725,3 +725,121 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
     );
     assert.deepEqual(events, ["module.deactivate"]);
 });
+
+for (const stage of ["validate", "configFactory", "workerDelegateFactory"] as const) {
+    test(`Loader rolls back ${stage} failure without deleting a live sibling run`, async (t) => {
+        const harness = await createHarness();
+        t.after(harness.cleanup);
+        const { id, generation } = await harness.writeGeneration({
+            config: { default: {}, schema: { type: "object" } },
+            capabilities: ["worker.execute", "worker.delegate"],
+        });
+        const events: string[] = [];
+        let fail = false;
+        let imports = 0;
+        const failure = new Error(`${stage} failed`);
+        const loader = new ExtensionLoader({
+            readToolCalls: async () => [],
+            importer: async () => { imports++; return { activate() {} }; },
+            instanceRuntime: () => testInstanceRuntime,
+            instances: new InstanceRegistry([]), paths: harness.paths,
+            points: createControlExtensionPointRegistry(),
+            configFactory: () => {
+                if (fail && stage === "configFactory") throw failure;
+                return {
+                    close: () => { events.push("config.close"); },
+                    validate: async () => { if (fail && stage === "validate") throw failure; },
+                };
+            },
+            workerExecuteFactory: () => fakeWorker(events),
+            workerDelegateFactory: () => {
+                if (fail && stage === "workerDelegateFactory") throw failure;
+                return fakeWorker(events);
+            },
+        });
+        // First failure must leave an empty generation root, including validation.
+        fail = true;
+        await assert.rejects(loader.load(id, generation), failure);
+        const runtimeRoot = harness.paths.runtimeDirectory(id, generation);
+        assert.deepEqual(await readdir(runtimeRoot), []);
+        assert.equal(imports, 0);
+        const expected: Record<typeof stage, string[]> = {
+            validate: ["config.close"], configFactory: [],
+            workerDelegateFactory: ["worker.closeAll", "config.close"],
+        };
+        assert.deepEqual(events, expected[stage]);
+        fail = false;
+        const live = await loader.load(id, generation);
+        const entries = await readdir(runtimeRoot);
+        assert.equal(entries.length, 1);
+        await writeFile(join(runtimeRoot, entries[0]!, "marker"), "live");
+        fail = true;
+        await assert.rejects(loader.load(id, generation), failure);
+        assert.deepEqual(await readdir(runtimeRoot), entries);
+        await access(join(runtimeRoot, entries[0]!, "marker"));
+        await live.retire();
+        assert.deepEqual(await readdir(runtimeRoot), []);
+    });
+}
+
+test("Loader constructs the logger before allocating capability or runtime resources", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } } });
+    const failure = new Error("logger factory failed");
+    let configs = 0;
+    const loader = new ExtensionLoader({
+        readToolCalls: async () => [], instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]), paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+        loggerFactory: () => { throw failure; },
+        configFactory: () => { configs++; return { close() {}, validate: async () => {} }; },
+    });
+    await assert.rejects(loader.load(id, generation), failure);
+    assert.equal(configs, 0);
+    await assert.rejects(access(harness.paths.runtimeDirectory(id, generation)), { code: "ENOENT" });
+});
+
+test("Loader preserves validation and cleanup errors and still removes its run", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const { id, generation } = await harness.writeGeneration({ config: { default: {}, schema: { type: "object" } } });
+    const validation = new Error("invalid config");
+    const cleanup = new Error("config close failed");
+    const loader = new ExtensionLoader({
+        readToolCalls: async () => [], instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]), paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+        configFactory: () => ({ close() { throw cleanup; }, validate: async () => { throw validation; } }),
+    });
+    await assert.rejects(loader.load(id, generation), (error) => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(error.errors, [validation, cleanup]);
+        return true;
+    });
+    assert.deepEqual(await readdir(harness.paths.runtimeDirectory(id, generation)), []);
+});
+
+test("Sandbox activation failure and disposal remove only their own run directories", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const { id, generation } = await harness.writeGeneration();
+    const loader = new ExtensionLoader({
+        readToolCalls: async () => [], instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]), paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+    });
+    const live = await loader.load(id, generation);
+    t.after(async () => await live.retire());
+    const runtimeRoot = harness.paths.runtimeDirectory(id, generation);
+    const entries = await readdir(runtimeRoot);
+    assert.equal(entries.length, 1);
+    await writeFile(join(runtimeRoot, entries[0]!, "marker"), "live");
+    await writeFile(join(harness.paths.generationDirectory(id, generation), "extension.mjs"),
+        'export function activate() { throw new Error("sandbox activation failed"); }\n');
+    await assert.rejects(loader.load(id, generation), /sandbox activation failed/);
+    assert.deepEqual(await readdir(runtimeRoot), entries);
+    await access(join(runtimeRoot, entries[0]!, "marker"));
+    await live.retire();
+    assert.deepEqual(await readdir(runtimeRoot), []);
+});

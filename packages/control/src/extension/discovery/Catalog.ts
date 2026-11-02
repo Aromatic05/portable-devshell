@@ -1,3 +1,4 @@
+import { routes, streams, type ControlRouteDeclaration } from "@portable-devshell/extension/control";
 import type {
     ExtensionManifest,
     ExtensionPointDeclaration,
@@ -114,6 +115,22 @@ export class ExtensionCatalog {
                 `Extension registration conflict for ${registration.pointId}/${registration.id}: ` +
                     `${extensionId} and ${existing.extensionId}.`,
             );
+        }
+        const addresses = new Set<string>();
+        const retained = [...this.#registrations.values()].filter(
+            (entry) => entry.extensionId !== extensionId,
+        );
+        for (const entry of [...retained, ...registrations]) {
+            if (entry.pointId !== routes.id && entry.pointId !== streams.id) continue;
+            const declaration = entry.declaration as ControlRouteDeclaration;
+            // Operations and streams share the endpoint module namespace.
+            const key = JSON.stringify([declaration.scope, declaration.module, declaration.operation]);
+            if (addresses.has(key)) {
+                throw new TypeError(
+                    `Control route ${declaration.scope}/${declaration.module}/${declaration.operation} is registered more than once.`,
+                );
+            }
+            addresses.add(key);
         }
         return registrations;
     }

@@ -12,6 +12,7 @@ import type {
 import {
     ExtensionCapabilityAssembler,
     type ExtensionCapabilityAssemblerOptions,
+    type ExtensionCapabilitySet,
 } from "../api/cap/index.js";
 import type { ExtensionGeneration } from "../registration/Generation.js";
 import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";
@@ -68,26 +69,6 @@ export class ExtensionLoader {
             "Extension entry",
         );
         await assertPlainFile(entryPath, `Extension entry for ${id}`);
-        await this.#prepareRuntimeRoot(runtimeRoot);
-        await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
-        await assertPlainDirectory(
-            runtimeRoot,
-            `Extension runtime generation root for ${id}`,
-        );
-        const runtimeDirectory = join(runtimeRoot, `run-${randomUUID()}`);
-        await Promise.all([
-            mkdir(dataDirectory, { mode: 0o700, recursive: true }),
-            mkdir(runtimeDirectory, { mode: 0o700 }),
-            mkdir(stateDirectory, { mode: 0o700, recursive: true }),
-        ]);
-
-        const capabilities = await this.#capabilities.assemble({
-            dataDirectory,
-            extensionId: id,
-            generation,
-            manifest,
-            stateDirectory,
-        });
         const logger = this.#loggerFactory(id, generation);
         const registrations = new ExtensionRegistrationBuilder(
             manifest,
@@ -101,6 +82,33 @@ export class ExtensionLoader {
         ) => {
             registrations.register(point, localId, binding);
         };
+        await this.#prepareRuntimeRoot(runtimeRoot);
+        await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
+        await assertPlainDirectory(
+            runtimeRoot,
+            `Extension runtime generation root for ${id}`,
+        );
+        await mkdir(dataDirectory, { mode: 0o700, recursive: true });
+        await mkdir(stateDirectory, { mode: 0o700, recursive: true });
+        const runtimeDirectory = join(runtimeRoot, `run-${randomUUID()}`);
+        await mkdir(runtimeDirectory, { mode: 0o700 });
+        let capabilities: ExtensionCapabilitySet;
+        try {
+            capabilities = await this.#capabilities.assemble({
+                dataDirectory,
+                extensionId: id,
+                generation,
+                manifest,
+                stateDirectory,
+            });
+        } catch (error) {
+            try {
+                await rm(runtimeDirectory, { force: true, recursive: true });
+            } catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "Extension preparation cleanup failed.");
+            }
+            throw error;
+        }
         const context: ExtensionContext = Object.freeze({
             capabilities: capabilities.contextCapabilities,
             ...(capabilities.config?.owned === undefined

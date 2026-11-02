@@ -40,7 +40,7 @@ test("route dispatch preserves scope, request context, change notifications, and
             return {
                 extensionId: "comment",
                 lease: { release: () => events.push("release") },
-                registration: { binding },
+                registration: { binding, declaration: { id: "comment-list", module: "contextMessage", operation: "list", scope: "instance" } },
             } as never;
         },
         listDeclarations(pointId: string) {
@@ -54,6 +54,7 @@ test("route dispatch preserves scope, request context, change notifications, and
                         operation: "list",
                         scope: "instance",
                     },
+                    id: "comment-list",
                     extensionId: "comment",
                     generation: "g1",
                 },
@@ -114,12 +115,13 @@ test("a failing route releases its lease and preserves the next caller's identit
     const service = new ControlExtensionRouteService({
         listDeclarations: (pointId: string) => pointId === routes.id ? [{
             declaration: { id: "update", module: "settings", operation: "update", scope: "instance" },
-            extensionId: "example", generation: "g1",
+            id: "update", extensionId: "example", generation: "g1",
         }] : [],
         onChange: () => () => {},
         acquireRegistration: async () => ({
+            extensionId: "example",
             lease: { release: () => { releases += 1; } },
-            registration: { binding: (async (request, invocation) => {
+            registration: { declaration: { id: "update", module: "settings", operation: "update", scope: "instance" }, binding: (async (request, invocation) => {
                 calls += 1;
                 assert.equal(Object.isFrozen(request), true);
                 assert.equal(Object.isFrozen(invocation), true);

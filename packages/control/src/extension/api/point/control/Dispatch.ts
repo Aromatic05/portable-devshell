@@ -17,6 +17,7 @@ import {
 } from "@portable-devshell/extension/control";
 
 import type { ExtensionHost } from "../../../host/index.js";
+import type { ExtensionCatalogRegistration } from "../../../discovery/Catalog.js";
 import type { ExtensionRegistrationLease } from "../../../Api.js";
 
 export class ControlExtensionRouteService {
@@ -42,7 +43,7 @@ export class ControlExtensionRouteService {
     modules(scope: ControlRouteScope): readonly ControlPortDefinition[] {
         const grouped = new Map<
             string,
-            Map<string, { declaration: ControlRouteDeclaration; id: string }>
+            Map<string, ExtensionCatalogRegistration>
         >();
         for (const registration of this.#extensions.listDeclarations(
             routes.id,
@@ -52,19 +53,13 @@ export class ControlExtensionRouteService {
             if (declaration.scope !== scope) continue;
             const operations =
                 grouped.get(declaration.module) ??
-                new Map<
-                    string,
-                    { declaration: ControlRouteDeclaration; id: string }
-                >();
+                new Map<string, ExtensionCatalogRegistration>();
             if (operations.has(declaration.operation)) {
                 throw new TypeError(
                     `Control route ${scope}/${declaration.module}/${declaration.operation} is registered more than once.`,
                 );
             }
-            operations.set(declaration.operation, {
-                declaration,
-                id: declaration.id,
-            });
+            operations.set(declaration.operation, registration);
             grouped.set(declaration.module, operations);
         }
         const ports = [...grouped.entries()]
@@ -81,7 +76,7 @@ export class ControlExtensionRouteService {
                                 operation,
                                 async (request, context) =>
                                     await this.#invoke(
-                                        entry.id,
+                                        entry,
                                         request,
                                         context,
                                     ),
@@ -98,7 +93,7 @@ export class ControlExtensionRouteService {
                 streams: [{
                     name: declaration.operation,
                     handle: async (stream, request, context) =>
-                        await this.#invokeStream(registration.id, stream, request, context),
+                        await this.#invokeStream(registration, stream, request, context),
                 }],
             });
         }
@@ -116,11 +111,12 @@ export class ControlExtensionRouteService {
     }
 
     async #invokeStream(
-        id: string,
+        expected: ExtensionCatalogRegistration,
         stream: MessageStream,
         request: { payload?: JsonValue },
         context: ControlPortContext,
     ): Promise<void> {
+        const id = expected.id;
         const controller = new AbortController();
         let signal = AbortSignal.any([context.signal, controller.signal]);
         let admitted!: () => void;
@@ -144,6 +140,7 @@ export class ControlExtensionRouteService {
                 }
                 const { extensionId, registration } = acquired;
                 lease = acquired.lease;
+                assertRouteIdentity(expected, acquired);
                 // Same-hash reloads share content, but have different lifetimes.
                 signal = AbortSignal.any([signal, lease.retirementSignal]);
                 const checkGeneration = () => {
@@ -222,13 +219,15 @@ export class ControlExtensionRouteService {
     }
 
     async #invoke(
-        id: string,
+        expected: ExtensionCatalogRegistration,
         request: { payload?: JsonValue; seq?: number },
         context: ControlPortContext,
     ): Promise<JsonValue | undefined> {
-        const { lease, registration } =
-            await this.#extensions.acquireRegistration(routes.id, id);
+        const id = expected.id;
+        const acquired = await this.#extensions.acquireRegistration(routes.id, id);
+        const { lease, registration } = acquired;
         try {
+            assertRouteIdentity(expected, acquired);
             if (typeof registration.binding !== "function") {
                 throw new TypeError(
                     `Control route ${id} has an invalid binding.`,
@@ -259,5 +258,20 @@ export class ControlExtensionRouteService {
         } finally {
             lease.release();
         }
+    }
+}
+
+// A retained port may follow steady updates, but must keep its published address
+// and owner even when lazy acquisition waits across a generation replacement.
+function assertRouteIdentity(
+    expected: ExtensionCatalogRegistration,
+    acquired: ExtensionRegistrationLease,
+): void {
+    const before = expected.declaration as ControlRouteDeclaration;
+    const after = acquired.registration.declaration as ControlRouteDeclaration;
+    if (acquired.extensionId !== expected.extensionId ||
+        after.scope !== before.scope || after.module !== before.module ||
+        after.operation !== before.operation) {
+        throw new Error(`Control route ${expected.id} declaration changed.`);
     }
 }
