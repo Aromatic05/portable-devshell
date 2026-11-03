@@ -7,10 +7,29 @@ use nix::unistd::{Pid, setsid};
 
 pub fn process_is_running(pid: u32) -> bool {
     match kill(Pid::from_raw(pid as i32), None) {
-        Ok(()) => true,
-        Err(Errno::EPERM) => true,
+        Ok(()) | Err(Errno::EPERM) => {
+            // kill(pid, 0) also succeeds for zombies. In particular, a start
+            // CLI waiting for Reverse Ready can still be the exited daemon's
+            // parent, so waiting for that CLI to reap it would deadlock stop.
+            #[cfg(target_os = "linux")]
+            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                return !proc_stat_has_exited(&stat);
+            }
+            // An unreadable process state is not evidence of termination.
+            true
+        }
         Err(_) => false,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn proc_stat_has_exited(stat: &str) -> bool {
+    // comm is parenthesized and can itself contain spaces and parentheses.
+    matches!(
+        stat.rsplit_once(") ")
+            .and_then(|(_, rest)| rest.as_bytes().first()),
+        Some(b'Z' | b'X')
+    )
 }
 
 pub fn terminate_process(pid: u32, force: bool) -> Result<(), String> {
@@ -103,6 +122,61 @@ mod tests {
     use nix::unistd::{Pid, getsid};
 
     use super::configure_daemon_command;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_state_handles_parentheses_and_preserves_live_or_unknown_states() {
+        assert!(super::proc_stat_has_exited(
+            "123 (worker (with ) spaces)) Z 1 2 3"
+        ));
+        assert!(super::proc_stat_has_exited("123 (worker) X 1 2 3"));
+        for state in ["R", "S", "D", "T", "t", "I", ""] {
+            assert!(!super::proc_stat_has_exited(&format!(
+                "123 (worker) {state} 1 2 3"
+            )));
+        }
+        assert!(!super::proc_stat_has_exited("unreadable"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminated_unreaped_child_is_stopped_before_parent_waits() {
+        use nix::libc;
+        use nix::sys::signal::kill;
+
+        for force in [false, true] {
+            let mut child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+            let pid = child.id();
+            assert!(super::process_is_running(pid));
+            super::terminate_process(pid, force).unwrap();
+
+            // Observe exit without reaping, matching a daemon whose start CLI
+            // still waits for Ready while a separate stop CLI waits for exit.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            loop {
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOWAIT,
+                    )
+                };
+                if result == 0 {
+                    break;
+                }
+                assert_eq!(
+                    std::io::Error::last_os_error().kind(),
+                    std::io::ErrorKind::Interrupted
+                );
+            }
+            assert_eq!(unsafe { info.si_pid() }, pid as i32);
+            assert!(kill(Pid::from_raw(pid as i32), None).is_ok());
+            assert!(!super::process_is_running(pid));
+            assert!(!child.wait().unwrap().success());
+            assert!(!super::process_is_running(pid));
+        }
+    }
 
     #[test]
     fn daemon_command_starts_in_a_new_session() {

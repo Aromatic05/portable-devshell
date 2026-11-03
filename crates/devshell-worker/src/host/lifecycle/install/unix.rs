@@ -42,7 +42,9 @@ pub fn install(bytes: &[u8], home: &Path, target: &str, sha: &str) -> Result<Pat
         .join("devshell-worker");
     activate_alias(&symlink_path, &target_path)?;
     sync_directory(&bin_dir)?;
-    Ok(symlink_path)
+    // The alias is shared by every instance. Callers must execute the verified
+    // content path even if another enrollment/update activates a different SHA.
+    Ok(binary)
 }
 
 fn verify_payload(bytes: &[u8], expected_sha: &str) -> Result<(), String> {
@@ -56,6 +58,9 @@ fn verify_payload(bytes: &[u8], expected_sha: &str) -> Result<(), String> {
 }
 
 fn installed_payload_is_valid(binary: &Path, sha_file: &Path, expected_sha: &str) -> bool {
+    if !fs::symlink_metadata(binary).is_ok_and(|metadata| metadata.file_type().is_file()) {
+        return false;
+    }
     let Ok(bytes) = fs::read(binary) else {
         return false;
     };
@@ -151,7 +156,9 @@ mod tests {
         let home = crate::testing::temp_dir();
         let first = b"worker-v1";
         let first_sha = hex(&Sha256::digest(first));
-        let alias = install(first, home.path(), "linux-x64", &first_sha).expect("install v1");
+        let first_binary =
+            install(first, home.path(), "linux-x64", &first_sha).expect("install v1");
+        let alias = home.path().join("bin/devshell-worker");
         let first_target = fs::read_link(&alias).expect("read v1 alias");
 
         let installed = home
@@ -159,6 +166,7 @@ mod tests {
             .join("workers/linux-x64")
             .join(&first_sha)
             .join("devshell-worker");
+        assert_eq!(first_binary, installed);
         fs::write(&installed, b"corrupt").expect("corrupt installed binary");
         install(first, home.path(), "linux-x64", &first_sha).expect("repair v1");
         assert_eq!(fs::read(&installed).expect("read repaired binary"), first);
@@ -192,6 +200,42 @@ mod tests {
 
         assert!(error.contains("injected rename failure"));
         assert_eq!(fs::read_link(&alias).expect("old alias remains"), previous);
+    }
+
+    #[test]
+    fn concurrent_instance_install_cannot_redirect_a_prepared_executable() {
+        use std::process::Command;
+
+        let home = crate::testing::temp_dir();
+        let target = b"#!/bin/sh\nprintf 'target-T'\n";
+        let unrelated = b"#!/bin/sh\nprintf 'instance-B-U'\n";
+        let target_sha = hex(&Sha256::digest(target));
+        let other_sha = hex(&Sha256::digest(unrelated));
+        let prepared = install(target, home.path(), "linux-x64", &target_sha).unwrap();
+
+        // Another instance completes its installation after A prepares T but
+        // before A starts it. Exercise the real installer and OS execution.
+        let other_home = home.path().to_path_buf();
+        let other = std::thread::spawn(move || {
+            install(unrelated, &other_home, "linux-x64", &other_sha).unwrap()
+        })
+        .join()
+        .unwrap();
+        let alias = home.path().join("bin/devshell-worker");
+        assert_eq!(alias.canonicalize().unwrap(), other);
+        assert_eq!(
+            hex(&Sha256::digest(fs::read(&prepared).unwrap())),
+            target_sha
+        );
+        assert_eq!(
+            Command::new(&prepared).output().unwrap().stdout,
+            b"target-T"
+        );
+        assert_eq!(
+            Command::new(&other).output().unwrap().stdout,
+            b"instance-B-U"
+        );
+        assert_eq!(alias.canonicalize().unwrap(), other);
     }
 
     #[cfg(target_os = "linux")]

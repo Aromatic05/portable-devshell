@@ -168,10 +168,14 @@ fn staged_upgrade_starts_installed_inode_and_rejects_expired_ownership() {
             "arm64"
         }
     );
+    let mut old_bytes = fs::read(&source).unwrap();
+    old_bytes.extend_from_slice(b"previous build");
+    let old_sha = format!("{:x}", Sha256::digest(&old_bytes));
     let old_binary = home
         .join("workers")
         .join(&target)
-        .join("previous/devshell-worker");
+        .join(&old_sha)
+        .join("devshell-worker");
     let staged_binary = home
         .join("workers")
         .join(&target)
@@ -181,10 +185,7 @@ fn staged_upgrade_starts_installed_inode_and_rejects_expired_ownership() {
     fs::create_dir_all(staged_binary.parent().unwrap()).unwrap();
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::copy(&source, &old_binary).unwrap();
-    let mut old_bytes = fs::read(&source).unwrap();
-    old_bytes.extend_from_slice(b"previous build");
     fs::write(&old_binary, &old_bytes).unwrap();
-    let old_sha = format!("{:x}", Sha256::digest(&old_bytes));
     fs::copy(&source, &staged_binary).unwrap();
     let alias = home.join("bin/devshell-worker");
     symlink(&old_binary, &alias).unwrap();

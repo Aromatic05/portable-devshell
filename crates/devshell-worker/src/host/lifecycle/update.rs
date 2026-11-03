@@ -1,8 +1,9 @@
+use crate::capability::rpc::bridge::send_request_with_timeout;
+use crate::capability::rpc::request::RpcRequest;
 use crate::cli::UpgradeRestartArgs;
 use crate::cli::instance::lifecycle::{start, stop};
 use crate::daemon::log::append_log;
 use crate::daemon::process::{self, DaemonState};
-use crate::host::home::devshell_home;
 use crate::host::lifecycle::install;
 use crate::instance::InstanceLock;
 use crate::instance::InstanceName;
@@ -47,19 +48,26 @@ fn restart_locked(
     {
         return Err("staged Worker update expired; daemon preserved".to_string());
     }
-    let previous = devshell_home()?
-        .join("bin")
-        .join("devshell-worker")
-        .canonicalize()
-        .map_err(|error| format!("cannot identify previous Worker: {error}"))?;
+    let status = send_request_with_timeout(
+        &sockets.socket_file,
+        &RpcRequest::request("update-identity", "worker.status", serde_json::json!({})),
+        std::time::Duration::from_secs(5),
+    )?;
+    let previous_sha = status
+        .result
+        .as_ref()
+        .filter(|_| status.ok)
+        .and_then(|value| value.get("workerSha256"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("cannot identify previous Worker content; daemon preserved")?;
+    let previous = install::verified_installed_binary(previous_sha)?;
 
-    // The existing installer verifies the content and switches only the
-    // executable alias. The old daemon keeps running until the new binary
-    // is ready to take ownership of its instance.
+    // Installation verifies the content and returns its immutable path. Any
+    // Unix CLI alias activation is independent of this instance's execution.
+    // Keep the old daemon running until binary preparation succeeds.
     let installed = install::install_current_binary()?;
     let _ = append_log(paths, "reverse Worker update staged; restarting daemon");
     if let Err(error) = stop::stop_running_daemon(paths, sockets) {
-        install::install_from_path(&previous)?;
         let _ = append_log(
             paths,
             &format!("reverse Worker update could not stop daemon: {error}"),
@@ -85,7 +93,15 @@ fn restart_locked(
             Ok(String::new())
         }
         Err(error) => {
-            let restored = install::install_from_path(&previous)?;
+            // Roll back this instance's daemon directly. Reinstalling would
+            // overwrite another instance's newer CLI alias. Both executables
+            // remain available at their verified content paths.
+            let restored = install::verify_path(&previous, previous_sha).map_err(|rollback| {
+                format!(
+                    "Worker update failed: {error}; rollback unavailable at {}: {rollback}",
+                    previous.display()
+                )
+            })?;
             // Roll back under the same lock, using local IPC readiness only.
             // Waiting for network Ready here would block an explicit user stop.
             let runtime = process::WorkerRuntimeContext {

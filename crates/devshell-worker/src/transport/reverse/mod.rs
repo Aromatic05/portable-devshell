@@ -19,7 +19,7 @@ use crate::capability::rpc::router::RpcRouter;
 use crate::daemon::log::append_log;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_file_mode;
-use crate::instance::{InstanceLock, InstanceName, WorkerReverseConfig};
+use crate::instance::{InstanceLock, InstanceName, WorkerReverseConfig, read_config};
 use bridge::ReverseBridge;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
@@ -60,26 +60,7 @@ impl ReverseConnector {
     }
 
     fn run(mut self) {
-        let _ = state::write(&self.paths, "connecting", None, None);
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(SSE_READ_TIMEOUT);
-        let client = match proxy::apply_http_client_proxy(client, self.config.proxy_url.as_deref())
-            .and_then(|builder| {
-                builder
-                    .build()
-                    .map_err(|error| format!("failed to build reverse HTTP client: {error}"))
-            }) {
-            Ok(client) => client,
-            Err(error) => {
-                let _ = append_log(
-                    &self.paths,
-                    &format!("reverse connector client setup failed: {error}"),
-                );
-                let _ = state::write(&self.paths, "failed", None, Some(&error));
-                return;
-            }
-        };
+        let mut client_setup = build_http_client(&self.config);
         let mut wss_failures = 0_u32;
         let mut backoff = Duration::from_secs(1);
 
@@ -98,6 +79,37 @@ impl ReverseConnector {
                     continue;
                 }
             };
+            let client = match &client_setup {
+                Ok(client) => client,
+                Err(error) => {
+                    let _ = append_log(
+                        &self.paths,
+                        &format!("reverse connector client setup failed: {error}"),
+                    );
+                    // Initialization failures own a fresh generation too. Keep
+                    // the connector alive so each explicit start can observe a
+                    // new failure instead of waiting forever on an old one.
+                    let _ = state::write_connection(
+                        &self.paths,
+                        generation,
+                        "failed",
+                        None,
+                        Some(error),
+                    );
+                    if !self.wait_for_reconnect() {
+                        return;
+                    }
+                    // Only a failed initialization reloads configuration on an
+                    // explicit retry, allowing the user to repair it in place.
+                    client_setup = read_config(&self.paths, &self.instance).and_then(|config| {
+                        let mut reverse = config.reverse.ok_or("Reverse configuration removed")?;
+                        reverse.generation = self.config.generation;
+                        self.config = reverse;
+                        build_http_client(&self.config)
+                    });
+                    continue;
+                }
+            };
             // Invalidate the previous Ready before attempting a new physical connection.
             let _ = state::write(&self.paths, "connecting", None, None);
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
@@ -106,7 +118,7 @@ impl ReverseConnector {
                     Err(error) => ("wss", false, Err(error)),
                 }
             } else {
-                ("sse", false, self.run_sse(&client, generation))
+                ("sse", false, self.run_sse(client, generation))
             };
 
             match result {
@@ -114,14 +126,7 @@ impl ReverseConnector {
                 // reconnect. The daemon stays usable and can recover without
                 // stopping its tools or launching another connector thread.
                 Ok(()) => {
-                    while !self.bridge.is_stopping()
-                        && !self
-                            .reconnect_requested
-                            .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        thread::sleep(Duration::from_millis(200));
-                    }
-                    if self.bridge.is_stopping() {
+                    if !self.wait_for_reconnect() {
                         return;
                     }
                     continue;
@@ -158,6 +163,17 @@ impl ReverseConnector {
             });
             backoff = (backoff * 2).min(MAX_RECONNECT_BACKOFF);
         }
+    }
+
+    fn wait_for_reconnect(&self) -> bool {
+        while !self.bridge.is_stopping()
+            && !self
+                .reconnect_requested
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            thread::sleep(Duration::from_millis(200));
+        }
+        !self.bridge.is_stopping()
     }
 
     /// Control progress belongs to this physical connection, never to a
@@ -235,6 +251,15 @@ impl ReverseConnector {
     }
 }
 
+fn build_http_client(config: &WorkerReverseConfig) -> Result<Client, String> {
+    let builder = Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(SSE_READ_TIMEOUT);
+    proxy::apply_http_client_proxy(builder, config.proxy_url.as_deref())?
+        .build()
+        .map_err(|error| format!("failed to build reverse HTTP client: {error}"))
+}
+
 pub(crate) fn next_generation_value(configured: u64, persisted: u64, now: u64) -> u64 {
     configured.max(persisted).saturating_add(1).max(now)
 }
@@ -262,4 +287,140 @@ pub(crate) fn reverse_endpoint(
             .map_err(|_| "failed to set websocket URL scheme".to_string())?;
     }
     Ok(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capability::artifact::payload::ArtifactPayloadStore;
+    use crate::capability::artifact::receive::ArtifactReceiveStore;
+    use crate::capability::artifact::store::ArtifactStore;
+    use crate::capability::rpc::request::RpcRequest;
+    use crate::instance::runtime::{PlatformInfo, WorkerRuntimeContext};
+    use crate::instance::sandbox::SecurityMode;
+    use crate::instance::storage::ExtensionResourceStore;
+    use crate::instance::{build_config, write_config};
+    use crate::tool::ToolRegistry;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn initialization_failure_keeps_connector_alive_for_fresh_failures_and_config_repair() {
+        let root = crate::testing::temp_dir();
+        let instance = InstanceName::parse("reverse-init-fixture").unwrap();
+        let state_dir = root.path().join("state");
+        let logs_dir = root.path().join("logs");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&logs_dir).unwrap();
+        let paths = InstancePaths {
+            instance_root: root.path().to_path_buf(),
+            artifacts_dir: root.path().join("artifacts"),
+            config_file: root.path().join("config.toml"),
+            log_file: logs_dir.join("worker.log"),
+            pid_file: state_dir.join("worker.pid"),
+            lock_file: state_dir.join("worker.lock"),
+            daemon_lock_file: state_dir.join("worker-daemon.lock"),
+            state_dir,
+            logs_dir,
+        };
+        let mut config = build_config(&instance).unwrap();
+        config.reverse = Some(WorkerReverseConfig {
+            controller_url: "http://127.0.0.1:1".into(),
+            device_token: "fixture-token".into(),
+            generation: 0,
+            proxy_url: Some("https://127.0.0.1:8443".into()),
+        });
+        write_config(&paths, &config).unwrap();
+        let artifacts = ArtifactStore::new(paths.artifacts_dir.clone()).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let receives = ArtifactReceiveStore::new(root.path().join("receives")).unwrap();
+        let runtime = WorkerRuntimeContext {
+            instance: instance.clone(),
+            platform: PlatformInfo {
+                os: std::env::consts::OS,
+                arch: std::env::consts::ARCH,
+            },
+            security_mode: SecurityMode::Disabled,
+            worker_sha256: None,
+        };
+        let router = Arc::new(RpcRouter::new(
+            config.clone(),
+            runtime,
+            Arc::new(ToolRegistry::new()),
+            payloads,
+            receives,
+            Arc::new(ExtensionResourceStore::new(root.path().join("resources"))),
+        ));
+        let signal = router.reverse_reconnect_signal();
+        let connector = ReverseConnector::new(
+            instance,
+            paths.clone(),
+            config.reverse.clone().unwrap(),
+            root.path().join("unused.sock"),
+            Arc::clone(&router),
+            Arc::clone(&signal),
+        )
+        .spawn();
+        let observe = |baseline, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                assert!(
+                    !connector.is_finished(),
+                    "connector exited after initialization failure"
+                );
+                if let Some(status) = state::read(&paths) {
+                    if status.generation > baseline && status.state == expected {
+                        assert_eq!(status.pid, std::process::id());
+                        return status;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "no fresh {expected}: {:?}",
+                    state::read(&paths)
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        // No IPC listener is needed: exercise the real connector, persistence,
+        // lifecycle lock and the same reconnect signal consumed by the RPC.
+        let first = observe(0, "failed");
+        assert!(
+            first
+                .last_error
+                .unwrap()
+                .contains("unsupported reverse proxy URL scheme: https")
+        );
+        let reconnect = || {
+            let _lock = InstanceLock::acquire(&paths).unwrap();
+            let baseline = state::generation(&paths);
+            signal.store(true, Ordering::SeqCst);
+            baseline
+        };
+        let second = observe(reconnect(), "failed");
+        assert!(second.generation > first.generation);
+        assert!(
+            second
+                .last_error
+                .unwrap()
+                .contains("unsupported reverse proxy URL scheme: https")
+        );
+        config.reverse.as_mut().unwrap().proxy_url = None;
+        write_config(&paths, &config).unwrap();
+        let recovered = observe(reconnect(), "reconnecting");
+        assert!(
+            recovered
+                .last_error
+                .unwrap()
+                .contains("failed to connect reverse connection")
+        );
+        // The repaired, ordinary-offline connector retries without another
+        // explicit signal and never turns an offline attempt into Failed.
+        observe(recovered.generation, "reconnecting");
+        router.dispatch_control(RpcRequest::request(
+            "stop-fixture",
+            "worker.stop",
+            serde_json::json!({}),
+        ));
+        connector.join().unwrap();
+    }
 }
