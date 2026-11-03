@@ -35,13 +35,16 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     ensure_dir(&socket_paths.instance_runtime_dir, 0o700)?;
     let _daemon_lock = InstanceLock::acquire_daemon(&instance_paths)?;
     let config = read_config(&instance_paths, &instance)?;
-    let runtime = process::read_runtime_context()?;
     let runtime_guard = RuntimeFilesGuard::new(instance_paths.clone(), socket_paths.clone());
 
     process::remove_ipc_endpoint_if_exists(&socket_paths.socket_file)?;
     process::remove_ipc_endpoint_if_exists(&socket_paths.transport_socket_file)?;
     process::write_pid(&instance_paths, std::process::id())?;
     append_log(&instance_paths, "daemon starting")?;
+    // Publish ownership before hashing the executable, which can outlast a
+    // caller's readiness deadline for large debug builds. The guard also
+    // covers errors during runtime context initialization.
+    let runtime = process::read_runtime_context()?;
 
     let rpc_listener = match LocalIpcListener::bind(&socket_paths.socket_file) {
         Ok(listener) => listener,

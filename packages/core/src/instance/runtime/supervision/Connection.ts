@@ -360,13 +360,14 @@ export class WorkerInstanceConnection {
                             };
                             update.timer.unref();
                             this.#reverseUpdate = update;
+                            // Announce the upgrade before EOF can launch the
+                            // detached helper; the staged reply may be lost.
+                            // WSS v2 peers receive no unfamiliar state frame.
+                            signalState({ state: "upgrading" });
                         },
                     });
                     if (!isCurrent()) return false;
                     if (target !== undefined) {
-                        // Report progress after the staging reply. WSS ingress
-                        // sends it only to v3 peers; v2 keeps ACK/Ready semantics.
-                        signalState({ state: "upgrading" });
                         return false;
                     }
                 } catch (error) {
@@ -409,7 +410,12 @@ export class WorkerInstanceConnection {
     async #expireReverseUpdate(update: PendingReverseUpdate): Promise<void> {
         if (this.#reverseUpdate !== update || this.#closed) return;
         update.expired = true;
-        const owner = {};
+        // A verified replacement may already own the gateway while its
+        // connected events/tool catalog are still being committed. Expiry
+        // must cancel only the source negotiation, not strand that candidate.
+        const owner = this.#endpoint.connectionIdentity === update.connectionIdentity
+            ? {}
+            : this.#connectionOwner;
         this.#connectionOwner = owner;
         this.#refreshOwner = undefined;
         this.#reverseReadyIdentity = undefined;
@@ -422,11 +428,17 @@ export class WorkerInstanceConnection {
             lastErrorCode: runtimeErrorCodes.workerHandshakeFailed,
             lastErrorMessage: message,
         }, isCurrent);
-        // Close only the superseded transport, never the daemon. Its existing
-        // connector retries with a new generation, which fences the old helper
-        // under the instance lock before an expired source Worker can be Ready.
-        if (isCurrent() && this.#endpoint.connectionIdentity === update.connectionIdentity)
-            this.closeTransport();
+        // Close only the superseded physical gateway, not the attached
+        // candidate being verified concurrently. The source Worker reconnects
+        // with a new generation, fencing its old detached helper.
+        if (isCurrent() && this.#endpoint.connectionIdentity === update.connectionIdentity) {
+            this.#intentionalTransportCloseDepth += 1;
+            try {
+                this.#endpoint.disconnect();
+            } finally {
+                this.#intentionalTransportCloseDepth -= 1;
+            }
+        }
     }
 
     async reconnectTransport(): Promise<InstanceSnapshot> {

@@ -1072,11 +1072,14 @@ test(
             workerEnvironment,
             workspace,
         );
-        runWorkerCommand(
+        // The embedded Control runs in this Node event loop. `start` waits
+        // for its final Reverse Ready, so do not block that loop with spawnSync.
+        const restarted = await execFileAsync(
+            workerBinary!,
             ["start", "--instance", "reverse-reenroll"],
-            workerEnvironment,
-            workspace,
+            { cwd: workspace, encoding: "utf8", env: workerEnvironment, windowsHide: true },
         );
+        assert.equal((JSON.parse(restarted.stdout) as { ok: boolean }).ok, true);
         const restartedGeneration = await waitForReverseGeneration(
             server.socketPath,
             "reverse-reenroll",

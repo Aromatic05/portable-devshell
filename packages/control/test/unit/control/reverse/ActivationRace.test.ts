@@ -95,7 +95,7 @@ for (const transport of ["wss", "sse"] as const) {
             const code = await credentials.createDeviceCode(instance.config.name);
             const { deviceToken } = await credentials.consumeDeviceCode(code.deviceCode);
             const activation = credentials.runAuthenticated(instance.config.name, deviceToken,
-                async () => connections.activate(identity, transport, channel.control));
+                async () => { await connections.activate(identity, transport, channel.control); });
             const rejected = assert.rejects(activation, /disconnected|closed|aborted/iu);
             await entered.promise;
             await accepted;

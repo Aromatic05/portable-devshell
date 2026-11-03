@@ -263,7 +263,7 @@ fn wait_for_reverse_ready(
 ) -> Result<(), String> {
     // Bound only an observed Control upgrade, including a stalled helper.
     // Ordinary offline reconnects may wait indefinitely and remain interruptible.
-    let mut upgrade_deadline: Option<(u64, std::time::Instant)> = None;
+    let mut upgrade_deadline: Option<std::time::Instant> = None;
     loop {
         // The lifecycle lock also covers replacement and rollback. Observe only
         // completed lifecycle operations, never their temporary stopped state.
@@ -285,23 +285,16 @@ fn wait_for_reverse_ready(
                 if connection.generation > previous_generation && connection.state == "connected" {
                     return Ok(());
                 }
-                if connection.state == "upgrading" {
-                    if upgrade_deadline
-                        .is_none_or(|(generation, _)| generation != connection.generation)
-                    {
-                        upgrade_deadline = Some((
-                            connection.generation,
-                            std::time::Instant::now() + std::time::Duration::from_secs(300),
-                        ));
-                    }
-                } else {
-                    upgrade_deadline = None;
+                if connection.state == "upgrading" && upgrade_deadline.is_none() {
+                    // Once an upgrade is observed, later reconnecting states
+                    // must not turn the bounded upgrade wait into an infinite
+                    // ordinary-offline wait.
+                    upgrade_deadline =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(300));
                 }
-            } else {
-                upgrade_deadline = None;
             }
         }
-        if upgrade_deadline.is_some_and(|(_, deadline)| std::time::Instant::now() >= deadline) {
+        if upgrade_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
             return Err("timed out waiting for Reverse Ready after Control reported upgrading; daemon preserved; inspect Worker logs".to_string());
         }
         std::thread::sleep(std::time::Duration::from_millis(200));

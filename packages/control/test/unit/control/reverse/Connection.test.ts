@@ -149,8 +149,9 @@ test("credential rotation disconnects the active core transport", async () => {
     await credentials.runAuthenticated(
         descriptor.config.name,
         enrolled.deviceToken,
-        async () =>
-            await connections.activate(identity(descriptor, 1), "wss", channel),
+        async () => {
+            await connections.activate(identity(descriptor, 1), "wss", channel);
+        },
     );
 
     await credentials.rotateDeviceToken(descriptor.config.name);
@@ -176,8 +177,9 @@ test("re-enrollment only displaces the previous connection after replacement aut
     await credentials.runAuthenticated(
         descriptor.config.name,
         oldCredential.deviceToken,
-        async () =>
-            connections.activate(identity(descriptor, 8), "wss", oldChannel),
+        async () => {
+            await connections.activate(identity(descriptor, 8), "wss", oldChannel);
+        },
     );
     const newCode = await credentials.createDeviceCode(descriptor.config.name);
     const newCredential = await credentials.consumeDeviceCode(
@@ -192,10 +194,11 @@ test("re-enrollment only displaces the previous connection after replacement aut
     await credentials.runAuthenticated(
         descriptor.config.name,
         newCredential.deviceToken,
-        async (credentialReplacement) =>
-            connections.activate(identity(descriptor, 1), "wss", newChannel, {
+        async (credentialReplacement) => {
+            await connections.activate(identity(descriptor, 1), "wss", newChannel, {
                 credentialReplacement,
-            }),
+            });
+        },
     );
     assert.equal(oldChannel.closed, true);
     assert.equal(newChannel.closed, false);

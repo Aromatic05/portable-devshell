@@ -272,10 +272,13 @@ export async function sse(t: TestContext, base: string, token: string, generatio
             while (boundary >= 0) {
                 const event = buffered.slice(0, boundary);
                 buffered = buffered.slice(boundary + 2);
-                const id = event.split("\n").find((line) => line.startsWith("id:"));
-                const data = event.split("\n").find((line) => line.startsWith("data:"));
-                if (data !== undefined) {
+                const lines = event.split("\n");
+                const kind = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+                if (kind === "frame") {
+                    const id = lines.find((line) => line.startsWith("id:"));
+                    const data = lines.find((line) => line.startsWith("data:"));
                     assert.ok(id);
+                    assert.ok(data);
                     ids.push(Number(id.slice(3).trim()));
                     channel.emit(Buffer.from(data.slice(5).trim(), "base64"));
                 }

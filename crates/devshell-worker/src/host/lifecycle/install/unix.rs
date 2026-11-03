@@ -193,4 +193,65 @@ mod tests {
         assert!(error.contains("injected rename failure"));
         assert_eq!(fs::read_link(&alias).expect("old alias remains"), previous);
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn installed_path_executes_after_staging_inode_is_replaced() {
+        use std::os::unix::fs::MetadataExt;
+        use std::process::Command;
+
+        const CHILD_HOME: &str = "DEVSHELL_WORKER_TEST_STAGED_INSTALL_HOME";
+        if std::env::var_os(CHILD_HOME).is_some() {
+            let source = std::env::current_exe().expect("staged executable");
+            let inode = fs::metadata(&source).expect("staged inode").ino();
+            let installed = super::super::install_current_binary().expect("install staged binary");
+            let sha = crate::daemon::process::current_worker_sha256().expect("staged content SHA");
+            assert_ne!(fs::metadata(&source).expect("installed inode").ino(), inode);
+            assert!(
+                fs::read_link("/proc/self/exe")
+                    .expect("executing inode")
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .ends_with(b" (deleted)")
+            );
+            let stale = Command::new(std::env::current_exe().expect("deleted executable path"))
+                .arg("--list")
+                .output()
+                .expect_err("deleted current_exe path must not execute");
+            assert_eq!(stale.kind(), io::ErrorKind::NotFound);
+            assert_eq!(hex(&Sha256::digest(fs::read(&installed).unwrap())), sha);
+            let output = Command::new(&installed)
+                .arg("--list")
+                .env_remove(CHILD_HOME)
+                .output()
+                .expect("execute installed path");
+            assert!(output.status.success(), "{output:?}");
+            return;
+        }
+
+        let home = crate::testing::temp_dir();
+        let source = std::env::current_exe().expect("test executable");
+        let bytes = fs::read(&source).expect("test executable bytes");
+        let sha = hex(&Sha256::digest(&bytes));
+        let staged = home
+            .path()
+            .join("workers")
+            .join(super::super::target_key().unwrap())
+            .join(sha)
+            .join("devshell-worker");
+        fs::create_dir_all(staged.parent().unwrap()).unwrap();
+        fs::copy(&source, &staged).expect("stage test executable without sidecar");
+        let test = format!(
+            "{}::installed_path_executes_after_staging_inode_is_replaced",
+            module_path!().split_once("::").unwrap().1
+        );
+        let output = Command::new(staged)
+            .args(["--exact", &test, "--test-threads=1"])
+            .env(CHILD_HOME, home.path())
+            .env("PORTABLE_DEVSHELL_HOME", home.path())
+            .output()
+            .expect("run staged helper");
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
 }

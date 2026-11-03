@@ -60,7 +60,7 @@ fn start_is_workspace_neutral_and_keeps_config_minimal() {
 }
 
 #[test]
-fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
+fn start_reuses_identical_content_from_different_sha_directories() {
     let env = TestEnv::new();
     let instance = "aromatic-worker-upgrade";
     let source = assert_cmd::cargo::cargo_bin("devshell-worker");
@@ -102,8 +102,8 @@ fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
     let new_start: Value = serde_json::from_slice(&new_start.stdout).unwrap();
     let new_pid = new_start["pid"].as_u64().unwrap();
 
-    assert_eq!(new_start["started"], true);
-    assert_ne!(new_pid, old_pid);
+    assert_eq!(new_start["started"], false);
+    assert_eq!(new_pid, old_pid);
     let status = env
         .std_command_for(&new_binary)
         .args(["status", "--instance", instance])
@@ -115,12 +115,166 @@ fn start_replaces_a_running_daemon_from_a_different_worker_identity() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(status["workerSha256"], new_sha);
+    assert_eq!(status["workerSha256"], worker_binary_sha256());
 
     env.std_command_for(&new_binary)
         .args(["stop", "--instance", instance])
         .status()
         .unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn start_preserves_same_version_daemon_with_different_content_sha() {
+    let env = TestEnv::new();
+    let instance = "aromatic-same-version";
+    let source = assert_cmd::cargo::cargo_bin("devshell-worker");
+    let other = env.home().join(source.file_name().unwrap());
+    let mut bytes = fs::read(&source).unwrap();
+    bytes.extend_from_slice(b"different build identity");
+    fs::copy(&source, &other).unwrap();
+    fs::write(&other, bytes).unwrap();
+    let started = env.json_command(&["start", "--instance", instance]);
+    let rejected = env
+        .std_command_for(&other)
+        .args(["start", "--instance", instance])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("same version but a different build")
+    );
+    let status = env.json_command(&["status", "--instance", instance]);
+    assert_eq!(status["pid"], started["pid"]);
+    assert_eq!(status["workerSha256"], worker_binary_sha256());
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn staged_upgrade_starts_installed_inode_and_rejects_expired_ownership() {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let instance = "aromatic-staged-upgrade";
+    let source = assert_cmd::cargo::cargo_bin("devshell-worker");
+    let home = env.instance_root(instance).parent().unwrap().to_path_buf();
+    let target = format!(
+        "linux-{}",
+        if cfg!(target_arch = "x86_64") {
+            "x64"
+        } else {
+            "arm64"
+        }
+    );
+    let old_binary = home
+        .join("workers")
+        .join(&target)
+        .join("previous/devshell-worker");
+    let staged_binary = home
+        .join("workers")
+        .join(&target)
+        .join(worker_binary_sha256())
+        .join("devshell-worker");
+    fs::create_dir_all(old_binary.parent().unwrap()).unwrap();
+    fs::create_dir_all(staged_binary.parent().unwrap()).unwrap();
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::copy(&source, &old_binary).unwrap();
+    let mut old_bytes = fs::read(&source).unwrap();
+    old_bytes.extend_from_slice(b"previous build");
+    fs::write(&old_binary, &old_bytes).unwrap();
+    let old_sha = format!("{:x}", Sha256::digest(&old_bytes));
+    fs::copy(&source, &staged_binary).unwrap();
+    let alias = home.join("bin/devshell-worker");
+    symlink(&old_binary, &alias).unwrap();
+    let started = env
+        .std_command_for(&old_binary)
+        .args(["start", "--instance", instance])
+        .output()
+        .unwrap();
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let started: Value = serde_json::from_slice(&started.stdout).unwrap();
+    let old_pid = started["pid"].as_u64().unwrap();
+    fs::write(
+        env.instance_root(instance).join("state/reverse-generation"),
+        "7\n",
+    )
+    .unwrap();
+
+    for (pid, generation) in [(old_pid + 1, 7), (old_pid, 6)] {
+        let expired = env
+            .std_command_for(&staged_binary)
+            .args([
+                "_upgrade-restart",
+                "--instance",
+                instance,
+                "--expected-pid",
+                &pid.to_string(),
+                "--expected-generation",
+                &generation.to_string(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!expired.status.success());
+        assert!(String::from_utf8_lossy(&expired.stderr).contains("update expired"));
+        assert_eq!(fs::canonicalize(&alias).unwrap(), old_binary);
+        let status = env.json_command(&["status", "--instance", instance]);
+        assert_eq!(status["pid"], old_pid);
+        assert_eq!(status["workerSha256"], old_sha);
+    }
+
+    // Staging writes no sidecar. Installation repairs this very path via
+    // rename, unlinking the helper's executing inode on Linux.
+    assert!(!staged_binary.with_extension("sha256").exists());
+    let before = fs::metadata(&staged_binary).unwrap();
+    let updated = env
+        .std_command_for(&staged_binary)
+        .args([
+            "_upgrade-restart",
+            "--instance",
+            instance,
+            "--expected-pid",
+            &old_pid.to_string(),
+            "--expected-generation",
+            "7",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        updated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&updated.stderr)
+    );
+    use std::os::unix::fs::MetadataExt;
+    assert_ne!(before.ino(), fs::metadata(&staged_binary).unwrap().ino());
+    assert_eq!(fs::canonicalize(&alias).unwrap(), staged_binary);
+    let status = env.json_command(&["status", "--instance", instance]);
+    assert_eq!(status["running"], true);
+    assert_ne!(status["pid"], old_pid);
+    assert_eq!(status["workerSha256"], worker_binary_sha256());
+    let handshake = env.rpc(
+        instance,
+        "core",
+        &serde_json::json!({
+            "protocol": "rpc", "type": "request", "id": "installed-identity",
+            "method": "worker.handshake", "message": {
+                "protocolRange": {"min": "1.0.0", "max": "1.0.0"},
+                "clientName": "upgrade-contract", "clientVersion": "1.0.0"
+            }
+        }),
+    );
+    assert_eq!(
+        handshake["message"]["workerVersion"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(handshake["message"]["workerSha256"], worker_binary_sha256());
+    wait_until_process_exits(old_pid as i32);
+    env.json_command(&["stop", "--instance", instance]);
 }
 
 #[test]
@@ -156,7 +310,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         handshake["message"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
     );
-    assert!(handshake["message"]["workerSha256"].is_null());
+    assert_eq!(handshake["message"]["workerSha256"], worker_binary_sha256());
     assert!(
         handshake["message"].get("workspace").is_none(),
         "{handshake}"
@@ -1572,7 +1726,7 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     let running_status = env.json_command(&["status", "--instance", instance]);
     assert_eq!(running_status["state"], "running");
     assert_eq!(running_status["running"], true);
-    assert!(running_status["workerSha256"].is_null());
+    assert_eq!(running_status["workerSha256"], worker_binary_sha256());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1624,7 +1778,8 @@ fn concurrent_stop_waits_for_start_to_finish() {
         .std_command()
         .current_dir(env.workspace())
         .env("DEVSHELL_WORKER_TEST_DELAY_READY_MS", "300")
-        .env("DEVSHELL_WORKER_TEST_READY_TIMEOUT_MS", "2000")
+        // Content hashing is part of startup, including for large debug builds.
+        .env("DEVSHELL_WORKER_TEST_READY_TIMEOUT_MS", "10000")
         .args(["start", "--instance", instance])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2489,4 +2644,13 @@ fn wait_until_path_exists(path: &std::path::Path) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("path did not appear: {}", path.display());
+}
+
+fn worker_binary_sha256() -> &'static str {
+    use sha2::{Digest, Sha256};
+    static SHA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SHA.get_or_init(|| {
+        let bytes = fs::read(assert_cmd::cargo::cargo_bin("devshell-worker")).unwrap();
+        format!("{:x}", Sha256::digest(bytes))
+    })
 }
