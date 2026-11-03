@@ -809,8 +809,9 @@ test("T2 old Reverse Worker upgrades before the new version becomes Ready", {
         USERPROFILE: home,
         XDG_RUNTIME_DIR: runtime,
     };
-    let oldWorker: ChildProcessWithoutNullStreams | undefined;
+    const oldWorkerRef: { current?: ChildProcessWithoutNullStreams } = {};
     t.after(async () => {
+        const oldWorker = oldWorkerRef.current;
         if (oldWorker?.exitCode === null && oldWorker.signalCode === null) {
             oldWorker.kill("SIGTERM");
             await waitForExit(oldWorker);
@@ -861,7 +862,7 @@ test("T2 old Reverse Worker upgrades before the new version becomes Ready", {
     ].join("\n"), { mode: 0o600 });
     await server.start();
     await pointProxyAtControlMcp(proxy, server.socketPath);
-    oldWorker = spawn(oldBinary, [], {
+    const oldWorker = oldWorkerRef.current = spawn(oldBinary, [], {
         env: { ...workerEnvironment,
             DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-upgrade",
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled" },
