@@ -5,6 +5,7 @@ import {
     ReverseSseChannel,
     type ReverseTransport,
     type ReverseUpstreamBatch,
+    type ReverseWorkerConnectionState,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
@@ -54,7 +55,10 @@ export class ReverseConnections {
         identity: ReverseConnectionIdentity,
         transport: ReverseTransport,
         channel: Channel,
-        options: { credentialReplacement?: boolean } = {},
+        options: {
+            credentialReplacement?: boolean;
+            signalState?(state: ReverseWorkerConnectionState): void;
+        } = {},
     ): Promise<boolean> {
         let generation: ReverseGenerationLease | undefined;
         try {
@@ -85,6 +89,10 @@ export class ReverseConnections {
                         credentialReplacement: options.credentialReplacement,
                         generation: identity.generation,
                         handshakeCompleted: () => clearTimeout(timeout),
+                        signalState: (state) => {
+                            if (controller.signal.aborted || !this.#ownsChannel(identity, channel)) return;
+                            options.signalState?.(state);
+                        },
                         transport,
                         signal: controller.signal,
                     });
@@ -166,6 +174,19 @@ export class ReverseConnections {
         } finally {
             generation.release();
         }
+    }
+
+    isActive(identity: ReverseConnectionIdentity, channel: Channel): boolean {
+        return this.#ownsChannel(identity, channel) &&
+            this.#active.get(identity.descriptor.config.name)?.channel === channel;
+    }
+
+    #ownsChannel(identity: ReverseConnectionIdentity, channel: Channel): boolean {
+        const name = identity.descriptor.config.name;
+        return !this.#stopped && !channel.closed && this.#instances.get(name) === identity.descriptor &&
+            [this.#active.get(name), this.#candidates.get(name)].some(
+                (connection) => connection?.channel === channel && connection.identity === identity && !connection.closed,
+            );
     }
 
     disconnect(instance: string): void {

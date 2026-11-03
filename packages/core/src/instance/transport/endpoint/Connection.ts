@@ -1,10 +1,11 @@
-import type { Channel, ReverseTransport } from "@portable-devshell/shared";
+import type { Channel, ReverseTransport, ReverseWorkerConnectionState } from "@portable-devshell/shared";
 
 export interface ReverseAttachment {
     connectedAt?: string;
     credentialReplacement?: boolean;
     generation: number;
     handshakeCompleted?: () => void;
+    signalState?(state: ReverseWorkerConnectionState): void;
     transport: ReverseTransport;
     signal?: AbortSignal;
 }

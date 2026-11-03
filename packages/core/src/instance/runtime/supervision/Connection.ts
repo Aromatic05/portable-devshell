@@ -7,6 +7,7 @@ import {
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
     type ReverseTransport,
+    type ReverseWorkerConnectionState,
 } from "@portable-devshell/shared";
 
 import type { InstanceStateUpdate } from "./State.js";
@@ -76,6 +77,7 @@ export class WorkerInstanceConnection {
     #refreshOwner?: object;
     #reverseReadyIdentity?: object;
     #reverseUpdate?: PendingReverseUpdate;
+    #signalReverseState?: (state: ReverseWorkerConnectionState) => void;
 
     constructor(options: WorkerInstanceConnectionOptions) {
         this.#appendEvent = options.appendEvent;
@@ -273,7 +275,20 @@ export class WorkerInstanceConnection {
         this.#reverseReadyIdentity = undefined;
         const identity = this.#endpoint.connectionIdentity;
         const isCurrent = () => !this.#closed && this.#connectionOwner === owner &&
-            identity !== undefined && this.#endpoint.connectionIdentity === identity;
+            !input.signal?.aborted && identity !== undefined && this.#endpoint.connectionIdentity === identity;
+        // Keep this connection-local callback after attach returns (staged is
+        // not Ready). Timeout invalidates the operation owner, but may still
+        // notify this same live channel. Never retain it across replacement.
+        const signalState = (state: ReverseWorkerConnectionState) => {
+            if (this.#closed || input.signal?.aborted || identity === undefined ||
+                this.#endpoint.connectionIdentity !== identity || this.#signalReverseState !== signalState) return;
+            try {
+                input.signalState?.(state);
+            } catch (error) {
+                console.warn(`Reverse Worker state delivery failed for ${this.#config.name}:`, error);
+            }
+        };
+        this.#signalReverseState = signalState;
         await this.#applyStateUpdate({ connectionState: "connecting", daemonState: "running" }, isCurrent);
         if (!isCurrent()) return false;
         this.#handshake = verifiedHandshake;
@@ -332,7 +347,12 @@ export class WorkerInstanceConnection {
                         },
                     });
                     if (!isCurrent()) return false;
-                    if (target !== undefined) return false;
+                    if (target !== undefined) {
+                        // Report progress after the staging reply. WSS ingress
+                        // sends it only to v3 peers; v2 keeps ACK/Ready semantics.
+                        signalState({ state: "upgrading" });
+                        return false;
+                    }
                 } catch (error) {
                     if (!isCurrent()) return false;
                     console.warn(`Reverse Worker update failed for ${this.#config.name}:`, error);
@@ -365,6 +385,7 @@ export class WorkerInstanceConnection {
                 lastErrorCode: getErrorCode(error, runtimeErrorCodes.workerHandshakeFailed),
                 lastErrorMessage: readErrorMessage(error),
             }, isCurrent);
+            if (isCurrent()) signalState({ state: "failed", message: readErrorMessage(error) });
             throw error;
         }
     }
@@ -375,13 +396,19 @@ export class WorkerInstanceConnection {
         this.#connectionOwner = owner;
         this.#refreshOwner = undefined;
         this.#reverseReadyIdentity = undefined;
+        const signalState = this.#signalReverseState;
+        const isCurrent = () => this.#reverseUpdate === update && this.#connectionOwner === owner && !this.#closed;
+        const message = "Timed out waiting for the staged Reverse Worker version and SHA256.";
         // Retain the exact target for a late successful replacement; expiry
         // terminates waiting, and never blesses the old Worker via refresh.
         await this.#applyStateUpdate({
             connectionState: "failed",
             lastErrorCode: runtimeErrorCodes.workerHandshakeFailed,
-            lastErrorMessage: "Timed out waiting for the staged Reverse Worker version and SHA256.",
-        }, () => this.#reverseUpdate === update && this.#connectionOwner === owner && !this.#closed);
+            lastErrorMessage: message,
+        }, isCurrent);
+        // Best effort only: a disconnected/old Worker cannot be promised this
+        // signal. Control's failed state remains observable independently.
+        if (isCurrent()) signalState?.({ state: "failed", message });
     }
 
     async reconnectTransport(): Promise<InstanceSnapshot> {
@@ -618,6 +645,7 @@ export class WorkerInstanceConnection {
         this.#connectionOwner = owner;
         this.#refreshOwner = undefined;
         this.#reverseReadyIdentity = undefined;
+        this.#signalReverseState = undefined;
         this.#handshake = undefined;
         const isCurrent = () => this.#connectionOwner === owner && !this.#endpoint.connected && !this.#closed;
         if (this.#config.managementMode === "selfManaged") {
@@ -699,6 +727,7 @@ export class WorkerInstanceConnection {
         this.#connectionOwner = {};
         this.#refreshOwner = undefined;
         this.#reverseReadyIdentity = undefined;
+        this.#signalReverseState = undefined;
         this.#intentionalTransportCloseDepth += 1;
 
         try {

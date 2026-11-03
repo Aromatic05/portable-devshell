@@ -302,7 +302,7 @@ export interface WebSocketServerLike {
 }
 
 export interface WebServerChannelOptions {
-    /** WSS v2 only: deduplicate acknowledged Worker result frames per instance. */
+    /** WSS v2/v3: deduplicate acknowledged Worker result frames per instance. */
     /** Return a commit callback for a new frame, or undefined for a duplicate. */
     reliableFrames?: (session: string, seq: bigint) => (() => void) | undefined;
     deadConnectionMs?: number;

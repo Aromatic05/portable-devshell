@@ -1,6 +1,7 @@
 use serde::Serialize;
 
-use crate::capability::rpc::bridge::send_request;
+use crate::capability::rpc::bridge::send_request_with_timeout;
+use crate::capability::rpc::codec::PROTOCOL_VERSION;
 use crate::capability::rpc::request::RpcRequest;
 use crate::cli::InstanceArgs;
 use crate::daemon::process;
@@ -34,7 +35,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     let _lock = InstanceLock::acquire(&instance_paths)?;
     let reverse = instance_paths.config_file.exists()
         && read_config(&instance_paths, &instance)?.reverse.is_some();
-    let previous_generation = state::generation(&instance_paths);
+    let mut previous_generation = state::generation(&instance_paths);
     let started = match process::daemon_state(&instance_paths, &socket_paths) {
         DaemonState::Running if running_daemon_matches_current_worker(&socket_paths)? => false,
         DaemonState::Running => {
@@ -60,9 +61,10 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         }
     };
 
-    let status = send_request(
+    let status = send_request_with_timeout(
         &socket_paths.socket_file,
         &RpcRequest::request("status-1", "worker.status", serde_json::json!({})),
+        std::time::Duration::from_secs(5),
     )?;
     if !status.ok {
         return Err(status
@@ -71,24 +73,50 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
             .unwrap_or_else(|| "worker status request failed".to_string()));
     }
 
+    let pid = process::read_pid(&instance_paths);
+    // Reconnect and generation allocation take this lock too. The request
+    // returns a baseline serialized with generation allocation, so an older
+    // Ready cannot satisfy it even if a natural reconnect raced with start.
+    drop(_lock);
     if reverse && !started {
-        let request = send_request(
+        let request = send_request_with_timeout(
             &socket_paths.socket_file,
-            &RpcRequest::request("reconnect-1", "worker.reconnect", serde_json::json!({})),
+            &RpcRequest::request(
+                "reconnect-1",
+                "worker.reconnect",
+                serde_json::json!({"expectedPid": pid}),
+            ),
+            std::time::Duration::from_secs(5),
         )?;
-        if !request.ok {
-            return Err(request
+        match request
+            .result
+            .as_ref()
+            .and_then(|value| value.get("generation"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(generation) if request.ok => previous_generation = generation,
+            _ if request
                 .error
-                .map(|error| error.message)
-                .unwrap_or_else(|| "Worker reconnect request failed".to_string()));
+                .as_ref()
+                .is_some_and(|error| error.code == "rpc.methodNotFound") =>
+            {
+                return Err("running Worker does not support worker.reconnect; cannot prove fresh Reverse Ready; daemon preserved; explicitly upgrade it before retrying".to_string());
+            }
+            _ => {
+                let reason = request.error.map(|error| error.message).unwrap_or_else(|| {
+                    "Worker reconnect did not provide a generation baseline".to_string()
+                });
+                return Err(format!(
+                    "{reason}; cannot prove fresh Reverse Ready; daemon preserved"
+                ));
+            }
         }
     }
     // Upgrade restart and daemon replacement also acquire this lock. Never
     // hold it while waiting for the Control-side final Ready handshake.
-    drop(_lock);
     if reverse {
         eprintln!("Waiting for Reverse Worker {instance} to become Ready...");
-        wait_for_reverse_ready(&instance_paths, &socket_paths, previous_generation)?;
+        wait_for_reverse_ready(&instance_paths, &socket_paths, previous_generation, started)?;
     }
 
     serde_json::to_string_pretty(&StartResponse {
@@ -101,14 +129,11 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
 }
 
 fn running_daemon_matches_current_worker(socket_paths: &EndpointPaths) -> Result<bool, String> {
-    let Some(current_sha256) = process::current_worker_sha256() else {
-        return Err(
-            "cannot identify the current Worker binary; running daemon preserved".to_string(),
-        );
-    };
-    let status = send_request(
+    let current_sha256 = process::current_worker_sha256();
+    let status = send_request_with_timeout(
         &socket_paths.socket_file,
         &RpcRequest::request("status-identity", "worker.status", serde_json::json!({})),
+        std::time::Duration::from_secs(5),
     )?;
     if !status.ok {
         return Err(status
@@ -121,21 +146,44 @@ fn running_daemon_matches_current_worker(socket_paths: &EndpointPaths) -> Result
         .as_ref()
         .and_then(|result| result.get("workerSha256"))
         .and_then(serde_json::Value::as_str);
-    let Some(running_sha256) = running_sha256 else {
-        return Err("running Worker has no SHA identity; daemon preserved for Control version negotiation; upgrade it before requesting fresh Ready with this CLI".to_string());
-    };
-    if running_sha256 == current_sha256 {
-        return Ok(true);
-    }
-    if status
+    let running_version = status
         .result
         .as_ref()
         .and_then(|result| result.get("workerVersion"))
-        .and_then(serde_json::Value::as_str)
-        == Some(env!("CARGO_PKG_VERSION"))
-    {
-        return Err("running Worker has the same version but a different build; daemon preserved; use an explicit upgrade to replace it".to_string());
+        .and_then(serde_json::Value::as_str);
+    if let (Some(running), Some(current)) = (running_sha256, current_sha256.as_deref()) {
+        if running == current {
+            return Ok(true);
+        }
+        if running_version == Some(env!("CARGO_PKG_VERSION")) {
+            return Err("running Worker has the same version but a different build; daemon preserved; use an explicit upgrade to replace it".to_string());
+        }
     }
+    let protocol = status
+        .result
+        .as_ref()
+        .and_then(|value| value.get("protocolVersion"))
+        .and_then(serde_json::Value::as_str);
+    if protocol == Some(PROTOCOL_VERSION)
+        && (running_version.is_none() || running_version == Some(env!("CARGO_PKG_VERSION")))
+    {
+        // Missing content identity is not evidence of a different binary.
+        // Reuse a protocol-compatible daemon unless its version proves that
+        // this CLI start requests a version change.
+        return Ok(true);
+    }
+    if protocol.is_none()
+        || running_version.is_none()
+        || running_version == Some(env!("CARGO_PKG_VERSION"))
+    {
+        return Err(
+            "cannot establish compatibility of running Worker; daemon preserved".to_string(),
+        );
+    }
+    eprintln!(
+        "Running Worker version differs from this CLI; restarting with {}.",
+        env!("CARGO_PKG_VERSION")
+    );
     Ok(false)
 }
 
@@ -200,31 +248,50 @@ fn wait_for_reverse_ready(
     paths: &InstancePaths,
     sockets: &EndpointPaths,
     previous_generation: u64,
+    started: bool,
 ) -> Result<(), String> {
+    // Bound only an observed Control upgrade, including a stalled helper.
+    // Ordinary offline reconnects may wait indefinitely and remain interruptible.
+    let mut upgrade_deadline: Option<(u64, std::time::Instant)> = None;
     loop {
         // The lifecycle lock also covers replacement and rollback. Observe only
         // completed lifecycle operations, never their temporary stopped state.
-        {
-            let _lock = InstanceLock::acquire(paths)?;
+        if let Some(_lock) = InstanceLock::try_acquire(paths)? {
             if process::daemon_state(paths, sockets) != DaemonState::Running {
                 return Err("Worker stopped before Reverse Ready".to_string());
             }
-            if let Some(connection) = state::read(paths) {
-                if connection.pid == process::read_pid(paths).unwrap_or(0)
-                    && connection.state == "failed"
-                {
+            let connection = state::read(paths).filter(|connection| {
+                connection.pid == process::read_pid(paths).unwrap_or(0)
+                    && connection.generation == state::generation(paths)
+                    && (started || connection.generation > previous_generation)
+            });
+            if let Some(connection) = connection {
+                if connection.state == "failed" {
                     return Err(connection
                         .last_error
                         .unwrap_or_else(|| "Reverse connector failed".to_string()));
                 }
-                if connection.pid == process::read_pid(paths).unwrap_or(0)
-                    && connection.generation == state::generation(paths)
-                    && connection.generation > previous_generation
-                    && connection.state == "connected"
-                {
+                if connection.generation > previous_generation && connection.state == "connected" {
                     return Ok(());
                 }
+                if connection.state == "upgrading" {
+                    if upgrade_deadline
+                        .is_none_or(|(generation, _)| generation != connection.generation)
+                    {
+                        upgrade_deadline = Some((
+                            connection.generation,
+                            std::time::Instant::now() + std::time::Duration::from_secs(300),
+                        ));
+                    }
+                } else {
+                    upgrade_deadline = None;
+                }
+            } else {
+                upgrade_deadline = None;
             }
+        }
+        if upgrade_deadline.is_some_and(|(_, deadline)| std::time::Instant::now() >= deadline) {
+            return Err("timed out waiting for Reverse Ready after Control reported upgrading; daemon preserved; inspect Worker logs".to_string());
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }

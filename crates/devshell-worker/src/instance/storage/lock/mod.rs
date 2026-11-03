@@ -26,6 +26,10 @@ impl InstanceLock {
             .ok_or_else(|| format!("failed to lock {}", paths.daemon_lock_file.display()))
     }
 
+    pub fn try_acquire(paths: &InstancePaths) -> Result<Option<Self>, String> {
+        Self::acquire_path(&paths.lock_file, true)
+    }
+
     pub fn try_acquire_daemon(paths: &InstancePaths) -> Result<Option<Self>, String> {
         Self::acquire_path(&paths.daemon_lock_file, true)
     }

@@ -47,11 +47,13 @@ export class ReverseIngress {
         clientTracking: false,
         noServer: true,
         handleProtocols: (offered) =>
-            offered.has("devshell-worker-transport.v2")
-                ? "devshell-worker-transport.v2"
-                : offered.has("devshell-worker-transport.v1")
-                    ? "devshell-worker-transport.v1"
-                    : false,
+            offered.has("devshell-worker-transport.v3")
+                ? "devshell-worker-transport.v3"
+                : offered.has("devshell-worker-transport.v2")
+                    ? "devshell-worker-transport.v2"
+                    : offered.has("devshell-worker-transport.v1")
+                        ? "devshell-worker-transport.v1"
+                        : false,
     });
 
     constructor(options: ReverseIngressOptions) {
@@ -141,12 +143,13 @@ export class ReverseIngress {
             const authentication = await this.#authenticateRequest(request);
             if (
                 !hasWebSocketProtocol(request, "devshell-worker-transport.v1") &&
-                !hasWebSocketProtocol(request, "devshell-worker-transport.v2")
+                !hasWebSocketProtocol(request, "devshell-worker-transport.v2") &&
+                !hasWebSocketProtocol(request, "devshell-worker-transport.v3")
             ) {
                 throw createRemoteError({
                     code: runtimeErrorCodes.reverseTransportUnavailable,
                     message:
-                        "Sec-WebSocket-Protocol devshell-worker-transport.v1 is required.",
+                        "Sec-WebSocket-Protocol devshell-worker-transport.v1, v2 or v3 is required.",
                     retryable: false,
                 });
             }
@@ -156,12 +159,14 @@ export class ReverseIngress {
                 socket,
                 head,
                 (webSocket) => {
+                    const acknowledged = webSocket.protocol === "devshell-worker-transport.v2" ||
+                        webSocket.protocol === "devshell-worker-transport.v3";
                     // Each physical channel owns a fresh FrameProtocol. Candidate
                     // ACKs must never mutate the live predecessor's receive state.
                     let accepted: { session: string; acceptedThrough: bigint } | undefined;
                     const channel = new WebServerChannel(
                         webSocket as never,
-                        webSocket.protocol === "devshell-worker-transport.v2"
+                        acknowledged
                             ? {
                                 reliableFrames: (session, seq) => {
                                     if (accepted !== undefined) {
@@ -195,11 +200,25 @@ export class ReverseIngress {
                                     authentication.identity,
                                     "wss",
                                     channel,
-                                    { credentialReplacement },
+                                    {
+                                        credentialReplacement,
+                                        signalState: (state) => {
+                                            // v2 peers only understand ACK/Ready text messages.
+                                            if (webSocket.protocol !== "devshell-worker-transport.v3" ||
+                                                webSocket.readyState !== 1) return;
+                                            webSocket.send(`DSR2:state:${JSON.stringify(state)}`, { binary: false }, (error) => {
+                                                if (error != null) {
+                                                    console.warn("Reverse WSS state delivery failed:", error);
+                                                    channel.close();
+                                                }
+                                            });
+                                        },
+                                    },
                                 );
                             },
                         );
-                        if (ready && webSocket.protocol === "devshell-worker-transport.v2") {
+                        if (ready && this.#connections.isActive(authentication.identity, channel) &&
+                            acknowledged) {
                             // Credential replacement commits AFTER activation.
                             // Do not signal ready before the old token has been
                             // revoked and the new generation has been admitted.
@@ -248,11 +267,11 @@ export class ReverseIngress {
                         authentication.identity,
                         "sse",
                         channel,
-                        { credentialReplacement },
+                        { credentialReplacement, signalState: (state) => channel.signalState(state) },
                     );
                 },
             );
-            if (ready) channel.signalReady();
+            if (ready && this.#connections.isActive(authentication.identity, channel)) channel.signalReady();
         } catch (error) {
             if (!response.headersSent) {
                 sendGatewayError(response, error);

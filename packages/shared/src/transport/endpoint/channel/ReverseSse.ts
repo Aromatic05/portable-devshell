@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 
+import type { ReverseWorkerConnectionState } from "../../../execution/reverse/Model.js";
 import { ChannelBase } from "./Channel.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -46,9 +47,19 @@ export class ReverseSseChannel extends ChannelBase {
     }
 
     signalReady(): void {
-        if (this.closed) return;
+        if (this.closed || this.#response.writableEnded || this.#response.destroyed) return;
         try {
             this.#response.write("event: ready\ndata: ready\n\n");
+        } catch (error) {
+            this.#disconnect(error);
+            throw error;
+        }
+    }
+
+    signalState(state: ReverseWorkerConnectionState): void {
+        if (this.closed || this.#response.writableEnded || this.#response.destroyed) return;
+        try {
+            this.#response.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
         } catch (error) {
             this.#disconnect(error);
             throw error;

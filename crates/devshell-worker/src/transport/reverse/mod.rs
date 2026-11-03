@@ -19,13 +19,14 @@ use crate::capability::rpc::router::RpcRouter;
 use crate::daemon::log::append_log;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_file_mode;
-use crate::instance::{InstanceName, WorkerReverseConfig};
+use crate::instance::{InstanceLock, InstanceName, WorkerReverseConfig};
 use bridge::ReverseBridge;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
 const SSE_RETRY_AFTER: Duration = Duration::from_secs(5);
 const SSE_READ_TIMEOUT: Duration = Duration::from_secs(45);
+const UPGRADE_READY_TIMEOUT: Duration = Duration::from_secs(135);
 
 #[derive(Clone)]
 pub struct ReverseConnector {
@@ -101,7 +102,7 @@ impl ReverseConnector {
             let _ = state::write(&self.paths, "connecting", None, None);
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
                 match self.connect_wss(generation) {
-                    Ok((socket, acknowledged)) => ("wss", true, self.run_wss(socket, acknowledged)),
+                    Ok((socket, protocol)) => ("wss", true, self.run_wss(socket, protocol)),
                     Err(error) => ("wss", false, Err(error)),
                 }
             } else {
@@ -109,9 +110,21 @@ impl ReverseConnector {
             };
 
             match result {
+                // Keep a terminal Control failure visible until an explicit
+                // reconnect. The daemon stays usable and can recover without
+                // stopping its tools or launching another connector thread.
                 Ok(()) => {
-                    wss_failures = 0;
-                    backoff = Duration::from_secs(1);
+                    while !self.bridge.is_stopping()
+                        && !self
+                            .reconnect_requested
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                    if self.bridge.is_stopping() {
+                        return;
+                    }
+                    continue;
                 }
                 Err(error) => {
                     let _ = append_log(
@@ -147,21 +160,44 @@ impl ReverseConnector {
         }
     }
 
+    /// Control progress belongs to this physical connection, never to a
+    /// generation read later from disk. Failed admission waits for an explicit
+    /// start to request another attempt without stopping the daemon.
+    fn accept_control_state(&self, transport: &str, data: &str) -> Result<bool, String> {
+        #[derive(serde::Deserialize)]
+        struct ControlState {
+            state: String,
+            message: Option<String>,
+        }
+        let signal: ControlState = serde_json::from_str(data)
+            .map_err(|error| format!("invalid reverse Control state: {error}"))?;
+        if !matches!(signal.state.as_str(), "upgrading" | "failed") {
+            return Err("unknown reverse Control state".to_string());
+        }
+        state::write_connection(
+            &self.paths,
+            self.config.generation,
+            &signal.state,
+            Some(transport),
+            signal.message.as_deref(),
+        )?;
+        Ok(signal.state == "failed")
+    }
+
     fn next_generation(&mut self) -> Result<u64, String> {
+        // Serialize generation changes with reconnect requests and the helper's
+        // PID/generation check, including its stop/spawn/rollback interval.
+        let _lock = InstanceLock::acquire(&self.paths)?;
+        self.reconnect_requested
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         let generation_file = self.paths.state_dir.join("reverse-generation");
         let persisted = match fs::read_to_string(&generation_file) {
-            Ok(value) => match value.trim().parse::<u64>() {
-                Ok(value) => value,
-                Err(error) => {
-                    // The current time is also included below to avoid
-                    // reusing a prior generation after a damaged state file.
-                    let _ = append_log(
-                        &self.paths,
-                        &format!("repairing invalid reverse generation file: {error}"),
-                    );
-                    0
-                }
-            },
+            Ok(value) => value.trim().parse::<u64>().map_err(|error| {
+                format!(
+                    "invalid reverse generation file {}: {error}",
+                    generation_file.display()
+                )
+            })?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => {
                 return Err(format!(
@@ -175,6 +211,10 @@ impl ReverseConnector {
             .unwrap_or_default()
             .as_millis()
             .min(u64::MAX as u128) as u64;
+        let previous = self.config.generation.max(persisted);
+        if previous == u64::MAX {
+            return Err("reverse generation exhausted".to_string());
+        }
         let generation = next_generation_value(self.config.generation, persisted, now);
         let temporary = generation_file.with_extension("tmp");
         let mut file = OpenOptions::new()

@@ -4,6 +4,18 @@
 
 import type { InstanceName } from "../../types/Instance.js";
 
+/**
+ * Connection-local, best-effort upgrade progress; never replayed or acknowledged.
+ * WSS v3 only: text message `DSR2:state:<JSON>`; SSE: `event: state` with JSON data
+ * (no event ID). WSS v1 has no state signal. The authenticated physical
+ * connection supplies the generation; stale connections must not receive it.
+ * Only the separate `DSR2:ready` / SSE `ready` signal admits a Worker.
+ */
+export interface ReverseWorkerConnectionState {
+    state: "upgrading" | "failed";
+    message?: string;
+}
+
 export interface ReverseDeviceCodeResult {
     controllerUrl: string;
     deviceCode: string;

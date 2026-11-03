@@ -18,7 +18,7 @@ export { createInstanceTransport, type InstanceTransport } from "./control/insta
 export { validateConfigSemantics } from "./control/config/Validate.js";
 export { ConfigViewModel } from "./control/config/ViewModel.js";
 export { InstanceConfigViewModel } from "./control/instance/ViewModel.js";
-export { type ReverseDeviceCodeResult, type ReverseEnrollmentRequest, type ReverseSseFrame, type ReverseUpstreamBatch } from "./execution/reverse/Model.js";
+export { type ReverseDeviceCodeResult, type ReverseEnrollmentRequest, type ReverseSseFrame, type ReverseUpstreamBatch, type ReverseWorkerConnectionState } from "./execution/reverse/Model.js";
 export { type ConnectionTransport, createConnectionTransport } from "./execution/reverse/Transport.js";
 export { type DebugInvocationSummary, type DebugPatchLoadRequest, type DebugPatchScope, type DebugPatchSummary, type DebugTargetSummary } from "./control/debug/Model.js";
 export { createDebugTransport, type DebugTransport } from "./control/debug/Transport.js";

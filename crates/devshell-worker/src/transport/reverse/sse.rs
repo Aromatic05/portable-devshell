@@ -69,7 +69,16 @@ impl ReverseConnector {
             let line = line.map_err(|error| format!("failed to read reverse SSE: {error}"))?;
             if line.is_empty() {
                 if event_name == "ready" {
-                    let _ = super::state::write(&self.paths, "connected", Some("sse"), None);
+                    super::state::write_connection(
+                        &self.paths,
+                        generation,
+                        "connected",
+                        Some("sse"),
+                        None,
+                    )?;
+                }
+                if event_name == "state" && self.accept_control_state("sse", &data)? {
+                    return Ok(());
                 }
                 if event_name == "frame" && !data.is_empty() {
                     let frame = BASE64

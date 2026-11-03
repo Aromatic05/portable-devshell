@@ -23,9 +23,9 @@ export function canContinueWithWorkerVersion(
     protocolRange: WorkerProtocolRange,
 ): boolean {
     assertNegotiatedWorkerProtocolVersion(handshake.protocolVersion, protocolRange);
-    const desired = assets.publishedVersion();
-    // Product majors govern mandatory replacement, never protocol negotiation.
-    return desired === undefined || handshake.workerVersion.split(".")[0] === desired.split(".")[0];
+    // Compatibility belongs to the negotiated protocol, independently of the
+    // product version used to select an optional binary update.
+    return true;
 }
 
 export async function updateReverseWorker(

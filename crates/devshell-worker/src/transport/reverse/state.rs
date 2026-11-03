@@ -34,6 +34,16 @@ pub fn write(
     transport: Option<&str>,
     error: Option<&str>,
 ) -> Result<(), String> {
+    write_connection(paths, generation(paths), state, transport, error)
+}
+
+pub(super) fn write_connection(
+    paths: &InstancePaths,
+    generation: u64,
+    state: &str,
+    transport: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), String> {
     let updated_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -41,7 +51,7 @@ pub fn write(
         .min(u64::MAX as u128) as u64;
     let value = ReverseConnectionState {
         state: state.to_string(),
-        generation: generation(paths),
+        generation,
         pid: std::process::id(),
         transport: transport.map(ToString::to_string),
         last_error: error.map(ToString::to_string),

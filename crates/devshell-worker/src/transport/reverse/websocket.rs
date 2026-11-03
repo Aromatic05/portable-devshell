@@ -18,6 +18,18 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const HEARTBEAT_TIMEOUT_ERROR: &str = "reverse websocket heartbeat timed out";
 
+pub(super) enum WssProtocol {
+    V1,
+    V2,
+    V3,
+}
+
+impl WssProtocol {
+    fn acknowledged(&self) -> bool {
+        matches!(self, Self::V2 | Self::V3)
+    }
+}
+
 /// A readable TCP socket is not necessarily alive: blackholed networks do not
 /// send FIN/RST. An explicit Ping/Pong exchange provides a bounded liveness
 /// check without confusing a temporary read timeout with a broken link.
@@ -70,7 +82,7 @@ impl ReverseConnector {
     pub(super) fn connect_wss(
         &self,
         generation: u64,
-    ) -> Result<(WebSocket<MaybeTlsStream<TcpStream>>, bool), String> {
+    ) -> Result<(WebSocket<MaybeTlsStream<TcpStream>>, WssProtocol), String> {
         let endpoint = reverse_endpoint(&self.config.controller_url, "/reverse/v1/connect", true)?;
         let mut request = endpoint
             .as_str()
@@ -92,7 +104,9 @@ impl ReverseConnector {
         );
         headers.insert(
             "sec-websocket-protocol",
-            HeaderValue::from_static("devshell-worker-transport.v1, devshell-worker-transport.v2"),
+            HeaderValue::from_static(
+                "devshell-worker-transport.v3, devshell-worker-transport.v2, devshell-worker-transport.v1",
+            ),
         );
 
         let bridge = self.bridge.clone();
@@ -106,10 +120,17 @@ impl ReverseConnector {
             .map_err(|error| format!("failed to connect reverse websocket: {error}"));
         drop(attempt);
         let (mut socket, response) = result?;
-        let acknowledged = response
+        let protocol = match response
             .headers()
             .get("sec-websocket-protocol")
-            .is_some_and(|value| value == "devshell-worker-transport.v2");
+            .and_then(|value| value.to_str().ok())
+        {
+            Some("devshell-worker-transport.v3") => WssProtocol::V3,
+            Some("devshell-worker-transport.v2") => WssProtocol::V2,
+            Some("devshell-worker-transport.v1") => WssProtocol::V1,
+            _ => return Err("invalid reverse WSS subprotocol".to_string()),
+        };
+        let acknowledged = protocol.acknowledged();
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
         let abandoned = self.bridge.prepare()?;
         if abandoned > 0 {
@@ -126,16 +147,20 @@ impl ReverseConnector {
                 "reverse connection established transport=wss generation={generation} acknowledged={acknowledged}"
             ),
         )?;
-        Ok((socket, acknowledged))
+        Ok((socket, protocol))
     }
 
     pub(super) fn run_wss(
         &self,
         mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
-        acknowledged: bool,
+        protocol: WssProtocol,
     ) -> Result<(), String> {
+        let acknowledged = protocol.acknowledged();
         let mut remote_frame_received = false;
-        let ready_deadline = Instant::now() + Duration::from_secs(60);
+        // Progress is sent after staging so older Workers can finish the
+        // transfer first. Allow Control's 120s transfer budget before staging.
+        let mut ready_deadline = Instant::now() + Duration::from_secs(180);
+        let mut upgrading = false;
         // Each connection starts a fresh Frame/Envelope stream and sequence;
         // never replay raw DATA from the previous physical transport.
         let mut sent_through = 0_u64;
@@ -175,7 +200,24 @@ impl ReverseConnector {
                 Ok(Message::Text(text)) if acknowledged => {
                     if text.as_str() == "DSR2:ready" {
                         remote_frame_received = true;
-                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
+                        super::state::write_connection(
+                            &self.paths,
+                            self.config.generation,
+                            "connected",
+                            Some("wss"),
+                            None,
+                        )?;
+                    } else if let Some(data) = text.as_str().strip_prefix("DSR2:state:") {
+                        if !matches!(protocol, WssProtocol::V3) {
+                            return Err("controller sent state without reverse WSS v3".to_string());
+                        }
+                        if self.accept_control_state("wss", data)? {
+                            return Ok(());
+                        }
+                        if !upgrading {
+                            upgrading = true;
+                            ready_deadline = Instant::now() + super::UPGRADE_READY_TIMEOUT;
+                        }
                     } else {
                         self.accept_wss_ack(text.as_str(), sent_through)?;
                     }

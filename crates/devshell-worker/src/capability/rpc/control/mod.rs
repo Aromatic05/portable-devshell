@@ -41,11 +41,35 @@ pub fn register_control_handlers(
     reverse_reconnect_requested: Arc<AtomicBool>,
 ) {
     if config.reverse.is_some() {
+        let instance = runtime.instance.clone();
         handlers.insert(
             "worker.reconnect".to_string(),
-            crate::capability::rpc::router::control_handler(move |_request| {
+            crate::capability::rpc::router::control_handler(move |request| {
+                let paths = crate::instance::storage::InstancePaths::resolve(&instance).map_err(
+                    |error| {
+                        crate::capability::rpc::error::RpcError::new(
+                            "worker.reconnectFailed",
+                            error,
+                        )
+                    },
+                )?;
+                let _lock = crate::instance::InstanceLock::acquire(&paths).map_err(|error| {
+                    crate::capability::rpc::error::RpcError::new("worker.reconnectFailed", error)
+                })?;
+                if request
+                    .params
+                    .get("expectedPid")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|pid| pid != u64::from(std::process::id()))
+                {
+                    return Err(crate::capability::rpc::error::RpcError::new(
+                        "worker.reconnectFailed",
+                        "Worker changed before reconnect",
+                    ));
+                }
+                let generation = crate::transport::reverse::state::generation(&paths);
                 reverse_reconnect_requested.store(true, Ordering::SeqCst);
-                Ok(serde_json::json!({"requested": true}))
+                Ok(serde_json::json!({"requested": true, "generation": generation}))
             }),
         );
     }
