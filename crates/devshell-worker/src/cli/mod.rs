@@ -20,6 +20,8 @@ enum Command {
     Transport(InstanceArgs),
     Retire(InstanceArgs),
     Gc(GcArgs),
+    #[command(name = "_upgrade-restart", hide = true)]
+    UpgradeRestart(UpgradeRestartArgs),
 }
 
 #[derive(Args, Debug)]
@@ -47,6 +49,12 @@ pub struct GcArgs {
     pub dry_run: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct UpgradeRestartArgs {
+    #[arg(long)]
+    pub instance: String,
+}
+
 pub fn run() -> Result<String, String> {
     let cli = Cli::parse();
     match cli.command {
@@ -58,6 +66,7 @@ pub fn run() -> Result<String, String> {
         Command::Transport(args) => crate::transport::run(&args.instance),
         Command::Retire(args) => instance::maintain::retire::run(args),
         Command::Gc(args) => instance::maintain::gc::run(args),
+        Command::UpgradeRestart(args) => crate::host::lifecycle::update::restart(args),
     }
 }
 
@@ -90,11 +99,18 @@ mod tests {
     #[test]
     fn enroll_accepts_explicit_running_worker_replacement() {
         let cli = Cli::try_parse_from([
-            "devshell-worker", "enroll", "--controller", "https://controller.example",
-            "--device-code", "fixture", "--replace-running",
-        ]).unwrap();
-        let Command::Enroll(args) = cli.command else { panic!("expected enroll"); };
+            "devshell-worker",
+            "enroll",
+            "--controller",
+            "https://controller.example",
+            "--device-code",
+            "fixture",
+            "--replace-running",
+        ])
+        .unwrap();
+        let Command::Enroll(args) = cli.command else {
+            panic!("expected enroll");
+        };
         assert!(args.replace_running);
     }
-
 }

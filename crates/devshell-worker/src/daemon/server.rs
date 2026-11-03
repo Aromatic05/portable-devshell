@@ -124,6 +124,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
             reverse,
             socket_paths.transport_socket_file.clone(),
             Arc::clone(&router),
+            router.reverse_reconnect_signal(),
         )
         .spawn()
     });

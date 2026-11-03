@@ -7,7 +7,10 @@ import test from "node:test";
 
 import {
     asInstanceName,
+    createRemoteError,
     createToolCallRuntime,
+    runtimeErrorCodes,
+    toRemoteErrorBody,
     type EnvironmentTransport,
     type InstanceProcessEnvelope,
     type InstanceRuntimeTransport,
@@ -376,6 +379,91 @@ test("environ_info survives Comment Memory failures and timeouts without treatin
         phase = "recovered";
         const recovered = await bootstrap();
         assert.deepEqual(recovered, { comment: [`Memory: ${selectedMemory.directory}`] });
+    } finally {
+        uninstall();
+        unbind();
+        runtime.close();
+        await rm(contextFile, { force: true });
+    }
+});
+
+test("T4 environ tools preserve structured unavailable and offline error contracts", async () => {
+    const { registry, toolRuntime, unbind } = createBoundRegistry();
+    const contextFile = join(tmpdir(), `portable-devshell-offline-${randomUUID()}.jsonl`);
+    let instanceAvailable = true;
+    const leaseInstance = () => {
+        if (!instanceAvailable) throw new Error();
+        return { release() {} };
+    };
+    const runtime = createContextRuntime({
+        contextFile,
+        environment: () => environmentTransport,
+        leaseInstance,
+        process: () => processTransport,
+        runtime: () => instanceRuntimeTransport,
+    });
+    await runtime.initialize();
+    const baseEnvironment = runtime.api.environment;
+    const contexts: ContextApi = {
+        cleanup: runtime.api.cleanup,
+        disable: (ctxId) => runtime.api.disable(ctxId),
+        detachInstance: (instance) => runtime.api.detachInstance(instance),
+        environment: {
+            attachRemote: async () => {
+                throw createRemoteError({
+                    code: runtimeErrorCodes.reverseSelfManagedOffline,
+                    details: { instance: "remote-test" },
+                    message: "",
+                    retryable: true,
+                });
+            },
+            ensurePrepared: (ctxId, instance, workspace) =>
+                baseEnvironment.ensurePrepared(ctxId, instance, workspace),
+            maskRemote: (ctxId, handle) => baseEnvironment.maskRemote(ctxId, handle),
+            prepareLocal: (ctxId, instance, workspace, options) =>
+                baseEnvironment.prepareLocal(ctxId, instance, workspace, options),
+            rollbackUndisclosed: (ctxId, instance, workspace) =>
+                baseEnvironment.rollbackUndisclosed(ctxId, instance, workspace),
+        },
+        reconcileInstance: (instance) => runtime.api.reconcileInstance(instance),
+        registry: runtime.api.registry,
+        renew: (ctxId) => runtime.api.renew(ctxId),
+        resolve: (input) => runtime.api.resolve(input),
+    };
+    const uninstall = installContextTools(contexts, registry, {
+        environment: () => environmentTransport,
+        leaseInstance,
+        process: () => processTransport,
+    });
+    const context = { contextMode: "explicit" as const, principal: "alice", source: "mcp" as const };
+    try {
+        const prepared = await toolRuntime.api.call(
+            "local", "environ_info", { workspace: "/repo" }, context,
+        ) as { ctxId: string };
+        await assert.rejects(
+            toolRuntime.api.call("local", "environ_remote", {
+                command: "attach", handle: "remote-handle",
+            }, { ...context, ctxId: prepared.ctxId }),
+            (error: unknown) => {
+                const body = toRemoteErrorBody(error);
+                assert.equal(body?.code, runtimeErrorCodes.reverseSelfManagedOffline);
+                assert.equal(body?.retryable, true);
+                assert.deepEqual(body?.details, { instance: "remote-test" });
+                return true;
+            },
+        );
+        instanceAvailable = false;
+        await assert.rejects(
+            toolRuntime.api.call("local", "environ_info", {}, {
+                ...context, ctxId: prepared.ctxId,
+            }),
+            (error: unknown) => {
+                const body = toRemoteErrorBody(error);
+                assert.equal(body?.code, runtimeErrorCodes.instanceNotReady);
+                assert.deepEqual(body?.details, { instance: "local" });
+                return true;
+            },
+        );
     } finally {
         uninstall();
         unbind();

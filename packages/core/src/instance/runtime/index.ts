@@ -84,6 +84,7 @@ export class WorkerInstance implements WorkerInstanceApi {
             metadataChanged: () => state.metadataChanged(),
             snapshot: () => state.snapshot(connection.snapshotReverse()),
             transportConnection: dependencies.transportConnection,
+            tunnel,
         });
         const reverse =
             config.managementMode === "selfManaged"

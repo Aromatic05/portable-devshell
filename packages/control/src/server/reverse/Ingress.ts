@@ -186,11 +186,12 @@ export class ReverseIngress {
                             console.warn("Reverse WSS channel closed:", error.message);
                     });
                     void (async () => {
+                        let ready = false;
                         await this.#credentials.runAuthenticated(
                             authentication.identity.descriptor.config.name,
                             authentication.token,
                             async (credentialReplacement) => {
-                                await this.#connections.activate(
+                                ready = await this.#connections.activate(
                                     authentication.identity,
                                     "wss",
                                     channel,
@@ -198,7 +199,7 @@ export class ReverseIngress {
                                 );
                             },
                         );
-                        if (webSocket.protocol === "devshell-worker-transport.v2") {
+                        if (ready && webSocket.protocol === "devshell-worker-transport.v2") {
                             // Credential replacement commits AFTER activation.
                             // Do not signal ready before the old token has been
                             // revoked and the new generation has been admitted.
@@ -238,17 +239,20 @@ export class ReverseIngress {
                 response,
                 readLastEventId(request),
             );
+            let ready = false;
             await this.#credentials.runAuthenticated(
                 authentication.identity.descriptor.config.name,
                 authentication.token,
-                async (credentialReplacement) =>
-                    await this.#connections.activate(
+                async (credentialReplacement) => {
+                    ready = await this.#connections.activate(
                         authentication.identity,
                         "sse",
                         channel,
                         { credentialReplacement },
-                    ),
+                    );
+                },
             );
+            if (ready) channel.signalReady();
         } catch (error) {
             if (!response.headersSent) {
                 sendGatewayError(response, error);

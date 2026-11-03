@@ -8,6 +8,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -32,6 +33,7 @@ pub struct ReverseConnector {
     paths: InstancePaths,
     config: WorkerReverseConfig,
     bridge: Arc<ReverseBridge>,
+    reconnect_requested: Arc<AtomicBool>,
 }
 
 impl ReverseConnector {
@@ -41,12 +43,14 @@ impl ReverseConnector {
         config: WorkerReverseConfig,
         transport_endpoint: PathBuf,
         router: Arc<RpcRouter>,
+        reconnect_requested: Arc<AtomicBool>,
     ) -> Self {
         Self {
             instance,
             paths,
             config,
             bridge: Arc::new(ReverseBridge::new(transport_endpoint, router)),
+            reconnect_requested,
         }
     }
 

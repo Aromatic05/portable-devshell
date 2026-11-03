@@ -8,8 +8,9 @@ use crate::daemon::process::DaemonState;
 use crate::daemon::process::lifecycle::{readiness, shutdown};
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
-use crate::instance::{InstanceLock, InstanceName, build_config, write_config};
+use crate::instance::{InstanceLock, InstanceName, build_config, read_config, write_config};
 use crate::transport::endpoint::channel::EndpointPaths;
+use crate::transport::reverse::state;
 
 #[derive(Serialize)]
 struct StartResponse {
@@ -31,6 +32,11 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     ensure_dir(&socket_paths.instance_runtime_dir, 0o700)?;
 
     let _lock = InstanceLock::acquire(&instance_paths)?;
+    let reverse = instance_paths.config_file.exists()
+        && read_config(&instance_paths, &instance)?.reverse.is_some();
+    let previous_connection = state::read(&instance_paths)
+        .map(|connection| connection.updated_at_ms)
+        .unwrap_or(0);
     let started = match process::daemon_state(&instance_paths, &socket_paths) {
         DaemonState::Running if running_daemon_matches_current_worker(&socket_paths)? => false,
         DaemonState::Running => {
@@ -56,7 +62,6 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         }
     };
 
-    let pid = process::read_pid(&instance_paths);
     let status = send_request(
         &socket_paths.socket_file,
         &RpcRequest::request("status-1", "worker.status", serde_json::json!({})),
@@ -68,11 +73,39 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
             .unwrap_or_else(|| "worker status request failed".to_string()));
     }
 
+    if reverse && !started {
+        let request = send_request(
+            &socket_paths.socket_file,
+            &RpcRequest::request("reconnect-1", "worker.reconnect", serde_json::json!({})),
+        )?;
+        if !request.ok {
+            return Err(request
+                .error
+                .map(|error| error.message)
+                .unwrap_or_else(|| "Worker reconnect request failed".to_string()));
+        }
+    }
+    // Upgrade restart and daemon replacement also acquire this lock. Never
+    // hold it while waiting for the Control-side final Ready handshake.
+    drop(_lock);
+    if reverse {
+        eprintln!("Waiting for Reverse Worker {instance} to become Ready...");
+        loop {
+            if state::read(&instance_paths).is_some_and(|connection| {
+                connection.state == "connected" && connection.updated_at_ms > previous_connection
+            }) && process::daemon_state(&instance_paths, &socket_paths) == DaemonState::Running
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
     serde_json::to_string_pretty(&StartResponse {
         ok: true,
         instance: instance.as_str().to_string(),
         started,
-        pid,
+        pid: process::read_pid(&instance_paths),
     })
     .map_err(|error| error.to_string())
 }

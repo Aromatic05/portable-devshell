@@ -131,7 +131,7 @@ class ContextToolRuntime {
                     throw createRemoteError({
                         code: runtimeErrorCodes.workerHandshakeFailed,
                         details: { instance: context.instance },
-                        message: `Worker handshake is unavailable for ${context.instance}.`,
+                        message: `Worker handshake is unavailable for ${context.instance}. Inform the user that the instance is unavailable and needs to be restored before continuing.`,
                         retryable: true,
                     });
 
@@ -248,12 +248,24 @@ class ContextToolRuntime {
                     handle: true,
                     workspace: "optional",
                 });
-                const details = await this.#contexts.environment.attachRemote(
-                    record.ctxId,
-                    parsed.handle!,
-                    parsed.workspace,
-                    signal,
-                );
+                let details: JsonValue;
+                try {
+                    details = await this.#contexts.environment.attachRemote(
+                        record.ctxId,
+                        parsed.handle!,
+                        parsed.workspace,
+                        signal,
+                    );
+                } catch (error) {
+                    const body = toRemoteErrorBody(error);
+                    if (body?.code !== runtimeErrorCodes.reverseSelfManagedOffline) throw error;
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.reverseSelfManagedOffline,
+                        details: body.details,
+                        message: "Reverse instance is offline. Inform the user that the remote device is unavailable and ask them to restore it before continuing.",
+                        retryable: true,
+                    });
+                }
                 return {
                     ...base,
                     command: "attach",
@@ -393,7 +405,7 @@ class ContextToolRuntime {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,
                 details: { instance },
-                message: `Instance ${instance} is unavailable.`,
+                message: `Instance ${instance} is unavailable. Inform the user that the instance must be restored before continuing.`,
                 retryable: false,
             });
         }

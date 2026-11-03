@@ -45,6 +45,16 @@ export class ReverseSseChannel extends ChannelBase {
         return this.#acceptedUpstreamSeq;
     }
 
+    signalReady(): void {
+        if (this.closed) return;
+        try {
+            this.#response.write("event: ready\ndata: ready\n\n");
+        } catch (error) {
+            this.#disconnect(error);
+            throw error;
+        }
+    }
+
     async write(data: Uint8Array): Promise<void> {
         if (this.closed || this.#response.writableEnded)
             throw new Error("reverse SSE channel is disconnected");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
     execFile,
     spawn,
@@ -6,8 +7,9 @@ import {
     type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { createReadStream } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
@@ -636,7 +638,26 @@ test(
         await resumed.close();
         terminalClient.close();
 
-        await server.restart();
+        // T1: disconnected Reverse + live daemon. `start` must wait until
+        // Control returns Ready without restarting the daemon.
+        const startEnvironment = {
+            ...process.env,
+            HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
+            XDG_RUNTIME_DIR: xdgRuntimeDir,
+        };
+        const beforeRestart = JSON.parse(runWorkerCommand(
+            ["status", "--instance", "reverse-test"], startEnvironment, workspace,
+        ).stdout) as { pid: number };
+        await server.stop();
+        const startAttempt = spawn(workerBinary!, ["start", "--instance", "reverse-test"], {
+            cwd: workspace,
+            env: startEnvironment,
+        });
+        t.after(() => { if (startAttempt.exitCode === null) startAttempt.kill("SIGTERM"); });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        assert.equal(startAttempt.exitCode, null, "start returned before Control became available");
+        await server.start();
         await pointProxyAtControlMcp(proxy, server.socketPath);
         await waitUntil(
             async () => {
@@ -653,6 +674,16 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
         );
+
+        await waitUntil(
+            async () => startAttempt.exitCode !== null,
+            () => "start did not finish after Control returned Ready",
+        );
+        assert.equal(startAttempt.exitCode, 0);
+        const afterRestart = JSON.parse(runWorkerCommand(
+            ["status", "--instance", "reverse-test"], startEnvironment, workspace,
+        ).stdout) as { pid: number };
+        assert.equal(afterRestart.pid, beforeRestart.pid, "reconnect restarted the daemon");
 
         const restartedClient = createClient(server.socketPath);
         t.after(() => restartedClient.close());
@@ -733,6 +764,122 @@ test(
         );
     },
 );
+
+test("T2 old Reverse Worker upgrades before the new version becomes Ready", {
+    skip: !process.env.PORTABLE_DEVSHELL_TEST_UPGRADE_OLD_WORKER ||
+        !process.env.PORTABLE_DEVSHELL_TEST_UPGRADE_NEW_WORKER,
+}, async (t) => {
+    const oldBinary = process.env.PORTABLE_DEVSHELL_TEST_UPGRADE_OLD_WORKER!;
+    const newBinary = process.env.PORTABLE_DEVSHELL_TEST_UPGRADE_NEW_WORKER!;
+    const home = await createTestTempDirectory("reverse-upgrade-home");
+    const runtime = await createTestTempDirectory("reverse-upgrade-runtime");
+    const proxy = await startLoopbackHttpProxy();
+    const paths = new ControlPathHome(home);
+    const sha = createHash("sha256").update(await readFile(newBinary)).digest("hex");
+    const release = createHttpServer((request, response) => {
+        if (request.url?.endsWith(".sha256")) {
+            response.end(`${sha}  devshell-worker-linux-x64\n`);
+        } else if (request.url?.endsWith("devshell-worker-linux-x64")) {
+            createReadStream(newBinary).pipe(response);
+        } else {
+            response.writeHead(404);
+            response.end();
+        }
+    });
+    release.listen(0, "127.0.0.1");
+    await once(release, "listening");
+    const address = release.address();
+    assert.ok(address !== null && typeof address !== "string");
+    const previous = {
+        base: process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL,
+        tag: process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG,
+        cache: process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR,
+    };
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL = `http://127.0.0.1:${address.port}`;
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG = "v1.0.0-rc.2";
+    process.env.PORTABLE_DEVSHELL_WORKER_CACHE_DIR = join(home, "cache");
+    const server = new Control({
+        homeDirectory: home,
+        factory: new ControlFactory({ builtinExtensionSources: [] }),
+        xdgRuntimeDir: runtime,
+    });
+    const workerEnvironment = {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        XDG_RUNTIME_DIR: runtime,
+    };
+    let oldWorker: ChildProcessWithoutNullStreams | undefined;
+    t.after(async () => {
+        if (oldWorker?.exitCode === null && oldWorker.signalCode === null) {
+            oldWorker.kill("SIGTERM");
+            await waitForExit(oldWorker);
+        }
+        spawnSync(newBinary, ["stop", "--instance", "reverse-upgrade"], {
+            env: workerEnvironment, windowsHide: true,
+        });
+        await server.stop();
+        await proxy.close();
+        await new Promise<void>((resolve) => release.close(() => resolve()));
+        for (const [key, value] of [
+            ["PORTABLE_DEVSHELL_WORKER_RELEASE_BASE_URL", previous.base],
+            ["PORTABLE_DEVSHELL_WORKER_RELEASE_TAG", previous.tag],
+            ["PORTABLE_DEVSHELL_WORKER_CACHE_DIR", previous.cache],
+        ] as const) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+        await rm(home, { recursive: true, force: true });
+        await rm(runtime, { recursive: true, force: true });
+    });
+
+    await mkdir(paths.controlHomeDir, { recursive: true });
+    await mkdir(paths.instancesDir, { recursive: true });
+    await writeFile(paths.configFile, encodeGlobalConfig({
+        control: { logLevel: "info" },
+        mcp: { enabled: true, listenHost: "127.0.0.1", listenPort: 0,
+            publicBaseUrl: proxy.origin },
+    }));
+    await writeFile(paths.instanceConfigFile("reverse-upgrade"), encodeInstanceConfig({
+        enabled: true, name: "reverse-upgrade", provider: "reverse",
+        logs: { eventBufferSize: 50 }, mcp: { enabled: true },
+    }));
+    const credentialStore = new ReverseCredentialStore(home);
+    const code = await credentialStore.createDeviceCode("reverse-upgrade");
+    const credential = await credentialStore.consumeDeviceCode(code.deviceCode);
+    const workerHome = join(home, ".devshell", "reverse-upgrade");
+    for (const child of ["state", "logs", "artifacts"])
+        await mkdir(join(workerHome, child), { recursive: true });
+    await mkdir(join(home, ".devshell", "bin"), { recursive: true });
+    await symlink(oldBinary, join(home, ".devshell", "bin", "devshell-worker"));
+    await writeFile(join(workerHome, "config.toml"), [
+        "version = 1", 'instance = "reverse-upgrade"',
+        `createdAt = ${Math.floor(Date.now() / 1000)}`,
+        "", "[reverse]", `controllerUrl = ${JSON.stringify(proxy.origin)}`,
+        `deviceToken = ${JSON.stringify(credential.deviceToken)}`,
+        "generation = 0", "",
+    ].join("\n"), { mode: 0o600 });
+    await server.start();
+    await pointProxyAtControlMcp(proxy, server.socketPath);
+    oldWorker = spawn(oldBinary, [], {
+        env: { ...workerEnvironment,
+            DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-upgrade",
+            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled" },
+    });
+    oldWorker.stdout.resume();
+    oldWorker.stderr.resume();
+    await waitUntil(async () => {
+        const snapshot = await request(server.socketPath, "process.snapshot", asInstanceName("reverse-upgrade"));
+        return snapshot.snapshot.ready === true && snapshot.worker?.version === "1.0.0-rc.2";
+    }, () => "old Worker did not upgrade and reconnect as v1.0.0-rc.2", 90_000);
+    const status = JSON.parse((await execFileAsync(
+        newBinary, ["status", "--instance", "reverse-upgrade"],
+        { env: workerEnvironment },
+    )).stdout) as { running: boolean; pid: number; workerSha256: string };
+    assert.equal(status.running, true);
+    assert.equal(status.workerSha256, sha);
+    assert.notEqual(status.pid, oldWorker.pid);
+});
 
 test(
     "real Rust reverse worker re-enrolls the same persistent instance and reuses the stored credential",

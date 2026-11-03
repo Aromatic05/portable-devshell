@@ -4,6 +4,7 @@ export interface ReverseAttachment {
     connectedAt?: string;
     credentialReplacement?: boolean;
     generation: number;
+    handshakeCompleted?: () => void;
     transport: ReverseTransport;
     signal?: AbortSignal;
 }
@@ -22,18 +23,21 @@ export class TransportConnection {
         return () => this.#attachListeners.delete(listener);
     }
 
-    async attach(channel: Channel, input?: ReverseAttachment): Promise<void> {
+    async attach(channel: Channel, input?: ReverseAttachment): Promise<boolean> {
         const previous = this.#attached;
         this.#attached = channel;
+        let ready = true;
         try {
             if (input !== undefined)
-                for (const listener of this.#attachListeners) await listener(input);
+                for (const listener of this.#attachListeners)
+                    if (await listener(input) === false) ready = false;
         } catch (error) {
             channel.close(error instanceof Error ? error : new Error(String(error)));
             if (this.#attached === channel) this.#attached = previous;
             throw error;
         }
         if (previous !== channel) previous?.close();
+        return ready;
     }
 
     takeAttached(): Channel | undefined {

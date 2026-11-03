@@ -37,6 +37,7 @@ pub struct RpcRouter {
     policy: Arc<dyn SecurityPolicy>,
     shutdown_requested: Arc<AtomicBool>,
     notifications: Arc<WorkerNotificationQueue>,
+    reverse_reconnect_requested: Arc<AtomicBool>,
 }
 
 impl RpcRouter {
@@ -53,6 +54,7 @@ impl RpcRouter {
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
         let notifications = Arc::new(WorkerNotificationQueue::new(DEFAULT_MAX_NOTIFICATION_BYTES));
+        let reverse_reconnect_requested = Arc::new(AtomicBool::new(false));
         let terminals = TerminalManager::with_policy_notifications(
             Arc::clone(&policy),
             Arc::clone(&notifications),
@@ -74,6 +76,7 @@ impl RpcRouter {
             terminals.clone(),
             alerts,
             Arc::clone(&notifications),
+            Arc::clone(&reverse_reconnect_requested),
         );
 
         Self {
@@ -84,7 +87,12 @@ impl RpcRouter {
             policy,
             shutdown_requested,
             notifications,
+            reverse_reconnect_requested,
         }
+    }
+
+    pub fn reverse_reconnect_signal(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.reverse_reconnect_requested)
     }
 
     pub fn is_control_method(&self, method: &str) -> bool {
@@ -142,8 +150,6 @@ impl RpcRouter {
     pub fn try_pop_notification(&self) -> Result<Option<serde_json::Value>, String> {
         self.notifications.try_pop()
     }
-
-
 
     pub fn cancel_request(&self, request_id: &str) -> Result<bool, RpcError> {
         self.active_tool_calls.cancel_request(request_id)

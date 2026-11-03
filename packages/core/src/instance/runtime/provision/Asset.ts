@@ -48,6 +48,26 @@ export class WorkerAssetResolver {
         this.#moduleDir = dirname(fileURLToPath(moduleUrl));
     }
 
+    publishedVersion(environment: NodeJS.ProcessEnv = process.env): string | undefined {
+        return this.#resolveReleaseTag(environment)?.replace(/^v/u, "");
+    }
+
+    async resolvePublished(
+        target: WorkerTarget,
+        environment: NodeJS.ProcessEnv = process.env,
+    ): Promise<{ asset: WorkerAsset; version: string }> {
+        const version = this.publishedVersion(environment);
+        const asset = await this.#resolveReleaseAsset(target, [], environment);
+        if (version === undefined || asset === undefined) {
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
+                message: `Published Worker asset is unavailable for ${target.key}.`,
+                retryable: true,
+            });
+        }
+        return { asset, version };
+    }
+
     async resolve(
         target: WorkerTarget,
         environment: NodeJS.ProcessEnv = process.env,

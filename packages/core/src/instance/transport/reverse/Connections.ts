@@ -55,11 +55,11 @@ export class ReverseConnections {
         transport: ReverseTransport,
         channel: Channel,
         options: { credentialReplacement?: boolean } = {},
-    ): Promise<void> {
+    ): Promise<boolean> {
         let generation: ReverseGenerationLease | undefined;
         try {
             generation = this.#acquireIdentityGeneration(identity);
-            await this.#exclusive(identity.descriptor.config.name, async () => {
+            return await this.#exclusive(identity.descriptor.config.name, async () => {
                 this.#assertRunning(channel);
                 const connection = this.#requireReverseConnection(
                     identity.descriptor,
@@ -79,10 +79,12 @@ export class ReverseConnections {
                     new Error("Reverse candidate disconnected during handshake."),
                 );
                 const offClose = channel.onClose(onClose);
+                let ready = true;
                 try {
-                    await connection.attach(channel, {
+                    ready = await connection.attach(channel, {
                         credentialReplacement: options.credentialReplacement,
                         generation: identity.generation,
+                        handshakeCompleted: () => clearTimeout(timeout),
                         transport,
                         signal: controller.signal,
                     });
@@ -106,6 +108,7 @@ export class ReverseConnections {
                 this.#active.set(identity.descriptor.config.name, active);
                 if (previous !== undefined && previous !== active)
                     previous.channel.close();
+                return ready;
             });
         } catch (error) {
             channel.close();

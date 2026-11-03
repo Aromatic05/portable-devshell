@@ -6,7 +6,7 @@ pub mod tool;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::capability::artifact::direct::ArtifactDirectTransfer;
 use crate::capability::artifact::payload::ArtifactPayloadStore;
@@ -38,7 +38,17 @@ pub fn register_control_handlers(
     terminals: TerminalManager,
     alerts: Arc<crate::instance::workspace::alert::AlertService>,
     notifications: Arc<WorkerNotificationQueue>,
+    reverse_reconnect_requested: Arc<AtomicBool>,
 ) {
+    if config.reverse.is_some() {
+        handlers.insert(
+            "worker.reconnect".to_string(),
+            crate::capability::rpc::router::control_handler(move |_request| {
+                reverse_reconnect_requested.store(true, Ordering::SeqCst);
+                Ok(serde_json::json!({"requested": true}))
+            }),
+        );
+    }
     let direct = ArtifactDirectTransfer::new(Arc::clone(&payloads), Arc::clone(&receives));
     let devshell_commands =
         devshell_command::DevshellCommandBroker::new(Arc::clone(&notifications));

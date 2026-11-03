@@ -1,4 +1,5 @@
 use std::net::TcpStream;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use reqwest::header::AUTHORIZATION;
@@ -51,7 +52,11 @@ impl WssHeartbeat {
         Ok(Some(token))
     }
 
-    fn pong(&mut self, payload: &[u8], now: Instant) {
+    fn request_probe(&mut self, now: Instant) {
+        self.next_ping = now;
+    }
+
+    fn pong(&mut self, payload: &[u8], now: Instant) -> bool {
         if self
             .outstanding
             .as_ref()
@@ -59,7 +64,9 @@ impl WssHeartbeat {
         {
             self.outstanding = None;
             self.next_ping = now + HEARTBEAT_INTERVAL;
+            return true;
         }
+        false
     }
 }
 
@@ -137,6 +144,9 @@ impl ReverseConnector {
         let mut sent_through = 0_u64;
         let mut heartbeat = WssHeartbeat::new(Instant::now());
         while !self.bridge.is_stopping() {
+            if self.reconnect_requested.swap(false, Ordering::SeqCst) {
+                heartbeat.request_probe(Instant::now());
+            }
             if let Some(token) = heartbeat.tick(Instant::now())? {
                 self.send_wss(&mut socket, Message::Ping(token.into()))
                     .map_err(|error| error.to_string())?;
@@ -178,7 +188,11 @@ impl ReverseConnector {
                 Ok(Message::Text(_)) => {
                     return Err("controller sent text on binary RPC websocket".to_string());
                 }
-                Ok(Message::Pong(payload)) => heartbeat.pong(&payload, Instant::now()),
+                Ok(Message::Pong(payload)) => {
+                    if heartbeat.pong(&payload, Instant::now()) && remote_frame_received {
+                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
+                    }
+                }
                 Ok(Message::Frame(_)) => {}
                 Err(WebSocketError::Io(error))
                     if matches!(

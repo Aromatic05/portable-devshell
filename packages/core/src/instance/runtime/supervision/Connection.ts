@@ -25,6 +25,8 @@ import {
     wrapWorkerCommandError,
 } from "../execution/Error.js";
 import { toEventData } from "./Event.js";
+import type { WorkerTunnel } from "../execution/capability/tunnel/Tunnel.js";
+import { canContinueWithWorkerVersion, updateReverseWorker } from "./Update.js";
 
 const reconnectRetryDelayMs = 250;
 
@@ -40,6 +42,7 @@ interface WorkerInstanceConnectionOptions {
     metadataChanged(): void;
     snapshot(): InstanceSnapshot;
     transportConnection: TransportConnection;
+    tunnel: WorkerTunnel;
 }
 
 export class WorkerInstanceConnection {
@@ -51,6 +54,7 @@ export class WorkerInstanceConnection {
     readonly #metadataChanged: WorkerInstanceConnectionOptions["metadataChanged"];
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
     readonly #transportConnection: TransportConnection;
+    readonly #tunnel: WorkerTunnel;
     readonly #unsubscribeAttach: () => void;
     #closed = false;
     #handshake?: WorkerHandshakeResult;
@@ -67,8 +71,9 @@ export class WorkerInstanceConnection {
         this.#metadataChanged = options.metadataChanged;
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
-        this.#unsubscribeAttach = this.#transportConnection.onAttach((input) =>
-            this.#acceptAttachedReverseChannel(input),
+        this.#tunnel = options.tunnel;
+        this.#unsubscribeAttach = this.#transportConnection.onAttach(async (input) =>
+            (await this.#acceptAttachedReverseChannel(input)).ready,
         );
         if (this.#config.managementMode === "selfManaged") {
             this.#reverseStatus = {
@@ -235,6 +240,7 @@ export class WorkerInstanceConnection {
                 );
             },
         });
+        input.handshakeCompleted?.();
         this.#handshake = verifiedHandshake;
         this.#metadataChanged();
         this.#reverseStatus = {
@@ -261,8 +267,22 @@ export class WorkerInstanceConnection {
             }),
         );
         await this.#appendEvent("worker.transportConnected");
+        // This channel can carry the update, but it is not final Ready when
+        // the Worker still needs replacement. Only the new handshake may
+        // promote the instance and acknowledge readiness to the Worker CLI.
+        let upgrading = false;
+        if (verifiedHandshake !== undefined) {
+            try {
+                upgrading = await updateReverseWorker(this.#tunnel, this.#config.name, verifiedHandshake);
+            } catch (error) {
+                console.warn(`Reverse Worker update failed for ${this.#config.name}:`, error);
+                // A compatible 1.x Worker may continue when an optional
+                // update cannot be delivered; a major upgrade is required.
+                if (!canContinueWithWorkerVersion(verifiedHandshake.workerVersion)) throw error;
+            }
+        }
         return await this.#applyStateUpdate({
-            connectionState: "connected",
+            connectionState: upgrading ? "connecting" : "connected",
             daemonState: "running",
             lastErrorCode: undefined,
             lastErrorMessage: undefined,

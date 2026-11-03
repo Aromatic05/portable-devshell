@@ -17,6 +17,10 @@ use crate::instance::InstanceName;
 pub fn install_current_binary() -> Result<PathBuf, String> {
     let source = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current worker executable: {error}"))?;
+    install_from_path(&source)
+}
+
+pub fn install_from_path(source: &Path) -> Result<PathBuf, String> {
     let bytes = fs::read(&source)
         .map_err(|error| format!("failed to read {}: {error}", source.display()))?;
     let sha = hex(&Sha256::digest(&bytes));
