@@ -168,7 +168,9 @@ export class WorkerInstanceState {
     async apply(
         update: InstanceStateUpdate,
         reverse?: ReverseInstanceStatus,
+        isCurrent: () => boolean = () => true,
     ): Promise<InstanceSnapshot> {
+        if (!isCurrent()) return this.snapshot(reverse);
         const previous = this.snapshot(reverse);
         const enteringReady = !previous.ready && isReadyState(
             update.daemonState ?? previous.daemonState,
@@ -180,6 +182,7 @@ export class WorkerInstanceState {
             // after observing the ready snapshot.
             await this.#onReadyChanged(true);
         }
+        if (!isCurrent()) return this.snapshot(reverse);
         this.#stateMachine.apply(update);
         const next = this.snapshot(reverse);
         if (
@@ -192,19 +195,22 @@ export class WorkerInstanceState {
                 createStatusChangedEventData(previous, next),
             );
         }
+        if (!isCurrent()) return this.snapshot(reverse);
         if (previous.connectionState !== next.connectionState) {
             await this.appendEvent(
                 "instance.connectionChanged",
                 createConnectionChangedEventData(previous, next),
             );
         }
+        if (!isCurrent()) return this.snapshot(reverse);
         if (previous.ready !== next.ready) {
             await this.appendEvent(
                 "instance.readyChanged",
                 createReadyChangedEventData(previous, next),
             );
-            if (!next.ready) await this.#onReadyChanged(false);
+            if (isCurrent() && !next.ready) await this.#onReadyChanged(false);
         }
+        if (!isCurrent()) return this.snapshot(reverse);
         if (
             previous.connectionState !== next.connectionState ||
             previous.daemonState !== next.daemonState ||

@@ -63,10 +63,11 @@ impl SpawnedDaemon {
     }
 }
 
-pub fn spawn(
+pub fn spawn_executable(
     instance: &InstanceName,
     paths: &InstancePaths,
     runtime: &WorkerRuntimeContext,
+    executable: &Path,
 ) -> Result<SpawnedDaemon, String> {
     let execution = crate::capability::execution::ExecutionConfig::from_env()?;
     #[cfg(unix)]
@@ -81,7 +82,6 @@ pub fn spawn(
             .try_clone()
             .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
 
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let mut command = match crate::capability::execution::daemon_sandbox(execution.as_ref())? {
             Some((driver, args)) => {
                 let mut wrapped = Command::new(driver);
@@ -146,7 +146,6 @@ pub fn spawn(
             );
         }
         let _ = paths;
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let security_mode = OsStr::new(match runtime.security_mode {
             SecurityMode::Disabled => "disabled",
             SecurityMode::Workspace => "workspace",
@@ -179,13 +178,17 @@ pub fn read_runtime_context() -> Result<WorkerRuntimeContext, String> {
 }
 
 pub fn current_worker_sha256() -> Option<String> {
-    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
-    let candidate = executable.parent()?.file_name()?.to_str()?;
-    if candidate.len() == 64 && candidate.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        Some(candidate.to_ascii_lowercase())
-    } else {
-        None
-    }
+    use sha2::{Digest, Sha256};
+    static SHA: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SHA.get_or_init(|| {
+        #[cfg(target_os = "linux")]
+        let executable = std::path::PathBuf::from("/proc/self/exe");
+        #[cfg(not(target_os = "linux"))]
+        let executable = std::env::current_exe().ok()?;
+        let bytes = fs::read(executable).ok()?;
+        Some(format!("{:x}", Sha256::digest(bytes)))
+    })
+    .clone()
 }
 
 pub fn current_security_mode() -> SecurityMode {

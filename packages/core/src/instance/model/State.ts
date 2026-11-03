@@ -67,6 +67,7 @@ export class InstanceState {
     readonly toolCalls: ToolCallRuntime;
     readonly #acquireLease: InstanceStateDependencies["acquireLease"];
     readonly #instanceName: InstanceName;
+    readonly #endpoint: Endpoint;
     readonly #toolDefinitions = new InstanceToolCatalog();
     readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
     readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
@@ -80,6 +81,7 @@ export class InstanceState {
         const { audit, config, instanceName, paths } = dependencies;
         this.#acquireLease = dependencies.acquireLease;
         this.#instanceName = instanceName;
+        this.#endpoint = dependencies.endpoint;
         this.audit = audit;
         const appendEvent = dependencies.appendEvent;
         this.approval = createApprovalRuntime({
@@ -192,8 +194,9 @@ export class InstanceState {
             throw new Error(
                 `Instance ${this.#instanceName} domains are retiring.`,
             );
+        const identity = this.#endpoint.connectionIdentity;
         const definitions = await this.tools.refreshTools();
-        if (this.#retiring) return;
+        if (this.#retiring || this.#endpoint.connectionIdentity !== identity) return;
         this.#workerToolRegistration.replace(definitions);
         this.task.resume();
     }

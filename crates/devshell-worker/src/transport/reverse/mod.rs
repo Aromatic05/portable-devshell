@@ -97,6 +97,8 @@ impl ReverseConnector {
                     continue;
                 }
             };
+            // Invalidate the previous Ready before attempting a new physical connection.
+            let _ = state::write(&self.paths, "connecting", None, None);
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
                 match self.connect_wss(generation) {
                     Ok((socket, acknowledged)) => ("wss", true, self.run_wss(socket, acknowledged)),
@@ -121,7 +123,8 @@ impl ReverseConnector {
                     if transport == "wss"
                         && (!established
                             || attempt_started.elapsed() < Duration::from_secs(5)
-                            || error.contains(websocket::HEARTBEAT_TIMEOUT_ERROR))
+                            || error.contains(websocket::HEARTBEAT_TIMEOUT_ERROR)
+                            || error == "reverse Ready timed out")
                     {
                         wss_failures = wss_failures.saturating_add(1);
                     } else if transport == "wss" {

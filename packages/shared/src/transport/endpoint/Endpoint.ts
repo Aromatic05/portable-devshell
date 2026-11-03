@@ -57,6 +57,11 @@ export class Endpoint {
         return this.#gateway !== undefined;
     }
 
+    /** Identity of the actual active link, including replacements without a disconnect. */
+    get connectionIdentity(): object | undefined {
+        return this.#gateway;
+    }
+
     bind(port: PortName, host: Host = this.host): Port {
         const key = `${host}\u0000${port}`;
         let binding = this.#ports.get(key);

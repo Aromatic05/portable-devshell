@@ -26,16 +26,27 @@ import {
 } from "../execution/Error.js";
 import { toEventData } from "./Event.js";
 import type { WorkerTunnel } from "../execution/capability/tunnel/Tunnel.js";
-import { canContinueWithWorkerVersion, updateReverseWorker } from "./Update.js";
+import {
+    canContinueWithWorkerVersion,
+    updateReverseWorker,
+    type ReverseWorkerUpdateTarget,
+} from "./Update.js";
 
 const reconnectRetryDelayMs = 250;
+const reverseUpgradeTimeoutMs = 120_000;
+
+interface PendingReverseUpdate {
+    target: ReverseWorkerUpdateTarget;
+    generation: number;
+    timer: ReturnType<typeof setTimeout>;
+}
 
 interface WorkerInstanceConnectionOptions {
     appendEvent(
         type: InstanceEventInput["type"],
         data?: JsonValue,
     ): Promise<unknown>;
-    applyStateUpdate(update: InstanceStateUpdate): Promise<InstanceSnapshot>;
+    applyStateUpdate(update: InstanceStateUpdate, isCurrent?: () => boolean): Promise<InstanceSnapshot>;
     config: ResolvedWorkerInstanceConfig;
     protocolClient: WorkerProtocolClient;
     endpoint: Endpoint;
@@ -61,6 +72,10 @@ export class WorkerInstanceConnection {
     #intentionalTransportCloseDepth = 0;
     #reconnectPromise?: Promise<InstanceSnapshot>;
     #reverseStatus?: ReverseInstanceStatus;
+    #connectionOwner = {};
+    #refreshOwner?: object;
+    #reverseReadyIdentity?: object;
+    #reverseUpdate?: PendingReverseUpdate;
 
     constructor(options: WorkerInstanceConnectionOptions) {
         this.#appendEvent = options.appendEvent;
@@ -72,8 +87,8 @@ export class WorkerInstanceConnection {
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
         this.#tunnel = options.tunnel;
-        this.#unsubscribeAttach = this.#transportConnection.onAttach(async (input) =>
-            (await this.#acceptAttachedReverseChannel(input)).ready,
+        this.#unsubscribeAttach = this.#transportConnection.onAttach((input) =>
+            this.#acceptAttachedReverseChannel(input),
         );
         if (this.#config.managementMode === "selfManaged") {
             this.#reverseStatus = {
@@ -160,6 +175,8 @@ export class WorkerInstanceConnection {
 
     async close(): Promise<void> {
         this.#closed = true;
+        if (this.#reverseUpdate !== undefined) clearTimeout(this.#reverseUpdate.timer);
+        this.#reverseUpdate = undefined;
         this.#unsubscribeAttach();
         this.closeTransport();
         this.#handshake = undefined;
@@ -205,7 +222,7 @@ export class WorkerInstanceConnection {
 
     async #acceptAttachedReverseChannel(
         input: ReverseAttachment,
-    ): Promise<InstanceSnapshot> {
+    ): Promise<boolean> {
         this.#requireSelfManaged();
         const previousGeneration = this.#reverseStatus?.generation ?? 0;
         if (
@@ -213,7 +230,6 @@ export class WorkerInstanceConnection {
             input.generation <= 0 ||
             (!input.credentialReplacement && input.generation <= previousGeneration)
         ) {
-            this.#transportConnection.close();
             throw createRemoteError({
                 code: runtimeErrorCodes.reverseGenerationInvalid,
                 details: {
@@ -238,9 +254,28 @@ export class WorkerInstanceConnection {
                     candidate,
                     input.signal,
                 );
+                const update = this.#reverseUpdate;
+                if (update !== undefined && (
+                    input.generation <= update.generation ||
+                    verifiedHandshake.workerVersion !== update.target.version ||
+                    verifiedHandshake.workerSha256 !== update.target.sha256
+                )) {
+                    throw new Error("Reverse Worker replacement does not match the staged version and SHA256.");
+                }
             },
         });
         input.handshakeCompleted?.();
+        input.signal?.throwIfAborted();
+        if (verifiedHandshake === undefined) throw new Error("Reverse Worker handshake is missing.");
+        const owner = {};
+        this.#connectionOwner = owner;
+        this.#refreshOwner = undefined;
+        this.#reverseReadyIdentity = undefined;
+        const identity = this.#endpoint.connectionIdentity;
+        const isCurrent = () => !this.#closed && this.#connectionOwner === owner &&
+            identity !== undefined && this.#endpoint.connectionIdentity === identity;
+        await this.#applyStateUpdate({ connectionState: "connecting", daemonState: "running" }, isCurrent);
+        if (!isCurrent()) return false;
         this.#handshake = verifiedHandshake;
         this.#metadataChanged();
         this.#reverseStatus = {
@@ -252,41 +287,101 @@ export class WorkerInstanceConnection {
             managementMode: "selfManaged",
             transport: input.transport,
         };
-        await this.#appendEvent(
-            "reverse.connected",
-            toEventData({
-                generation: input.generation,
-                transport: input.transport,
-            }),
-        );
-        await this.#appendEvent(
-            "reverse.transportChanged",
-            toEventData({
-                generation: input.generation,
-                transport: input.transport,
-            }),
-        );
-        await this.#appendEvent("worker.transportConnected");
-        // This channel can carry the update, but it is not final Ready when
-        // the Worker still needs replacement. Only the new handshake may
-        // promote the instance and acknowledge readiness to the Worker CLI.
-        let upgrading = false;
-        if (verifiedHandshake !== undefined) {
-            try {
-                upgrading = await updateReverseWorker(this.#tunnel, this.#config.name, verifiedHandshake);
-            } catch (error) {
-                console.warn(`Reverse Worker update failed for ${this.#config.name}:`, error);
-                // A compatible 1.x Worker may continue when an optional
-                // update cannot be delivered; a major upgrade is required.
-                if (!canContinueWithWorkerVersion(verifiedHandshake.workerVersion)) throw error;
+        try {
+            await this.#appendEvent(
+                "reverse.connected",
+                toEventData({
+                    generation: input.generation,
+                    transport: input.transport,
+                }),
+            );
+            if (!isCurrent()) return false;
+            await this.#appendEvent(
+                "reverse.transportChanged",
+                toEventData({
+                    generation: input.generation,
+                    transport: input.transport,
+                }),
+            );
+            if (!isCurrent()) return false;
+            await this.#appendEvent("worker.transportConnected");
+            // This channel can carry the update, but it is not final Ready when
+            // the Worker still needs replacement. Only the new handshake may
+            // promote the instance and acknowledge readiness to the Worker CLI.
+            if (!isCurrent()) return false;
+            // A staged target survives disconnects and is accepted only by the
+            // candidate verifier above. Ordinary refresh never completes it.
+            const completingUpdate = this.#reverseUpdate;
+            if (completingUpdate === undefined) {
+                try {
+                    const target = await updateReverseWorker(this.#tunnel, this.#config.name, verifiedHandshake, {
+                        generation: input.generation,
+                        signal: input.signal,
+                        isCurrent,
+                        beforeRestart: (target) => {
+                            if (!isCurrent()) throw new Error("Reverse Worker update connection was superseded.");
+                            const update: PendingReverseUpdate = {
+                                target,
+                                generation: input.generation,
+                                timer: setTimeout(() => {
+                                    void this.#expireReverseUpdate(update).catch(() => undefined);
+                                }, reverseUpgradeTimeoutMs),
+                            };
+                            update.timer.unref();
+                            this.#reverseUpdate = update;
+                        },
+                    });
+                    if (!isCurrent()) return false;
+                    if (target !== undefined) return false;
+                } catch (error) {
+                    if (!isCurrent()) return false;
+                    console.warn(`Reverse Worker update failed for ${this.#config.name}:`, error);
+                    // Once EOF could have launched the helper, only the target
+                    // generation may complete negotiation, even if its reply was lost.
+                    if (this.#reverseUpdate !== undefined || !canContinueWithWorkerVersion(
+                        verifiedHandshake, this.#config.handshake.protocolRange,
+                    )) throw error;
+                }
             }
+            if (!isCurrent()) return false;
+            const snapshot = await this.#applyStateUpdate({
+                connectionState: "connected",
+                daemonState: "running",
+                lastErrorCode: undefined,
+                lastErrorMessage: undefined,
+            }, isCurrent);
+            if (isCurrent() && snapshot.ready) {
+                this.#reverseReadyIdentity = identity;
+                if (completingUpdate !== undefined) {
+                    clearTimeout(completingUpdate.timer);
+                    this.#reverseUpdate = undefined;
+                }
+            }
+            return isCurrent() && snapshot.ready;
+        } catch (error) {
+            if (!isCurrent()) return false;
+            await this.#applyStateUpdate({
+                connectionState: "failed",
+                lastErrorCode: getErrorCode(error, runtimeErrorCodes.workerHandshakeFailed),
+                lastErrorMessage: readErrorMessage(error),
+            }, isCurrent);
+            throw error;
         }
-        return await this.#applyStateUpdate({
-            connectionState: upgrading ? "connecting" : "connected",
-            daemonState: "running",
-            lastErrorCode: undefined,
-            lastErrorMessage: undefined,
-        });
+    }
+
+    async #expireReverseUpdate(update: PendingReverseUpdate): Promise<void> {
+        if (this.#reverseUpdate !== update || this.#closed) return;
+        const owner = {};
+        this.#connectionOwner = owner;
+        this.#refreshOwner = undefined;
+        this.#reverseReadyIdentity = undefined;
+        // Retain the exact target for a late successful replacement; expiry
+        // terminates waiting, and never blesses the old Worker via refresh.
+        await this.#applyStateUpdate({
+            connectionState: "failed",
+            lastErrorCode: runtimeErrorCodes.workerHandshakeFailed,
+            lastErrorMessage: "Timed out waiting for the staged Reverse Worker version and SHA256.",
+        }, () => this.#reverseUpdate === update && this.#connectionOwner === owner && !this.#closed);
     }
 
     async reconnectTransport(): Promise<InstanceSnapshot> {
@@ -324,6 +419,20 @@ export class WorkerInstanceConnection {
               ? "connecting"
               : "reconnecting",
     ): Promise<InstanceSnapshot> {
+        // Only attach negotiation can admit a self-managed link. Ping and
+        // handshake on the old daemon must never bypass upgrading/staged.
+        if (this.#config.managementMode === "selfManaged" && (
+            this.#reverseReadyIdentity === undefined ||
+            this.#reverseReadyIdentity !== this.#endpoint.connectionIdentity
+        )) return this.#snapshot();
+        const owner = this.#connectionOwner;
+        const generation = this.#reverseStatus?.generation;
+        const refreshOwner = {};
+        this.#refreshOwner = refreshOwner;
+        let identity = this.#endpoint.connectionIdentity;
+        const ownsOperation = () => !this.#closed && this.#connectionOwner === owner &&
+            this.#refreshOwner === refreshOwner && this.#reverseStatus?.generation === generation;
+        const isCurrent = () => ownsOperation() && this.#endpoint.connectionIdentity === identity;
         const shouldEmitTransportLifecycleEvents =
             connectionState !== "connected";
 
@@ -333,14 +442,23 @@ export class WorkerInstanceConnection {
             lastErrorCode: undefined,
             lastErrorMessage: undefined,
             pid,
-        });
+        }, isCurrent);
 
         try {
-            if (!this.#endpoint.connected) await this.#endpoint.reconnect();
+            if (!isCurrent()) return this.#snapshot();
+            if (!this.#endpoint.connected) {
+                await this.#endpoint.reconnect();
+                if (!ownsOperation()) return this.#snapshot();
+                identity = this.#endpoint.connectionIdentity;
+            }
             await this.#protocolClient.ping();
-            this.#handshake = await this.#protocolClient.handshake(
+            if (!isCurrent()) return this.#snapshot();
+            const handshake = await this.#protocolClient.handshake(
                 this.#config.handshake,
             );
+            if (!isCurrent()) return this.#snapshot();
+            this.#handshake = handshake;
+            this.#metadataChanged();
             if (this.#reverseStatus !== undefined) {
                 this.#reverseStatus = {
                     ...this.#reverseStatus,
@@ -355,14 +473,18 @@ export class WorkerInstanceConnection {
                 await this.#appendEvent("worker.transportConnected");
             }
 
+            if (!isCurrent()) return this.#snapshot();
             return await this.#applyStateUpdate({
                 connectionState: "connected",
                 daemonState: "running",
                 lastErrorCode: undefined,
                 lastErrorMessage: undefined,
                 pid,
-            });
+            }, isCurrent);
         } catch (error) {
+            // A reply (including failure) belongs to the exact link and
+            // refresh that issued it, not whichever gateway is current now.
+            if (!isCurrent()) return this.#snapshot();
             const wrappedError = wrapWorkerCommandError(
                 error,
                 runtimeErrorCodes.workerHandshakeFailed,
@@ -370,6 +492,9 @@ export class WorkerInstanceConnection {
                 this.#config.name,
             );
             this.closeTransport();
+            const failureOwner = this.#connectionOwner;
+            const isFailureCurrent = () => !this.#closed && this.#connectionOwner === failureOwner &&
+                !this.#endpoint.connected;
             this.#handshake = undefined;
             if (this.#config.managementMode === "selfManaged") {
                 this.markReverseOffline(wrappedError);
@@ -383,7 +508,7 @@ export class WorkerInstanceConnection {
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
                 pid,
-            });
+            }, isFailureCurrent);
 
             if (wrappedError !== error) {
                 throw wrappedError;
@@ -489,9 +614,14 @@ export class WorkerInstanceConnection {
         if (this.#intentionalTransportCloseDepth > 0) {
             return;
         }
+        const owner = {};
+        this.#connectionOwner = owner;
+        this.#refreshOwner = undefined;
+        this.#reverseReadyIdentity = undefined;
+        this.#handshake = undefined;
+        const isCurrent = () => this.#connectionOwner === owner && !this.#endpoint.connected && !this.#closed;
         if (this.#config.managementMode === "selfManaged") {
             this.markReverseOffline(error);
-            this.#handshake = undefined;
             await this.#appendEvent(
                 "worker.transportDisconnected",
                 toEventData({
@@ -501,6 +631,7 @@ export class WorkerInstanceConnection {
                     ),
                 }),
             );
+            if (!isCurrent()) return;
             await this.#appendEvent(
                 "reverse.disconnected",
                 toEventData({
@@ -521,7 +652,7 @@ export class WorkerInstanceConnection {
                 ),
                 lastErrorMessage: readErrorMessage(error),
                 pid: undefined,
-            });
+            }, isCurrent);
             return;
         }
 
@@ -536,7 +667,7 @@ export class WorkerInstanceConnection {
             }),
         );
 
-        this.#handshake = undefined;
+        if (!isCurrent()) return;
         await this.#applyStateUpdate({
             connectionState:
                 daemonState === "running" ? "reconnecting" : "disconnected",
@@ -546,9 +677,9 @@ export class WorkerInstanceConnection {
                 runtimeErrorCodes.workerTransportDisconnected,
             ),
             lastErrorMessage: readErrorMessage(error),
-        });
+        }, isCurrent);
 
-        if (daemonState !== "running") {
+        if (daemonState !== "running" || !isCurrent()) {
             return;
         }
 
@@ -565,6 +696,9 @@ export class WorkerInstanceConnection {
     }
 
     closeTransport(): void {
+        this.#connectionOwner = {};
+        this.#refreshOwner = undefined;
+        this.#reverseReadyIdentity = undefined;
         this.#intentionalTransportCloseDepth += 1;
 
         try {

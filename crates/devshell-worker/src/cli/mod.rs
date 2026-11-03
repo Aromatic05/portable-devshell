@@ -53,6 +53,10 @@ pub struct GcArgs {
 pub struct UpgradeRestartArgs {
     #[arg(long)]
     pub instance: String,
+    #[arg(long)]
+    pub expected_pid: u32,
+    #[arg(long)]
+    pub expected_generation: u64,
 }
 
 pub fn run() -> Result<String, String> {

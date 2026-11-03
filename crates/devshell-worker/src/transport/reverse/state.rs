@@ -10,6 +10,10 @@ use crate::instance::storage::ensure_file_mode;
 #[serde(rename_all = "camelCase")]
 pub struct ReverseConnectionState {
     pub state: String,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default)]
+    pub pid: u32,
     pub transport: Option<String>,
     pub last_error: Option<String>,
     pub updated_at_ms: u64,
@@ -37,6 +41,8 @@ pub fn write(
         .min(u64::MAX as u128) as u64;
     let value = ReverseConnectionState {
         state: state.to_string(),
+        generation: generation(paths),
+        pid: std::process::id(),
         transport: transport.map(ToString::to_string),
         last_error: error.map(ToString::to_string),
         updated_at_ms,
@@ -54,4 +60,11 @@ pub fn write(
     fs::rename(&temporary, &file)
         .map_err(|error| format!("failed to replace {}: {error}", file.display()))?;
     Ok(())
+}
+
+pub fn generation(paths: &InstancePaths) -> u64 {
+    fs::read_to_string(paths.state_dir.join("reverse-generation"))
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
 }

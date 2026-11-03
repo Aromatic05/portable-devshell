@@ -217,19 +217,23 @@ interface WorkerProtocolSemVer {
     patch: number;
 }
 
-function assertNegotiatedWorkerProtocolVersion(
+export function assertNegotiatedWorkerProtocolVersion(
     version: string,
     range: WorkerProtocolRange,
 ): void {
     const selected = parseWorkerProtocolSemVer(version);
     const minimum = parseWorkerProtocolSemVer(range.min);
     const maximum = parseWorkerProtocolSemVer(range.max);
-    if (compareWorkerProtocolSemVer(minimum, maximum) > 0) {
+    if (
+        minimum.major !== maximum.major ||
+        compareWorkerProtocolSemVer(minimum, maximum) > 0
+    ) {
         throw new TypeError(
             `Invalid Worker protocol range ${range.min}..${range.max}.`,
         );
     }
     if (
+        selected.major !== minimum.major ||
         compareWorkerProtocolSemVer(selected, minimum) < 0 ||
         compareWorkerProtocolSemVer(selected, maximum) > 0
     ) {

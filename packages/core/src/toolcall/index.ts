@@ -49,9 +49,11 @@ export function createToolCallExecutionRuntime(
     const refreshTools = async () => {
         if (closed)
             throw new Error("Tool call execution runtime is closed.");
+        const identity = options.endpoint.connectionIdentity;
         const tools = await options.readTools();
         if (closed)
             throw new Error("Tool call execution runtime is closed.");
+        if (options.endpoint.connectionIdentity !== identity) return catalog.listTools();
         return catalog.refresh(tools);
     };
     return {

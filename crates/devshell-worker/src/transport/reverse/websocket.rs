@@ -52,10 +52,6 @@ impl WssHeartbeat {
         Ok(Some(token))
     }
 
-    fn request_probe(&mut self, now: Instant) {
-        self.next_ping = now;
-    }
-
     fn pong(&mut self, payload: &[u8], now: Instant) -> bool {
         if self
             .outstanding
@@ -139,13 +135,17 @@ impl ReverseConnector {
         acknowledged: bool,
     ) -> Result<(), String> {
         let mut remote_frame_received = false;
+        let ready_deadline = Instant::now() + Duration::from_secs(60);
         // Each connection starts a fresh Frame/Envelope stream and sequence;
         // never replay raw DATA from the previous physical transport.
         let mut sent_through = 0_u64;
         let mut heartbeat = WssHeartbeat::new(Instant::now());
         while !self.bridge.is_stopping() {
+            if !remote_frame_received && Instant::now() >= ready_deadline {
+                return Err("reverse Ready timed out".to_string());
+            }
             if self.reconnect_requested.swap(false, Ordering::SeqCst) {
-                heartbeat.request_probe(Instant::now());
+                return Err("reverse reconnect requested".to_string());
             }
             if let Some(token) = heartbeat.tick(Instant::now())? {
                 self.send_wss(&mut socket, Message::Ping(token.into()))
@@ -164,13 +164,8 @@ impl ReverseConnector {
                             return Err(error.to_string());
                         }
                     }
-                    // HTTP 101 alone does not mean Control accepted this
-                    // connection. Wait until it actually sends a valid frame.
-                    if !remote_frame_received && !acknowledged {
-                        // Legacy v1 does not carry a usable/ready control frame.
-                        remote_frame_received = true;
-                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
-                    }
+                    // Legacy binary traffic does not prove Control completed
+                    // its Ready handshake. Only the existing Ready event does.
                 }
                 Ok(Message::Ping(payload)) => {
                     self.send_wss(&mut socket, Message::Pong(payload))
@@ -189,9 +184,7 @@ impl ReverseConnector {
                     return Err("controller sent text on binary RPC websocket".to_string());
                 }
                 Ok(Message::Pong(payload)) => {
-                    if heartbeat.pong(&payload, Instant::now()) && remote_frame_received {
-                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
-                    }
+                    heartbeat.pong(&payload, Instant::now());
                 }
                 Ok(Message::Frame(_)) => {}
                 Err(WebSocketError::Io(error))
