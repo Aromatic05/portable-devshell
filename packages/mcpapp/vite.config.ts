@@ -18,5 +18,10 @@ export default defineConfig({
             },
         },
     },
-    test: { environment: "jsdom" },
+    test: {
+        environment: "jsdom",
+        environmentOptions: { jsdom: { url: "http://localhost:3123" } },
+        // Let jsdom provide Storage instead of Node's unconfigured global.
+        execArgv: ["--no-experimental-webstorage"],
+    },
 });
