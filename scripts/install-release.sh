@@ -602,6 +602,8 @@ persistent_backup_ready=0
 application_transaction_active=0
 worker_transaction_active=0
 migration_committed=0
+migration_pid=
+migration_launching=0
 runtime_restore_control=0
 runtime_control_pid=
 runtime_restore_instances="$temporary/runtime-restore-instances"
@@ -644,9 +646,29 @@ restore_persistent_state() {
 
 cleanup_installation() {
     status=$?
-    trap - EXIT HUP INT TERM
+    trap - EXIT
+    trap '' HUP INT TERM
     rollback_blocked=0
-    if [ "$status" -ne 0 ] && [ "$candidate_control_restore_attempted" -eq 1 ] && { [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; }; then
+    # The migration CLI writes in this Node process. Reap it before touching
+    # either generations or persistent state; a second signal cannot interrupt
+    # cleanup. If interrupted between launch and PID capture, fail closed.
+    if [ -n "$migration_pid" ]; then
+        kill -KILL "$migration_pid" 2>/dev/null || :
+        wait "$migration_pid" 2>/dev/null || :
+        if kill -0 "$migration_pid" 2>/dev/null; then
+            echo "迁移子进程尚未退出；保留快照并禁止自动回滚及恢复旧运行态。" >&2
+            rollback_blocked=1
+            status=1
+        fi
+    elif [ "$migration_launching" -eq 1 ]; then
+        echo "迁移子进程 PID 尚未确认；保留快照并禁止自动回滚及恢复旧运行态。" >&2
+        rollback_blocked=1
+        status=1
+    fi
+    # Keep cleanup non-reentrant without passing ignored signals to restored
+    # Control/Instance processes (caught traps reset to defaults on exec).
+    trap ':' HUP INT TERM
+    if [ "$rollback_blocked" -eq 0 ] && [ "$status" -ne 0 ] && [ "$candidate_control_restore_attempted" -eq 1 ] && { [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; }; then
         if ! stop_installed_control "$command_link"; then
             echo "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。" >&2
             rollback_blocked=1
@@ -822,14 +844,18 @@ if ! smoke_cli "$command_link" "安装结果验证失败"; then
 fi
 if [ "$migration_required" -eq 1 ]; then
     detail "执行候选版本 persistent migration"
-    if ! node "$command_link" migrate >/dev/null; then
+    # A domain can commit before the child exits. Arm snapshot restoration
+    # before launch, including interruption before the first durable write.
+    migration_committed=1
+    migration_launching=1
+    node "$command_link" migrate >/dev/null &
+    migration_pid=$!
+    migration_launching=0
+    if ! wait "$migration_pid"; then
         echo "候选版本 migration 失败，正在恢复原安装。" >&2
-        # One instance may have migrated before another failed. Restore the
-        # whole pre-upgrade snapshot, not just the application symlink.
-        migration_committed=1
         exit 1
     fi
-    migration_committed=1
+    migration_pid=
     detail "Persistent migration 已完成；旧数据快照保留至 Control/Instance 验收结束"
 fi
 if [ "$persistent_backup_ready" -eq 1 ]; then

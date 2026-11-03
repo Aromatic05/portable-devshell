@@ -551,11 +551,9 @@ try {
     } elseif ($null -ne $runtimeState.Pid -and (Test-ControlProcessRunning $runtimeState.Pid)) {
         throw "Control PID $($runtimeState.Pid) 仍在运行但 RPC 不可用；安装在停机前取消。"
     }
-    $previousCommandContent = if (Test-Path -LiteralPath $commandPath -PathType Leaf) {
-        Get-Content -Raw -LiteralPath $commandPath
-    } else {
-        $null
-    }
+    $previousCommandPresent = Test-Path -LiteralPath $commandPath -PathType Leaf
+    $previousCommandBytes = $null
+    if ($previousCommandPresent) { $previousCommandBytes = [IO.File]::ReadAllBytes($commandPath) }
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
     $candidateControlRestoreAttempted = $false
@@ -577,7 +575,13 @@ try {
         Move-Item -Force $stagingDirectory $versionDirectory
         Move-Item -LiteralPath $preparedCurrentDirectory -Destination $currentDirectory
         $cliPath = Join-Path $currentDirectory $cliRelativePath
-        Set-Content -Encoding ASCII -LiteralPath $commandPath -Value "@echo off`r`nnode `"$cliPath`" %*`r`n"
+        # binDirectory and currentDirectory are independently configurable, and
+        # cliRelativePath may itself contain Unicode. %~dp0 cannot supply those
+        # path components. Keep batch source ASCII; decode the path only in Node
+        # and launch the real CLI with its normal argv, cwd, stdio and exit code.
+        $encodedCliPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cliPath))
+        $launcher = "const r=require('node:child_process').spawnSync(process.execPath,[Buffer.from('$encodedCliPath','base64').toString('utf8'),...process.argv.slice(1)],{stdio:'inherit'});if(r.error)throw r.error;process.exit(r.status===null?1:r.status)"
+        [IO.File]::WriteAllText($commandPath, "@echo off`r`nsetlocal DisableDelayedExpansion`r`nnode -e `"$launcher`" -- %*`r`n", [Text.Encoding]::ASCII)
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
@@ -627,10 +631,10 @@ try {
                 } elseif (-not $previousVersionPresent) {
                     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $versionDirectory
                 }
-                if ($null -eq $previousCommandContent) {
+                if (-not $previousCommandPresent) {
                     Remove-Item -Force -ErrorAction SilentlyContinue $commandPath
                 } else {
-                    Set-Content -Encoding ASCII -LiteralPath $commandPath -Value $previousCommandContent
+                    [IO.File]::WriteAllBytes($commandPath, $previousCommandBytes)
                 }
             } finally {
                 Restore-WorkerAliases $targets $devshellHome $workerBackupDirectory

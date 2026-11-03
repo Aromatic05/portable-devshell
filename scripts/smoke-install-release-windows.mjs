@@ -25,9 +25,9 @@ const target = hostTarget();
 const workerName = `devshell-worker-${target}.exe`;
 const root = await createTestTempDirectory("windows-release-install-smoke");
 const release = resolve(root, "release");
-const home = resolve(root, "home");
-const installRoot = resolve(root, "install");
-const binDirectory = resolve(root, "bin");
+const home = resolve(root, "用户 空间");
+const installRoot = resolve(root, "安装 目录");
+const binDirectory = resolve(home, "命令 目录");
 const devshellHome = resolve(root, "devshell-home");
 const runtime = resolve(root, "runtime");
 const environment = {
@@ -108,7 +108,7 @@ function run(
     ignoreFailure = false,
     timeoutMs = 45_000,
 ) {
-    const result = spawnSync(executable, args, {
+    const result = spawnSync(shell ? `"${executable}"` : executable, args, {
         cwd: repositoryRoot,
         encoding: "utf8",
         env: environment,

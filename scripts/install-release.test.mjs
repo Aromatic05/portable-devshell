@@ -5,6 +5,7 @@ import {
     chmod,
     lstat,
     mkdir,
+    open,
     readFile,
     readdir,
     readlink,
@@ -574,165 +575,220 @@ test(
     },
 );
 
-test(
-    "Windows release installer activates a fresh application with the host worker",
-    {
-        skip: process.platform !== "win32",
-    },
-    async () => {
-        const root = await createTestTempDirectory(
-            "windows-release-install-test",
-        );
-        const release = resolve(root, "release");
-        const app = resolve(root, "app");
-        const home = resolve(root, "home");
-        const installRoot = resolve(root, "installed");
-        const binDirectory = resolve(root, "bin");
-        const devshellHome = resolve(root, "devshell-home");
-        const applicationVersion = "9.8.7-windows-test";
+for (const unicode of [false, true]) {
+    test(
+        `Windows release installer activates and replaces an application (${unicode ? "Unicode paths" : "ASCII paths"})`,
+        {
+            skip: process.platform !== "win32",
+        },
+        async () => {
+            const root = await createTestTempDirectory(
+                "windows-release-install-test",
+            );
+            const release = resolve(root, "release");
+            const app = resolve(root, "app");
+            const home = resolve(root, unicode ? "用户 空间" : "home");
+            const installRoot = resolve(
+                root,
+                unicode ? "安装 目录" : "installed",
+            );
+            const binDirectory = resolve(home, unicode ? "命令 目录" : "bin");
+            const devshellHome = resolve(root, "devshell-home");
+            const applicationVersion = "9.8.7-windows-test";
+            const cliDirectory = unicode ? "入口 空间" : "custom";
 
-        try {
-            await mkdir(resolve(app, "custom"), { recursive: true });
-            await mkdir(release, { recursive: true });
-            await mkdir(home, { recursive: true });
-            await writeFile(
-                resolve(app, "package.json"),
-                `${JSON.stringify(
+            try {
+                await mkdir(resolve(app, cliDirectory), { recursive: true });
+                await mkdir(release, { recursive: true });
+                await mkdir(home, { recursive: true });
+                await writeFile(
+                    resolve(app, "package.json"),
+                    `${JSON.stringify(
+                        {
+                            name: "portable-devshell",
+                            version: applicationVersion,
+                            private: true,
+                            type: "module",
+                            bin: {
+                                devshell: `./${cliDirectory}/devshell-entry.js`,
+                            },
+                            engines: { node: ">=24" },
+                        },
+                        null,
+                        2,
+                    )}\n`,
+                    "utf8",
+                );
+                await writeFile(
+                    resolve(app, "portable-devshell-install.json"),
+                    `${JSON.stringify(
+                        {
+                            minimumNodeMajor: 24,
+                            version: applicationVersion,
+                        },
+                        null,
+                        2,
+                    )}\n`,
+                    "utf8",
+                );
+                await writeFile(
+                    resolve(app, cliDirectory, "devshell-entry.js"),
+                    [
+                        "#!/usr/bin/env node",
+                        "const command = process.argv[2] ?? 'status';",
+                        "if (command === 'status') process.stdout.write('control: stopped\\n');",
+                        "else if (command === 'stop') process.exit(0);",
+                        "else if (command === 'args') { process.stdout.write(JSON.stringify({ args: process.argv.slice(3), cwd: process.cwd() })); process.exit(17); }",
+                        "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
+                        "",
+                    ].join("\n"),
+                    "utf8",
+                );
+
+                const archive = resolve(release, applicationAssetName());
+                run("tar.exe", ["-czf", archive, "-C", app, "."]);
+                await writeChecksum(archive);
+                for (const target of preinstalledTargets()) {
+                    const filename = target.startsWith("windows-")
+                        ? `devshell-worker-${target}.exe`
+                        : `devshell-worker-${target}`;
+                    const worker = resolve(release, filename);
+                    await writeFile(worker, `fake worker ${target}\n`, "utf8");
+                    await writeChecksum(worker);
+                }
+
+                const environment = {
+                    ...process.env,
+                    HOME: home,
+                    USERPROFILE: home,
+                    LOCALAPPDATA: resolve(root, "local-app-data"),
+                    PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
+                        release,
+                    ).href.replace(/\/$/u, ""),
+                    PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+                    PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
+                    PORTABLE_DEVSHELL_HOME: devshellHome,
+                };
+                const result = spawnSync(
+                    "powershell.exe",
+                    [
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        resolve(
+                            repositoryRoot,
+                            "scripts",
+                            "install-release.ps1",
+                        ),
+                    ],
                     {
-                        name: "portable-devshell",
-                        version: applicationVersion,
-                        private: true,
-                        type: "module",
-                        bin: { devshell: "./custom/devshell-entry.js" },
-                        engines: { node: ">=24" },
+                        cwd: repositoryRoot,
+                        encoding: "utf8",
+                        env: environment,
+                        timeout: 30_000,
                     },
-                    null,
-                    2,
-                )}\n`,
-                "utf8",
-            );
-            await writeFile(
-                resolve(app, "portable-devshell-install.json"),
-                `${JSON.stringify(
-                    {
-                        minimumNodeMajor: 24,
-                        version: applicationVersion,
-                    },
-                    null,
-                    2,
-                )}\n`,
-                "utf8",
-            );
-            await writeFile(
-                resolve(app, "custom", "devshell-entry.js"),
-                [
-                    "#!/usr/bin/env node",
-                    "const command = process.argv[2] ?? 'status';",
-                    "if (command === 'status') process.stdout.write('control: stopped\\n');",
-                    "else if (command === 'stop') process.exit(0);",
-                    "else { process.stderr.write(`unsupported test command: ${command}\\n`); process.exit(2); }",
-                    "",
-                ].join("\n"),
-                "utf8",
-            );
-
-            const archive = resolve(release, applicationAssetName());
-            run("tar.exe", ["-czf", archive, "-C", app, "."]);
-            await writeChecksum(archive);
-            for (const target of preinstalledTargets()) {
-                const filename = target.startsWith("windows-")
-                    ? `devshell-worker-${target}.exe`
-                    : `devshell-worker-${target}`;
-                const worker = resolve(release, filename);
-                await writeFile(worker, `fake worker ${target}\n`, "utf8");
-                await writeChecksum(worker);
-            }
-
-            const environment = {
-                ...process.env,
-                HOME: home,
-                USERPROFILE: home,
-                LOCALAPPDATA: resolve(root, "local-app-data"),
-                PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
-                    release,
-                ).href.replace(/\/$/u, ""),
-                PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
-                PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
-                PORTABLE_DEVSHELL_HOME: devshellHome,
-            };
-            const result = spawnSync(
-                "powershell.exe",
-                [
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    resolve(repositoryRoot, "scripts", "install-release.ps1"),
-                ],
-                {
-                    cwd: repositoryRoot,
-                    encoding: "utf8",
-                    env: environment,
-                    timeout: 30_000,
-                },
-            );
-            assert.equal(
-                result.status,
-                0,
-                `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`,
-            );
-
-            const command = resolve(binDirectory, "devshell.cmd");
-            const commandResult = spawnSync(command, ["status"], {
-                encoding: "utf8",
-                env: environment,
-                shell: true,
-            });
-            assert.equal(
-                commandResult.status,
-                0,
-                `${commandResult.stdout}${commandResult.stderr}`,
-            );
-            await assert.rejects(lstat(resolve(binDirectory, "pi.cmd")), {
-                code: "ENOENT",
-            });
-
-            for (const target of preinstalledTargets()) {
-                const suffix = target.startsWith("windows-") ? ".exe" : "";
+                );
                 assert.equal(
-                    (
-                        await lstat(
+                    result.status,
+                    0,
+                    `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`,
+                );
+
+                const command = resolve(binDirectory, "devshell.cmd");
+                const bytes = await readFile(command);
+                assert.ok(
+                    bytes.every((byte) => byte < 128),
+                    "batch source must be ASCII without a BOM",
+                );
+                for (const codepage of [437, 936, 65001]) {
+                    const commandResult = spawnSync(
+                        `chcp ${codepage} >nul && "%DEVSHELL_TEST_COMMAND%" status`,
+                        {
+                            cwd: home,
+                            encoding: "utf8",
+                            env: {
+                                ...environment,
+                                DEVSHELL_TEST_COMMAND: command,
+                            },
+                            shell: true,
+                            timeout: 15_000,
+                        },
+                    );
+                    assert.equal(
+                        commandResult.status,
+                        0,
+                        `${commandResult.error ?? ""}\n${commandResult.stdout}${commandResult.stderr}`,
+                    );
+                    assert.match(commandResult.stdout, /control: stopped/u);
+                }
+                const argsResult = spawnSync(
+                    '"%DEVSHELL_TEST_COMMAND%" args "two words" "中文参数"',
+                    {
+                        cwd: home,
+                        encoding: "utf8",
+                        env: { ...environment, DEVSHELL_TEST_COMMAND: command },
+                        shell: true,
+                        timeout: 15_000,
+                    },
+                );
+                assert.equal(
+                    argsResult.status,
+                    17,
+                    `${argsResult.stdout}${argsResult.stderr}`,
+                );
+                assert.deepEqual(JSON.parse(argsResult.stdout), {
+                    args: ["two words", "中文参数"],
+                    cwd: home,
+                });
+                const replaced = runInstallerRaw(environment, true);
+                assert.equal(
+                    replaced.status,
+                    0,
+                    `${replaced.stdout}${replaced.stderr}`,
+                );
+                assert.deepEqual(await readFile(command), bytes);
+                await assert.rejects(lstat(resolve(binDirectory, "pi.cmd")), {
+                    code: "ENOENT",
+                });
+
+                for (const target of preinstalledTargets()) {
+                    const suffix = target.startsWith("windows-") ? ".exe" : "";
+                    assert.equal(
+                        (
+                            await lstat(
+                                resolve(
+                                    devshellHome,
+                                    "bin",
+                                    `devshell-worker-${target}${suffix}`,
+                                ),
+                            )
+                        ).isFile(),
+                        true,
+                    );
+                }
+                for (const target of allTargets.filter(
+                    (candidate) => !preinstalledTargets().includes(candidate),
+                )) {
+                    const suffix = target.startsWith("windows-") ? ".exe" : "";
+                    await assert.rejects(
+                        lstat(
                             resolve(
                                 devshellHome,
                                 "bin",
                                 `devshell-worker-${target}${suffix}`,
                             ),
-                        )
-                    ).isFile(),
-                    true,
-                );
-            }
-            for (const target of allTargets.filter(
-                (candidate) => !preinstalledTargets().includes(candidate),
-            )) {
-                const suffix = target.startsWith("windows-") ? ".exe" : "";
-                await assert.rejects(
-                    lstat(
-                        resolve(
-                            devshellHome,
-                            "bin",
-                            `devshell-worker-${target}${suffix}`,
                         ),
-                    ),
-                    { code: "ENOENT" },
-                );
+                        { code: "ENOENT" },
+                    );
+                }
+            } finally {
+                await rm(root, { force: true, recursive: true });
             }
-        } finally {
-            await rm(root, { force: true, recursive: true });
-        }
-    },
-);
+        },
+    );
+}
 
 async function assertInstalledLayout({
     applicationVersion,
@@ -1327,6 +1383,28 @@ test(
     },
 );
 
+for (const [label, bytes] of [
+    [
+        "UTF-8 BOM and Unicode without final newline",
+        Buffer.from("\ufeff@echo off\r\nrem 原命令"),
+    ],
+    [
+        "legacy codepage bytes",
+        Buffer.from([
+            0x40, 0x72, 0x65, 0x6d, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0d, 0x0a,
+        ]),
+    ],
+    ["empty command", Buffer.alloc(0)],
+]) {
+    test(
+        `Windows installer restores exact previous CMD bytes: ${label}`,
+        { skip: process.platform !== "win32" },
+        async () => {
+            await verifyTransactionalRollback(true, bytes);
+        },
+    );
+}
+
 test("Windows release installer blocks rollback before starting a migration child", async () => {
     const source = await readFile(resolve(repositoryRoot, "scripts", "install-release.ps1"), "utf8");
     const started = source.indexOf("            $migrationStarted = $true");
@@ -1443,7 +1521,7 @@ async function verifyWindowsMigrationFailure({ crash, expectedEvents, expectedAu
         assert.equal(await readFile(resolve(devshellHome, "bin", workerAssetName()), "utf8"), "new-worker\n");
         assert.equal(await readFile(resolve(devshellHome, "bin", "devshell-worker.exe"), "utf8"), "new-worker\n");
         const command = await readFile(resolve(binDirectory, "devshell.cmd"), "utf8");
-        assert.ok(command.includes(resolve(installRoot, "current", "custom", "devshell-entry.js")));
+        assert.ok(command.includes(Buffer.from(resolve(installRoot, "current", "custom", "devshell-entry.js"), "utf8").toString("base64")));
         assert.deepEqual(JSON.parse(await readFile(resolve(devshellHome, "context.json"), "utf8")), { version: 2, sentinel: "context" });
         assert.deepEqual(JSON.parse(await readFile(resolve(devshellHome, "audit.json"), "utf8")), expectedAudit);
         assert.deepEqual((await readFile(runtimeLog, "utf8")).trim().split("\n"), expectedEvents);
@@ -1496,15 +1574,434 @@ test("Windows release installer stages all application and Worker copies before 
     assert.doesNotMatch(source.slice(shutdown, activateApp), /Copy-Item -Recurse/u);
 });
 
-async function verifyTransactionalRollback(windows) {
+test("Windows launcher Node payload preserves Unicode path, argv, cwd and exit code", async () => {
+    const root = await createTestTempDirectory("windows-launcher-payload");
+    try {
+        const cli = resolve(root, "入口 空间", "entry.mjs");
+        await mkdir(resolve(cli, ".."), { recursive: true });
+        await writeFile(
+            cli,
+            "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd() })); process.exit(17);\n",
+        );
+        const source = await readFile(
+            resolve(repositoryRoot, "scripts", "install-release.ps1"),
+            "utf8",
+        );
+        const template = source.match(/\$launcher = "([^"\r\n]+)"/u)?.[1];
+        assert.ok(template, "exercise the actual installer payload");
+        const payload = template.replace(
+            "$encodedCliPath",
+            Buffer.from(cli, "utf8").toString("base64"),
+        );
+        const outputPath = resolve(root, "output.json");
+        const output = await open(outputPath, "w");
+        try {
+            const result = spawnSync(
+                process.execPath,
+                ["-e", payload, "--", "two words", "中文参数", "--flag"],
+                { cwd: root, stdio: ["ignore", output.fd, "inherit"], timeout: 15_000 },
+            );
+            assert.equal(result.error, undefined);
+            assert.equal(result.status, 17);
+        } finally {
+            await output.close();
+        }
+        assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), {
+            argv: [cli, "two words", "中文参数", "--flag"],
+            cwd: root,
+        });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+// Real installer runs use only fixture releases and paths under a test-owned root.
+// The writer stays alive (and ignores TERM) until cleanup kills and reaps it.
+for (const shell of ["sh", "bash"]) {
+    for (const scenario of [
+        "early-TERM",
+        "partial-TERM",
+        "partial-HUP",
+        "partial-INT",
+        "failure",
+        "success",
+        "launch-gap",
+    ]) {
+        test(
+            `Unix migration rollback ordering: ${shell} ${scenario}`,
+            {
+                skip: process.platform === "win32",
+                timeout: 30_000,
+            },
+            async () => {
+                await verifyUnixMigrationInterruption(shell, scenario);
+            },
+        );
+    }
+}
+
+async function verifyUnixMigrationInterruption(shell, scenario) {
+    const root = await createTestTempDirectory(
+        "release-migration-interruption",
+    );
+    const app = resolve(root, "app");
+    const release = resolve(root, "release");
+    const installRoot = resolve(root, "installed");
+    const devshellHome = resolve(root, "state");
+    const extensionData = resolve(
+        root,
+        "data",
+        "portable-devshell",
+        "extension-data",
+    );
+    const runtimeLog = resolve(root, "runtime.log");
+    const writerPidFile = resolve(root, "writer.pid");
+    const readyFile = resolve(root, "writer.ready");
+    const oldVersion = "9.8.7-migration-old";
+    const newVersion = "9.8.8-migration-new";
+    const environment = {
+        ...process.env,
+        HOME: resolve(root, "home"),
+        USERPROFILE: resolve(root, "home"),
+        XDG_DATA_HOME: resolve(root, "data"),
+        XDG_RUNTIME_DIR: resolve(root, "runtime"),
+        TMPDIR: resolve(root, "tmp"),
+        PORTABLE_DEVSHELL_HOME: devshellHome,
+        PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
+        PORTABLE_DEVSHELL_BIN_DIR: resolve(root, "bin"),
+        PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(
+            /\/$/u,
+            "",
+        ),
+        PORTABLE_DEVSHELL_TEST_LIVE_HOME: devshellHome,
+        PORTABLE_DEVSHELL_TEST_RUNTIME_LOG: runtimeLog,
+        PORTABLE_DEVSHELL_TEST_WRITER_PID: writerPidFile,
+        PORTABLE_DEVSHELL_TEST_READY: readyFile,
+        PORTABLE_DEVSHELL_TEST_EXTENSION_DATA: extensionData,
+        PORTABLE_DEVSHELL_TEST_SCENARIO: scenario,
+    };
+    let oldControl;
+    let installer;
+    let writerPid;
+    try {
+        for (const name of [
+            environment.HOME,
+            environment.TMPDIR,
+            environment.XDG_RUNTIME_DIR,
+        ]) {
+            await mkdir(name, { recursive: true });
+        }
+        await writeTransactionalReleaseFixture({
+            app,
+            release,
+            version: oldVersion,
+            workerContent: "old-worker\n",
+        });
+        const oldCli = resolve(app, "custom", "devshell-entry.js");
+        const oldSource = await readFile(oldCli, "utf8");
+        await writeFile(
+            oldCli,
+            oldSource.replace(
+                "const command =",
+                [
+                    "if (process.argv[2] === 'start') {",
+                    "  const pidFile = process.env.PORTABLE_DEVSHELL_TEST_WRITER_PID;",
+                    "  const pid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : undefined;",
+                    "  let alive = false; if (pid) { try { process.kill(pid, 0); alive = true; } catch {} }",
+                    "  const state = readFileSync(`${process.env.PORTABLE_DEVSHELL_HOME}/config.json`, 'utf8');",
+                    "  const extension = readFileSync(`${process.env.PORTABLE_DEVSHELL_TEST_EXTENSION_DATA}/host.json`, 'utf8');",
+                    "  appendFileSync(process.env.PORTABLE_DEVSHELL_TEST_RUNTIME_LOG, `old-start:${alive ? 'writer-alive' : 'writer-dead'}:${state}:${extension}\\n`);",
+                    "  if (alive || state !== 'old-config' || extension !== 'old-host') process.exit(99);",
+                    "}",
+                    "const command =",
+                ].join("\n"),
+            ),
+        );
+        await packFixture(app, release);
+        const installed = runInstallerRaw(environment, false);
+        assert.equal(
+            installed.status,
+            0,
+            `${installed.stdout}${installed.stderr}`,
+        );
+        await writeFile(resolve(devshellHome, "config.json"), "old-config");
+        await writeFile(resolve(devshellHome, "audit.json"), "old-audit");
+        await mkdir(extensionData, { recursive: true });
+        await writeFile(resolve(extensionData, "host.json"), "old-host");
+        oldControl = await startFakeControl(
+            resolve(installRoot, "versions", oldVersion),
+            devshellHome,
+        );
+        await writeTransactionalReleaseFixture({
+            app,
+            release,
+            version: newVersion,
+            workerContent: "new-worker\n",
+        });
+        const candidateCli = resolve(app, "custom", "devshell-entry.js");
+        const candidateSource = await readFile(candidateCli, "utf8");
+        await writeFile(
+            candidateCli,
+            candidateSource.replace(
+                "const command =",
+                [
+                    "import { writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';",
+                    "if (process.argv[2] === 'migrate') {",
+                    "  const scenario = process.env.PORTABLE_DEVSHELL_TEST_SCENARIO;",
+                    "  writeFileSync(process.env.PORTABLE_DEVSHELL_TEST_WRITER_PID, String(process.pid));",
+                    "  const commit = (path, value) => { const fd = openSync(path, 'w'); writeFileSync(fd, value); fsyncSync(fd); closeSync(fd); };",
+                    "  const write = () => {",
+                    "    commit(`${process.env.PORTABLE_DEVSHELL_HOME}/config.json`, 'new-config');",
+                    "    commit(`${process.env.PORTABLE_DEVSHELL_TEST_EXTENSION_DATA}/host.json`, 'new-host');",
+                    "    commit(`${process.env.PORTABLE_DEVSHELL_HOME}/new-domain.json`, 'new-domain');",
+                    "  };",
+                    "  process.on('SIGTERM', () => {});",
+                    "  if (scenario !== 'early-TERM') write();",
+                    "  appendFileSync(process.env.PORTABLE_DEVSHELL_TEST_RUNTIME_LOG, 'migration-ready\\n');",
+                    "  writeFileSync(process.env.PORTABLE_DEVSHELL_TEST_READY, 'ready');",
+                    "  if (scenario === 'success') { commit(`${process.env.PORTABLE_DEVSHELL_HOME}/audit.json`, 'new-audit'); process.exit(0); }",
+                    "  if (scenario === 'failure') process.exit(23);",
+                    "  setInterval(scenario === 'early-TERM' ? () => {} : write, 10);",
+                    "  await new Promise(() => {});",
+                    "}",
+                    "const command =",
+                ].join("\n"),
+            ),
+        );
+        const manifestPath = resolve(app, "portable-devshell-install.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        await writeFile(
+            manifestPath,
+            JSON.stringify({ ...manifest, updatePreflight: true }),
+        );
+        const control = resolve(
+            app,
+            "node_modules",
+            "@portable-devshell",
+            "control",
+        );
+        await mkdir(resolve(control, "dist", "migration"), { recursive: true });
+        await writeFile(
+            resolve(control, "package.json"),
+            '{"type":"module"}\n',
+        );
+        await writeFile(
+            resolve(control, "dist", "migration", "Control.js"),
+            "export async function preflightControlUpdate() { return { extensions: { checkedGenerations: 0 }, migration: { required: true }, rollback: { feasible: true } }; }\n",
+        );
+        await packFixture(app, release);
+        let script = resolve(repositoryRoot, "scripts", "install-release.sh");
+        if (scenario === "launch-gap") {
+            script = resolve(root, "installer-launch-gap.sh");
+            const source = await readFile(
+                resolve(repositoryRoot, "scripts", "install-release.sh"),
+                "utf8",
+            );
+            // Stop at the exact async-launch/PID-capture boundary. Do not add
+            // production fault hooks; run a private copy of the installer.
+            await writeFile(
+                script,
+                source.replace(
+                    "    migration_pid=$!",
+                    () => [
+                        '    while [ ! -f "$PORTABLE_DEVSHELL_TEST_READY" ]; do sleep 0.01; done',
+                        "    kill -TERM $$",
+                        "    migration_pid=$!",
+                    ].join("\n"),
+                ),
+            );
+        }
+        installer = spawn(shell, [script], {
+            cwd: root,
+            env: { ...environment, PORTABLE_DEVSHELL_TEST_RUNNING: "1" },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        installer.stdout.on("data", (data) => {
+            stdout += data;
+        });
+        installer.stderr.on("data", (data) => {
+            stderr += data;
+        });
+        // An intentionally retained writer inherits the pipes in launch-gap;
+        // await the installer exit, not pipe closure.
+        const exited = new Promise((resolveExit, reject) => {
+            installer.once("error", reject);
+            installer.once("exit", (code, signal) =>
+                resolveExit({ code, signal }),
+            );
+        });
+        await waitForFixtureFile(readyFile);
+        writerPid = Number(await readFile(writerPidFile, "utf8"));
+        if (scenario !== "success" && scenario !== "failure") {
+            assert.equal(
+                await readFile(resolve(devshellHome, "config.json"), "utf8"),
+                scenario === "early-TERM" ? "old-config" : "new-config",
+            );
+            assert.equal(await readFile(resolve(devshellHome, "audit.json"), "utf8"), "old-audit");
+        }
+        if (
+            scenario.includes("-TERM") ||
+            scenario === "partial-HUP" ||
+            scenario === "partial-INT"
+        ) {
+            installer.kill(`SIG${scenario.split("-")[1]}`);
+        }
+        const result = await Promise.race([
+            exited,
+            new Promise((_, reject) => {
+                const timer = setTimeout(
+                    () =>
+                        reject(
+                            new Error(`installer timeout\n${stdout}${stderr}`),
+                        ),
+                    15_000,
+                );
+                timer.unref();
+            }),
+        ]);
+        assert.equal(result.signal, null, `${stdout}${stderr}`);
+        assert.equal(
+            result.code,
+            scenario === "success"
+                ? 0
+                : scenario === "launch-gap"
+                  ? 1
+                  : scenario === "failure"
+                    ? 1
+                    : { TERM: 143, HUP: 129, INT: 130 }[scenario.split("-")[1]],
+            `${stdout}${stderr}`,
+        );
+        const version = JSON.parse(
+            await readFile(
+                resolve(installRoot, "current", "package.json"),
+                "utf8",
+            ),
+        ).version;
+        const events = (await readFile(runtimeLog, "utf8")).trim().split("\n");
+        const snapshots = (await readdir(installRoot)).filter((name) =>
+            name.startsWith(".persistent-backup-"),
+        );
+        if (scenario === "launch-gap") {
+            assert.equal(version, newVersion);
+            assert.equal(snapshots.length, 1);
+            assert.equal(
+                await readFile(
+                    resolve(
+                        installRoot,
+                        snapshots[0],
+                        "devshell",
+                        "config.json",
+                    ),
+                    "utf8",
+                ),
+                "old-config",
+            );
+            assert.deepEqual(events, ["stop", "migration-ready"]);
+            assert.match(stderr, /PID 尚未确认/u);
+            assert.equal(process.kill(writerPid, 0), true);
+        } else {
+            assert.equal(
+                version,
+                scenario === "success" ? newVersion : oldVersion,
+            );
+            assert.equal(
+                snapshots.length,
+                0,
+                "success and completed rollback must remove snapshots",
+            );
+            assert.equal(
+                await readFile(resolve(devshellHome, "config.json"), "utf8"),
+                scenario === "success" ? "new-config" : "old-config",
+            );
+            assert.equal(
+                await readFile(resolve(extensionData, "host.json"), "utf8"),
+                scenario === "success" ? "new-host" : "old-host",
+            );
+            assert.equal(
+                await readFile(resolve(devshellHome, "audit.json"), "utf8"),
+                scenario === "success" ? "new-audit" : "old-audit",
+            );
+            assert.equal(
+                await readFile(
+                    resolve(devshellHome, "bin", workerAssetName()),
+                    "utf8",
+                ),
+                scenario === "success" ? "new-worker\n" : "old-worker\n",
+            );
+            if (scenario !== "success") {
+                await assert.rejects(
+                    lstat(resolve(devshellHome, "new-domain.json")),
+                    { code: "ENOENT" },
+                );
+                assert.equal(
+                    events[2],
+                    "old-start:writer-dead:old-config:old-host",
+                );
+                assert.deepEqual(events.slice(3), [
+                    "start",
+                    "instance:ready-local",
+                    "instance:starting-ssh",
+                    "instance:stale-local",
+                ]);
+                assert.throws(() => process.kill(writerPid, 0), {
+                    code: "ESRCH",
+                });
+            }
+        }
+    } finally {
+        if (installer?.exitCode === null) installer.kill("SIGKILL");
+        if (!writerPid) {
+            try {
+                writerPid = Number(await readFile(writerPidFile, "utf8"));
+            } catch { /* The fixture may already have exited. */ }
+        }
+        if (writerPid) {
+            try {
+                process.kill(writerPid, "SIGKILL");
+            } catch { /* The fixture may already have exited. */ }
+        }
+        oldControl?.kill("SIGKILL");
+        await rm(root, { recursive: true, force: true });
+    }
+}
+
+async function packFixture(app, release) {
+    const archive = resolve(release, applicationAssetName());
+    run(process.platform === "win32" ? "tar.exe" : "tar", [
+        "-czf",
+        archive,
+        "-C",
+        app,
+        ".",
+    ]);
+    await writeChecksum(archive);
+}
+
+async function waitForFixtureFile(path) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+        try {
+            await readFile(path);
+            return;
+        } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    throw new Error(`fixture did not become ready: ${path}`);
+}
+
+async function verifyTransactionalRollback(windows, previousCommandBytes) {
     const root = await createTestTempDirectory(
         windows ? "windows-release-rollback-test" : "release-rollback-test",
     );
     const release = resolve(root, "release");
     const app = resolve(root, "app");
-    const home = resolve(root, "home");
-    const installRoot = resolve(root, "installed");
-    const binDirectory = resolve(root, "bin");
+    const home = resolve(root, windows ? "用户 空间" : "home");
+    const installRoot = resolve(root, windows ? "安装 目录" : "installed");
+    const binDirectory = windows ? resolve(home, "命令 目录") : resolve(root, "bin");
     const devshellHome = resolve(root, "devshell-home");
     const environment = {
         ...process.env,
@@ -1543,6 +2040,10 @@ async function verifyTransactionalRollback(windows) {
             `${installed.stdout}${installed.stderr}`,
         );
 
+        const commandPath = resolve(binDirectory, windows ? "devshell.cmd" : "devshell");
+        if (previousCommandBytes !== undefined) await writeFile(commandPath, previousCommandBytes);
+        const commandBefore = await readFile(commandPath);
+
         const workerAlias = resolve(devshellHome, "bin", workerAssetName());
         const defaultAlias = resolve(
             devshellHome,
@@ -1569,6 +2070,7 @@ async function verifyTransactionalRollback(windows) {
             ),
         );
         assert.equal(restored.version, oldVersion);
+        assert.deepEqual(await readFile(commandPath), commandBefore);
         assert.equal(await readFile(workerAlias, "utf8"), "old-worker\n");
         assert.equal(await readFile(defaultAlias, "utf8"), "old-worker\n");
     } finally {
