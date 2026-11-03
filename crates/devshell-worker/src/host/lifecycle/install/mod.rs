@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use sha2::{Digest, Sha256};
 
@@ -11,8 +10,11 @@ mod platform;
 #[path = "windows.rs"]
 mod platform;
 
+use crate::daemon::process::{self, PlatformInfo, WorkerRuntimeContext};
 use crate::host::home::devshell_home;
-use crate::instance::InstanceName;
+use crate::instance::storage::InstancePaths;
+use crate::instance::{InstanceLock, InstanceName};
+use crate::transport::endpoint::channel::EndpointPaths;
 
 pub fn install_current_binary() -> Result<PathBuf, String> {
     let source = std::env::current_exe()
@@ -30,19 +32,26 @@ pub fn install_from_path(source: &Path) -> Result<PathBuf, String> {
 }
 
 pub fn start_installed_worker(binary: &Path, instance: &InstanceName) -> Result<(), String> {
-    let output = Command::new(binary)
-        .arg("start")
-        .arg("--instance")
-        .arg(instance.as_str())
-        .output()
-        .map_err(|error| format!("failed to start installed worker: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "installed worker start failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    // Enrollment needs only local readiness; its bounded connection check
+    // handles offline/retrying without waiting for Control's final Ready.
+    let paths = InstancePaths::resolve(instance)?;
+    let sockets = EndpointPaths::resolve(instance)?;
+    let _lock = InstanceLock::acquire(&paths)?;
+    if process::daemon_state(&paths, &sockets) != process::DaemonState::Stopped {
+        return Err("Worker runtime changed during enrollment; daemon preserved".to_string());
     }
-    Ok(())
+    let runtime = WorkerRuntimeContext {
+        instance: instance.clone(),
+        platform: PlatformInfo {
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+        },
+        security_mode: process::current_security_mode(),
+        worker_sha256: None,
+    };
+    crate::cli::instance::lifecycle::start::start_daemon_executable(
+        instance, &paths, &sockets, &runtime, binary,
+    )
 }
 
 fn target_key() -> Result<&'static str, String> {

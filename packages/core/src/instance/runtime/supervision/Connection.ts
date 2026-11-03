@@ -39,6 +39,10 @@ const reverseUpgradeTimeoutMs = 120_000;
 interface PendingReverseUpdate {
     target: ReverseWorkerUpdateTarget;
     generation: number;
+    connectionIdentity: object;
+    sourceVersion: string;
+    sourceSha256?: string;
+    expired: boolean;
     timer: ReturnType<typeof setTimeout>;
 }
 
@@ -257,12 +261,19 @@ export class WorkerInstanceConnection {
                     input.signal,
                 );
                 const update = this.#reverseUpdate;
-                if (update !== undefined && (
-                    input.generation <= update.generation ||
-                    verifiedHandshake.workerVersion !== update.target.version ||
-                    verifiedHandshake.workerSha256 !== update.target.sha256
-                )) {
-                    throw new Error("Reverse Worker replacement does not match the staged version and SHA256.");
+                if (update !== undefined) {
+                    const matchesTarget = verifiedHandshake.workerVersion === update.target.version &&
+                        verifiedHandshake.workerSha256 === update.target.sha256;
+                    // Advancing the original daemon's generation is serialized
+                    // with the helper's expected-generation check by its lock.
+                    // After timeout, a late helper cannot replace that daemon.
+                    const resumingExpiredWorker = update.expired && !matchesTarget &&
+                        verifiedHandshake.workerVersion === update.sourceVersion &&
+                        verifiedHandshake.workerSha256 === update.sourceSha256 &&
+                        canContinueWithWorkerVersion(verifiedHandshake, this.#config.handshake.protocolRange);
+                    if (input.generation <= update.generation || (!matchesTarget && !resumingExpiredWorker)) {
+                        throw new Error("Reverse Worker replacement does not match the staged version and SHA256.");
+                    }
                 }
             },
         });
@@ -329,7 +340,8 @@ export class WorkerInstanceConnection {
             const completingUpdate = this.#reverseUpdate;
             if (completingUpdate === undefined) {
                 try {
-                    const target = await updateReverseWorker(this.#tunnel, this.#config.name, verifiedHandshake, {
+                    const handshake = verifiedHandshake;
+                    const target = await updateReverseWorker(this.#tunnel, this.#config.name, handshake, {
                         generation: input.generation,
                         signal: input.signal,
                         isCurrent,
@@ -338,6 +350,10 @@ export class WorkerInstanceConnection {
                             const update: PendingReverseUpdate = {
                                 target,
                                 generation: input.generation,
+                                connectionIdentity: identity!,
+                                sourceVersion: handshake.workerVersion,
+                                sourceSha256: handshake.workerSha256,
+                                expired: false,
                                 timer: setTimeout(() => {
                                     void this.#expireReverseUpdate(update).catch(() => undefined);
                                 }, reverseUpgradeTimeoutMs),
@@ -392,11 +408,11 @@ export class WorkerInstanceConnection {
 
     async #expireReverseUpdate(update: PendingReverseUpdate): Promise<void> {
         if (this.#reverseUpdate !== update || this.#closed) return;
+        update.expired = true;
         const owner = {};
         this.#connectionOwner = owner;
         this.#refreshOwner = undefined;
         this.#reverseReadyIdentity = undefined;
-        const signalState = this.#signalReverseState;
         const isCurrent = () => this.#reverseUpdate === update && this.#connectionOwner === owner && !this.#closed;
         const message = "Timed out waiting for the staged Reverse Worker version and SHA256.";
         // Retain the exact target for a late successful replacement; expiry
@@ -406,9 +422,11 @@ export class WorkerInstanceConnection {
             lastErrorCode: runtimeErrorCodes.workerHandshakeFailed,
             lastErrorMessage: message,
         }, isCurrent);
-        // Best effort only: a disconnected/old Worker cannot be promised this
-        // signal. Control's failed state remains observable independently.
-        if (isCurrent()) signalState?.({ state: "failed", message });
+        // Close only the superseded transport, never the daemon. Its existing
+        // connector retries with a new generation, which fences the old helper
+        // under the instance lock before an expired source Worker can be Ready.
+        if (isCurrent() && this.#endpoint.connectionIdentity === update.connectionIdentity)
+            this.closeTransport();
     }
 
     async reconnectTransport(): Promise<InstanceSnapshot> {

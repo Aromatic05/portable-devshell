@@ -622,6 +622,7 @@ dependencies = [
  "reqwest",
  "same-file",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

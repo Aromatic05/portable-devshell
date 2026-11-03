@@ -159,6 +159,17 @@ fn running_daemon_matches_current_worker(socket_paths: &EndpointPaths) -> Result
             return Err("running Worker has the same version but a different build; daemon preserved; use an explicit upgrade to replace it".to_string());
         }
     }
+    if let Some(running_version) = running_version {
+        let running = semver::Version::parse(running_version)
+            .map_err(|_| "cannot determine running Worker version; daemon preserved".to_string())?;
+        let current =
+            semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|error| error.to_string())?;
+        if running > current {
+            return Err(format!(
+                "running Worker {running} is newer than this CLI {current}; daemon preserved"
+            ));
+        }
+    }
     let protocol = status
         .result
         .as_ref()
