@@ -72,6 +72,30 @@ import { tmpdir } from "node:os";
             : undefined;
     }
 
+    function assertLocalReferencesResolve(schema: Record<string, unknown>): void {
+        function visit(value: unknown): void {
+            if (Array.isArray(value)) {
+                for (const entry of value) visit(entry);
+                return;
+            }
+            if (typeof value !== "object" || value === null) return;
+            const record = value as Record<string, unknown>;
+            if (typeof record.$ref === "string" && record.$ref.startsWith("#/")) {
+                let target: unknown = schema;
+                for (const token of record.$ref.slice(2).split("/")) {
+                    const key = decodeURIComponent(token)
+                        .replaceAll("~1", "/").replaceAll("~0", "~");
+                    assert.ok(typeof target === "object" && target !== null, record.$ref);
+                    assert.ok(Object.hasOwn(target, key), record.$ref);
+                    target = (target as Record<string, unknown>)[key];
+                }
+                assert.notEqual(target, undefined, record.$ref);
+            }
+            for (const entry of Object.values(record)) visit(entry);
+        }
+        visit(schema);
+    }
+
 
     test(
         "MCP initialize tools/list and tools/call succeed against the frozen worker",
@@ -152,6 +176,9 @@ import { tmpdir } from "node:os";
                     inputSchema: Record<string, unknown>;
                     name: string;
                 }>;
+                for (const tool of tools) {
+                    assertLocalReferencesResolve(tool.inputSchema);
+                }
                 const bash = tools.find((tool) => tool.name === "bash_run");
                 const fileRead = tools.find(
                     (tool) => tool.name === "file_read",
@@ -226,6 +253,7 @@ import { tmpdir } from "node:os";
                             Object.entries(tmuxManage.inputSchema).filter(
                                 ([key]) =>
                                     ![
+                                        "$defs",
                                         "$schema",
                                         "properties",
                                         "required",
@@ -237,6 +265,7 @@ import { tmpdir } from "node:os";
                             Object.entries(workerTmuxSchema).filter(
                                 ([key]) =>
                                     ![
+                                        "$defs",
                                         "$schema",
                                         "properties",
                                         "required",
@@ -277,6 +306,13 @@ import { tmpdir } from "node:os";
                         "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
                     );
                     assert.notEqual(manageProperties.command, undefined);
+                    assert.deepEqual(manageProperties.command?.enum, [
+                        "list", "create", "close",
+                    ]);
+                    assert.deepEqual(manageProperties.scope?.anyOf, [
+                        { enum: ["workspace", "instance"], type: "string" },
+                        { type: "null" },
+                    ]);
                 }
                 for (const name of [
                     "file_glob",

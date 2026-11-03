@@ -104,7 +104,7 @@ function remoteEnvironmentDefinition(): ToolDefinition {
             additionalProperties: false,
             properties: {
                 command: {
-                    enum: ["help", "attach", "mask"],
+                    minLength: 1,
                     type: "string",
                 },
                 handle: {

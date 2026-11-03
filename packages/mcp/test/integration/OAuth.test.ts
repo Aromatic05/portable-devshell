@@ -250,6 +250,7 @@ test(
         const commentAdvice = createCommentAdvice();
         const commentDelivery = createCommentDelivery(comment.comment);
         const unsupportedInvocation = {
+            signal: new AbortController().signal,
             async requestInterface(): Promise<never> {
                 throw new Error(
                     "Comment ToolCall hooks must not request a host interface.",

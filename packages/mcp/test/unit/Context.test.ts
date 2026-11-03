@@ -638,7 +638,12 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
         registry.validateAndTouch("ctx-expiring", binding),
         hasCode("mcp.contextExpired"),
     );
-    assert.deepEqual(await registry.listCleanupPending(), []);
+    assert.deepEqual(
+        (await registry.listCleanupPending()).map(({ ctxId, status }) => [
+            ctxId, status,
+        ]),
+        [["ctx-expiring", "expired"]],
+    );
 });
 
 test("McpContextRegistry validates attached instances without binding ctxId authority to one instance", async () => {
@@ -852,7 +857,7 @@ test("McpContextRegistry stages expired history eviction for cleanup before dele
     );
     assert.deepEqual(
         (await registry.listCleanupPending()).map(({ ctxId }) => ctxId),
-        ["ctx-expired-old"],
+        ["ctx-expired-old", "ctx-expired-new"],
     );
     await assert.rejects(
         registry.renewForPrincipal("ctx-expired-old", { principal: "local" }),
@@ -863,6 +868,19 @@ test("McpContextRegistry stages expired history eviction for cleanup before dele
     assert.deepEqual(
         (await registry.list()).map(({ ctxId }) => ctxId),
         ["ctx-expired-new"],
+    );
+    assert.deepEqual(
+        (await registry.listCleanupPending()).map(({ ctxId, status }) => [
+            ctxId, status,
+        ]),
+        [["ctx-expired-new", "expired"]],
+    );
+
+    await registry.settleCleanup("ctx-expired-new");
+    assert.deepEqual(await registry.listCleanupPending(), []);
+    assert.deepEqual(
+        (await registry.list()).map(({ ctxId, status }) => [ctxId, status]),
+        [["ctx-expired-new", "expired"]],
     );
 });
 
