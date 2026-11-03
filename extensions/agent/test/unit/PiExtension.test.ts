@@ -193,10 +193,9 @@ test("Pi devshell structured tool failures remain errors with model-visible meta
     const result = await executePiTool(registeredTool!, "call-error", {
         changes: "...",
     });
-    const projected = JSON.parse(firstText(result)) as {
-        error?: unknown;
-    };
-    assert.deepEqual(projected.error, {
+    const modelText = firstText(result);
+    assert.match(modelText, /^error=/u);
+    assert.deepEqual(JSON.parse(modelText.slice("error=".length)), {
         code: "file.snapshotRequired",
         details: { path: "./document.txt" },
         message: "snapshot required",
