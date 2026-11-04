@@ -58,8 +58,184 @@ function Download-File([string]$Url, [string]$Destination) {
     }
 }
 
+# Windows bsdtar can lose both Unicode argv and UTF-8 member names through
+# its locale conversion. Node uses Unicode Windows filesystem APIs directly.
+# Keep this payload ASCII so Windows PowerShell 5.1 can also load it safely.
+function Expand-ApplicationArchive([string]$Archive, [string]$Destination) {
+    $script = @'
+import { constants, createReadStream } from "node:fs";
+import { copyFile, lstat, mkdir, open, readdir } from "node:fs/promises";
+import path from "node:path";
+import { createGunzip } from "node:zlib";
+
+const [archive, destination] = process.argv.slice(2);
+const root = path.resolve(destination);
+if (!(await lstat(root)).isDirectory() || (await lstat(root)).isSymbolicLink() ||
+    (await readdir(root)).length !== 0) throw new Error("Extraction requires an empty real directory");
+const input = createReadStream(archive);
+const unzip = createGunzip();
+input.on("error", error => unzip.destroy(error));
+input.pipe(unzip);
+const chunks = unzip[Symbol.asyncIterator]();
+let pending = Buffer.alloc(0);
+async function read(size) {
+    const result = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+        if (!pending.length) {
+            const next = await chunks.next();
+            if (next.done) throw new Error("Truncated tar archive");
+            pending = next.value;
+        }
+        const count = Math.min(size - offset, pending.length);
+        pending.copy(result, offset, 0, count);
+        pending = pending.subarray(count);
+        offset += count;
+    }
+    return result;
+}
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+const text = bytes => utf8.decode(bytes.subarray(0, bytes.indexOf(0) < 0 ? bytes.length : bytes.indexOf(0)));
+function octal(bytes) {
+    const value = text(bytes).trim();
+    if (!/^[0-7]+$/.test(value)) throw new Error("Invalid tar number");
+    const number = Number.parseInt(value, 8);
+    if (!Number.isSafeInteger(number)) throw new Error("Oversized tar number");
+    return number;
+}
+function pax(bytes) {
+    const values = Object.create(null);
+    for (let offset = 0; offset < bytes.length;) {
+        const space = bytes.indexOf(32, offset);
+        const digits = bytes.subarray(offset, space).toString("ascii");
+        const length = Number(digits);
+        if (space < offset || !/^[1-9][0-9]*$/.test(digits) ||
+            !Number.isSafeInteger(length) || length <= space - offset + 1 ||
+            offset + length > bytes.length || bytes[offset + length - 1] !== 10) {
+            throw new Error("Invalid PAX record");
+        }
+        const record = utf8.decode(bytes.subarray(space + 1, offset + length - 1));
+        const equals = record.indexOf("=");
+        if (equals < 1) throw new Error("Invalid PAX key");
+        const key = record.slice(0, equals);
+        if (/sparse/i.test(key) || (key === "SCHILY.filetype" && record.slice(equals + 1) === "sparse")) {
+            throw new Error("Sparse tar entries are unsupported");
+        }
+        values[key] = record.slice(equals + 1);
+        offset += length;
+    }
+    return values;
+}
+function memberPath(name) {
+    // Apply Windows rules even in the Linux payload tests: reject traversal,
+    // drive/UNC paths, ADS, device names and Win32-normalized aliases.
+    if (!name || [...name].some(character => character.charCodeAt(0) < 32) ||
+        /[\\:<>"|?*]/u.test(name) || name.startsWith("/")) {
+        throw new Error("Unsafe tar path: " + name);
+    }
+    const parts = name.split("/").filter(part => part !== "." && part !== "");
+    if (parts.some(part => part === ".." || /[. ]$/u.test(part) ||
+        /^(con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/iu.test(part))) {
+        throw new Error("Unsafe tar path: " + name);
+    }
+    return path.join(root, ...parts);
+}
+async function directory(target) {
+    const relative = path.relative(root, target);
+    let current = root;
+    for (const part of relative ? relative.split(path.sep) : []) {
+        current = path.join(current, part);
+        await mkdir(current).catch(error => { if (error.code !== "EEXIST") throw error; });
+        const info = await lstat(current);
+        if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe tar directory");
+    }
+}
+const files = new Set();
+let globalPax = Object.create(null), localPax = Object.create(null), longName, longLink;
+try {
+    while (true) {
+        const header = await read(512);
+        if (header.every(byte => byte === 0)) {
+            if (!(await read(512)).every(byte => byte === 0)) throw new Error("Invalid tar terminator");
+            // Drain gzip to validate its CRC, and reject hidden appended entries.
+            if (pending.some(byte => byte !== 0)) throw new Error("Trailing tar data");
+            for await (const chunk of { [Symbol.asyncIterator]: () => chunks }) {
+                if (chunk.some(byte => byte !== 0)) throw new Error("Trailing tar data");
+            }
+            break;
+        }
+        const checksum = header.reduce((sum, byte, index) => sum + (index >= 148 && index < 156 ? 32 : byte), 0);
+        if (checksum !== octal(header.subarray(148, 156))) throw new Error("Invalid tar checksum");
+        const type = String.fromCharCode(header[156] || 48);
+        let size = octal(header.subarray(124, 136));
+        if (["x", "g", "L", "K"].includes(type)) {
+            if (size > 1024 * 1024) throw new Error("Oversized tar metadata");
+            const data = await read(size);
+            await read((512 - size % 512) % 512);
+            if (type === "L") longName = text(data);
+            else if (type === "K") longLink = text(data);
+            else if (type === "g") Object.assign(globalPax, pax(data));
+            else Object.assign(localPax, pax(data));
+            continue;
+        }
+        if (!["0", "1", "5"].includes(type)) throw new Error("Unsupported tar entry type: " + type);
+        const attributes = { ...globalPax, ...localPax };
+        if (attributes.size !== undefined) {
+            if (!/^[0-9]+$/.test(attributes.size)) throw new Error("Invalid PAX size");
+            size = Number(attributes.size);
+            if (!Number.isSafeInteger(size)) throw new Error("Oversized PAX entry");
+        }
+        const prefix = header.subarray(257, 263).equals(Buffer.from("ustar\0"))
+            ? text(header.subarray(345, 500)) : "";
+        const name = attributes.path ?? longName ?? ((prefix ? prefix + "/" : "") + text(header.subarray(0, 100)));
+        const target = memberPath(name);
+        localPax = Object.create(null);
+        const linkName = attributes.linkpath ?? longLink ?? text(header.subarray(157, 257));
+        longName = longLink = undefined;
+        if (type === "5") {
+            if (size !== 0) throw new Error("Nonempty tar directory");
+            await directory(target);
+        } else if (type === "1") {
+            // pnpm deploy can contain hardlinked files. Materialize a copy of
+            // an already extracted file; never create filesystem links.
+            const source = memberPath(linkName);
+            if (size !== 0 || !files.has(source)) throw new Error("Unsafe tar hardlink");
+            await directory(path.dirname(target));
+            await copyFile(source, target, constants.COPYFILE_EXCL);
+            files.add(target);
+        } else {
+            if (target === root) throw new Error("Invalid tar file path");
+            await directory(path.dirname(target));
+            // Never follow or overwrite a link or a duplicate archive member.
+            const file = await open(target, "wx");
+            try {
+                for (let remaining = size; remaining > 0;) {
+                    const data = await read(Math.min(remaining, 64 * 1024));
+                    await file.writeFile(data);
+                    remaining -= data.length;
+                }
+            } finally { await file.close(); }
+            files.add(target);
+            await read((512 - size % 512) % 512);
+        }
+    }
+} finally {
+    input.destroy();
+    unzip.destroy();
+}
+'@
+    $scriptPath = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-extract-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+    try {
+        [IO.File]::WriteAllText($scriptPath, $script, [Text.UTF8Encoding]::new($false))
+        & node $scriptPath $Archive $Destination
+        if ($LASTEXITCODE -ne 0) { throw "无法解压 portable-devshell 应用包。" }
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $scriptPath
+    }
+}
+
 function Set-InstallMetadata([string]$ManifestPath, [string]$WorkerReleaseDirectoryUrl) {
-    $manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+    $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $ManifestPath | ConvertFrom-Json
     $manifest | Add-Member -NotePropertyName workerReleaseDirectoryUrl -NotePropertyValue $WorkerReleaseDirectoryUrl.TrimEnd('/') -Force
     $json = $manifest | ConvertTo-Json -Depth 20
     [IO.File]::WriteAllText($ManifestPath, "$json`n", [Text.UTF8Encoding]::new($false))
@@ -140,7 +316,7 @@ function Get-ApplicationBinRelativePath([string]$ApplicationDirectory, [string]$
     if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
         throw "应用包缺少 package.json：$packageManifestPath"
     }
-    $packageManifest = Get-Content -Raw -LiteralPath $packageManifestPath | ConvertFrom-Json
+    $packageManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $packageManifestPath | ConvertFrom-Json
     $binProperty = $packageManifest.bin.PSObject.Properties[$BinName]
     $entry = if ($null -eq $binProperty) { "" } else { [string]$binProperty.Value }
     if ([string]::IsNullOrWhiteSpace($entry)) {
@@ -398,7 +574,6 @@ function Backup-WorkerAliases([string[]]$Targets, [string]$DevshellHome, [string
 
 Write-InstallStep "检查安装环境"
 if ($null -eq (Get-Command node -ErrorAction SilentlyContinue)) { throw "缺少必需命令：node" }
-if ($null -eq (Get-Command tar.exe -ErrorAction SilentlyContinue)) { throw "缺少必需命令：tar.exe" }
 $nodeVersion = & node -p "Number(process.versions.node.split('.')[0])"
 if ($LASTEXITCODE -ne 0 -or [int]$nodeVersion -lt 24) {
     throw "portable-devshell 需要 Node.js 24 或更高版本。"
@@ -461,11 +636,10 @@ try {
     Write-InstallStep "验证应用包并准备安装"
     $appDirectory = Join-Path $temporary "app"
     New-Item -ItemType Directory -Force -Path $appDirectory | Out-Null
-    & tar.exe -xzf $appArchive -C $appDirectory
-    if ($LASTEXITCODE -ne 0) { throw "无法解压 portable-devshell 应用包。" }
+    Expand-ApplicationArchive $appArchive $appDirectory
     $manifestPath = Join-Path $appDirectory "portable-devshell-install.json"
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw "发布包缺少 portable-devshell-install.json。" }
-    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
     $version = [string]$manifest.version
     if ([string]::IsNullOrWhiteSpace($version)) { throw "应用包版本无效。" }
     $candidatePreflight = ($manifest.PSObject.Properties.Name -contains "updatePreflight") -and [bool]$manifest.updatePreflight

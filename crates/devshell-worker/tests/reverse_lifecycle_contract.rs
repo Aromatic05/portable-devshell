@@ -147,6 +147,9 @@ fn reverse_initialization_failure_repeated_start_and_repaired_config_recover() {
                 result => panic!("no recovered Reverse connection: {result:?}"),
             }
         };
+        // BSD accepted sockets inherit O_NONBLOCK from the listener. A read
+        // timeout alone does not make WebSocket reads block until daemon stop.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();

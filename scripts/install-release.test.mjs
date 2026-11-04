@@ -19,7 +19,7 @@ import { basename, resolve } from "node:path";
 import test from "node:test";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { createGzip } from "node:zlib";
+import { createGzip, gunzipSync, gzipSync } from "node:zlib";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -29,7 +29,7 @@ const { pack } = createRequire(
 
 // Use the workspace's JS tar writer: Windows tar.exe can crash while creating
 // archives containing Unicode names, even with --format=gnutar. Extraction
-// still goes through the real installer's system tar.
+// goes through the installer route: Node on Windows, system tar on Unix.
 async function writeApplicationFixtureArchive(archive, directory) {
     const output = pack();
     const writing = pipeline(output, createGzip(), createWriteStream(archive));
@@ -69,7 +69,7 @@ async function writeApplicationFixtureArchive(archive, directory) {
     }
 }
 
-test("application fixture archive preserves Unicode members through system tar extraction", async () => {
+test("application fixture archive preserves Unicode archive path and members through release extraction", async () => {
     const root = await createTestTempDirectory("release-archive-test");
     const app = resolve(root, "源 空间");
     const destination = resolve(root, "解包 空间");
@@ -81,13 +81,174 @@ test("application fixture archive preserves Unicode members through system tar e
         await mkdir(destination);
         await writeFile(resolve(app, member), payload);
         await writeApplicationFixtureArchive(archive, app);
-        run(process.platform === "win32" ? "tar.exe" : "tar", [
-            "-xzf",
-            archive,
-            "-C",
-            destination,
-        ]);
+        if (process.platform === "win32") {
+            // Execute the actual installer function under Windows PowerShell 5.1,
+            // including its Unicode native argv and temporary Node script bridge.
+            await runWindowsArchiveExtraction(root, archive, destination);
+        } else {
+            run("tar", ["-xzf", archive, "-C", destination]);
+        }
         assert.deepEqual(await readFile(resolve(destination, member)), payload);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+async function windowsArchiveExtractor() {
+    const source = await readFile(resolve(repositoryRoot, "scripts/install-release.ps1"), "utf8");
+    const match = source.match(/function Expand-ApplicationArchive\([^]*?\n\}\n(?=\nfunction Set-InstallMetadata)/u);
+    assert.ok(match, "installer extraction function must remain directly testable");
+    const payload = match[0].match(/ {4}\$script = @'\r?\n([^]*?)\r?\n'@/u);
+    assert.ok(payload);
+    return { functionSource: match[0], payload: payload[1] };
+}
+
+async function runWindowsArchiveExtraction(root, archive, destination) {
+    const { functionSource } = await windowsArchiveExtractor();
+    const script = resolve(root, "extract.ps1");
+    await writeFile(script, `\ufeffparam([string]$Archive, [string]$Destination)\n$ErrorActionPreference = "Stop"\n${functionSource}\nExpand-ApplicationArchive $Archive $Destination\n`);
+    run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, archive, destination]);
+}
+
+async function runArchivePayload(root, archive, destination) {
+    const { payload } = await windowsArchiveExtractor();
+    const script = resolve(root, "extract.mjs");
+    await writeFile(script, payload);
+    return spawnSync(process.execPath, [script, archive, destination], {
+        encoding: "utf8",
+        timeout: 30_000,
+    });
+}
+
+async function writeTarEntries(archive, entries) {
+    const output = pack();
+    const writing = pipeline(output, createGzip(), createWriteStream(archive));
+    writing.catch(() => {});
+    try {
+        for (const { data = Buffer.alloc(0), ...header } of entries) {
+            await new Promise((resolveEntry, reject) => {
+                output.entry({ ...header, size: data.length }, data,
+                    error => error ? reject(error) : resolveEntry());
+            });
+        }
+        output.finalize();
+        await writing;
+    } catch (error) {
+        output.destroy(error);
+        await writing.catch(() => {});
+        throw error;
+    }
+}
+
+test("Windows installer Node extractor preserves UTF-8 PAX paths, long names and binary contents", async () => {
+    const root = await createTestTempDirectory("windows-extractor-test");
+    const archive = resolve(root, "发布 应用.tar.gz");
+    const destination = resolve(root, "解包 空间");
+    const names = ["入口 空间/devshell-entry.js", `${"a".repeat(120)}.js`, `${"prefix/".repeat(15)}entry.js`, "large.bin", "empty"];
+    const payload = Buffer.from(Array.from({ length: 160_001 }, (_, index) => index % 256));
+    try {
+        await mkdir(destination);
+        await writeTarEntries(archive, names.map(name => ({ name, data: name === "empty" ? Buffer.alloc(0) : payload })));
+        const result = await runArchivePayload(root, archive, destination);
+        assert.equal(result.status, 0, `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`);
+        for (const name of names) {
+            assert.deepEqual(await readFile(resolve(destination, name)), name === "empty" ? Buffer.alloc(0) : payload);
+        }
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Windows installer Node extractor rejects traversal, Windows aliases, unsafe links and duplicate files", async () => {
+    const root = await createTestTempDirectory("windows-extractor-safety-test");
+    const archive = resolve(root, "archive.tar.gz");
+    const destination = resolve(root, "app");
+    const cases = [
+        ...["../escape", "目录/../../escape", "/absolute", "C:/drive", "C:relative", "a\\..\\escape", "file:stream", "NUL.txt", "dir/COM1", "trailing. /file", "trailing./file"].map(name => [{ name }]),
+        [{ name: "link", type: "symlink", linkname: "../outside" }],
+        [{ name: "link", type: "link", linkname: "../outside" }],
+        [{ name: "link", type: "link", linkname: "missing" }],
+        [{ name: "original", data: Buffer.from("safe") }, { name: "link", type: "link", linkname: "original", pax: { linkpath: "../escape" } }],
+        [{ name: "fifo", type: "fifo" }],
+        [{ name: "innocent", pax: { path: "../escape" } }],
+        [{ name: "same", data: Buffer.from("first") }, { name: "same", data: Buffer.from("second") }],
+    ];
+    try {
+        for (const entries of cases) {
+            await mkdir(destination);
+            await writeTarEntries(archive, entries);
+            const result = await runArchivePayload(root, archive, destination);
+            assert.notEqual(result.status, 0, JSON.stringify(entries));
+            assert.match(result.stderr, /Unsafe tar|Unsupported tar|EEXIST/u);
+            await assert.rejects(lstat(resolve(root, "escape")), { code: "ENOENT" });
+            await rm(destination, { recursive: true, force: true });
+        }
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+function updateTarChecksum(header) {
+    header.fill(32, 148, 156);
+    const sum = header.reduce((total, byte) => total + byte, 0);
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, "ascii");
+}
+
+test("Windows installer Node extractor handles GNU long names and materializes safe hardlinks", async () => {
+    const root = await createTestTempDirectory("windows-extractor-gnu-test");
+    const archive = resolve(root, "archive.tar.gz");
+    const destination = resolve(root, "app");
+    const longName = `${"long".repeat(35)}.js`;
+    const payload = Buffer.from("GNU file contents\n");
+    try {
+        await mkdir(destination);
+        await writeTarEntries(archive, [
+            { name: "././@LongLink", data: Buffer.from(`${longName}\0`) },
+            { name: "placeholder", data: payload },
+            { name: "././@LongLink", data: Buffer.from(`${longName}\0`) },
+            { name: "copy.js", type: "link", linkname: "placeholder" },
+        ]);
+        const tar = gunzipSync(await readFile(archive));
+        tar[156] = "L".charCodeAt(0);
+        updateTarChecksum(tar.subarray(0, 512));
+        tar[2048 + 156] = "K".charCodeAt(0);
+        updateTarChecksum(tar.subarray(2048, 2560));
+        const fileHeader = tar.subarray(1024, 1536);
+        fileHeader.write("ustar ", 257, "ascii");
+        // GNU stores other metadata where USTAR stores the path prefix.
+        fileHeader.write("1234567", 345, "ascii");
+        updateTarChecksum(fileHeader);
+        await writeFile(archive, gzipSync(tar));
+        const result = await runArchivePayload(root, archive, destination);
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(await readFile(resolve(destination, longName)), payload);
+        assert.deepEqual(await readFile(resolve(destination, "copy.js")), payload);
+        assert.equal((await lstat(resolve(destination, "copy.js"))).nlink, 1);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("Windows installer Node extractor rejects corrupt and truncated archives", async () => {
+    const root = await createTestTempDirectory("windows-extractor-corrupt-test");
+    const archive = resolve(root, "archive.tar.gz");
+    const destination = resolve(root, "app");
+    try {
+        await writeTarEntries(archive, [{ name: "entry.js", data: Buffer.from("contents") }]);
+        const gzip = await readFile(archive);
+        const tar = gunzipSync(gzip);
+        const badChecksum = Buffer.from(tar);
+        badChecksum[0] ^= 1;
+        const badCrc = Buffer.from(gzip);
+        badCrc[badCrc.length - 8] ^= 1;
+        for (const bytes of [gzipSync(badChecksum), gzipSync(tar.subarray(0, 514)), gzip.subarray(0, gzip.length - 5), badCrc]) {
+            await mkdir(destination);
+            await writeFile(archive, bytes);
+            const result = await runArchivePayload(root, archive, destination);
+            assert.notEqual(result.status, 0);
+            assert.match(result.stderr, /Invalid tar checksum|Truncated tar archive|unexpected end|incorrect data check/u);
+            await rm(destination, { recursive: true, force: true });
+        }
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -676,7 +837,7 @@ for (const unicode of [false, true]) {
                 unicode ? "安装 目录" : "installed",
             );
             const binDirectory = resolve(home, unicode ? "命令 目录" : "bin");
-            const devshellHome = resolve(root, "devshell-home");
+            const devshellHome = resolve(root, unicode ? "状态 空间" : "devshell-home");
             const applicationVersion = "9.8.7-windows-test";
             const cliDirectory = unicode ? "入口 空间" : "custom";
 
