@@ -8,7 +8,11 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use support::TestEnv;
 
-fn finish(mut child: Child) -> Output {
+fn finish(child: Child) -> Output {
+    finish_with_diagnostics(child, String::new)
+}
+
+fn finish_with_diagnostics(mut child: Child, diagnostics: impl FnOnce() -> String) -> Output {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if child.try_wait().unwrap().is_some() {
@@ -17,7 +21,7 @@ fn finish(mut child: Child) -> Output {
         if Instant::now() >= deadline {
             child.kill().ok();
             let output = child.wait_with_output().unwrap();
-            panic!("lifecycle command hung: {output:?}");
+            panic!("lifecycle command hung: {output:?}; {}", diagnostics());
         }
         thread::sleep(Duration::from_millis(25));
     }
@@ -33,10 +37,26 @@ fn run(mut command: Command) -> Output {
     )
 }
 
-fn start(env: &TestEnv, instance: &str) -> Output {
+fn start(env: &TestEnv, instance: &str, phase: &str) -> Output {
     let mut command = env.std_command();
     command.args(["start", "--instance", instance]);
-    run(command)
+    finish_with_diagnostics(
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+        || {
+            let root = env.instance_root(instance);
+            format!(
+                "start phase: {phase}; pid: {:?}; generation: {:?}; connection: {:?}; daemon log: {:?}",
+                fs::read_to_string(root.join("state/worker.pid")),
+                fs::read_to_string(root.join("state/reverse-generation")),
+                fs::read_to_string(root.join("state/reverse-connection.json")),
+                fs::read_to_string(root.join("logs/worker.log")),
+            )
+        },
+    )
 }
 
 fn connection(env: &TestEnv, instance: &str) -> Value {
@@ -84,7 +104,7 @@ fn reverse_initialization_failure_repeated_start_and_repaired_config_recover() {
         Some("https://127.0.0.1:8443"),
     );
 
-    let first = start(&env, instance);
+    let first = start(&env, instance, "initial invalid config");
     assert!(!first.status.success(), "{first:?}");
     assert!(
         String::from_utf8_lossy(&first.stderr)
@@ -96,7 +116,7 @@ fn reverse_initialization_failure_repeated_start_and_repaired_config_recover() {
     assert_eq!(first_state["state"], "failed");
     assert!(first_state["generation"].as_u64().unwrap() > 0);
 
-    let second = start(&env, instance);
+    let second = start(&env, instance, "retry invalid config");
     assert!(!second.status.success(), "{second:?}");
     assert!(
         String::from_utf8_lossy(&second.stderr)
@@ -146,7 +166,7 @@ fn reverse_initialization_failure_repeated_start_and_repaired_config_recover() {
         // Keep Ready observable until the test explicitly stops its daemon.
         while socket.read().is_ok() {}
     });
-    let recovered = start(&env, instance);
+    let recovered = start(&env, instance, "repaired config");
     assert!(recovered.status.success(), "{recovered:?}");
     let recovered: Value = serde_json::from_slice(&recovered.stdout).unwrap();
     assert_eq!(recovered["started"], false);

@@ -15,11 +15,36 @@ pub fn process_is_running(pid: u32) -> bool {
             if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
                 return !proc_stat_has_exited(&stat);
             }
+            #[cfg(target_os = "macos")]
+            if let Some(exited) = macos_process_has_exited(pid) {
+                return !exited;
+            }
             // An unreadable process state is not evidence of termination.
             true
         }
         Err(_) => false,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_has_exited(pid: u32) -> Option<bool> {
+    use nix::libc;
+
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of_val(&info) as libc::c_int;
+    // XNU requires a nonzero arg to include zombies for PROC_PIDTBSDINFO.
+    // Unlike waitid, this also works in a separate stop CLI, which is not the
+    // daemon's parent. Never reap another caller's child to test liveness.
+    let count = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            1,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    (count == size && info.pbi_pid == pid).then_some(info.pbi_status == libc::SZOMB)
 }
 
 #[cfg(target_os = "linux")]
@@ -138,7 +163,7 @@ mod tests {
         assert!(!super::proc_stat_has_exited("unreadable"));
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn terminated_unreaped_child_is_stopped_before_parent_waits() {
         use nix::libc;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { createRequire } from "node:module";
 import {
     chmod,
     lstat,
@@ -15,10 +17,81 @@ import {
 } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import test from "node:test";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { createGzip } from "node:zlib";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const { pack } = createRequire(
+    new URL("../packages/core/package.json", import.meta.url),
+)("tar-stream");
+
+// Use the workspace's JS tar writer: Windows tar.exe can crash while creating
+// archives containing Unicode names, even with --format=gnutar. Extraction
+// still goes through the real installer's system tar.
+async function writeApplicationFixtureArchive(archive, directory) {
+    const output = pack();
+    const writing = pipeline(output, createGzip(), createWriteStream(archive));
+    // Observe pipeline failures immediately, including while reading entries.
+    writing.catch(() => {});
+    try {
+        async function append(relative = ".") {
+            const path = resolve(directory, relative);
+            const metadata = await lstat(path);
+            assert.ok(metadata.isDirectory() || metadata.isFile());
+            const data = metadata.isFile() ? await readFile(path) : undefined;
+            await new Promise((resolveEntry, reject) => {
+                output.entry(
+                    {
+                        name: relative,
+                        type: metadata.isDirectory() ? "directory" : "file",
+                        mode: metadata.mode & 0o777,
+                        size: data?.length ?? 0,
+                    },
+                    data,
+                    (error) => (error ? reject(error) : resolveEntry()),
+                );
+            });
+            if (metadata.isDirectory()) {
+                for (const name of (await readdir(path)).sort()) {
+                    await append(`${relative}/${name}`);
+                }
+            }
+        }
+        await append();
+        output.finalize();
+        await writing;
+    } catch (error) {
+        output.destroy(error);
+        await writing.catch(() => {});
+        throw error;
+    }
+}
+
+test("application fixture archive preserves Unicode members through system tar extraction", async () => {
+    const root = await createTestTempDirectory("release-archive-test");
+    const app = resolve(root, "源 空间");
+    const destination = resolve(root, "解包 空间");
+    const archive = resolve(root, "发布 应用.tar.gz");
+    const member = "入口 空间/devshell-entry.js";
+    const payload = Buffer.from("console.log('中文参数');\n");
+    try {
+        await mkdir(resolve(app, "入口 空间"), { recursive: true });
+        await mkdir(destination);
+        await writeFile(resolve(app, member), payload);
+        await writeApplicationFixtureArchive(archive, app);
+        run(process.platform === "win32" ? "tar.exe" : "tar", [
+            "-xzf",
+            archive,
+            "-C",
+            destination,
+        ]);
+        assert.deepEqual(await readFile(resolve(destination, member)), payload);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
 
 // Model an external terminal without changing the installer ownership guard.
 // Guard tests add their intentional Worker markers after this clean baseline.
@@ -656,9 +729,7 @@ for (const unicode of [false, true]) {
                 );
 
                 const archive = resolve(release, applicationAssetName());
-                // Avoid the suspected Windows bsdtar PAX Unicode conversion
-                // fault via the GNU writer; retain all Unicode entries/paths.
-                run("tar.exe", ["--format=gnutar", "-czf", archive, "-C", app, "."]);
+                await writeApplicationFixtureArchive(archive, app);
                 await writeChecksum(archive);
                 for (const target of preinstalledTargets()) {
                     const filename = target.startsWith("windows-")
