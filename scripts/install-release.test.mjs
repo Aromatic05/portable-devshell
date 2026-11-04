@@ -94,8 +94,10 @@ test("application fixture archive preserves Unicode archive path and members thr
     }
 });
 
-async function windowsArchiveExtractor() {
-    const source = await readFile(resolve(repositoryRoot, "scripts/install-release.ps1"), "utf8");
+async function windowsArchiveExtractor(source) {
+    source ??= await readFile(resolve(repositoryRoot, "scripts/install-release.ps1"), "utf8");
+    // Windows checkouts may use CRLF, including inside the Node here-string.
+    source = source.replaceAll("\r\n", "\n");
     const match = source.match(/function Expand-ApplicationArchive\([^]*?\n\}\n(?=\nfunction Set-InstallMetadata)/u);
     assert.ok(match, "installer extraction function must remain directly testable");
     const payload = match[0].match(/ {4}\$script = @'\r?\n([^]*?)\r?\n'@/u);
@@ -103,15 +105,15 @@ async function windowsArchiveExtractor() {
     return { functionSource: match[0], payload: payload[1] };
 }
 
-async function runWindowsArchiveExtraction(root, archive, destination) {
-    const { functionSource } = await windowsArchiveExtractor();
+async function runWindowsArchiveExtraction(root, archive, destination, source) {
+    const { functionSource } = await windowsArchiveExtractor(source);
     const script = resolve(root, "extract.ps1");
     await writeFile(script, `\ufeffparam([string]$Archive, [string]$Destination)\n$ErrorActionPreference = "Stop"\n${functionSource}\nExpand-ApplicationArchive $Archive $Destination\n`);
     run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, archive, destination]);
 }
 
-async function runArchivePayload(root, archive, destination) {
-    const { payload } = await windowsArchiveExtractor();
+async function runArchivePayload(root, archive, destination, source) {
+    const { payload } = await windowsArchiveExtractor(source);
     const script = resolve(root, "extract.mjs");
     await writeFile(script, payload);
     return spawnSync(process.execPath, [script, archive, destination], {
@@ -119,6 +121,38 @@ async function runArchivePayload(root, archive, destination) {
         timeout: 30_000,
     });
 }
+
+test("Windows archive extractor parses LF and CRLF sources identically and executes the CRLF-derived payload", async () => {
+    const source = (await readFile(resolve(repositoryRoot, "scripts/install-release.ps1"), "utf8")).replaceAll("\r\n", "\n");
+    const crlfSource = source.replaceAll("\n", "\r\n");
+    const extracted = await windowsArchiveExtractor(source);
+    assert.deepEqual(await windowsArchiveExtractor(crlfSource), extracted);
+    assert.ok(extracted.functionSource.startsWith("function Expand-ApplicationArchive("));
+    assert.ok(extracted.payload.length > 0);
+    for (const input of [source, crlfSource]) {
+        await assert.rejects(windowsArchiveExtractor(input.replace("function Expand-ApplicationArchive(", "function Missing-ApplicationArchive(")), /installer extraction function must remain directly testable/u);
+    }
+    const root = await createTestTempDirectory("windows-extractor-crlf-test");
+    const archive = resolve(root, "发布 应用.tar.gz");
+    const destination = resolve(root, "解包 空间");
+    const member = "入口 空间/devshell-entry.js";
+    const payload = Buffer.from("console.log('中文参数');\n");
+    try {
+        await mkdir(destination);
+        await writeTarEntries(archive, [{ name: member, data: payload }]);
+        const result = await runArchivePayload(root, archive, destination, crlfSource);
+        assert.equal(result.status, 0, `${result.error?.stack ?? ""}\n${result.stdout}${result.stderr}`);
+        assert.deepEqual(await readFile(resolve(destination, member)), payload);
+        if (process.platform === "win32") {
+            await rm(destination, { recursive: true });
+            await mkdir(destination);
+            await runWindowsArchiveExtraction(root, archive, destination, crlfSource);
+            assert.deepEqual(await readFile(resolve(destination, member)), payload);
+        }
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
 
 async function writeTarEntries(archive, entries) {
     const output = pack();
