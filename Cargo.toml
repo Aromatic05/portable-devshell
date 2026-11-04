@@ -2,3 +2,10 @@
 members = ["crates/devshell-worker"]
 exclude = ["crates/psmux"]
 resolver = "2"
+
+# Full executable identity is on the daemon readiness path, including in Debug.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3

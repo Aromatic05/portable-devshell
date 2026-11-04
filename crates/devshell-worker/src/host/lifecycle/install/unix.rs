@@ -222,7 +222,7 @@ mod tests {
         .join()
         .unwrap();
         let alias = home.path().join("bin/devshell-worker");
-        assert_eq!(alias.canonicalize().unwrap(), other);
+        assert_eq!(alias.canonicalize().unwrap(), other.canonicalize().unwrap());
         assert_eq!(
             hex(&Sha256::digest(fs::read(&prepared).unwrap())),
             target_sha
@@ -235,7 +235,7 @@ mod tests {
             Command::new(&other).output().unwrap().stdout,
             b"instance-B-U"
         );
-        assert_eq!(alias.canonicalize().unwrap(), other);
+        assert_eq!(alias.canonicalize().unwrap(), other.canonicalize().unwrap());
     }
 
     #[cfg(target_os = "linux")]

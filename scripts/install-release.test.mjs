@@ -20,6 +20,16 @@ import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
+// Model an external terminal without changing the installer ownership guard.
+// Guard tests add their intentional Worker markers after this clean baseline.
+function externalTerminalEnv() {
+    const env = { ...process.env };
+    delete env.DEVSHELL_WORKER_TOOL;
+    delete env.DEVSHELL_MODEL_CTX_ID;
+    delete env.DEVSHELL_MODEL_PARENT_CALL_ID;
+    return env;
+}
+
 const allTargets = [
     "linux-x64",
     "linux-arm64",
@@ -40,7 +50,7 @@ test(
     { skip: process.platform !== "win32" },
     () => {
         const env = {
-            ...process.env,
+            ...externalTerminalEnv(),
             DEVSHELL_WORKER_TOOL: "1",
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-worker-tool-release",
         };
@@ -58,7 +68,7 @@ test(
     { skip: process.platform === "win32" },
     () => {
         const env = {
-            ...process.env,
+            ...externalTerminalEnv(),
             DEVSHELL_WORKER_TOOL: "1",
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-worker-tool-release",
         };
@@ -78,7 +88,7 @@ test(
     () => {
         const result = runInstallerRaw(
             {
-                ...process.env,
+                ...externalTerminalEnv(),
                 DEVSHELL_MODEL_CTX_ID: "ctx-self-upgrade-test",
                 DEVSHELL_MODEL_PARENT_CALL_ID: "call-self-upgrade-test",
                 PORTABLE_DEVSHELL_RELEASE_BASE_URL: "file:///nonexistent-self-upgrade-release",
@@ -207,7 +217,7 @@ test(
             }
 
             const environment = {
-                ...process.env,
+                ...externalTerminalEnv(),
                 HOME: home,
                 XDG_DATA_HOME: resolve(root, "data"),
                 PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -426,7 +436,7 @@ test(
             }
 
             const result = runInstaller({
-                ...process.env,
+                ...externalTerminalEnv(),
                 HOME: home,
                 XDG_DATA_HOME: resolve(root, "data"),
                 PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -547,7 +557,7 @@ test(
                     cwd: repositoryRoot,
                     encoding: "utf8",
                     env: {
-                        ...process.env,
+                        ...externalTerminalEnv(),
                         HOME: home,
                         XDG_DATA_HOME: resolve(root, "data"),
                         PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -646,7 +656,9 @@ for (const unicode of [false, true]) {
                 );
 
                 const archive = resolve(release, applicationAssetName());
-                run("tar.exe", ["-czf", archive, "-C", app, "."]);
+                // Avoid the suspected Windows bsdtar PAX Unicode conversion
+                // fault via the GNU writer; retain all Unicode entries/paths.
+                run("tar.exe", ["--format=gnutar", "-czf", archive, "-C", app, "."]);
                 await writeChecksum(archive);
                 for (const target of preinstalledTargets()) {
                     const filename = target.startsWith("windows-")
@@ -658,7 +670,7 @@ for (const unicode of [false, true]) {
                 }
 
                 const environment = {
-                    ...process.env,
+                    ...externalTerminalEnv(),
                     HOME: home,
                     USERPROFILE: home,
                     LOCALAPPDATA: resolve(root, "local-app-data"),
@@ -930,7 +942,7 @@ test(
         const binDirectory = resolve(root, "bin");
         const devshellHome = resolve(root, "devshell-home");
         const environment = {
-            ...process.env,
+            ...externalTerminalEnv(),
             HOME: home,
             XDG_DATA_HOME: resolve(root, "data"),
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -1004,7 +1016,7 @@ test(
         const runtimeLog = resolve(root, "runtime.log");
         let oldControl;
         const environment = {
-            ...process.env,
+            ...externalTerminalEnv(),
             HOME: home,
             XDG_DATA_HOME: resolve(root, "data"),
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -1100,7 +1112,7 @@ test(
         const devshellHome = resolve(root, "devshell-home");
         const runtimeLog = resolve(root, "runtime.log");
         const environment = {
-            ...process.env,
+            ...externalTerminalEnv(),
             HOME: home,
             XDG_DATA_HOME: resolve(root, "data"),
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -1192,7 +1204,7 @@ test(
         const devshellHome = resolve(root, "devshell-home");
         const runtimeLog = resolve(root, "runtime.log");
         const environment = {
-            ...process.env,
+            ...externalTerminalEnv(),
             HOME: home,
             XDG_DATA_HOME: resolve(root, "data"),
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -1290,7 +1302,7 @@ test(
         const devshellHome = resolve(root, "devshell-home");
         const runtimeLog = resolve(root, "runtime.log");
         const environment = {
-            ...process.env,
+            ...externalTerminalEnv(),
             HOME: home,
             XDG_DATA_HOME: resolve(root, "data"),
             PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(
@@ -1452,7 +1464,7 @@ async function verifyWindowsMigrationFailure({ crash, expectedEvents, expectedAu
     const devshellHome = resolve(root, "devshell-home");
     const runtimeLog = resolve(root, "runtime.log");
     const environment = {
-        ...process.env,
+        ...externalTerminalEnv(),
         HOME: resolve(root, "home"),
         USERPROFILE: resolve(root, "home"),
         LOCALAPPDATA: resolve(root, "local-app-data"),
@@ -1660,7 +1672,7 @@ async function verifyUnixMigrationInterruption(shell, scenario) {
     const oldVersion = "9.8.7-migration-old";
     const newVersion = "9.8.8-migration-new";
     const environment = {
-        ...process.env,
+        ...externalTerminalEnv(),
         HOME: resolve(root, "home"),
         USERPROFILE: resolve(root, "home"),
         XDG_DATA_HOME: resolve(root, "data"),
@@ -1745,11 +1757,11 @@ async function verifyUnixMigrationInterruption(shell, scenario) {
             candidateSource.replace(
                 "const command =",
                 [
-                    "import { writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';",
+                    "import { writeFileSync, openSync, fsyncSync, closeSync, renameSync } from 'node:fs';",
                     "if (process.argv[2] === 'migrate') {",
                     "  const scenario = process.env.PORTABLE_DEVSHELL_TEST_SCENARIO;",
                     "  writeFileSync(process.env.PORTABLE_DEVSHELL_TEST_WRITER_PID, String(process.pid));",
-                    "  const commit = (path, value) => { const fd = openSync(path, 'w'); writeFileSync(fd, value); fsyncSync(fd); closeSync(fd); };",
+                    "  const commit = (path, value) => { const pending = `${path}.pending`; const fd = openSync(pending, 'w'); writeFileSync(fd, value); fsyncSync(fd); closeSync(fd); renameSync(pending, path); };",
                     "  const write = () => {",
                     "    commit(`${process.env.PORTABLE_DEVSHELL_HOME}/config.json`, 'new-config');",
                     "    commit(`${process.env.PORTABLE_DEVSHELL_TEST_EXTENSION_DATA}/host.json`, 'new-host');",
@@ -2004,7 +2016,7 @@ async function verifyTransactionalRollback(windows, previousCommandBytes) {
     const binDirectory = windows ? resolve(home, "命令 目录") : resolve(root, "bin");
     const devshellHome = resolve(root, "devshell-home");
     const environment = {
-        ...process.env,
+        ...externalTerminalEnv(),
         HOME: home,
         XDG_DATA_HOME: resolve(root, "data"),
         PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(

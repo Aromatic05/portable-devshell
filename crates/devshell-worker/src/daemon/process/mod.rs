@@ -179,16 +179,44 @@ pub fn read_runtime_context() -> Result<WorkerRuntimeContext, String> {
 
 pub fn current_worker_sha256() -> Option<String> {
     use sha2::{Digest, Sha256};
+    use std::io::Read;
     static SHA: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     SHA.get_or_init(|| {
         #[cfg(target_os = "linux")]
         let executable = std::path::PathBuf::from("/proc/self/exe");
         #[cfg(not(target_os = "linux"))]
         let executable = std::env::current_exe().ok()?;
-        let bytes = fs::read(executable).ok()?;
-        Some(format!("{:x}", Sha256::digest(bytes)))
+        let mut file = fs::File::open(executable).ok()?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = match file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return None,
+            };
+            digest.update(&buffer[..count]);
+        }
+        Some(format!("{:x}", digest.finalize()))
     })
     .clone()
+}
+
+#[cfg(test)]
+mod content_identity_tests {
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn streaming_identity_matches_full_executable_sha256() {
+        let executable = std::env::current_exe().unwrap();
+        let bytes = std::fs::read(executable).unwrap();
+        assert!(bytes.len() > 64 * 1024, "exercise multiple hash chunks");
+        assert_eq!(
+            super::current_worker_sha256(),
+            Some(format!("{:x}", Sha256::digest(&bytes)))
+        );
+    }
 }
 
 pub fn current_security_mode() -> SecurityMode {

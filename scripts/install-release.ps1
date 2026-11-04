@@ -603,7 +603,7 @@ try {
             Restore-InstalledControl $cliPath $runtimeState
         } catch {
             if ($migrationCommitted) {
-                try { Stop-InstalledControl $commandPath $devshellHome } catch {}
+                try { Stop-InstalledControl $cliPath $devshellHome } catch {}
                 throw "候选 Control 无法恢复真实运行态；persistent migration 已提交，禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
             }
             throw
@@ -613,7 +613,7 @@ try {
         if (-not $activated -and -not $migrationStarted) {
             if ($candidateControlRestoreAttempted) {
                 try {
-                    Stop-InstalledControl $commandPath $devshellHome
+                    Stop-InstalledControl $cliPath $devshellHome
                 } catch {
                     throw "候选 Control 无法安全停止；为避免让运行进程与磁盘 generation 不一致，拒绝自动回滚。 $($_.Exception.Message)"
                 }

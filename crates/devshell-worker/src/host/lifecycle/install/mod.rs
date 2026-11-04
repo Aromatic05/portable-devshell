@@ -177,15 +177,18 @@ mod previous_content_tests {
         let other_sha = hex(&Sha256::digest(b"other"));
         let other = platform::install(b"other", home.path(), "linux-x64", &other_sha).unwrap();
         assert_eq!(
-            previous_binary(home.path(), "linux-x64", &sha).unwrap(),
-            cached
+            previous_binary(home.path(), "linux-x64", &sha)
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            cached.canonicalize().unwrap()
         );
         assert_eq!(
             home.path()
                 .join("bin/devshell-worker")
                 .canonicalize()
                 .unwrap(),
-            other
+            other.canonicalize().unwrap()
         );
     }
 
@@ -204,7 +207,7 @@ mod previous_content_tests {
         let other_sha = hex(&Sha256::digest(b"other"));
         let other = platform::install(b"other", home.path(), "linux-x64", &other_sha).unwrap();
         assert_eq!(verify_path(&saved, &sha).unwrap(), saved);
-        assert_eq!(alias.canonicalize().unwrap(), other);
+        assert_eq!(alias.canonicalize().unwrap(), other.canonicalize().unwrap());
         // With no cached P, discovering U must not claim it is the old daemon.
         assert!(
             previous_binary(home.path(), "linux-x64", &sha)
@@ -229,7 +232,7 @@ mod previous_content_tests {
                 .unwrap_err()
                 .contains("not a content file")
         );
-        assert_eq!(alias.canonicalize().unwrap(), other);
+        assert_eq!(alias.canonicalize().unwrap(), other.canonicalize().unwrap());
     }
 
     #[test]
