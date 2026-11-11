@@ -117,11 +117,11 @@ class ContextToolRuntime {
         let committed = false;
         let alertCleanupWorkspace: string | undefined;
         try {
-            await this.#contexts.cleanup.reconcile(record.ctxId);
             if (!resolution.created) {
                 record = await this.#touchContext(record, context);
                 resolution = { ...resolution, record };
             }
+            await this.#contexts.cleanup.reconcile(record.ctxId);
 
             const generation = this.#requireGeneration(context.instance);
             try {
@@ -373,16 +373,13 @@ class ContextToolRuntime {
 
     async #touchContext(
         record: ContextRecord,
-        context: ToolCallContext,
+        context: ToolCallContext & { instance: string },
     ): Promise<ContextRecord> {
-        const principal = this.#principal(context);
-        return record.status === "expired"
-            ? await this.#contexts.registry.renewForPrincipal(record.ctxId, {
-                  principal,
-              })
-            : await this.#contexts.registry.validateAndTouch(record.ctxId, {
-                  principal,
-              });
+        return await this.#contexts.resolve({
+            ctxId: record.ctxId,
+            principal: this.#principal(context),
+            touch: true,
+        });
     }
 
     #expose(

@@ -44,7 +44,7 @@ function environmentInfoDefinition(): ToolDefinition {
             },
         },
         description:
-            "Prepare the current Context before using other DevShell tools. If no Context is bound, use the workspace path already supplied by the user, or ask the user for its absolute path. Existing Contexts and expired leases can be reused.",
+            "Prepare the current workspace. If no Context is bound, use the workspace path already supplied by the user or ask for its absolute path. Idle Contexts are restored automatically on tool use; no explicit renewal is needed.",
         group: "environ",
         inputSchema: {
             additionalProperties: false,

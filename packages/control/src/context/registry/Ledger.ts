@@ -114,6 +114,8 @@ export class ContextCleanupLedger implements ContextCleanupLedgerPort {
             }
             await this.#host.mutate(() => {
                 record.cleanupPending = false;
+                if (record.status === "expired")
+                    record.environments = record.environments.map(({ temporaryDirectory: _collected, ...environment }) => environment);
             });
         });
     }

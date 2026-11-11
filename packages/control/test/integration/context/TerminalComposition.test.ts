@@ -19,7 +19,9 @@ function deferred() {
 }
 
 for (const reason of ["disabled", "expired"] as const) {
-    test(`Factory Context ${reason} notifies each attachment once and pins both through reload`, { timeout: 10000 }, async (t) => {
+    test(reason === "disabled"
+        ? "Factory disabled Context notifies each attachment once through reload"
+        : "Factory expired Context releases references without retiring business state", { timeout: 10000 }, async (t) => {
         let clock = Date.now();
         t.mock.method(Date, "now", () => clock);
         const home = await createTestTempDirectory(`context-terminal-${reason}`);
@@ -91,18 +93,29 @@ for (const reason of ["disabled", "expired"] as const) {
             clock = Date.parse(record.expiresAt) + 1;
         }
         const pending = reason === "disabled" ? state.contexts.api.disable(record.ctxId) : state.reconcile();
-        await entered.promise;
-        await state.extensions.control.reload("terminal");
-        assert.equal(runtimes[0]!.state, "draining");
-        assert.equal(runtimes[0]!.inFlight, 2);
-        assert.deepEqual(disposed, []);
-        finish.resolve();
+        if (reason === "disabled") {
+            await entered.promise;
+            await state.extensions.control.reload("terminal");
+            assert.equal(runtimes[0]!.state, "draining");
+            assert.equal(runtimes[0]!.inFlight, 2);
+            assert.deepEqual(disposed, []);
+            finish.resolve();
+        }
         await pending;
+        if (reason === "expired") await state.extensions.control.reload("terminal");
         await state.contexts.api.cleanup.reconcile(record.ctxId);
         if (reason === "disabled") await state.contexts.api.disable(record.ctxId);
-        assert.deepEqual(events, ["alpha", "beta"].map((instance) => ({ runtime: 1, ctxId: record.ctxId, instance, reason })));
+        assert.deepEqual(events, reason === "disabled"
+            ? ["alpha", "beta"].map((instance) => ({ runtime: 1, ctxId: record.ctxId, instance, reason }))
+            : []);
         assert.deepEqual(releases.sort(), ["alpha", "beta"]);
-        assert.equal(JSON.parse(await readFile(paths.contextsFile, "utf8")).contexts[0].cleanupPending, false);
+        const persisted = JSON.parse(await readFile(paths.contextsFile, "utf8"));
+        if (reason === "expired") {
+            assert.deepEqual(persisted.contexts, []);
+            assert.equal((await state.contexts.api.registry.lookup(record.ctxId, { principal: "test" })).status, "expired");
+        } else {
+            assert.equal(persisted.contexts[0].cleanupPending, false);
+        }
         assert.deepEqual(disposed, [1]);
     });
 }

@@ -181,6 +181,7 @@ test("Context registers definitions and executes environ_info through ToolCall h
         disable: (ctxId) => runtime.api.disable(ctxId),
         detachInstance: (instance) => runtime.api.detachInstance(instance),
         environment: {
+            recover: (ctxId, instance) => baseEnvironment.recover(ctxId, instance),
             attachRemote: (ctxId, handle, workspace, signal) =>
                 baseEnvironment.attachRemote(ctxId, handle, workspace, signal),
             ensurePrepared: (ctxId, instance, workspace) =>
@@ -409,6 +410,7 @@ test("T4 environ tools preserve structured unavailable and offline error contrac
         disable: (ctxId) => runtime.api.disable(ctxId),
         detachInstance: (instance) => runtime.api.detachInstance(instance),
         environment: {
+            recover: (ctxId, instance) => baseEnvironment.recover(ctxId, instance),
             attachRemote: async () => {
                 throw createRemoteError({
                     code: runtimeErrorCodes.reverseSelfManagedOffline,

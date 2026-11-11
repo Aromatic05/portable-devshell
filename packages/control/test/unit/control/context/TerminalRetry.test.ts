@@ -7,7 +7,9 @@ import { createContextRuntime } from "../../../../src/context/index.ts";
 import type { ContextEnvironmentRetiredEvent } from "../../../../src/context/Api.ts";
 
 for (const reason of ["disabled", "expired"] as const) {
-    test(`${reason} retirement retains failed attachment debt across restart without replaying successful attachments`, async (t) => {
+    test(reason === "disabled"
+        ? "disabled retirement retains failed attachment debt across restart"
+        : "expired GC preserves Context identity without retiring business state", async (t) => {
         let now = Date.now();
         t.mock.method(Date, "now", () => now);
         const root = await mkdtemp(join(tmpdir(), "context-terminal-retry-"));
@@ -32,35 +34,35 @@ for (const reason of ["disabled", "expired"] as const) {
         await runtime.api.renew(record.ctxId);
         assert.deepEqual(events, []);
         if (reason === "expired") now = Date.parse(record.expiresAt) + 1;
-        if (reason === "disabled")
-            await assert.rejects(runtime.api.disable(record.ctxId), /cleanup was incomplete/u);
-        else {
-            const warnings: unknown[] = [];
-            t.mock.method(console, "warn", (...args: unknown[]) => { warnings.push(args); });
+        if (reason === "expired") {
             await runtime.reconcile();
-            assert.ok(warnings.length > 0);
+            assert.deepEqual(events, []);
+            assert.deepEqual(JSON.parse(await readFile(contextFile, "utf8")).contexts, []);
+            runtime.close();
+            const restarted = createContextRuntime(options);
+            await restarted.initialize();
+            assert.equal((await restarted.api.resolve({ ctxId: record.ctxId, principal: "test", touch: true })).status, "active");
+            failing = false;
+            await restarted.api.disable(record.ctxId);
+            assert.deepEqual(events, ["alpha", "beta"].map((instance) => ({ ctxId: record.ctxId, instance, reason: "disabled" })));
+            restarted.close();
+            return;
         }
+        await assert.rejects(runtime.api.disable(record.ctxId), /cleanup was incomplete/u);
         const stored = JSON.parse(await readFile(contextFile, "utf8")).contexts[0];
         assert.equal(stored.cleanupPending, true);
         assert.deepEqual(stored.retiredEnvironmentInstances, ["alpha"]);
         assert.equal((await runtime.api.registry.listCleanupPending()).length, 1);
-        if (reason === "expired") await assert.rejects(runtime.api.renew(record.ctxId));
         runtime.close();
         failing = false;
         const restarted = createContextRuntime(options);
         await restarted.initialize();
         await restarted.reconcile();
         await restarted.reconcile();
-        if (reason === "disabled") await restarted.api.disable(record.ctxId);
+        await restarted.api.disable(record.ctxId);
         assert.deepEqual(events, ["alpha", "beta", "beta"].map((instance) => ({ ctxId: record.ctxId, instance, reason })));
         assert.deepEqual(await restarted.api.registry.listCleanupPending(), []);
         assert.equal(JSON.parse(await readFile(contextFile, "utf8")).contexts[0].cleanupPending, false);
-        if (reason === "expired") {
-            await restarted.api.renew(record.ctxId);
-            assert.equal(events.length, 3);
-            await restarted.api.disable(record.ctxId);
-            assert.deepEqual(events.slice(3), ["alpha", "beta"].map((instance) => ({ ctxId: record.ctxId, instance, reason: "disabled" })));
-        }
         restarted.close();
     });
 }

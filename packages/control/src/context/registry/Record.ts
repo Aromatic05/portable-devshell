@@ -47,14 +47,6 @@ export function invalidExternalBinding() {
     );
 }
 
-export function expiredContext(ctxId: string, expiresAt: string) {
-    return contextError(
-        contextErrorCodes.expired,
-        "ctxId lease has expired. Call environ_info to reactivate the same Context.",
-        { ctxId, expiresAt },
-    );
-}
-
 export function disabledContext(ctxId: string) {
     return contextError(
         contextErrorCodes.disabled,

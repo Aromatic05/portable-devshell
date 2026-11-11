@@ -45,10 +45,12 @@ test("round3 Context denied touches cannot extend the owner's durable lease or e
     assert.equal(await readFile(filePath, "utf8"), durable);
     assert.equal((await registry.lookup(owner.ctxId, { principal: "owner" })).lastAccessedAt, owner.lastAccessedAt);
     now = 2000;
-    await assert.rejects(registry.validateAndTouch(owner.ctxId, { principal: "owner" }), { code: "mcp.contextExpired" });
+    await assert.rejects(registry.validateAndTouch(owner.ctxId, { principal: "attacker" }), { code: "mcp.contextInvalid" });
+    assert.equal(await readFile(filePath, "utf8"), durable);
+    assert.equal((await registry.validateAndTouch(owner.ctxId, { principal: "owner" })).status, "active");
     const reloaded = new ContextRegistry({ filePath, now: () => now, ttlMs: 1000 });
     await reloaded.initialize();
-    await assert.rejects(reloaded.validate(owner.ctxId, { principal: "owner" }), { code: "mcp.contextExpired" });
+    assert.equal((await reloaded.validate(owner.ctxId, { principal: "owner" })).status, "active");
 });
 
 test("round3 Context rebinding one principal's session leaves the other principal and the old explicit Context intact", async () => {

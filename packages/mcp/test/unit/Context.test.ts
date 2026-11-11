@@ -596,7 +596,7 @@ test("McpContextRegistry rolls back in-memory mutations when persistence fails",
     }
 });
 
-test("McpContextRegistry distinguishes invalid and expired ctxId values", async () => {
+test("McpContextRegistry rejects invalid ids but transparently renews expired Contexts", async () => {
     let now = 1_000;
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-expiring",
@@ -626,24 +626,22 @@ test("McpContextRegistry distinguishes invalid and expired ctxId values", async 
     const passive = await registry.validate("ctx-expiring", binding);
     assert.equal(passive.expiresAt, "1970-01-01T00:00:01.100Z");
     now = 1_101;
-    await assert.rejects(
-        registry.validate("ctx-expiring", binding),
-        hasCode("mcp.contextExpired"),
-    );
-    await assert.rejects(
-        registry.validateAndTouch("ctx-expiring", binding),
-        hasCode("mcp.contextExpired"),
-    );
-    await assert.rejects(
-        registry.validateAndTouch("ctx-expiring", binding),
-        hasCode("mcp.contextExpired"),
-    );
+    assert.equal((await registry.validate("ctx-expiring", binding)).status, "expired");
     assert.deepEqual(
         (await registry.listCleanupPending()).map(({ ctxId, status }) => [
             ctxId, status,
         ]),
         [["ctx-expiring", "expired"]],
     );
+    await assert.rejects(
+        registry.validateAndTouch("ctx-expiring", { principal: "other" }),
+        hasCode("mcp.contextInvalid"),
+    );
+    const recovered = await registry.validateAndTouch("ctx-expiring", binding);
+    assert.equal(recovered.status, "active");
+    assert.equal(recovered.expiresAt, "1970-01-01T00:00:01.201Z");
+    assert.equal(recovered.environments[0]?.workspace, "/workspace");
+    assert.deepEqual(await registry.listCleanupPending(), []);
 });
 
 test("McpContextRegistry validates attached instances without binding ctxId authority to one instance", async () => {
@@ -820,7 +818,7 @@ test("McpContextRegistry never compacts terminal Context cleanup debt", async ()
     assert.deepEqual(await registry.list(), []);
 });
 
-test("McpContextRegistry stages expired history eviction for cleanup before deletion", async () => {
+test("McpContextRegistry retains expired identity after cleanup and terminal compaction", async () => {
     let now = 1_000;
     const ids = ["ctx-expired-old", "ctx-expired-new"];
     let index = 0;
@@ -837,16 +835,10 @@ test("McpContextRegistry stages expired history eviction for cleanup before dele
     };
     await registry.create(binding);
     now = 1_011;
-    await assert.rejects(
-        registry.validateAndTouch("ctx-expired-old", binding),
-        hasCode("mcp.contextExpired"),
-    );
+    assert.equal((await registry.validate("ctx-expired-old", binding)).status, "expired");
     await registry.create(binding);
     now = 1_022;
-    await assert.rejects(
-        registry.validateAndTouch("ctx-expired-new", binding),
-        hasCode("mcp.contextExpired"),
-    );
+    assert.equal((await registry.validate("ctx-expired-new", binding)).status, "expired");
 
     assert.deepEqual(
         (await registry.list()).map(({ ctxId, status }) => [ctxId, status]),
@@ -859,15 +851,10 @@ test("McpContextRegistry stages expired history eviction for cleanup before dele
         (await registry.listCleanupPending()).map(({ ctxId }) => ctxId),
         ["ctx-expired-old", "ctx-expired-new"],
     );
-    await assert.rejects(
-        registry.renewForPrincipal("ctx-expired-old", { principal: "local" }),
-        hasCode("mcp.contextExpired"),
-    );
-
     await registry.settleCleanup("ctx-expired-old");
     assert.deepEqual(
         (await registry.list()).map(({ ctxId }) => ctxId),
-        ["ctx-expired-new"],
+        ["ctx-expired-old", "ctx-expired-new"],
     );
     assert.deepEqual(
         (await registry.listCleanupPending()).map(({ ctxId, status }) => [
@@ -880,8 +867,11 @@ test("McpContextRegistry stages expired history eviction for cleanup before dele
     assert.deepEqual(await registry.listCleanupPending(), []);
     assert.deepEqual(
         (await registry.list()).map(({ ctxId, status }) => [ctxId, status]),
-        [["ctx-expired-new", "expired"]],
+        [["ctx-expired-old", "expired"], ["ctx-expired-new", "expired"]],
     );
+    const renewed = await registry.renewForPrincipal("ctx-expired-old", { principal: "local" });
+    assert.equal(renewed.status, "active");
+    assert.equal(renewed.environments[0]?.workspace, "/workspace");
 });
 
 test("McpContextRegistry persists environment cleanup debt across workspace replacement and mask", async () => {

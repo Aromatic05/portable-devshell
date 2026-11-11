@@ -1,11 +1,11 @@
 import { ContextChangeHub } from "./Change.js";
+import { ContextIdentityArchive } from "./Archive.js";
 import { ContextCleanupLedger } from "./Ledger.js";
 import {
     invalidContext,
     invalidRemoteHandle,
     maskedInstance,
     invalidExternalBinding,
-    expiredContext,
     disabledContext,
     isCtxId,
     cloneRecord,
@@ -23,12 +23,14 @@ import {
     isMissing,
 } from "./Record.js";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
     type ContextBinding,
     type ContextEnvironment,
+    type ContextEnvironmentCleanup,
     type ContextEnvironmentBinding,
     type ContextExternalBinding,
     type ContextInstanceReference,
@@ -53,6 +55,7 @@ import {
 
 export class ContextRegistry implements ContextRegistryPort {
     readonly changes = new ContextChangeHub();
+    #archive?: ContextIdentityArchive;
     readonly #publicRecords = new Map<string, string>();
     readonly #contexts = new Map<string, ContextStoredRecord>();
     readonly #ledger: ContextCleanupLedger;
@@ -102,12 +105,27 @@ export class ContextRegistry implements ContextRegistryPort {
             if (this.#initialized) {
                 return;
             }
+            if (this.#filePath !== undefined) {
+                await mkdir(dirname(this.#filePath), { recursive: true, mode: 0o700 });
+                const path = `${this.#filePath}.identity.sqlite3`;
+                if (existsSync(path)) this.#archive = new ContextIdentityArchive(path);
+            }
             await this.#load();
             const previous = cloneContextMap(this.#contexts);
-            const expired = this.#expireOverdue(this.#now());
-            const compacted = this.#compactTerminalContexts();
-            const changed = expired || compacted;
             try {
+                const expired = this.#expireOverdue(this.#now());
+                let collected = false;
+                if (this.#filePath !== undefined)
+                    for (const record of this.#contexts.values()) {
+                        if (record.status !== "expired" || record.cleanupPending !== false ||
+                            (record.pendingEnvironmentCleanup?.length ?? 0) > 0) continue;
+                        this.#archive ??= new ContextIdentityArchive(`${this.#filePath}.identity.sqlite3`);
+                        this.#archive.collect(record);
+                        this.#contexts.delete(record.ctxId);
+                        collected = true;
+                    }
+                const compacted = this.#compactTerminalContexts();
+                const changed = expired || collected || compacted;
                 if (changed) {
                     await this.#persist();
                 }
@@ -117,6 +135,11 @@ export class ContextRegistry implements ContextRegistryPort {
                 throw error;
             }
         });
+    }
+
+    close(): void {
+        this.#archive?.close();
+        this.#archive = undefined;
     }
 
     async create(binding: ContextBinding): Promise<ContextRecord> {
@@ -132,7 +155,7 @@ export class ContextRegistry implements ContextRegistryPort {
             }
             const now = this.#now();
             let ctxId = this.#idFactory();
-            while (this.#contexts.has(ctxId)) {
+            while (this.#contexts.has(ctxId) || this.#archive?.has(ctxId)) {
                 ctxId = `ctx-${randomUUID()}`;
             }
             const at = new Date(now).toISOString();
@@ -175,7 +198,7 @@ export class ContextRegistry implements ContextRegistryPort {
         return await this.#run(async () => {
             this.#assertInitialized();
             return cloneRecordForRead(
-                this.#record(ctxId, binding.principal),
+                this.#record(ctxId, binding.principal, false),
                 this.#now(),
             );
         });
@@ -188,10 +211,12 @@ export class ContextRegistry implements ContextRegistryPort {
         return await this.#run(async () => {
             this.#assertInitialized();
             const record = this.#record(ctxId);
-            const now = await this.#requireActive(record);
             if (record.principal !== binding.principal) {
                 throw invalidContext(ctxId);
             }
+            if (record.status === "expired" || Date.parse(record.expiresAt) <= this.#now())
+                return await this.#renew(record);
+            const now = await this.#requireActive(record);
             await this.#touchRecord(record, now);
             return cloneRecord(record);
         });
@@ -203,8 +228,6 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<ContextRecord> {
         const record = await this.lookup(ctxId, binding);
         if (record.status === "disabled") throw disabledContext(ctxId);
-        if (record.status === "expired")
-            throw expiredContext(ctxId, record.expiresAt);
         return record;
     }
 
@@ -214,7 +237,7 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<ContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#record(ctxId);
+            const record = this.#record(ctxId, undefined, false);
             await this.#requireActive(record);
             if ((record.maskedInstances ?? []).includes(instance)) {
                 throw maskedInstance(ctxId, instance);
@@ -232,7 +255,7 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<ContextEnvironment | undefined> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#activeRecord(ctxId);
+            const record = this.#activeRecord(ctxId, false);
             const environment = contextEnvironment(record, instance);
             return environment === undefined ? undefined : { ...environment };
         });
@@ -244,7 +267,7 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<void> {
         await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#activeRecord(ctxId);
+            const record = this.#activeRecord(ctxId, false);
             if ((record.maskedInstances ?? []).includes(instance)) {
                 throw maskedInstance(ctxId, instance);
             }
@@ -254,6 +277,8 @@ export class ContextRegistry implements ContextRegistryPort {
     async detachInstance(instance: string): Promise<ContextRecord[]> {
         return await this.#run(async () => {
             this.#assertInitialized();
+            for (const archived of this.#archive?.byInstance(instance) ?? [])
+                this.#record(archived.ctxId);
             const affected = [...this.#contexts.values()].filter(
                 (record) =>
                     record.environments.some(
@@ -322,6 +347,10 @@ export class ContextRegistry implements ContextRegistryPort {
             ) {
                 throw invalidExternalBinding();
             }
+            if (external !== undefined)
+                for (const externalBinding of external.bindings)
+                    for (const previous of this.#archive?.byExternal(externalBinding, external.principal) ?? [])
+                        this.#record(previous.ctxId);
             await this.#mutateAndPersist(() => {
                 const index = record.environments.findIndex(
                     (environment) => environment.instance === binding.instance,
@@ -378,10 +407,7 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<ContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
+            const record = this.#record(ctxId);
             if (
                 !record.environments.some(
                     (environment) => environment.instance === instance,
@@ -430,7 +456,7 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<string> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#activeRecord(ctxId);
+            const record = this.#activeRecord(ctxId, false);
             const reference = record.remoteInstanceHandles?.find(
                 (candidate) => candidate.handle === handle,
             );
@@ -501,7 +527,7 @@ export class ContextRegistry implements ContextRegistryPort {
             const now = this.#now();
             this.#publishPublicChanges(now);
             return {
-                contexts: [...this.#contexts.values()].map((record) =>
+                contexts: this.#allRecords().map((record) =>
                     cloneRecordForRead(record, now),
                 ),
                 revision: this.changes.revision,
@@ -513,7 +539,7 @@ export class ContextRegistry implements ContextRegistryPort {
         return await this.#run(async () => {
             this.#assertInitialized();
             const now = this.#now();
-            return [...this.#contexts.values()]
+            return (query.status === "active" ? [...this.#contexts.values()] : this.#allRecords())
                 .map((record) => cloneRecordForRead(record, now))
                 .filter(
                     (record) =>
@@ -568,10 +594,15 @@ export class ContextRegistry implements ContextRegistryPort {
         return this.#ledger.listEnvironmentCleanup(...args);
     }
 
-    recordEnvironmentCleanup(
-        ...args: Parameters<ContextCleanupLedger["recordEnvironmentCleanup"]>
-    ): ReturnType<ContextCleanupLedger["recordEnvironmentCleanup"]> {
-        return this.#ledger.recordEnvironmentCleanup(...args);
+    async recordEnvironmentCleanup(
+        ctxId: string,
+        cleanup: ContextEnvironmentCleanup,
+    ): Promise<void> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            this.#record(ctxId);
+        });
+        await this.#ledger.recordEnvironmentCleanup(ctxId, cleanup);
     }
 
     async disable(ctxId: string): Promise<ContextRecord> {
@@ -591,16 +622,21 @@ export class ContextRegistry implements ContextRegistryPort {
         });
     }
 
-    settleCleanup(
-        ...args: Parameters<ContextCleanupLedger["settleCleanup"]>
-    ): ReturnType<ContextCleanupLedger["settleCleanup"]> {
-        return this.#ledger.settleCleanup(...args);
+    async settleCleanup(ctxId: string): Promise<void> {
+        await this.#ledger.settleCleanup(ctxId);
+        await this.#collectSettled(ctxId);
     }
 
-    settleEnvironmentCleanup(
-        ...args: Parameters<ContextCleanupLedger["settleEnvironmentCleanup"]>
-    ): ReturnType<ContextCleanupLedger["settleEnvironmentCleanup"]> {
-        return this.#ledger.settleEnvironmentCleanup(...args);
+    async park(ctxId: string): Promise<void> {
+        await this.#collectSettled(ctxId);
+    }
+
+    async settleEnvironmentCleanup(
+        ctxId: string,
+        cleanup: ContextEnvironmentCleanup,
+    ): Promise<void> {
+        await this.#ledger.settleEnvironmentCleanup(ctxId, cleanup);
+        await this.#collectSettled(ctxId);
     }
 
     async discard(ctxId: string): Promise<ContextRecord> {
@@ -610,6 +646,7 @@ export class ContextRegistry implements ContextRegistryPort {
             await this.#mutateAndPersist(() => {
                 this.#contexts.delete(ctxId);
             });
+            this.#archive?.forget(ctxId);
             return cloneRecord(record);
         });
     }
@@ -665,33 +702,32 @@ export class ContextRegistry implements ContextRegistryPort {
         });
     }
 
-    #activeRecord(ctxId: string): ContextStoredRecord {
-        const record = this.#record(ctxId);
+    #activeRecord(ctxId: string, warm = true): ContextStoredRecord {
+        const record = this.#record(ctxId, undefined, warm);
         if (record.status === "disabled") throw disabledContext(ctxId);
-        if (
-            record.status === "expired" ||
-            Date.parse(record.expiresAt) <= this.#now()
-        ) {
-            throw expiredContext(ctxId, record.expiresAt);
-        }
         return record;
     }
 
-    #record(ctxId: string, principal?: string): ContextStoredRecord {
-        const record = isCtxId(ctxId) ? this.#contexts.get(ctxId) : undefined;
+    #record(ctxId: string, principal?: string, warm = true): ContextStoredRecord {
+        const record = isCtxId(ctxId)
+            ? this.#contexts.get(ctxId) ?? this.#archive?.get(ctxId)
+            : undefined;
         if (
             record === undefined ||
             (principal !== undefined && record.principal !== principal)
         )
             throw invalidContext(ctxId);
+        if (warm && !this.#contexts.has(ctxId)) this.#contexts.set(ctxId, record);
         return record;
     }
 
     async #renew(record: ContextStoredRecord): Promise<ContextRecord> {
         if (record.status === "disabled") throw disabledContext(record.ctxId);
-        if (record.status === "expired" && record.cleanupPending === true)
-            throw expiredContext(record.ctxId, record.expiresAt);
         const now = this.#now();
+        if (record.status === "active" && Date.parse(record.expiresAt) > now) {
+            await this.#touchRecord(record, now);
+            return cloneRecord(record);
+        }
         await this.#mutateAndPersist(() => {
             record.status = "active";
             record.cleanupPending = undefined;
@@ -704,30 +740,43 @@ export class ContextRegistry implements ContextRegistryPort {
 
     async #requireActive(record: ContextStoredRecord): Promise<number> {
         if (record.status === "disabled") throw disabledContext(record.ctxId);
-        const now = this.#now();
-        if (
-            record.status !== "expired" &&
-            !(Date.parse(record.expiresAt) <= now)
-        )
-            return now;
-        if (record.status !== "expired")
-            await this.#mutateAndPersist(() => {
-                record.status = "expired";
-            });
-        throw expiredContext(record.ctxId, record.expiresAt);
+        return this.#now();
     }
 
     #externalMatches(
         external: ContextExternalBinding,
         principal: string,
     ): ContextStoredRecord[] {
-        return [...this.#contexts.values()].filter(
+        const hot = [...this.#contexts.values()].filter(
             (record) =>
                 record.principal === principal &&
                 (record.externalBindings ?? []).some((candidate) =>
                     sameExternalBinding(candidate, external),
                 ),
         );
+        const cold = (this.#archive?.byExternal(external, principal) ?? [])
+            .filter((record) => !this.#contexts.has(record.ctxId));
+        return [...hot, ...cold];
+    }
+
+    #allRecords(): ContextStoredRecord[] {
+        return [
+            ...this.#contexts.values(),
+            ...(this.#archive?.list() ?? []).filter((record) => !this.#contexts.has(record.ctxId)),
+        ];
+    }
+
+    async #collectSettled(ctxId: string): Promise<void> {
+        if (this.#filePath === undefined) return;
+        await this.#run(async () => {
+            const record = this.#contexts.get(ctxId);
+            if (record?.status !== "expired" || record.cleanupPending !== false ||
+                (record.pendingEnvironmentCleanup?.length ?? 0) !== 0) return;
+            this.#archive ??= new ContextIdentityArchive(`${this.#filePath}.identity.sqlite3`);
+            this.#archive!.collect(record);
+            await this.#mutateAndPersist(() => this.#contexts.delete(ctxId));
+            this.#persistedExpiresAt.delete(ctxId);
+        });
     }
 
     async #mutateAndPersist(mutate: () => void): Promise<void> {
@@ -818,8 +867,10 @@ export class ContextRegistry implements ContextRegistryPort {
     }
 
     #compactTerminalContexts(): boolean {
+        // Expired Contexts retain their identity and workspace bindings so a
+        // later call can rehydrate resources without requiring environ_info.
         const terminal = [...this.#contexts.values()]
-            .filter((record) => record.status !== "active")
+            .filter((record) => record.status === "disabled")
             .sort((left, right) => {
                 const created = left.createdAt.localeCompare(right.createdAt);
                 return created === 0
@@ -879,6 +930,7 @@ export class ContextRegistry implements ContextRegistryPort {
                 }
             }
             for (const record of document.contexts) {
+                this.#archive?.forget(record.ctxId);
                 this.#persistedExpiresAt.set(
                     record.ctxId,
                     Date.parse(record.expiresAt),
@@ -915,7 +967,8 @@ export class ContextRegistry implements ContextRegistryPort {
             this.#publicRecords.set(ctxId, record);
         const terminal = changed.filter((ctxId) => {
             const record = this.#contexts.get(ctxId);
-            return record === undefined || record.status === "disabled";
+            return record?.status === "disabled" ||
+                (record === undefined && !this.#archive?.has(ctxId));
         });
         this.changes.publish(changed, terminal);
     }

@@ -146,6 +146,7 @@ test("Context cleanup retains Worker stop debt until the same reference is succe
     assert.equal(ready, false);
     assert.deepEqual(await runtime.api.registry.listEnvironmentCleanup(), []);
     await runtime.reconcile();
-    assert.equal(JSON.parse(await readFile(contextFile, "utf8")).contexts[0].cleanupPending, false);
+    assert.deepEqual(JSON.parse(await readFile(contextFile, "utf8")).contexts, []);
+    assert.equal((await runtime.api.registry.lookup(ctxId, { principal: "test-principal" })).status, "expired");
     assert.equal(stops, 2);
 });
