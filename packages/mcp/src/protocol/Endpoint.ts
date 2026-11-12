@@ -40,6 +40,7 @@ export interface McpEndpointOptions {
 }
 
 export class McpEndpoint {
+    readonly contextMode: ControlMcpContextMode;
     readonly #catalog: McpEndpointCatalog;
     readonly #dispatch: McpEndpointDispatch;
     readonly #extensions: McpExtensionRegistry;
@@ -49,6 +50,7 @@ export class McpEndpoint {
         const contextSelector = createMcpContextSelector(
             options.contextMode ?? "explicit",
         );
+        this.contextMode = contextSelector.id;
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,

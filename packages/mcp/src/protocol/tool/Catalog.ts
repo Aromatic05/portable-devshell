@@ -143,6 +143,7 @@ export class McpEndpointCatalog {
                 preserveInputDescriptions: mcpToolPreserveInputDescriptions(
                     exposed._meta,
                 ),
+                exposeContextOutput: exposed.name === "environ_info",
             },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);

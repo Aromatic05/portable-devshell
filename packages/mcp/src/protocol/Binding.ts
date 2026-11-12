@@ -188,7 +188,7 @@ export class McpEndpointBinding {
                     request.params.name,
                     result,
                     this.#modelOutput,
-                ));
+                ), requestEndpoint.contextMode === "explicit");
             } catch (error) {
                 throw toMcpError(error);
             }
@@ -231,17 +231,24 @@ function toRequestId(value: unknown): string | undefined {
     return undefined;
 }
 
-function toCallToolResult(result: McpEndpointResult) {
+function toCallToolResult(result: McpEndpointResult, explicit: boolean) {
+    const structured = result instanceof McpNativeToolResult
+        ? result.structuredContent : result;
+    const originalContent = result instanceof McpNativeToolResult
+        ? result.content : [];
+    const content = explicit && originalContent.length === 0
+        ? [{ type: "text" as const, text: JSON.stringify(structured) }]
+        : originalContent;
     if (result instanceof McpNativeToolResult) {
         return {
             ...(result._meta === undefined ? {} : { _meta: result._meta }),
-            content: result.content,
+            content,
             isError: result.isError,
             structuredContent: result.structuredContent,
         };
     }
     return {
-        content: [],
+        content,
         isError: false,
         structuredContent: result,
     };

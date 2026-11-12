@@ -214,10 +214,11 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
             assert.equal(response.status, 200, method);
             return parseMcpHttpResponse<{ error?: unknown; result?: {
                 capabilities?: Record<string, unknown>;
+                content?: Array<{ type?: string; text?: string }>;
                 structuredContent?: { ctxId?: string };
                 tools?: Array<{ name: string; inputSchema?: {
                     required?: string[]; properties?: Record<string, unknown>;
-                }; _meta?: Record<string, unknown> }>;
+                }; outputSchema?: { properties?: Record<string, unknown> }; _meta?: Record<string, unknown> }>;
             } }>(await response.text());
         };
         const init = await legacyRpc(1, "initialize", {
@@ -233,13 +234,18 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
             assert.equal(bootstrap?.inputSchema?.properties?.ctxId, undefined);
             assert.notEqual(bootstrap?.inputSchema?.required?.includes("ctxId"), true);
         }
+        assert.notEqual(
+            listed.result?.tools?.find((tool) => tool.name === "environ_info")
+                ?.outputSchema?.properties?.ctxId, undefined,
+        );
         assert.equal(bash?._meta?.["openai/outputTemplate"], undefined);
         assert.equal(listed.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
         const info = await legacyRpc(3, "tools/call", {
             name: "environ_info", arguments: { workspace },
         });
-        const ctxId = info.result?.structuredContent?.ctxId;
+        const ctxId = (JSON.parse(info.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId;
         assert.ok(ctxId?.startsWith("ctx-"), JSON.stringify(info));
+        assert.equal(info.result?.structuredContent?.ctxId, ctxId);
         const resumed = await legacyRpc(4, "tools/call", {
             name: "environ_info", arguments: { ctxId },
         });
@@ -248,6 +254,7 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
             name: "bash_run", arguments: { ctxId, command: "pwd" },
         });
         assert.equal(executed.error, undefined);
+        assert.equal(JSON.parse(executed.result?.content?.[0]?.text ?? "{}").stdout, "ok\n");
 
         const legacySessionTools = await legacyRpc(6, "tools/list", {
             _meta: { "openai/session": "chat-using-legacy-wire" },
@@ -259,6 +266,7 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
             _meta: { "openai/session": "chat-using-legacy-wire" },
         });
         assert.equal(legacySessionInfo.result?.structuredContent?.ctxId, undefined);
+        assert.equal(legacySessionInfo.result?.content?.length, 0);
 
         const modernList = await postModern(endpoint, "modern-list", "tools/list");
         assert.equal(modernList.status, 200);
@@ -274,9 +282,11 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         });
         assert.equal(openaiInfo.status, 200);
         const openaiResult = parseMcpHttpResponse<{ result?: {
+            content?: Array<{ text?: string }>;
             structuredContent?: { ctxId?: string };
         } }>(await openaiInfo.text());
         assert.equal(openaiResult.result?.structuredContent?.ctxId, undefined);
+        assert.equal(openaiResult.result?.content?.length, 0);
         const openaiCall = await postModern(endpoint, "openai-call", "tools/call", {
             name: "bash_run", arguments: { command: "pwd" },
             _meta: { "openai/session": "chat-session-one" },
@@ -288,9 +298,14 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         });
         assert.equal(standardModern.status, 200);
         const standardResult = parseMcpHttpResponse<{ result?: {
+            content?: Array<{ text?: string }>;
             structuredContent?: { ctxId?: string };
         } }>(await standardModern.text());
         assert.ok(standardResult.result?.structuredContent?.ctxId?.startsWith("ctx-"));
+        assert.equal(
+            (JSON.parse(standardResult.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId,
+            standardResult.result?.structuredContent?.ctxId,
+        );
     } finally {
         await host.stop();
         await rm(workspace, { force: true, recursive: true });

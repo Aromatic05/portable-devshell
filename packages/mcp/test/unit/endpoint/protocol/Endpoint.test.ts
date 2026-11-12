@@ -695,7 +695,10 @@ test("tools/call delegates through the host ToolCall API", async () => {
             toolName: "bash_run",
         });
         assert.equal(response.body.result?.isError, false);
-        assert.deepEqual(response.body.result?.content, []);
+        assert.deepEqual(response.body.result?.content, [{
+            type: "text",
+            text: '{"exitCode":0,"stderr":"","stdout":"/workspace\\n"}',
+        }]);
         assert.deepEqual(response.body.result?.structuredContent, {
             exitCode: 0,
             stderr: "",
@@ -961,7 +964,11 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
     assert.equal(environmentInputProperties?.ctxId, undefined);
-    assert.deepEqual(environmentTool?.outputSchema, { type: "object" });
+    assert.notEqual(
+        (environmentTool?.outputSchema as { properties?: Record<string, unknown> })
+            .properties?.ctxId,
+        undefined,
+    );
 
     const requestContext = {
         principal: "subject-1",

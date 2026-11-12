@@ -13,6 +13,7 @@ export interface McpToolSchemaAdapterOptions {
     inputHints?: Readonly<Record<string, string>>;
     modelFacing?: boolean;
     preserveInputDescriptions?: boolean;
+    exposeContextOutput?: boolean;
 }
 
 export class McpToolSchemaUnavailableError extends Error {
@@ -73,7 +74,11 @@ export class McpToolSchemaAdapter {
                 : normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,
             outputSchema: modelFacing
-                ? { type: "object" }
+                ? options.exposeContextOutput === true
+                    ? { type: "object", properties: {
+                        ctxId: { type: "string", minLength: 1 },
+                    } }
+                    : { type: "object" }
                 : normalizeModelSchema(tool.outputSchema),
         };
     }
