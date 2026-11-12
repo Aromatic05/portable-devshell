@@ -228,6 +228,11 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         const listed = await legacyRpc(2, "tools/list", {});
         const bash = listed.result?.tools?.find((tool) => tool.name === "bash_run");
         assert.ok(bash?.inputSchema?.required?.includes("ctxId"));
+        for (const name of ["environ_info", "environ_remote"]) {
+            const bootstrap = listed.result?.tools?.find((tool) => tool.name === name);
+            assert.equal(bootstrap?.inputSchema?.properties?.ctxId, undefined);
+            assert.notEqual(bootstrap?.inputSchema?.required?.includes("ctxId"), true);
+        }
         assert.equal(bash?._meta?.["openai/outputTemplate"], undefined);
         assert.equal(listed.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
         const info = await legacyRpc(3, "tools/call", {

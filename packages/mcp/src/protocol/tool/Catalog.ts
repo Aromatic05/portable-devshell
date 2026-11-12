@@ -113,7 +113,10 @@ export class McpEndpointCatalog {
                 : withMcpProvenance(modelTool);
         const modelFacing = isModelFacingTool(provenanceTool);
         const contextualTool =
-            this.#contextSelector.requiresExplicitContextId || !modelFacing
+            this.#contextSelector.requiresExplicitContextId &&
+            isBootstrapTool(provenanceTool.name)
+                ? provenanceTool
+                : this.#contextSelector.requiresExplicitContextId || !modelFacing
                 ? withMcpContextId(
                       provenanceTool,
                       modelFacing

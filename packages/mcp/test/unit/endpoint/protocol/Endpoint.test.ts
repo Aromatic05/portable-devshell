@@ -960,7 +960,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     ).properties;
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
-    assert.notEqual(environmentInputProperties?.ctxId, undefined);
+    assert.equal(environmentInputProperties?.ctxId, undefined);
     assert.deepEqual(environmentTool?.outputSchema, { type: "object" });
 
     const requestContext = {
