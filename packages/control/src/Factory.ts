@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
+    ControlLogger,
     ControlPathHome,
     CONTROL_PROTOCOL_RANGE,
     Endpoint,
@@ -80,6 +81,8 @@ export class ControlFactory {
             options.homeDirectory ?? homedir(),
         );
         const toolRegistry = createToolCallRegistry();
+        const requestLog = new ControlLogger(options.homeDirectory);
+        let requestLogTail = Promise.resolve();
         const http = new ControlHttpServer();
         const artifact = createArtifactRuntime({
             config: () => options.config.require(),
@@ -148,6 +151,11 @@ export class ControlFactory {
                 factory: this.#mcpFactory,
                 instances: options.instances.registry,
                 toolRegistry,
+                requestLogger: (line) => {
+                    requestLogTail = requestLogTail.catch(() => undefined)
+                        .then(() => requestLog.info(`MCP HTTP ${line}`));
+                    void requestLogTail.catch((error) => console.warn("MCP HTTP logging failed:", error));
+                },
             });
             mcpOwner = mcp;
             const configEngine = new ConfigEngine({

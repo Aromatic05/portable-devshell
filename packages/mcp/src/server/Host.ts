@@ -33,6 +33,7 @@ export interface McpHostConfig {
     toolProvenance?: McpToolProvenanceRecorder;
     toolSource: McpToolSource;
     mcpAppLeaseFile?: string;
+    requestLogger?: (line: string) => void;
 }
 
 export class McpHost {
@@ -68,6 +69,7 @@ export class McpHost {
         this.#protocol = new McpProtocolRoute(this.#httpServer, {
             ...(this.#oauth === undefined ? {} : { oauth: this.#oauth }),
             ...(config.publicBaseUrl === undefined ? {} : { publicBaseUrl: config.publicBaseUrl }),
+            ...(config.requestLogger === undefined ? {} : { requestLogger: config.requestLogger }),
         });
 
         for (const instance of config.instances) {

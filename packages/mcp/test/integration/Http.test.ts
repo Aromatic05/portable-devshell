@@ -60,7 +60,7 @@ test("missing instance returns 404", async () => {
     }
 });
 
-test("legacy initialize is strictly rejected while server/discover negotiates the modern protocol", async () => {
+test("published handshake revisions initialize, list and call tools alongside modern discovery", async () => {
     const host = createHost();
     await host.start();
 
@@ -68,20 +68,65 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
         const port = requireTcpPort(host.server.address);
         const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
 
-        const legacy = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                accept: "application/json, text/event-stream",
-                "content-type": "application/json",
-            },
-            body: JSON.stringify(await readFixture("mcp-initialize.json")),
-        });
-        assert.equal(legacy.status, 400);
-        const legacyError = parseMcpHttpResponse<{
-            error?: { code?: number; data?: { supported?: string[] } };
-        }>(await legacy.text());
-        assert.equal(legacyError.error?.code, -32022);
-        assert.deepEqual(legacyError.error?.data?.supported, ["2026-07-28"]);
+        for (const protocolVersion of ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]) {
+            const legacy = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "initialize",
+                    params: {
+                        protocolVersion,
+                        capabilities: {},
+                        clientInfo: { name: "compatibility-client", version: "1" },
+                    },
+                }),
+            });
+            assert.equal(legacy.status, 200, `initialize ${protocolVersion}`);
+            const init = parseMcpHttpResponse<{
+                result?: { protocolVersion?: string };
+            }>(await legacy.text());
+            assert.equal(init.result?.protocolVersion, protocolVersion);
+            assert.equal(legacy.headers.get("mcp-session-id"), null);
+
+            const legacyTools = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": protocolVersion,
+                },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+            });
+            assert.equal(legacyTools.status, 200, `tools/list ${protocolVersion}`);
+            const listing = parseMcpHttpResponse<{ result?: { tools?: Array<{ name: string }> } }>(
+                await legacyTools.text(),
+            );
+            assert.equal(listing.result?.tools?.some((tool) => tool.name === "bash_run"), true);
+
+            const legacyCall = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": protocolVersion,
+                },
+                body: JSON.stringify({
+                    jsonrpc: "2.0", id: 3, method: "tools/call",
+                    params: { name: "environ_info", arguments: { workspace: "/workspace" } },
+                }),
+            });
+            assert.equal(legacyCall.status, 200, `tools/call ${protocolVersion}`);
+            const called = parseMcpHttpResponse<{ error?: unknown; result?: unknown }>(
+                await legacyCall.text(),
+            );
+            assert.equal(called.error, undefined, `tools/call ${protocolVersion}`);
+            assert.notEqual(called.result, undefined, `tools/call ${protocolVersion}`);
+        }
 
         const discovery = await discoverModern(endpoint);
         assert.equal(discovery.status, 200);
@@ -94,6 +139,57 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
             true,
         );
         assert.equal(discovery.headers.get("mcp-session-id"), null);
+    } finally {
+        await host.stop();
+    }
+});
+
+test("MCP request diagnostics record pre-auth rejection and successful 2025 discovery without secrets", async () => {
+    const entries: Array<Record<string, unknown>> = [];
+    const host = createHost({
+        auth: { enabled: true, provider: "token", token: "private-test-token" },
+        requestLogger: (line) => entries.push(JSON.parse(line) as Record<string, unknown>),
+    });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const headers = {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+            "mcp-protocol-version": "2025-11-25",
+        };
+        const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+        const denied = await fetch(`${endpoint}?secret=query-must-not-be-logged`, {
+            method: "POST",
+            headers: { ...headers, authorization: "Bearer invalid-test-token" },
+            body: request,
+        });
+        assert.equal(denied.status, 401);
+        await denied.text();
+
+        const allowed = await fetch(endpoint, {
+            method: "POST",
+            headers: { ...headers, authorization: "Bearer private-test-token" },
+            body: request,
+        });
+        assert.equal(allowed.status, 200);
+        await allowed.text();
+
+        const received = entries.filter((entry) => entry.event === "received");
+        const finished = entries.filter((entry) => entry.event === "finished");
+        assert.equal(received.length, 2);
+        assert.equal(finished.length, 2);
+        assert.equal(finished[0]?.requestId, received[0]?.requestId);
+        assert.equal(finished[0]?.status, 401);
+        assert.equal(finished[0]?.auth, "rejected");
+        assert.equal(finished[1]?.requestId, received[1]?.requestId);
+        assert.equal(finished[1]?.status, 200);
+        assert.equal(finished[1]?.auth, "accepted");
+        assert.equal(finished[1]?.rpcMethod, "tools/list");
+        assert.equal(finished[1]?.protocolVersion, "2025-11-25");
+        assert.equal(JSON.stringify(entries).includes("private-test-token"), false);
+        assert.equal(JSON.stringify(entries).includes("invalid-test-token"), false);
+        assert.equal(JSON.stringify(entries).includes("query-must-not-be-logged"), false);
     } finally {
         await host.stop();
     }
@@ -502,6 +598,7 @@ function createHost(overrides?: {
     auth?: McpAuthConfig;
     listenPort?: number;
     publicBaseUrl?: string;
+    requestLogger?: (line: string) => void;
     storageDir?: string;
     tools?: ToolCallApi;
 }): McpHost {
@@ -510,6 +607,7 @@ function createHost(overrides?: {
         listenPort: overrides?.listenPort ?? 0,
         tools: overrides?.tools ?? createHttpToolCallApi(),
         publicBaseUrl: overrides?.publicBaseUrl,
+        requestLogger: overrides?.requestLogger,
         storageDir: overrides?.storageDir,
         instances: [
             createInstance(

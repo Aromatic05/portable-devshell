@@ -898,6 +898,18 @@ test(
             );
             assert.equal(typeof provider.tokens()?.access_token, "string");
             assert.equal(typeof provider.tokens()?.refresh_token, "string");
+            const legacyClient = new Client(clientInfo, {
+                versionNegotiation: { mode: "legacy" },
+            });
+            try {
+                await legacyClient.connect(new StreamableHTTPClientTransport(new URL(endpoint), {
+                    authProvider: provider,
+                }));
+                const tools = await legacyClient.listTools();
+                assert.equal(tools.tools.some((tool) => tool.name === "bash_run"), true);
+            } finally {
+                await legacyClient.close();
+            }
             assert.deepEqual(
                 (await host.oauthApprovals!.list())
                     .map((request) => [

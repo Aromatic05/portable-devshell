@@ -66,7 +66,9 @@ export class McpEndpointBinding {
         const common = {
             bus,
             keepAliveMs: 15_000,
-            legacy: "reject" as const,
+            // Keep the 2026 stateless envelope path while serving earlier
+            // handshake revisions through the SDK's Streamable HTTP fallback.
+            legacy: "stateless" as const,
         };
         this.#handler = createMcpHandler(() => this.#createServer(), {
             ...common,
