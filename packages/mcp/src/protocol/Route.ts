@@ -53,6 +53,23 @@ export class McpProtocolRoute {
         path: string,
         serverVersion?: string,
     ): void {
+        const explicitFallback = options.contextMode === "openai-session"
+            ? new McpEndpoint({
+                  ...options,
+                  contextMode: "explicit",
+                  extensions: new McpExtensionRegistry(
+                      options.extensions?.filter((extension) => extension.id !== "mcpapp"),
+                  ),
+                  toolAdapter: undefined,
+                  toolSource: {
+                      list: (instance) => options.toolSource.list(instance)
+                          .filter((entry) => !entry.definition.name.startsWith("mcpapp_")),
+                      get: (instance, name) => name.startsWith("mcpapp_")
+                          ? undefined
+                          : options.toolSource.get(instance, name),
+                  },
+              })
+            : undefined;
         const binding = new McpEndpointBinding(
             new McpEndpoint({
                 ...options,
@@ -60,6 +77,7 @@ export class McpProtocolRoute {
             }),
             serverVersion,
             options.modelOutput,
+            explicitFallback,
         );
         this.register({
             auth: options.auth ?? { enabled: false, provider: "none" },

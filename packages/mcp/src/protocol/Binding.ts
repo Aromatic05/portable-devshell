@@ -49,16 +49,19 @@ export class McpEndpointBinding {
     readonly #streamNodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #endpoint: McpEndpoint;
+    readonly #explicitFallback?: McpEndpoint;
     readonly #modelOutput: McpModelOutputBudget;
 
     constructor(
         endpoint: McpEndpoint,
         serverVersion = "0.0.0",
         modelOutput: McpModelOutputBudget = {},
+        explicitFallback?: McpEndpoint,
     ) {
         validateMcpModelOutputBudget(modelOutput);
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
+        this.#explicitFallback = explicitFallback;
         this.#modelOutput = modelOutput;
         // Per-request modes share a bus so subscriptions and tool calls
         // remain on the same notification stream across both handlers.
@@ -70,11 +73,11 @@ export class McpEndpointBinding {
             // handshake revisions through the SDK's Streamable HTTP fallback.
             legacy: "stateless" as const,
         };
-        this.#handler = createMcpHandler(() => this.#createServer(), {
+        this.#handler = createMcpHandler(({ era }) => this.#createServer(era), {
             ...common,
             responseMode: "auto",
         });
-        this.#streamHandler = createMcpHandler(() => this.#createServer(), {
+        this.#streamHandler = createMcpHandler(({ era }) => this.#createServer(era), {
             ...common,
             // The Node adapter flushes headers with the first body frame.
             // Send a prompt heartbeat even if a long call emits no progress.
@@ -99,9 +102,12 @@ export class McpEndpointBinding {
             : this.#nodeHandler)(request, response, body);
     }
 
-    #createServer(): Server {
-        const resources = this.#endpoint.listResources();
-        const appResources = this.#endpoint.hasAppResources();
+    #createServer(era: "legacy" | "modern"): Server {
+        const endpoint = era === "legacy"
+            ? this.#explicitFallback ?? this.#endpoint
+            : this.#endpoint;
+        const resources = endpoint.listResources();
+        const appResources = endpoint.hasAppResources();
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -124,7 +130,7 @@ export class McpEndpointBinding {
             }));
 
             server.setRequestHandler("resources/read", async (request) => {
-                const content = await this.#endpoint.readResource(
+                const content = await endpoint.readResource(
                     request.params.uri,
                 );
                 if (content === undefined) {
@@ -148,10 +154,13 @@ export class McpEndpointBinding {
             });
         }
 
-        server.setRequestHandler("tools/list", async () => {
+        server.setRequestHandler("tools/list", async (request) => {
             try {
+                const requestEndpoint = hasOpenaiSession(readRequestMeta(request.params?._meta))
+                    ? this.#endpoint
+                    : endpoint;
                 return {
-                    tools: this.#endpoint.listTools().map(toProtocolTool),
+                    tools: requestEndpoint.listTools().map(toProtocolTool),
                 };
             } catch (error) {
                 throw toMcpError(error);
@@ -166,7 +175,10 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(ctx.mcpReq.id),
                 };
-                const result = await this.#endpoint.callTool(
+                const requestEndpoint = hasOpenaiSession(requestMeta)
+                    ? this.#endpoint
+                    : this.#explicitFallback ?? endpoint;
+                const result = await requestEndpoint.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
@@ -200,6 +212,11 @@ function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     if (typeof meta !== "object" || meta === null || Array.isArray(meta))
         return undefined;
     return meta as Record<string, unknown>;
+}
+
+function hasOpenaiSession(meta: Record<string, unknown> | undefined): boolean {
+    const session = meta?.["openai/session"];
+    return typeof session === "string" && session.length > 0;
 }
 
 function toRequestId(value: unknown): string | undefined {

@@ -120,7 +120,11 @@ export class McpEndpointCatalog {
                           ? undefined
                           : "Internal Context ID carried by the MCP App.",
                   )
-                : provenanceTool;
+                : withMcpContextId(
+                      provenanceTool,
+                      "Context ID returned by environ_info. Required when the client does not supply openai/session metadata.",
+                      false,
+                  );
         const exposed = isBootstrapTool(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);

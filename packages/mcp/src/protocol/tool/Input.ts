@@ -11,6 +11,7 @@ import { McpToolSchemaUnavailableError } from "./Schema.js";
 export function withMcpContextId(
     tool: ToolDefinition,
     description = "Context ID returned by environ_info in explicit Context mode.",
+    required = true,
 ): ToolDefinition {
     return withInputProperty(
         tool,
@@ -20,7 +21,7 @@ export function withMcpContextId(
             minLength: 1,
             type: "string",
         },
-        true,
+        required,
     );
 }
 

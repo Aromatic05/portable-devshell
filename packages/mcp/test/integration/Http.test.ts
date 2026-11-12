@@ -195,6 +195,103 @@ test("MCP request diagnostics record pre-auth rejection and successful 2025 disc
     }
 });
 
+test("non-OpenAI clients use explicit Context while OpenAI session tools stay bound", async () => {
+    const workspace = await createTestTempDirectory("mcp-context-fallback");
+    const host = createHost({ contextMode: "openai-session", contextTools: true });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const legacyRpc = async (id: number, method: string, params: Record<string, unknown>) => {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": "2025-11-25",
+                },
+                body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+            });
+            assert.equal(response.status, 200, method);
+            return parseMcpHttpResponse<{ error?: unknown; result?: {
+                capabilities?: Record<string, unknown>;
+                structuredContent?: { ctxId?: string };
+                tools?: Array<{ name: string; inputSchema?: {
+                    required?: string[]; properties?: Record<string, unknown>;
+                }; _meta?: Record<string, unknown> }>;
+            } }>(await response.text());
+        };
+        const init = await legacyRpc(1, "initialize", {
+            protocolVersion: "2025-11-25", capabilities: {},
+            clientInfo: { name: "standard-mcp", version: "1" },
+        });
+        assert.equal(init.result?.capabilities?.extensions, undefined);
+        const listed = await legacyRpc(2, "tools/list", {});
+        const bash = listed.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.ok(bash?.inputSchema?.required?.includes("ctxId"));
+        assert.equal(bash?._meta?.["openai/outputTemplate"], undefined);
+        assert.equal(listed.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
+        const info = await legacyRpc(3, "tools/call", {
+            name: "environ_info", arguments: { workspace },
+        });
+        const ctxId = info.result?.structuredContent?.ctxId;
+        assert.ok(ctxId?.startsWith("ctx-"), JSON.stringify(info));
+        const resumed = await legacyRpc(4, "tools/call", {
+            name: "environ_info", arguments: { ctxId },
+        });
+        assert.equal(resumed.result?.structuredContent?.ctxId, ctxId);
+        const executed = await legacyRpc(5, "tools/call", {
+            name: "bash_run", arguments: { ctxId, command: "pwd" },
+        });
+        assert.equal(executed.error, undefined);
+
+        const legacySessionTools = await legacyRpc(6, "tools/list", {
+            _meta: { "openai/session": "chat-using-legacy-wire" },
+        });
+        const legacySessionBash = legacySessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(legacySessionBash?.inputSchema?.required?.includes("ctxId"), true);
+        const legacySessionInfo = await legacyRpc(7, "tools/call", {
+            name: "environ_info", arguments: { workspace },
+            _meta: { "openai/session": "chat-using-legacy-wire" },
+        });
+        assert.equal(legacySessionInfo.result?.structuredContent?.ctxId, undefined);
+
+        const modernList = await postModern(endpoint, "modern-list", "tools/list");
+        assert.equal(modernList.status, 200);
+        const modernTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
+            name: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] };
+        }> } }>(await modernList.text());
+        const modernBash = modernTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(modernBash?.inputSchema?.properties?.ctxId, undefined);
+        assert.notEqual(modernBash?.inputSchema?.required?.includes("ctxId"), true);
+        const openaiInfo = await postModern(endpoint, "openai-info", "tools/call", {
+            name: "environ_info", arguments: { workspace },
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(openaiInfo.status, 200);
+        const openaiResult = parseMcpHttpResponse<{ result?: {
+            structuredContent?: { ctxId?: string };
+        } }>(await openaiInfo.text());
+        assert.equal(openaiResult.result?.structuredContent?.ctxId, undefined);
+        const openaiCall = await postModern(endpoint, "openai-call", "tools/call", {
+            name: "bash_run", arguments: { command: "pwd" },
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(openaiCall.status, 200);
+        assert.equal(parseMcpHttpResponse<{ error?: unknown }>(await openaiCall.text()).error, undefined);
+        const standardModern = await postModern(endpoint, "standard-modern", "tools/call", {
+            name: "environ_info", arguments: { workspace },
+        });
+        assert.equal(standardModern.status, 200);
+        const standardResult = parseMcpHttpResponse<{ result?: {
+            structuredContent?: { ctxId?: string };
+        } }>(await standardModern.text());
+        assert.ok(standardResult.result?.structuredContent?.ctxId?.startsWith("ctx-"));
+    } finally {
+        await host.stop();
+        await rm(workspace, { force: true, recursive: true });
+    }
+});
+
 test("quiet ToolCall keeps the HTTP connection live before the Worker finishes", async () => {
     let entered!: () => void;
     let resume!: () => void;
@@ -596,6 +693,8 @@ async function readFixture(name: string): Promise<JsonValue> {
 
 function createHost(overrides?: {
     auth?: McpAuthConfig;
+    contextMode?: "explicit" | "openai-session";
+    contextTools?: boolean;
     listenPort?: number;
     publicBaseUrl?: string;
     requestLogger?: (line: string) => void;
@@ -605,16 +704,25 @@ function createHost(overrides?: {
     return new McpHost({
         listenHost: "127.0.0.1",
         listenPort: overrides?.listenPort ?? 0,
-        tools: overrides?.tools ?? createHttpToolCallApi(),
+        tools: overrides?.contextTools === true ? undefined : overrides?.tools ?? createHttpToolCallApi(),
+        ...(overrides?.contextTools !== true ? {} : {
+            resolveTarget: () => ({
+                async dispatch(request) {
+                    if (request.execute !== undefined)
+                        return await request.execute(
+                            request.callId, request.value.payload, request.value, request.signal,
+                        ) as JsonValue;
+                    return { exitCode: 0, stderr: "", stdout: "ok\n" };
+                },
+            }),
+        }),
         publicBaseUrl: overrides?.publicBaseUrl,
         requestLogger: overrides?.requestLogger,
         storageDir: overrides?.storageDir,
-        instances: [
-            createInstance(
-                "demo",
-                overrides?.auth ?? { enabled: false, provider: "none" },
-            ),
-        ],
+        instances: [{
+            ...createInstance("demo", overrides?.auth ?? { enabled: false, provider: "none" }),
+            contextMode: overrides?.contextMode,
+        }],
     });
 }
 
