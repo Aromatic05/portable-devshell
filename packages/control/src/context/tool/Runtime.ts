@@ -218,10 +218,40 @@ class ContextToolRuntime {
     ): Promise<JsonValue> {
         const allowContextId = context.contextMode !== "openai-session";
         const parsed = readRemoteEnvironmentInput(input, allowContextId);
+        if (parsed.command === "help") {
+            assertRemoteArguments(parsed, { handle: false, workspace: false });
+            return {
+                command: "help",
+                details: { commands: remoteEnvironmentCommandCatalog() },
+                message: "Current environ_remote command catalog.",
+            };
+        }
+        if (parsed.command === "attach")
+            assertRemoteArguments(parsed, { handle: true, workspace: "optional" });
+        else if (parsed.command === "mask")
+            assertRemoteArguments(parsed, { handle: true, workspace: false });
+        else
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
+                message: `Unknown environ_remote command ${JSON.stringify(parsed.command)}. Use command='help' for the current command catalog.`,
+                retryable: false,
+            });
+        const boundContextId = parsed.ctxId ?? context.ctxId;
+        const byHandle = boundContextId === undefined && context.contextMode === "explicit"
+            ? await this.#contexts.registry.lookupContextByRemoteHandle(
+                parsed.handle!, { principal: this.#principal(context) }, context.instance,
+            )
+            : undefined;
+        if (boundContextId === undefined && context.contextMode === "explicit" && byHandle === undefined)
+            throw createRemoteError({
+                code: contextErrorCodes.invalid,
+                message: "Remote instance handle is invalid for this Context. Obtain a current handle with devshell instance list or status.",
+                retryable: false,
+            });
         let resolution = await this.#resolveContext(
-            (parsed.ctxId ?? context.ctxId) === undefined
+            (boundContextId ?? byHandle?.ctxId) === undefined
                 ? {}
-                : { ctxId: parsed.ctxId ?? context.ctxId },
+                : { ctxId: boundContextId ?? byHandle?.ctxId },
             context,
             false,
         );
@@ -232,22 +262,7 @@ class ContextToolRuntime {
         }
         const base = this.#expose(record, context);
         switch (parsed.command) {
-            case "help":
-                assertRemoteArguments(parsed, {
-                    handle: false,
-                    workspace: false,
-                });
-                return {
-                    ...base,
-                    command: "help",
-                    details: { commands: remoteEnvironmentCommandCatalog() },
-                    message: "Current environ_remote command catalog.",
-                };
             case "attach": {
-                assertRemoteArguments(parsed, {
-                    handle: true,
-                    workspace: "optional",
-                });
                 let details: JsonValue;
                 try {
                     details = await this.#contexts.environment.attachRemote(
@@ -277,10 +292,6 @@ class ContextToolRuntime {
                 };
             }
             case "mask": {
-                assertRemoteArguments(parsed, {
-                    handle: true,
-                    workspace: false,
-                });
                 return {
                     ...base,
                     command: "mask",

@@ -240,11 +240,16 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         );
         assert.equal(bash?._meta?.["openai/outputTemplate"], undefined);
         assert.equal(listed.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
+        const remoteHelp = await legacyRpc(30, "tools/call", {
+            name: "environ_remote", arguments: { command: "help" },
+        });
+        assert.equal(remoteHelp.error, undefined);
         const info = await legacyRpc(3, "tools/call", {
             name: "environ_info", arguments: { workspace },
         });
         const ctxId = (JSON.parse(info.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId;
-        assert.ok(ctxId?.startsWith("ctx-"), JSON.stringify(info));
+        assert.ok(typeof ctxId === "string", JSON.stringify(info));
+        assert.match(ctxId, /^ctx-/u);
         assert.equal(info.result?.structuredContent?.ctxId, ctxId);
         const resumed = await legacyRpc(4, "tools/call", {
             name: "environ_info", arguments: { ctxId },
@@ -255,6 +260,13 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         });
         assert.equal(executed.error, undefined);
         assert.equal(JSON.parse(executed.result?.content?.[0]?.text ?? "{}").stdout, "ok\n");
+        const remote = await host.contexts.registry.referenceInstance(ctxId, "remote-test");
+        assert.ok(remote);
+        const masked = await legacyRpc(31, "tools/call", {
+            name: "environ_remote", arguments: { command: "mask", handle: remote.handle },
+        });
+        assert.equal(masked.error, undefined, JSON.stringify(masked));
+        assert.equal(masked.result?.structuredContent?.ctxId, ctxId);
 
         const legacySessionTools = await legacyRpc(6, "tools/list", {
             _meta: { "openai/session": "chat-using-legacy-wire" },
@@ -275,7 +287,16 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         }> } }>(await modernList.text());
         const modernBash = modernTools.result?.tools?.find((tool) => tool.name === "bash_run");
         assert.notEqual(modernBash?.inputSchema?.properties?.ctxId, undefined);
-        assert.notEqual(modernBash?.inputSchema?.required?.includes("ctxId"), true);
+        assert.equal(modernBash?.inputSchema?.required?.includes("ctxId"), true);
+        const modernSessionList = await postModern(endpoint, "modern-session-list", "tools/list", {
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(modernSessionList.status, 200);
+        const sessionTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
+            name: string; inputSchema?: { required?: string[] };
+        }> } }>(await modernSessionList.text());
+        const sessionBash = sessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(sessionBash?.inputSchema?.required?.includes("ctxId"), true);
         const openaiInfo = await postModern(endpoint, "openai-info", "tools/call", {
             name: "environ_info", arguments: { workspace },
             _meta: { "openai/session": "chat-session-one" },

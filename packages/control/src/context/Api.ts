@@ -33,6 +33,11 @@ export interface ContextRecordPort {
         external: ContextExternalBinding,
         binding: ContextValidationBinding,
     ): Promise<ContextRecord | undefined>;
+    lookupContextByRemoteHandle(
+        handle: string,
+        binding: ContextValidationBinding,
+        instance: string,
+    ): Promise<ContextRecord | undefined>;
     lookup(
         ctxId: string,
         binding: ContextValidationBinding,

@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
     asInstanceName,
+    contextErrorCodes,
     createRemoteError,
     createToolCallRuntime,
     runtimeErrorCodes,
@@ -439,13 +440,23 @@ test("T4 environ tools preserve structured unavailable and offline error contrac
     });
     const context = { contextMode: "explicit" as const, principal: "alice", source: "mcp" as const };
     try {
+        const help = await toolRuntime.api.call(
+            "local", "environ_remote", { command: "help" }, context,
+        ) as { command: string; details: { commands: Array<{ command: string }> } };
+        assert.equal(help.command, "help");
+        assert.deepEqual(help.details.commands.map((entry) => entry.command), ["help", "attach", "mask"]);
         const prepared = await toolRuntime.api.call(
             "local", "environ_info", { workspace: "/repo" }, context,
         ) as { ctxId: string };
+        const remote = await runtime.api.registry.referenceInstance(prepared.ctxId, "remote-test");
+        assert.ok(remote);
+        const remoteHandle = remote.handle;
+        assert.ok(typeof remoteHandle === "string");
+        assert.match(remoteHandle, /^ih-/u);
         await assert.rejects(
             toolRuntime.api.call("local", "environ_remote", {
-                command: "attach", handle: "remote-handle",
-            }, { ...context, ctxId: prepared.ctxId }),
+                command: "attach", handle: remoteHandle,
+            }, context),
             (error: unknown) => {
                 const body = toRemoteErrorBody(error);
                 assert.equal(body?.code, runtimeErrorCodes.reverseSelfManagedOffline);
@@ -454,6 +465,17 @@ test("T4 environ tools preserve structured unavailable and offline error contrac
                 return true;
             },
         );
+        await assert.rejects(
+            toolRuntime.api.call("local", "environ_remote", {
+                command: "mask", handle: remoteHandle,
+            }, { ...context, principal: "bob" }),
+            (error: unknown) => toRemoteErrorBody(error)?.code === contextErrorCodes.invalid,
+        );
+        const masked = await toolRuntime.api.call("local", "environ_remote", {
+            command: "mask", handle: remoteHandle,
+        }, context) as { ctxId: string; details: { masked: boolean; instance: string } };
+        assert.equal(masked.ctxId, prepared.ctxId);
+        assert.deepEqual(masked.details, { masked: true, instance: "remote-test" });
         instanceAvailable = false;
         await assert.rejects(
             toolRuntime.api.call("local", "environ_info", {}, {

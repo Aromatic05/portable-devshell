@@ -1274,6 +1274,13 @@ test("tools/call applies the configured model output budget on the HTTP wire", a
             stdoutTruncated: boolean;
         };
         assert.equal(Buffer.byteLength(JSON.stringify(projected)) <= 6_000, true);
+        const text = response.body.result?.content?.[0]?.text;
+        assert.equal(text, JSON.stringify(projected));
+        assert.equal(
+            Buffer.byteLength(JSON.stringify(projected), "utf8") +
+                Buffer.byteLength(text ?? "", "utf8") <= 6_000,
+            true,
+        );
         assert.equal(projected.stdoutPath, original.stdoutPath);
         assert.equal(projected.stdoutTruncated, true);
         assert.equal(projected.stdout.startsWith("first"), true);

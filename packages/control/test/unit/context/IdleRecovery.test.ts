@@ -226,6 +226,9 @@ test("collected Context preserves masks and removes archived remote handles on I
         const masked = await registry.referenceInstance(ctx.ctxId, "masked");
         assert.ok(deleted?.handle);
         assert.ok(masked?.handle);
+        assert.equal((await registry.lookupContextByRemoteHandle(deleted.handle, { principal: "owner" }, "alpha"))?.ctxId, ctx.ctxId);
+        assert.equal(await registry.lookupContextByRemoteHandle(deleted.handle, { principal: "other" }, "alpha"), undefined);
+        assert.equal(await registry.lookupContextByRemoteHandle(deleted.handle, { principal: "owner" }, "beta"), undefined);
         await registry.maskRemoteInstance(ctx.ctxId, masked.handle);
         now = 1_101;
         await registry.listCleanupPending();
@@ -234,7 +237,9 @@ test("collected Context preserves masks and removes archived remote handles on I
 
         const reopened = new ContextRegistry({ filePath, now: () => now, ttlMs: 100 });
         await reopened.initialize();
+        assert.equal((await reopened.lookupContextByRemoteHandle(deleted.handle, { principal: "owner" }, "alpha"))?.ctxId, ctx.ctxId);
         assert.equal((await reopened.detachInstance("removed")).length, 1);
+        assert.equal(await reopened.lookupContextByRemoteHandle(deleted.handle, { principal: "owner" }, "alpha"), undefined);
         await assert.rejects(reopened.resolveRemoteInstanceHandle(ctx.ctxId, deleted.handle), { code: "mcp.contextInvalid" });
         await assert.rejects(reopened.assertInstanceAvailable(ctx.ctxId, "masked"), { code: "mcp.contextInstanceMasked" });
         reopened.close();

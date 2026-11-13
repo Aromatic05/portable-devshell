@@ -191,6 +191,27 @@ export class ContextRegistry implements ContextRegistryPort {
         });
     }
 
+    async lookupContextByRemoteHandle(
+        handle: string,
+        binding: ContextValidationBinding,
+        instance: string,
+    ): Promise<ContextRecord | undefined> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const belongsToRequest = (record: ContextStoredRecord) =>
+                record.principal === binding.principal &&
+                record.environments.some((environment) => environment.instance === instance) &&
+                record.remoteInstanceHandles?.some((reference) => reference.handle === handle) === true;
+            const hot = [...this.#contexts.values()].filter(belongsToRequest);
+            const cold = (this.#archive?.byInstance(instance) ?? [])
+                .filter((record) => !this.#contexts.has(record.ctxId) && belongsToRequest(record));
+            const matches = [...hot, ...cold];
+            return matches.length === 1
+                ? cloneRecordForRead(matches[0]!, this.#now())
+                : undefined;
+        });
+    }
+
     async lookup(
         ctxId: string,
         binding: ContextValidationBinding,

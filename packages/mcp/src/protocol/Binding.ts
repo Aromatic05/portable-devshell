@@ -102,6 +102,10 @@ export class McpEndpointBinding {
             : this.#nodeHandler)(request, response, body);
     }
 
+    #selectEndpoint(meta: Record<string, unknown> | undefined, fallback: McpEndpoint): McpEndpoint {
+        return hasOpenaiSession(meta) ? this.#endpoint : this.#explicitFallback ?? fallback;
+    }
+
     #createServer(era: "legacy" | "modern"): Server {
         const endpoint = era === "legacy"
             ? this.#explicitFallback ?? this.#endpoint
@@ -156,9 +160,7 @@ export class McpEndpointBinding {
 
         server.setRequestHandler("tools/list", async (request) => {
             try {
-                const requestEndpoint = hasOpenaiSession(readRequestMeta(request.params?._meta))
-                    ? this.#endpoint
-                    : endpoint;
+                const requestEndpoint = this.#selectEndpoint(readRequestMeta(request.params?._meta), endpoint);
                 return {
                     tools: requestEndpoint.listTools().map(toProtocolTool),
                 };
@@ -175,9 +177,7 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(ctx.mcpReq.id),
                 };
-                const requestEndpoint = hasOpenaiSession(requestMeta)
-                    ? this.#endpoint
-                    : this.#explicitFallback ?? endpoint;
+                const requestEndpoint = this.#selectEndpoint(requestMeta, endpoint);
                 const result = await requestEndpoint.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
@@ -188,6 +188,7 @@ export class McpEndpointBinding {
                     request.params.name,
                     result,
                     this.#modelOutput,
+                    requestEndpoint.contextMode === "explicit",
                 ), requestEndpoint.contextMode === "explicit");
             } catch (error) {
                 throw toMcpError(error);
