@@ -109,26 +109,72 @@ function compactModelInputSchema(
     );
 }
 
-// Inline only small enumerated scalar references so model-facing schemas expose
-// valid choices directly (e.g. file_read.files[].view), without expanding
-// recursive objects or increasing the model token budget unnecessarily.
-function inlineScalarReferences(value: JsonValue, root: JsonValue): JsonValue {
+// Keep object references intact; only inline finite scalar enums. A nullable
+// enum on an optional field needs neither a reference nor a null alternative
+// in the model-facing schema: omission already means no value.
+function inlineScalarReferences(
+    value: JsonValue,
+    root: JsonValue,
+    optional = false,
+): JsonValue {
     if (Array.isArray(value))
         return value.map((entry) => inlineScalarReferences(entry, root));
     if (!isRecord(value)) return value;
     if (typeof value.$ref === "string" && isRecord(root)) {
         const definition = resolveLocalDefinition(root, value.$ref);
-        if (definition !== undefined &&
-            (Array.isArray(definition.enum) || definition.const !== undefined) &&
-            (definition.type === "string" || definition.type === "integer" ||
-                definition.type === "number" || definition.type === "boolean")) {
+        const scalar = definition === undefined ? undefined : scalarEnumSchema(definition);
+        if (scalar !== undefined) {
             const { $ref: _reference, ...rest } = value;
-            return { ...definition, ...rest };
+            return inlineScalarReferences({ ...scalar, ...rest }, root, optional);
         }
     }
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-        key, inlineScalarReferences(entry, root),
+    const schema = scalarEnumSchema(value) ?? value;
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    const normalized = Object.fromEntries(Object.entries(schema).map(([key, entry]) => [
+        key,
+        key === "properties" && isRecord(entry)
+            ? Object.fromEntries(Object.entries(entry).map(([name, property]) => [
+                name, inlineScalarReferences(property, root, !required.includes(name)),
+            ]))
+            : inlineScalarReferences(entry, root),
     ]));
+    if (optional && Array.isArray(normalized.anyOf) &&
+        normalized.anyOf.length === 2 && normalized.default !== null) {
+        const alternatives = normalized.anyOf;
+        const scalar = alternatives.find((branch: JsonValue) =>
+            isRecord(branch) && scalarEnumSchema(branch) !== undefined);
+        if (scalar !== undefined && alternatives.some((branch: JsonValue) =>
+            isRecord(branch) && Object.keys(branch).length === 1 && branch.type === "null") &&
+            Object.keys(normalized).every((key) =>
+                ["anyOf", "description", "default", "title"].includes(key))) {
+            const { anyOf: _alternatives, ...rest } = normalized;
+            return { ...(scalar as Record<string, JsonValue>), ...rest };
+        }
+    }
+    return normalized;
+}
+
+function scalarEnumSchema(value: Record<string, JsonValue>): Record<string, JsonValue> | undefined {
+    const scalar = ["string", "integer", "number", "boolean"].includes(String(value.type));
+    if (scalar && (Array.isArray(value.enum) || value.const !== undefined)) return value;
+    if (!Array.isArray(value.oneOf) || value.oneOf.length === 0) return undefined;
+    const first = value.oneOf[0];
+    if (!isRecord(first) ||
+        !["string", "integer", "number", "boolean"].includes(String(first.type))) return undefined;
+    const choices: JsonValue[] = [];
+    for (const branch of value.oneOf) {
+        if (!isRecord(branch) || branch.type !== first.type ||
+            Object.keys(branch).some((key) => !["type", "enum", "const", "title", "description"].includes(key))) return undefined;
+        const values = Array.isArray(branch.enum) ? branch.enum
+            : branch.const !== undefined ? [branch.const] : [];
+        if (values.length === 0 || values.some((item) =>
+            (first.type === "integer" ? !Number.isInteger(item) :
+                typeof item !== (first.type === "number" ? "number" : first.type)) ||
+            choices.includes(item))) return undefined;
+        choices.push(...values);
+    }
+    const { oneOf: _variants, ...rest } = value;
+    return { ...rest, enum: choices, type: first.type };
 }
 
 function hideModelInputProperties(
