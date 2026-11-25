@@ -193,6 +193,7 @@ export class McpHost {
                 ...createMcpRouteEntries({
                     ...common,
                     contextMode: "openai-session",
+                    appEnabled: () => this.#appReady,
                     extensions: new McpExtensionRegistry([mcpAppExtension]),
                     toolAdapter: (dispatch) =>
                         new McpAppCall({

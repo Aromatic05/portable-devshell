@@ -289,6 +289,7 @@ test("MCP endpoint serves App resources and environment presentation from a gene
     const binding = new McpEndpointBinding(
         createTestMcpEndpoint({
             extensions,
+            contextMode: "openai-session",
             instanceName: "demo",
             context: harness.context,
             tools: harness.tools,
@@ -1310,7 +1311,7 @@ function createBinding(
             : undefined;
     return new McpEndpointBinding(
         createTestMcpEndpoint({
-            contextMode: options?.contextMode,
+            contextMode: options?.contextMode ?? (options?.mcpApp === true ? "openai-session" : undefined),
             ...(extensions === undefined ? {} : { extensions }),
             context: harness.context,
             instanceName: "demo",

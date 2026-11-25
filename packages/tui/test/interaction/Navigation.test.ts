@@ -3113,6 +3113,11 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                 "public=https://example.test/tunnel/alpha/custom-mcp",
             ],
         );
+        for (const suffix of ["/explicit", "/agy-session", "/stateless"]) {
+            for (const base of ["http://127.0.0.1:3210/alpha/custom-mcp", "https://example.test/tunnel/alpha/custom-mcp"]) {
+                assert.ok(configuredEndpoints?.expandedLines.some(line => line.text.endsWith(base + suffix)));
+            }
+        }
 
         harness.store.setFormDraft(
             "web",

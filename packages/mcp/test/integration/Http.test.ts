@@ -364,6 +364,22 @@ test("automatic route schemas stay fixed without session metadata and only bind 
     assert.ok(bindings[1]);
     assert.notEqual(bindings[0].ctxId, bindings[1].ctxId);
     assert.equal((await host.contexts.registry.list()).length, 2);
+    for (const [suffix, key, old] of [["", openai, bindings[0]], ["/agy-session", agy, bindings[1]]] as const) {
+        await host.contexts.disable(old.ctxId);
+        const metadata = { [key]: "chat" };
+        const restarted = await rpc(suffix, "tools/call", {
+            name: "environ_info", arguments: { workspace }, _meta: metadata,
+        });
+        assert.equal(restarted.error, undefined);
+        assert.equal(restarted.result?.structuredContent?.ctxId, undefined);
+        const current = await host.contexts.registry.lookupExternal({ kind: key, value: "chat" }, { principal: "local" });
+        assert.ok(current);
+        assert.notEqual(current.ctxId, old.ctxId);
+        assert.equal((await host.contexts.registry.lookup(old.ctxId, { principal: "local" })).status, "disabled");
+        const call = await rpc(suffix, "tools/call", { name: "bash_run", arguments: { command: "pwd" }, _meta: metadata });
+        assert.equal(call.error, undefined);
+        assert.equal(call.result?.structuredContent?.stdout, "ok\n");
+    }
 });
 
 test("quiet ToolCall keeps the HTTP connection live before the Worker finishes", async () => {
@@ -421,7 +437,7 @@ test("quiet ToolCall keeps the HTTP connection live before the Worker finishes",
     }
 });
 
-test("production MCP host advertises MCP App resources on OpenAI but not stateless", async () => {
+test("production MCP host advertises MCP App resources only on OpenAI", async () => {
     const host = createHost();
     await host.start();
     try {
@@ -449,13 +465,23 @@ test("production MCP host advertises MCP App resources on OpenAI but not statele
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppInteractionResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppToolCallResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
-        const statelessEndpoint = `${endpoint}/stateless`;
-        const statelessDiscovery = await discoverModern(statelessEndpoint);
-        assert.equal(statelessDiscovery.status, 200);
-        await statelessDiscovery.text();
-        const statelessResources = await postModern(statelessEndpoint, "stateless-resources", "resources/list");
-        assert.equal(statelessResources.status, 404);
-        await statelessResources.text();
+        for (const suffix of ["/explicit", "/agy-session", "/stateless"]) {
+            const modeEndpoint = `${endpoint}${suffix}`;
+            const discovery = await discoverModern(modeEndpoint);
+            assert.equal(discovery.status, 200);
+            await discovery.text();
+            const resources = await postModern(modeEndpoint, "mode-resources", "resources/list");
+            assert.equal(resources.status, 404);
+            await resources.text();
+            const tools = await postModern(modeEndpoint, "mode-tools", "tools/list");
+            const listed = parseMcpHttpResponse<{ result?: { tools: Array<{ name: string; _meta?: Record<string, unknown> }> } }>(await tools.text());
+            assert.ok(listed.result?.tools.length);
+            for (const tool of listed.result.tools) {
+                assert.equal(tool.name.startsWith("mcpapp_"), false);
+                assert.equal(tool._meta?.ui, undefined);
+                assert.equal(tool._meta?.["openai/outputTemplate"], undefined);
+            }
+        }
         const read = await request("resources/read", { uri: mcpAppResourceUri });
         assert.equal(read.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
         assert.deepEqual(read.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["fullscreen"]);

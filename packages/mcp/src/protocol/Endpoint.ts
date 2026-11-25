@@ -11,7 +11,7 @@ import { createMcpContextSelector } from "./context/Selector.js";
 import type { McpTool } from "./tool/Schema.js";
 import type { McpToolSource } from "./tool/Source.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
-import { McpEndpointCatalog } from "./tool/Catalog.js";
+import { McpEndpointCatalog, withoutAppMetadata } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { isAppOnlyInteractionTool, McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type { McpEndpointCallContext } from "./call/Port.js";
@@ -21,7 +21,7 @@ import type { McpModelOutputBudget } from "./call/ModelOutput.js";
 export type { McpEndpointCallContext } from "./call/Port.js";
 
 export interface McpEndpointOptions {
-    appEnabled?: boolean;
+    appEnabled?: boolean | (() => boolean);
     auth?: McpAuthConfig;
     context: Pick<ContextTransport, "resolve">;
     contextMode?: ControlMcpContextMode;
@@ -45,6 +45,7 @@ export class McpEndpoint {
     readonly #catalog: McpEndpointCatalog;
     readonly #dispatch: McpEndpointDispatch;
     readonly #extensions: McpExtensionRegistry;
+    readonly #appEnabled: () => boolean;
     readonly #instanceName: string;
     readonly #toolAdapter?: ReturnType<NonNullable<McpEndpointOptions['toolAdapter']>>;
     constructor(options: McpEndpointOptions) {
@@ -52,10 +53,13 @@ export class McpEndpoint {
             options.contextMode ?? "explicit",
         );
         this.contextMode = contextSelector.id;
+        const appEnabled = options.appEnabled;
+        this.#appEnabled = () => this.contextMode === "openai-session" &&
+            (typeof appEnabled === "function" ? appEnabled() : appEnabled !== false);
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
-            appEnabled: options.appEnabled,
+            appEnabled: this.#appEnabled,
             bootstrapPresentationResourceUri:
                 this.#extensions.environmentPresentation()?.resourceUri,
             toolCallPresentationResourceUri:
@@ -92,15 +96,15 @@ export class McpEndpoint {
     }
 
     hasAppResources(): boolean {
-        return this.#extensions.hasAppResources();
+        return this.#appEnabled() && this.#extensions.hasAppResources();
     }
 
     listResources() {
-        return this.#extensions.listResources();
+        return this.#extensions.listResources(this.#appEnabled());
     }
 
     async readResource(uri: string) {
-        return await this.#extensions.readResource(uri);
+        return await this.#extensions.readResource(uri, this.#appEnabled());
     }
 
     async callTool(
@@ -110,13 +114,17 @@ export class McpEndpoint {
     ): Promise<McpEndpointResult> {
         const hideContext = this.contextMode !== "explicit" && !isAppOnlyInteractionTool(toolName);
         if (hideContext && this.contextMode !== "stateless") input = withoutContextId(input);
-        const intercepted = await this.#toolAdapter?.call(toolName, input, requestContext, signal);
+        const adapter = this.#appEnabled() ? this.#toolAdapter : undefined;
+        const intercepted = await adapter?.call(toolName, input, requestContext, signal);
         if (intercepted !== undefined) return intercepted;
         const executed = await this.#dispatch.callTool(toolName, input, requestContext, signal);
         const result = !hideContext ? executed : executed instanceof McpNativeToolResult
             ? new McpNativeToolResult({ ...executed, structuredContent: withoutContextId(executed.structuredContent) })
             : withoutContextId(executed);
-        return this.#toolAdapter?.present(toolName, result, requestContext, input) ?? result;
+        if (adapter !== undefined) return await adapter.present(toolName, result, requestContext, input);
+        return !this.#appEnabled() && result instanceof McpNativeToolResult
+            ? new McpNativeToolResult({ ...result, _meta: withoutAppMetadata(result._meta) })
+            : result;
     }
 
     catalogSnapshot() {

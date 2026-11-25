@@ -37,7 +37,7 @@ import type {
 
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
-    appEnabled?: boolean;
+    appEnabled?: boolean | (() => boolean);
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
@@ -61,7 +61,7 @@ export class McpEndpointCatalog {
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
     readonly #source: McpToolSource;
-    readonly #appEnabled: boolean;
+    readonly #appEnabled: () => boolean;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
 
     constructor(options: McpEndpointCatalogOptions) {
@@ -75,7 +75,8 @@ export class McpEndpointCatalog {
         this.#instanceName = options.instanceName;
         this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true && this.#contextSelector.id !== "stateless";
         this.#source = options.source;
-        this.#appEnabled = options.appEnabled !== false;
+        const appEnabled = options.appEnabled;
+        this.#appEnabled = typeof appEnabled === "function" ? appEnabled : () => appEnabled !== false;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
@@ -111,18 +112,19 @@ export class McpEndpointCatalog {
         const name = entry.definition.name;
         if (this.#contextSelector.id === "stateless")
             return entry.scope === this.#instanceName && Object.hasOwn(statelessToolDescriptions, name);
-        return this.#appEnabled || !name.startsWith("mcpapp_");
+        return this.#appEnabled() || (!name.startsWith("mcpapp_") && isModelFacingTool(entry.definition));
     }
 
     adapt(tool: ToolDefinition): McpTool {
         const stateless = this.#contextSelector.id === "stateless";
         if (stateless && tool.name === "bash_run") tool = withStatelessCwd(tool);
-        const modelTool = withBootstrapPresentation(
+        const appEnabled = this.#appEnabled();
+        const modelTool = appEnabled ? withBootstrapPresentation(
             tool,
             this.#bootstrapPresentationResourceUri,
             this.#toolCallPresentationResourceUri,
             this.#toolCallPresentationResourceUriForTool,
-        );
+        ) : { ...tool, _meta: withoutAppMetadata(asRecord(tool._meta)) };
         const provenanceTool =
             isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
                 ? modelTool
@@ -160,7 +162,7 @@ export class McpEndpointCatalog {
         const invocationStatus = mcpToolInvocationStatus(exposed._meta);
         const meta = {
             ...asRecord(adapted._meta),
-            ...(invocationStatus === undefined
+            ...(!appEnabled || invocationStatus === undefined
                 ? {}
                 : {
                       "openai/toolInvocation/invoked": invocationStatus.invoked,
@@ -256,6 +258,14 @@ function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : {};
+}
+
+export function withoutAppMetadata<T>(value: Record<string, T> | undefined): Record<string, T> | undefined {
+    if (value === undefined) return undefined;
+    const metadata = Object.fromEntries(Object.entries(value).filter(([key]) =>
+        key !== "ui" && !key.startsWith("ui/") && !key.startsWith("openai/") &&
+        key !== "portable-devshell/widgetPayload" && key !== "portable-devshell/mcpapp"));
+    return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
 function isModelFacingTool(tool: ToolDefinition): boolean {

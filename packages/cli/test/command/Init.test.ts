@@ -460,6 +460,29 @@ for (const enabled of [true, false]) {
     });
 }
 
+test("init does not advertise MCP endpoints for a disabled instance", async () => {
+    const view = configView({ token: "********" });
+    view.instances[0]!.mcp.enabled = false;
+    let output = "";
+    let result: unknown;
+    const context = {
+        clients: {
+            config: { async get() { return view; } },
+            runtime(instance: string) {
+                return { async start() { return readySnapshot(instance); } };
+            },
+        },
+        controlNegotiated: true,
+        writeValue(value: unknown, text: string) {
+            result = value;
+            output = text;
+        },
+    } as unknown as CliDispatchContext;
+    assert.equal(await executeInit({ kind: "init" }, context), true);
+    assert.equal((result as { mcpEnabled: boolean }).mcpEnabled, false);
+    assert.doesNotMatch(output, /\/local-pc\/mcp/u);
+});
+
 function configView(input?: {
     enabled?: boolean;
     instances?: ConfigView["instances"];
@@ -544,6 +567,8 @@ test("interactive init validates a public base URL and displays the complete end
     assert.equal(saved.filter((patch) => patch.publicBaseUrl !== undefined).length, 1);
     assert.match(output, /Public base URL/u);
     assert.match(output, /without the Instance endpoint/u);
-    assert.match(output, /MCP endpoint: https:\/\/example\.test\/proxy\/local-pc\/mcp/u);
+    for (const suffix of ["", "/explicit", "/agy-session", "/stateless"]) {
+        assert.ok(output.includes("https://example.test/proxy/local-pc/mcp" + suffix));
+    }
     assert.doesNotMatch(output, /mcp\/local-pc\/mcp/u);
 });

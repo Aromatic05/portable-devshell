@@ -201,8 +201,10 @@ test("the production Endpoint exposes a reachable fullscreen Workspace with Inli
         description: "Run command", requiredCapabilities: [], inputSchema: { type: "object" },
         outputSchema: { type: "object" } }];
     const extension = createMcpAppMcpExtension("https://example.test");
+    let appReady = true;
     const endpoint = new McpEndpoint({
-        instanceName: "alpha", extensions: new McpExtensionRegistry([extension]),
+        instanceName: "alpha", contextMode: "openai-session", extensions: new McpExtensionRegistry([extension]),
+        appEnabled: () => appReady,
         context: { resolve: async () => { throw new Error("Unexpected Context read"); } },
         tools: { call: async () => { throw new Error("Unexpected tool execution"); } },
         toolSource: {
@@ -220,6 +222,12 @@ test("the production Endpoint exposes a reachable fullscreen Workspace with Inli
     const resource = await endpoint.readResource(workspaceUri);
     assert.match(resource?.text ?? "", /data-mcpapp-view="workspace"/u);
     assert.deepEqual(resource?._meta?.["openai/ui"], { availableDisplayModes: ["fullscreen"] });
+    appReady = false;
+    assert.equal(endpoint.hasAppResources(), false);
+    assert.deepEqual(endpoint.listResources(), []);
+    assert.equal(await endpoint.readResource(workspaceUri), undefined);
+    assert.deepEqual(endpoint.listTools().map(tool => tool.name), ["bash_run"]);
+    await assert.rejects(endpoint.callTool("mcpapp_open", {}, { principal: "local" }), /not exposed/u);
 });
 
 test("Inline opt-in still excludes frequent background and reporting tools", async () => {
