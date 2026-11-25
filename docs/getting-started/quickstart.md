@@ -128,7 +128,7 @@ enabled = false
 
 ## 6. MCP Agent 的第一步
 
-MCP 侧不要把 instance 配置中的某个目录当成默认项目。正常工作流从：
+MCP 侧不要把 instance 配置中的某个目录当成默认项目。绑定 Context 的入口从：
 
 ```text
 environ_info(workspace=/absolute/path/on/worker)
@@ -139,6 +139,8 @@ environ_info(workspace=/absolute/path/on/worker)
 它会建立 portable-devshell Context、prepare 当前 workspace，并在 Host 支持时一起 bootstrap Live Workspace。MCP `tools/list` 合并 Worker schema、Control runtime primitive 和 Extension `mcp.tools`，后者 contribution 变化会更新 catalog；instance group/capability 配置不裁剪目录，`[extensions].model` 单独控制 shell command。当前 endpoint 拒绝 legacy 协议请求，client 必须支持 2026-07-28。
 
 `openai-session` 把内部 `ctxId` 隐藏在 model-facing schema 之外；`explicit` Context mode 则让通用 MCP client 显式携带它。详见 [Context](../concepts/context.md)。
+
+使用 `/local-pc/mcp/stateless` 时跳过这一步，直接调用 `bash_run`、`file_read` 或 `file_edit`；路径必须是 Worker 绝对路径，`bash_run.cwd` 必填。该入口不提供 `tmux_run` 或 MCP App。
 
 ## 7. 验证长任务
 

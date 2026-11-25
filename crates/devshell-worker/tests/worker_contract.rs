@@ -1639,6 +1639,47 @@ fn workspace_security_mode_rejects_absolute_bash_cwd() {
 }
 
 #[test]
+fn stateless_tools_still_enforce_workspace_security() {
+    let env = TestEnv::new();
+    let instance = "aromatic-stateless-secure";
+    let outside = env.home().join("outside.txt");
+    fs::write(&outside, "original\n").unwrap();
+    env.workspace_mode_command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    for (method, input) in [
+        ("bash_run", serde_json::json!({
+            "command": "pwd", "cwd": env.home(), "timeoutMs": 30_000
+        })),
+        ("file_read", serde_json::json!({
+            "files": [{"path": outside, "view": "content"}]
+        })),
+        ("file_edit", serde_json::json!({
+            "changes": format!("*** Begin Edit\n*** Patch File: {}\n@@\n-original\n+changed\n*** End Edit", outside.display())
+        })),
+    ] {
+        let denied = env.rpc(instance, "tool", &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": method,
+            "method": method,
+            "message": { "input": input, "context": {
+                "ctxId": "57a7e1e5-5000-8000-8000-000000000000",
+                "contextMode": "stateless",
+                "source": "mcp"
+            } }
+        }));
+        assert_eq!(denied["type"], "error", "{method}: {denied}");
+        assert_eq!(denied["error"]["code"], "security.denied", "{method}: {denied}");
+    }
+    assert_eq!(fs::read_to_string(outside).unwrap(), "original\n");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn workspace_security_mode_rejects_absolute_terminal_cwd() {
     let env = TestEnv::new();
     let instance = "aromatic-secure-terminal";

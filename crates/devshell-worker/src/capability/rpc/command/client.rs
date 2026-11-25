@@ -345,6 +345,7 @@ mod tests {
         for source in [None, Some("cli"), Some("mcp")] {
             let call = ToolCall {
                 workspace: root.path().to_path_buf(),
+                stateless: false,
                 params: serde_json::Value::Null,
                 ctx_id: "ctx".into(),
                 operation_id: "call".into(),

@@ -117,8 +117,11 @@ OpenAI workspace 管理员可能需要先审核/发布自定义 App。后续 MCP
 | ChatGPT | `/demo-local/mcp` 或 `/demo-local/mcp/openai-session` |
 | agy | `/demo-local/mcp/agy-session` |
 | Gemini Web / 通用 MCP 客户端 | `/demo-local/mcp/explicit` |
+| 通用 MCP 客户端（无需会话或工作区绑定） | `/demo-local/mcp/stateless` |
 
 已有 ChatGPT connector 保持原 URL。原先使用裸 URL、但不发送 OpenAI 会话 metadata 的客户端，应改为 `/explicit`；OAuth 客户端换 URL 后需授权新 resource。实例 TOML 不再配置 `contextMode`。详见 [Context](../concepts/context.md)。
+
+`/stateless` 不需要先调用 `environ_info`。直接调用 `bash_run`、`file_read` 或 `file_edit`，提供 Worker 绝对路径；`bash_run.cwd` 必填。详见 [MCP](../concepts/mcp.md#context-selector)。
 
 ## OAuth 与刷新
 

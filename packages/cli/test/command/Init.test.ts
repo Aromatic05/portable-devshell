@@ -170,6 +170,7 @@ test("init reconciles a running fresh-like Control through RPC without restartin
         "start:local-pc",
     ]);
     assert.match(renderedText, /DevShell is initialized/u);
+    assert.match(renderedText, /Stateless: http:\/\/127\.0\.0\.1:17890\/local-pc\/mcp\/stateless/u);
     assert.match(renderedText, /ds_[A-Za-z0-9_-]{40,}/u);
 });
 
@@ -523,7 +524,7 @@ test("interactive init validates a public base URL and displays the complete end
     let view = configView({ instances: [], token: undefined });
     const saved: ConfigMcpPatch[] = [];
     let output = "";
-    const stdin = Readable.from(["1\nnot-a-url\nftp://example.test\nhttps://user:pass@example.test\nhttps://example.test/?token=bad\nhttps://example.test/local-pc/mcp\nhttps://example.test/proxy/?\n"]) as Readable & { isTTY: boolean };
+    const stdin = Readable.from(["1\nnot-a-url\nftp://example.test\nhttps://user:pass@example.test\nhttps://example.test/?token=bad\nhttps://example.test/local-pc/mcp\nhttps://example.test/local-pc/mcp/stateless\nhttps://example.test/proxy/?\n"]) as Readable & { isTTY: boolean };
     stdin.isTTY = true;
     await executeInit({ kind: "init" }, {
         controlNegotiated: true, outputFormat: "text", stdin,

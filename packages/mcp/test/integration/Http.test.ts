@@ -421,7 +421,7 @@ test("quiet ToolCall keeps the HTTP connection live before the Worker finishes",
     }
 });
 
-test("production MCP host advertises and reads its MCP App resource", async () => {
+test("production MCP host advertises MCP App resources on OpenAI but not stateless", async () => {
     const host = createHost();
     await host.start();
     try {
@@ -449,6 +449,13 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppInteractionResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppToolCallResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
+        const statelessEndpoint = `${endpoint}/stateless`;
+        const statelessDiscovery = await discoverModern(statelessEndpoint);
+        assert.equal(statelessDiscovery.status, 200);
+        await statelessDiscovery.text();
+        const statelessResources = await postModern(statelessEndpoint, "stateless-resources", "resources/list");
+        assert.equal(statelessResources.status, 404);
+        await statelessResources.text();
         const read = await request("resources/read", { uri: mcpAppResourceUri });
         assert.equal(read.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
         assert.deepEqual(read.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["fullscreen"]);
@@ -653,7 +660,7 @@ test("OAuth carries the public prefix and does not reuse existing bare-route tok
     proxy.setTarget(`http://127.0.0.1:${requireTcpPort(host.server.address)}`);
 
     try {
-        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session"]) {
+        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session", "/stateless"]) {
             const resourcePath = `${basePath}${suffix}`;
             const protectedMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource${resourcePath}`);
             assert.equal(protectedMetadata.status, 200, resourcePath);
@@ -734,7 +741,7 @@ test("running host replaces and unregisters instance bindings without restart", 
 
         host.unregisterInstance("demo");
         host.replaceTestTools("demo", []);
-        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session"]) {
+        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session", "/stateless"]) {
             const missing = await postModern(`${endpoint}${suffix}`, "list-tools", "tools/list");
             assert.equal(missing.status, 404);
             await missing.text();

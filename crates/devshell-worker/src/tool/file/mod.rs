@@ -53,13 +53,22 @@ impl FileToolState {
     }
 }
 
+pub fn requested_path(call: &ToolCall, raw: &str) -> Result<RequestedPath, ToolError> {
+    if call.stateless {
+        if !Path::new(raw).is_absolute() {
+            return Err(ToolError::new("file.invalidPath", "stateless mode requires an absolute Worker path"));
+        }
+        return Ok(parse_requested_path(raw)?);
+    }
+    Ok(parse_requested_path(&normalize_requested_path(raw)?)?)
+}
+
 pub fn resolve_existing(
     call: &ToolCall,
     raw: &str,
     write: bool,
 ) -> Result<(RequestedPath, ResolvedPath), ToolError> {
-    let normalized = normalize_requested_path(raw)?;
-    let requested = parse_requested_path(&normalized)?;
+    let requested = requested_path(call, raw)?;
     authorize(call, requested.namespace, write)?;
     let resolved = resolve_existing_target(&call.workspace, &requested)?;
     Ok((requested, resolved))
@@ -68,8 +77,7 @@ pub fn resolve_create(
     call: &ToolCall,
     raw: &str,
 ) -> Result<(RequestedPath, ResolvedPath), ToolError> {
-    let normalized = normalize_requested_path(raw)?;
-    let requested = parse_requested_path(&normalized)?;
+    let requested = requested_path(call, raw)?;
     authorize(call, requested.namespace, true)?;
     let resolved = resolve_create_target(&call.workspace, &requested)?;
     Ok((requested, resolved))
@@ -79,8 +87,7 @@ pub fn resolve_create_plan(
     call: &ToolCall,
     raw: &str,
 ) -> Result<(RequestedPath, PathBuf), ToolError> {
-    let normalized = normalize_requested_path(raw)?;
-    let requested = parse_requested_path(&normalized)?;
+    let requested = requested_path(call, raw)?;
     authorize(call, requested.namespace, true)?;
     let canonical = resolve_create_candidate(&call.workspace, &requested)?;
     Ok((requested, canonical))
@@ -98,8 +105,7 @@ pub fn resolve_info(
     call: &ToolCall,
     raw: &str,
 ) -> Result<(RequestedPath, ResolvedEntry), ToolError> {
-    let normalized = normalize_requested_path(raw)?;
-    let requested = parse_requested_path(&normalized)?;
+    let requested = requested_path(call, raw)?;
     authorize(call, requested.namespace, false)?;
     let entry = resolve_entry(&call.workspace, &requested)?;
     Ok((requested, entry))

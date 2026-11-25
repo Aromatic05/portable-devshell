@@ -23,13 +23,16 @@ use crate::capability::rpc::response::RpcResponse;
 use crate::capability::terminal::TerminalManager;
 use crate::daemon::process::WorkerRuntimeContext;
 use crate::daemon::process::registry::ActiveProcessRegistry;
-use crate::instance::WorkerConfig;
+use crate::instance::{InstanceName, WorkerConfig};
 use crate::instance::sandbox::{SecurityPolicy, build_security_policy};
-use crate::instance::storage::ExtensionResourceStore;
+use crate::instance::storage::{ExtensionResourceStore, InstancePaths};
 use crate::instance::workspace::alert::AlertService;
 use crate::tool::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
+const STATELESS_CONTEXT_ID: &str = "57a7e1e5-5000-8000-8000-000000000000";
+
 pub struct RpcRouter {
+    instance: InstanceName,
     active_processes: Arc<ActiveProcessRegistry>,
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     control_handlers: HashMap<String, Arc<dyn ControlHandler>>,
@@ -80,6 +83,7 @@ impl RpcRouter {
         );
 
         Self {
+            instance: runtime.instance,
             active_processes,
             active_tool_calls,
             control_handlers,
@@ -164,41 +168,46 @@ impl RpcRouter {
             .map_err(|message| RpcError::new("rpc.methodNotFound", message))?;
         let tool = self.tools.find(&tool_name).map_err(RpcError::from)?;
         let context = request.context.as_ref();
-        let workspace = context
-            .and_then(|value| value.workspace.as_deref())
-            .ok_or_else(|| {
-                RpcError::new(
-                    "rpc.invalidContext",
-                    "tool calls require a workspace context",
-                )
+        let ctx_id = context.and_then(|value| value.ctx_id.as_deref());
+        let stateless = context.is_some_and(|value| value.context_mode.as_deref() == Some("stateless"));
+        let supplied_workspace = context.and_then(|value| value.workspace.as_deref());
+        let workspace = if stateless {
+            if ctx_id != Some(STATELESS_CONTEXT_ID) || supplied_workspace.is_some()
+                || !context.is_some_and(|value| value.source.as_deref() == Some("mcp"))
+            {
+                return Err(RpcError::new("rpc.invalidContext", "Invalid stateless tool context."));
+            }
+            if !matches!(request.method.as_str(), "bash_run" | "file_read" | "file_edit") {
+                return Err(RpcError::new("rpc.methodNotFound", "Tool is not available in stateless mode."));
+            }
+            // The tools still share a Worker call type. The instance root is
+            // only its internal workspace slot; accepted paths never use it.
+            InstancePaths::resolve(&self.instance)
+                .map_err(|error| RpcError::new("rpc.invalidContext", error))?
+                .instance_root
+        } else {
+            let workspace = supplied_workspace.ok_or_else(|| {
+                RpcError::new("rpc.invalidContext", "tool calls require a workspace context")
             })?;
-        if !Path::new(workspace).is_absolute() {
-            return Err(RpcError::new(
-                "rpc.invalidContext",
-                "tool workspace must be an absolute path",
-            ));
-        }
-        let workspace = PathBuf::from(workspace).canonicalize().map_err(|error| {
-            RpcError::new(
-                "rpc.invalidContext",
-                format!("failed to resolve workspace {workspace}: {error}"),
-            )
-        })?;
-        if !workspace.is_dir() {
-            return Err(RpcError::new(
-                "rpc.invalidContext",
-                format!("workspace is not a directory: {}", workspace.display()),
-            ));
-        }
+            if !Path::new(workspace).is_absolute() {
+                return Err(RpcError::new("rpc.invalidContext", "tool workspace must be an absolute path"));
+            }
+            let workspace = PathBuf::from(workspace).canonicalize().map_err(|error| {
+                RpcError::new("rpc.invalidContext", format!("failed to resolve workspace {workspace}: {error}"))
+            })?;
+            if !workspace.is_dir() {
+                return Err(RpcError::new("rpc.invalidContext", format!("workspace is not a directory: {}", workspace.display())));
+            }
+            workspace
+        };
         let operation_id = context
             .and_then(|value| value.operation_id.clone())
             .unwrap_or_else(|| request.id.clone());
         tool.call(ToolCall {
             workspace,
+            stateless,
             params: request.params.clone(),
-            ctx_id: context
-                .and_then(|value| value.ctx_id.clone())
-                .unwrap_or_else(|| "ctx-worker-default".to_string()),
+            ctx_id: ctx_id.unwrap_or("ctx-worker-default").to_string(),
             operation_id: operation_id.clone(),
             source: context.and_then(|value| value.source.clone()),
             policy: Arc::clone(&self.policy),

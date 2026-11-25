@@ -109,7 +109,7 @@ export class McpEndpoint {
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
         const hideContext = this.contextMode !== "explicit" && !isAppOnlyInteractionTool(toolName);
-        if (hideContext) input = withoutContextId(input);
+        if (hideContext && this.contextMode !== "stateless") input = withoutContextId(input);
         const intercepted = await this.#toolAdapter?.call(toolName, input, requestContext, signal);
         if (intercepted !== undefined) return intercepted;
         const executed = await this.#dispatch.callTool(toolName, input, requestContext, signal);

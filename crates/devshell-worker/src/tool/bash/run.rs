@@ -11,15 +11,14 @@ use crate::capability::artifact::result_path::tool_result_path;
 use crate::capability::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::capability::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::instance::sandbox::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
-    parse_requested_path, resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, resolve_existing_target,
 };
 use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::bash::bash_run_name;
 use crate::tool::bash::model::ShellRuntime;
 use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tool::bash::process::spawn_shell;
-use crate::tool::file::FileToolState;
+use crate::tool::file::{FileToolState, requested_path};
 #[cfg(unix)]
 use crate::tool::file::observation::{CommandReadPlan, MAX_OUTPUT_BYTES};
 use crate::tool::{
@@ -137,7 +136,7 @@ impl ToolHandler for BashRunTool {
             .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
         #[cfg(unix)]
-        let read_plan = CommandReadPlan::analyze(&params.command, &cwd.canonical);
+        let read_plan = if call.stateless { None } else { CommandReadPlan::analyze(&params.command, &cwd.canonical) };
         let execution = crate::capability::execution::ExecutionConfig::from_env()
             .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
         if let Some(config) = execution.as_ref() {
@@ -154,7 +153,7 @@ impl ToolHandler for BashRunTool {
             Some(None) => Some(""),
             None => None,
         };
-        if let Some(environment) = self.model_devshell.environment(&call, None, requested_path) {
+        if !call.stateless && let Some(environment) = self.model_devshell.environment(&call, None, requested_path) {
             environment.inject(&mut params.env);
         }
         let started = Instant::now();
@@ -397,9 +396,10 @@ struct StreamOutput {
     artifact_warning: Option<String>,
 }
 fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolError> {
-    let normalized = normalize_requested_path(raw.unwrap_or("./"))
-        .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
-    let requested = parse_requested_path(&normalized)
+    if call.stateless && raw.is_none() {
+        return Err(ToolError::new("bash.invalidCwd", "cwd is required in stateless mode"));
+    }
+    let requested = requested_path(call, raw.unwrap_or("./"))
         .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
     let (read, write) = match requested.namespace {
         PathNamespace::Workspace => (

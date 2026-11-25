@@ -88,6 +88,14 @@ export function withMcpInstanceTarget(tool: ToolDefinition): ToolDefinition {
     });
 }
 
+export const statelessCwdHint = "Required absolute working directory on the Worker.";
+
+export function withStatelessCwd(tool: ToolDefinition): ToolDefinition {
+    return withInputProperty(tool, "cwd", {
+        description: statelessCwdHint, minLength: 1, type: "string",
+    }, true);
+}
+
 export function readMcpRoutedInput(
     input: JsonValue,
     instanceRoutingEnabled: boolean,

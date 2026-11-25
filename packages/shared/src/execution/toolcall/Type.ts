@@ -30,7 +30,9 @@ export interface ToolCallExternalBinding {
     value: string;
 }
 
-export type ControlMcpContextMode = "explicit" | "openai-session" | "agy-session";
+export type ControlMcpContextMode = "explicit" | "openai-session" | "agy-session" | "stateless";
+
+export const statelessMcpContextId = "57a7e1e5-5000-8000-8000-000000000000";
 
 export interface ToolCallContext {
     requestId?: string;

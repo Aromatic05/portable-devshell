@@ -33,15 +33,16 @@ Context 的权威状态、生命周期、environment 准备和清理集中在 `p
 
 ## Context selector
 
-MCP URL 决定**如何找到 Context**，不改变内部模型：
+MCP URL 决定**是否以及如何找到 Context**：
 
 | 路由 | Context 来源 |
 | --- | --- |
 | `/<instance>/mcp`、`/<instance>/mcp/openai-session` | 已认证主体 + `openai/session` |
 | `/<instance>/mcp/agy-session` | 已认证主体 + `antigravity.google/conversation_id` |
 | `/<instance>/mcp/explicit` | `environ_info` 返回 `ctxId`，后续调用显式携带它 |
+| `/<instance>/mcp/stateless` | 不创建或查找 Context；每次调用提供 Worker 绝对路径 |
 
-自动会话模式不在模型工具 schema 或模型结果中暴露 `ctxId`。调用缺少对应 metadata 时会提示选择正确入口，不会更换模式或创建无绑定的 Context。OpenAI Workspace App 的私有调用仍可携带内部 `ctxId` 和隐藏 capability。所有模式都校验 principal、Context 状态和 instance attachment；无认证或共享 bearer 不区分共享同一凭据的用户。
+自动会话模式不在模型工具 schema 或模型结果中暴露 `ctxId`。调用缺少对应 metadata 时会提示选择正确入口，不会更换模式或创建无绑定的 Context。OpenAI Workspace App 的私有调用仍可携带内部 `ctxId` 和隐藏 capability。绑定 Context 的模式都会校验 principal、Context 状态和 instance attachment。`stateless` 不做这些 Context 校验，但仍使用该 instance 的 MCP 认证与 Worker 权限。无认证或共享 bearer 不区分共享同一凭据的用户。
 
 ## External binding
 

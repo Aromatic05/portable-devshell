@@ -231,6 +231,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 const recordActivity = this.#onExecutionActivity;
                 // Goal control and UI/report calls are not evidence of work.
                 const shouldTrack = ctxId !== undefined && recordActivity !== undefined &&
+                    hookValue.context.contextMode !== "stateless" &&
                     hookValue.context.source !== "extension" &&
                     !["workspace_goal", "progress_report", "environ_info"].includes(hookValue.toolName) &&
                     !hookValue.toolName.startsWith("mcpapp_");

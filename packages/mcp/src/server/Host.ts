@@ -230,6 +230,8 @@ export class McpHost {
                     [`${path}/explicit`], version),
                 ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "agy-session" },
                     [`${path}/agy-session`], version),
+                ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "stateless" },
+                    [`${path}/stateless`], version),
             ]);
         } catch (error) {
             if (mountApp) this.#appRoute?.unregister(instance.name);

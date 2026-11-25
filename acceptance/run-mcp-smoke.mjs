@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { createAcceptanceFixture, runCli } from "./AcceptanceSupport.mjs";
 
@@ -11,6 +12,71 @@ try {
     runCli(["start"], fixture.env);
     runCli(["instance", "start", "aromatic-pc"], fixture.env);
     const endpoint = `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp/explicit`;
+    const statelessEndpoint = new URL("./stateless", endpoint).href;
+    const listContexts = () => JSON.parse(runCli(["context", "list"], fixture.env).stdout);
+    const contextsBefore = listContexts();
+    const statelessList = await postJson(statelessEndpoint, {
+        jsonrpc: "2.0", id: "req-stateless-list", method: "tools/list",
+    });
+    assert.equal(statelessList.headers.get("mcp-session-id"), null);
+    const statelessTools = statelessList.body.result?.tools;
+    assert.deepEqual(statelessTools?.map(({ name }) => name).sort(), ["bash_run", "file_edit", "file_read"]);
+    for (const tool of statelessTools) {
+        assert.equal(Object.hasOwn(tool.inputSchema.properties, "ctxId"), false);
+        assert.equal(Object.hasOwn(tool.inputSchema.properties, "instance"), false);
+        assert.equal(tool._meta?.ui, undefined);
+    }
+    const statelessBash = statelessTools.find(({ name }) => name === "bash_run");
+    assert.ok(statelessBash.inputSchema.required.includes("cwd"));
+
+    const statelessCall = async (id, name, args) => (await postJson(statelessEndpoint, {
+        jsonrpc: "2.0", id: `req-stateless-${id}`, method: "tools/call",
+        params: { name, arguments: args },
+    })).body;
+    const missingCwd = await statelessCall("missing-cwd", "bash_run", { command: "pwd", timeoutMs: 30_000 });
+    assert.equal(missingCwd.error?.data?.code, "bash.invalidCwd", JSON.stringify(missingCwd));
+    const relativeCwd = await statelessCall("relative-cwd", "bash_run", {
+        command: "pwd", cwd: "./", timeoutMs: 30_000,
+    });
+    assert.equal(relativeCwd.error?.data?.code, "bash.invalidCwd", JSON.stringify(relativeCwd));
+    const absoluteCwd = await statelessCall("absolute-cwd", "bash_run", {
+        command: "pwd", cwd: fixture.workspace, timeoutMs: 30_000,
+    });
+    assert.equal(absoluteCwd.result?.structuredContent?.stdout?.trim(), fixture.workspace, JSON.stringify(absoluteCwd));
+
+    const statelessFile = join(fixture.workspace, "README.md");
+    const changes = (path) => `*** Begin Edit\n*** Patch File: ${path}\n@@\n-portable-devshell acceptance workspace\n+patched without a prior read\n*** End Edit`;
+    const relativeEdit = await statelessCall("relative-edit", "file_edit", { changes: changes("./README.md") });
+    assert.equal(relativeEdit.error?.data?.code, "file.invalidPath", JSON.stringify(relativeEdit));
+    const edit = await statelessCall("edit", "file_edit", { changes: changes(statelessFile) });
+    assert.equal(edit.error, undefined, JSON.stringify(edit));
+    assert.equal(await readFile(statelessFile, "utf8"), "patched without a prior read\n", JSON.stringify(edit));
+    const relativeRead = await statelessCall("relative-read", "file_read", {
+        files: [{ path: "./README.md", view: "content" }],
+    });
+    assert.equal(relativeRead.error?.data?.code, "file.invalidPath", JSON.stringify(relativeRead));
+    const absoluteRead = await statelessCall("absolute-read", "file_read", {
+        files: [{ path: statelessFile, view: "content", selector: "1:raw" }],
+    });
+    assert.equal(absoluteRead.result?.structuredContent?.files?.[0]?.content,
+        "1:patched without a prior read", JSON.stringify(absoluteRead));
+
+    const largeCommand = process.platform === "win32"
+        ? "1..2400 | ForEach-Object { [Console]::WriteLine(('line-{0:D4}' -f $_)) }"
+        : "awk 'BEGIN { for (i = 1; i <= 2400; i++) printf \"line-%04d\\n\", i }'";
+    const statelessOutput = await statelessCall("output", "bash_run", {
+        command: largeCommand, cwd: fixture.workspace, timeoutMs: 30_000,
+    });
+    const retained = statelessOutput.result?.structuredContent;
+    assert.equal(retained?.exitCode, 0, JSON.stringify(statelessOutput));
+    assert.equal(retained.stdoutTruncated, true);
+    assert.match(retained.stdoutPath, /^\/\.devshell\/tool-results\//u);
+    const statelessRecovered = await statelessCall("recover", "file_read", {
+        files: [{ path: retained.stdoutPath, view: "content", selector: "1200-1202:raw" }],
+    });
+    assert.equal(statelessRecovered.result?.structuredContent?.files?.[0]?.content,
+        "1200:line-1200\n1201:line-1201\n1202:line-1202", JSON.stringify(statelessRecovered));
+    assert.deepEqual(listContexts(), contextsBefore);
 
     const discover = await postJson(endpoint, {
         jsonrpc: "2.0",
@@ -81,9 +147,6 @@ try {
     // A real Worker retains the complete output while the model sees only
     // the budgeted MCP projection. Recover the middle from the retained
     // virtual artifact to prove the truncation is not destructive.
-    const largeCommand = process.platform === "win32"
-        ? "1..2400 | ForEach-Object { [Console]::WriteLine(('line-{0:D4}' -f $_)) }"
-        : "awk 'BEGIN { for (i = 1; i <= 2400; i++) printf \"line-%04d\\n\", i }'";
     const large = await postJson(endpoint, {
         jsonrpc: "2.0",
         id: "req-tools-large-output",
@@ -146,6 +209,7 @@ try {
                 toolCall: toolCall.body,
                 largeOutputRecoveryVerified: true,
                 agySessionBindingVerified: true,
+                statelessVerified: true,
             },
             null,
             2,

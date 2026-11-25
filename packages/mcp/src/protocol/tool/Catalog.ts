@@ -24,9 +24,11 @@ import {
     type McpTool,
 } from "./Schema.js";
 import {
+    statelessCwdHint,
     withMcpContextId,
     withMcpInstanceTarget,
     withMcpProvenance,
+    withStatelessCwd,
 } from "./Input.js";
 import type {
     McpToolSource,
@@ -71,14 +73,14 @@ export class McpEndpointCatalog {
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
-        this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true;
+        this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true && this.#contextSelector.id !== "stateless";
         this.#source = options.source;
         this.#appEnabled = options.appEnabled !== false;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
         return {
-            entries: this.#source.list(this.#instanceName).filter((entry) => this.#allowsTool(entry.definition.name)),
+            entries: this.#source.list(this.#instanceName).filter((entry) => this.#allowsEntry(entry)),
             instanceRoutingEnabled: this.#instanceRoutingEnabled,
         };
     }
@@ -96,18 +98,25 @@ export class McpEndpointCatalog {
         toolName: string,
         instanceName: string = this.#instanceName,
     ): ToolDefinition | undefined {
-        return this.#allowsTool(toolName) ? this.#source.get(instanceName, toolName)?.definition : undefined;
+        const entry = this.#source.get(instanceName, toolName);
+        return entry !== undefined && this.#allowsEntry(entry) ? entry.definition : undefined;
     }
 
     getEntry(toolName: string): McpToolSourceEntry | undefined {
-        return this.#allowsTool(toolName) ? this.#source.get(this.#instanceName, toolName) : undefined;
+        const entry = this.#source.get(this.#instanceName, toolName);
+        return entry !== undefined && this.#allowsEntry(entry) ? entry : undefined;
     }
 
-    #allowsTool(toolName: string): boolean {
-        return this.#appEnabled || !toolName.startsWith("mcpapp_");
+    #allowsEntry(entry: McpToolSourceEntry): boolean {
+        const name = entry.definition.name;
+        if (this.#contextSelector.id === "stateless")
+            return entry.scope === this.#instanceName && Object.hasOwn(statelessToolDescriptions, name);
+        return this.#appEnabled || !name.startsWith("mcpapp_");
     }
 
     adapt(tool: ToolDefinition): McpTool {
+        const stateless = this.#contextSelector.id === "stateless";
+        if (stateless && tool.name === "bash_run") tool = withStatelessCwd(tool);
         const modelTool = withBootstrapPresentation(
             tool,
             this.#bootstrapPresentationResourceUri,
@@ -130,13 +139,16 @@ export class McpEndpointCatalog {
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            exposed.description.trim(),
+            (stateless ? statelessToolDescriptions[exposed.name] ?? exposed.description : exposed.description).trim(),
             {
                 hiddenInputProperties: [
                     ...mcpToolHiddenInputProperties(exposed._meta),
                     ...(!explicit && modelFacing ? ["ctxId"] : []),
                 ],
-                inputHints: mcpToolInputHints(exposed._meta),
+                inputHints: {
+                    ...mcpToolInputHints(exposed._meta),
+                    ...(stateless ? statelessInputHints[exposed.name] : undefined),
+                },
                 modelFacing,
                 preserveInputDescriptions: mcpToolPreserveInputDescriptions(
                     exposed._meta,
@@ -179,6 +191,17 @@ export class McpEndpointCatalog {
             : entry.definition;
     }
 }
+
+const statelessToolDescriptions: Readonly<Record<string, string>> = {
+    bash_run: "Run a shell command in the supplied absolute working directory. Retained output paths can be passed to file_read.",
+    file_read: "Read absolute Worker paths or retained bash_run output paths. Use nextSelector to continue a truncated read.",
+    file_edit: "Apply one ordered change set using absolute Worker paths. No prior file_read is required; later operations do not execute after a failure.",
+};
+
+const statelessInputHints: Readonly<Record<string, Record<string, string>>> = {
+    bash_run: { cwd: statelessCwdHint, command: "Shell command." },
+    file_read: { path: "Absolute Worker file path or a retained bash_run output path." },
+};
 
 function isBootstrapTool(name: string): boolean {
     return toolNamespace(name) === bootstrapToolNamespace;

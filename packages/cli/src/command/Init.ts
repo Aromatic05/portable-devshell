@@ -152,7 +152,8 @@ function renderInitResult(result: CliInitResult): string {
     ];
     if (result.endpoint !== undefined) {
         lines.push("", "MCP endpoints", `  OpenAI: ${result.endpoint}`,
-            `  Explicit (Gemini Web): ${result.endpoint}/explicit`, `  agy: ${result.endpoint}/agy-session`);
+            `  Explicit (Gemini Web): ${result.endpoint}/explicit`, `  agy: ${result.endpoint}/agy-session`,
+            `  Stateless: ${result.endpoint}/stateless`);
     } else if (result.mcpEnabled) {
         lines.push("", "MCP", "  enabled (public URL not configured)");
     } else {
@@ -195,7 +196,7 @@ async function offerRemoteAccess(context: CliDispatchContext, endpointPath: stri
                 continue;
             }
             const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
-            if (/\/mcp(?:\/(?:openai-session|explicit|agy-session))?$/u.test(url.pathname.replace(/\/+$/u, ""))) {
+            if (/\/mcp(?:\/(?:openai-session|explicit|agy-session|stateless))?$/u.test(url.pathname.replace(/\/+$/u, ""))) {
                 context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
                 continue;
             }
