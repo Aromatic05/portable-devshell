@@ -270,6 +270,10 @@ impl Host {
                 self.require(&input.id)?.input(&data)?;
                 Ok(json!({ "accepted": true }))
             }
+            "process.v1.inspect" => {
+                let input: Target = parse(request)?;
+                serialize(self.require(&input.id)?.inspect()?)
+            }
             "process.v1.resize" => {
                 let input: ResizeInput = parse(request)?;
                 validate_dimensions(input.cols, input.rows)?;

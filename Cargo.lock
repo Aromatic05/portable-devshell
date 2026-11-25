@@ -639,6 +639,7 @@ dependencies = [
  "tungstenite",
  "url",
  "uuid",
+ "vt100",
  "windows-sys 0.61.2",
  "zstd",
 ]
@@ -3408,6 +3409,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vt100"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb05cdd19ae8707bf6a0a269972c07e6358103a7079faec749dec318a5b3dc23"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
+]
 
 [[package]]
 name = "vt100-psmux"

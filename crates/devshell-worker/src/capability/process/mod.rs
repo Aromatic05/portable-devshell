@@ -6,4 +6,5 @@ mod output;
 pub mod pipe;
 mod protocol;
 pub mod pty;
+mod screen;
 pub mod shell;

@@ -12,6 +12,7 @@ use crate::instance::sandbox::path::ResolvedPath;
 use super::child::{ExitLatch, reap, wait_until_exit};
 use super::output::{OutputChannel, OutputJournal, OutputPage, READ_CHUNK};
 use super::pty::{TerminalChild, spawn_managed};
+use super::screen::{ScreenSnapshot, TerminalScreen};
 use super::shell::{ShellCommand, ShellRuntime};
 
 pub(super) struct SpawnSpec<'a> {
@@ -89,6 +90,7 @@ impl Control {
 #[derive(Default)]
 struct State {
     output: OutputJournal,
+    screen: Option<TerminalScreen>,
     completion: Option<Result<Exit, String>>,
 }
 
@@ -103,6 +105,10 @@ pub(super) struct ManagedProcess {
 
 impl ManagedProcess {
     pub fn spawn(id: String, spec: SpawnSpec<'_>) -> Result<Arc<Self>, RpcError> {
+        let screen = spec
+            .dimensions
+            .map(|(cols, rows)| TerminalScreen::new(cols, rows))
+            .transpose()?;
         let (control, writer, outputs): (Control, Writer, Vec<(OutputChannel, Reader)>) =
             if let Some((cols, rows)) = spec.dimensions {
                 let prepared = ShellCommand::prepare(
@@ -161,7 +167,10 @@ impl ManagedProcess {
             tty,
             control,
             writer: Mutex::new(Some(writer)),
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                screen,
+                ..State::default()
+            }),
             changed: Condvar::new(),
         });
         let readers: Vec<_> = outputs
@@ -178,6 +187,9 @@ impl ManagedProcess {
                                     .state
                                     .lock()
                                     .map_err(|_| "process state lock poisoned")?;
+                                if let Some(screen) = state.screen.as_mut() {
+                                    screen.process(&bytes[..n]);
+                                }
                                 state.output.append(channel, &bytes[..n]);
                                 process.changed.notify_all();
                             }
@@ -310,10 +322,26 @@ impl ManagedProcess {
             .map_err(io_error)
     }
 
+    pub fn inspect(&self) -> Result<ScreenSnapshot, RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        let screen = state
+            .screen
+            .as_ref()
+            .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
+        Ok(screen.snapshot(state.output.latest_seq()))
+    }
+
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), RpcError> {
+        let mut state = self.state.lock().map_err(lock_error)?;
+        let screen = state
+            .screen
+            .as_mut()
+            .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
+        // Keep the output reader at the same size boundary as the native PTY.
         self.control
             .resize(cols, rows)
-            .map_err(|error| RpcError::new("process.resizeFailed", error))
+            .map_err(|error| RpcError::new("process.resizeFailed", error))?;
+        screen.resize(cols, rows)
     }
 
     pub fn kill(&self) -> Result<(), RpcError> {

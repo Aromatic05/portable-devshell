@@ -215,15 +215,31 @@ fn independent_host_owns_pipe_and_pty_across_request_disconnects() {
         true, None, true,
     );
     wait_for_output(&fixture, &pty, "terminal", "ready");
+    let before = fixture.read(&pty, 0, 0);
+    let screen = fixture.call("process.v1.inspect", json!({"id": pty}));
+    assert_eq!(screen["seq"], before["process"]["latestSeq"]);
+    assert!(screen["text"].as_str().unwrap().contains("ready"));
+    assert_eq!(fixture.read(&pty, 0, 0), before);
     fixture.call(
         "process.v1.resize",
         json!({ "id": pty, "cols": 100, "rows": 40 }),
     );
+    let resized = fixture.call("process.v1.inspect", json!({"id": pty}));
+    assert_eq!(resized["cols"], 100);
+    assert_eq!(resized["rows"], 40);
     fixture.input(&pty, b"world\n");
     let finished = finish(&fixture, &pty);
     assert_eq!(finished["process"]["state"], "exited");
     assert_eq!(finished["process"]["exit"]["exitCode"], 9);
     assert!(output(&finished, "terminal").contains("received:world"));
+    let final_screen = fixture.call("process.v1.inspect", json!({"id": pty}));
+    assert_eq!(final_screen["seq"], finished["process"]["latestSeq"]);
+    assert!(
+        final_screen["text"]
+            .as_str()
+            .unwrap()
+            .contains("received:world")
+    );
     assert_eq!(
         fixture
             .call("process.v1.list", json!({}))

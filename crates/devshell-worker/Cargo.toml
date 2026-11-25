@@ -34,6 +34,7 @@ tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 url = "2.5"
 zstd = "0.13.3"
 uuid = { version = "1.23.0", features = ["v4"] }
+vt100 = "0.18.1"
 
 [target.'cfg(unix)'.dependencies]
 cap-primitives = "4.0.2"
