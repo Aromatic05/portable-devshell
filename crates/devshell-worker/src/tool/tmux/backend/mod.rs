@@ -25,7 +25,7 @@ use crate::instance::storage::ensure_dir;
 use crate::tool::ToolCommandEnvironment;
 use crate::tool::ToolError;
 #[cfg(windows)]
-use crate::tool::bash::model::{ShellRuntime, powershell_command};
+use crate::capability::process::shell::{ShellRuntime, powershell_command};
 use crate::tool::tmux::backend::shell::prepare_shell_launch;
 use crate::tool::tmux::transcript::TRANSCRIPT_LOGGER_MODE;
 use crate::tool::tmux::transcript::codec::{

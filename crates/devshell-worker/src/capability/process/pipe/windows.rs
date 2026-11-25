@@ -4,7 +4,7 @@ use std::process::{Child, Command, Stdio};
 
 use crate::instance::sandbox::path::ResolvedPath;
 use crate::tool::ToolError;
-use crate::tool::bash::model::{ShellRuntime, powershell_command};
+use crate::capability::process::shell::{ShellRuntime, powershell_command};
 use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 pub fn spawn_shell(

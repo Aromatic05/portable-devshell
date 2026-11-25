@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::instance::path::protocol_path;
 use crate::tool::ToolError;
 #[cfg(windows)]
-use crate::tool::bash::model::{ShellRuntime, powershell_command};
+use crate::capability::process::shell::{ShellRuntime, powershell_command};
 
 #[cfg(unix)]
 const BASH_INTEGRATION: &str = include_str!("../assets/bash.sh");

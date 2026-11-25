@@ -11,7 +11,7 @@ pub mod handshake {
     use crate::host::environment::detect_environment;
     use crate::host::home::user_home_directory;
     use crate::instance::WorkerConfig;
-    use crate::tool::bash::model::ShellRuntime;
+    use crate::capability::process::shell::ShellRuntime;
 
     pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
         control_handler(move |request| {

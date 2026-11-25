@@ -15,9 +15,9 @@ use crate::instance::sandbox::path::{
 };
 use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::bash::bash_run_name;
-use crate::tool::bash::model::ShellRuntime;
+use crate::capability::process::shell::ShellRuntime;
 use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
-use crate::tool::bash::process::spawn_shell;
+use crate::capability::process::pipe::spawn_shell;
 use crate::tool::file::{FileToolState, requested_path};
 #[cfg(unix)]
 use crate::tool::file::observation::{CommandReadPlan, MAX_OUTPUT_BYTES};
@@ -69,7 +69,7 @@ impl ToolHandler for BashRunTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
-            self.shell.catalog_description(),
+            "Execute short, bounded, non-interactive shell work. For long-running or PTY-oriented work call tmux_run instead. When retained stdout/stderr paths are returned, file_read can retrieve omitted output.",
             [ToolCapability::Execute],
             serde_json::json!({
                 "devshell": { "mcp": {

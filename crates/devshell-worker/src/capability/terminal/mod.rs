@@ -1,8 +1,3 @@
-#[cfg(unix)]
-mod pty_unix;
-#[cfg(windows)]
-mod pty_windows;
-
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -15,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::capability::process::pty::{TerminalChild, spawn_terminal};
 use crate::capability::rpc::error::RpcError;
 use crate::capability::rpc::notification::WorkerNotificationQueue;
 use crate::instance::sandbox::SecurityPolicy;
@@ -144,18 +140,6 @@ struct TerminalSessionState {
 struct ReplayFrame {
     bytes: Vec<u8>,
     seq: u64,
-}
-
-pub(crate) trait TerminalChild {
-    fn kill(&self) -> Result<(), String>;
-    fn resize(&self, cols: u16, rows: u16) -> Result<(), String>;
-    fn wait(&self) -> Result<(i32, i32), String>;
-}
-
-pub(crate) struct SpawnedTerminal {
-    pub child: Box<dyn TerminalChild + Send + Sync>,
-    pub reader: Box<dyn std::io::Read + Send>,
-    pub writer: Box<dyn Write + Send>,
 }
 
 impl TerminalManager {
@@ -633,16 +617,6 @@ fn epoch_millis() -> u128 {
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> RpcError {
     RpcError::new("terminal.internal", "Terminal state lock poisoned.")
-}
-
-#[cfg(unix)]
-fn spawn_terminal(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
-    pty_unix::spawn(cwd, cols, rows)
-}
-
-#[cfg(windows)]
-fn spawn_terminal(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
-    pty_windows::spawn(cwd, cols, rows)
 }
 
 #[cfg(all(test, windows))]

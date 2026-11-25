@@ -6,7 +6,7 @@ use nix::unistd::{Pid, fchdir, setpgid};
 
 use crate::instance::sandbox::path::ResolvedPath;
 use crate::tool::ToolError;
-use crate::tool::bash::model::ShellRuntime;
+use crate::capability::process::shell::ShellRuntime;
 
 pub fn spawn_shell(
     shell: &ShellRuntime,
@@ -77,7 +77,7 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     use crate::instance::sandbox::path::{parse_requested_path, resolve_existing_target};
-    use crate::tool::bash::model::ShellRuntime;
+    use crate::capability::process::shell::ShellRuntime;
 
     use super::spawn_shell;
 
