@@ -1,47 +1,29 @@
 use std::fs::{self, File};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 
+use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use nix::libc;
 use nix::pty::{Winsize, openpty};
 use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Pid, dup, setsid};
+use nix::unistd::{Pid, fchdir, setsid};
 
 use crate::capability::rpc::error::RpcError;
 
 use super::{SpawnedTerminal, TerminalChild};
+use crate::capability::process::shell::ShellCommand;
+use crate::instance::sandbox::path::ResolvedPath;
 
-type ExitState = Arc<(Mutex<Option<(i32, i32)>>, Condvar)>;
+use crate::capability::process::child::{ExitLatch, reap, wait_until_exit};
 
 static SHELL_STARTUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
-    let opened = openpty(
-        Some(&Winsize {
-            ws_row: rows,
-            ws_col: cols,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        }),
-        None,
-    )
-    .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let stdin = dup(&opened.slave)
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let stdout = dup(&opened.slave)
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let stderr = dup(&opened.slave)
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let reader = dup(&opened.master)
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let writer = dup(&opened.master)
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let slave_fd = opened.slave.as_raw_fd();
     let shell = if cfg!(test) {
         "/bin/sh".to_string()
     } else {
@@ -59,16 +41,106 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     if !cfg!(test) {
         command.arg("-l");
     }
-    command
-        .current_dir(cwd)
-        .stdin(Stdio::from(stdin))
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
     if let Some(zdotdir) = startup.as_ref() {
         command.env("ZDOTDIR", zdotdir);
     }
+    spawn_with(
+        command,
+        cwd,
+        None,
+        startup.map(StartupDirectory),
+        false,
+        cols,
+        rows,
+    )
+}
+
+/// Start the command itself as the controlling-terminal process, rather than
+/// sending text into an interactive shell. Its exit status belongs to the task.
+pub(in crate::capability::process) fn spawn_managed(
+    command: &ShellCommand,
+    cwd: &ResolvedPath,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
+    let anchored = cwd
+        .cloned_directory_file()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    spawn_with(
+        command.std_command(),
+        cwd.access_path(),
+        anchored,
+        None,
+        true,
+        cols,
+        rows,
+    )
+}
+
+struct StartupDirectory(PathBuf);
+
+impl Drop for StartupDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn spawn_with(
+    mut command: Command,
+    cwd: &Path,
+    anchored: Option<File>,
+    startup: Option<StartupDirectory>,
+    managed: bool,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
+    let opened = openpty(
+        Some(&Winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        }),
+        None,
+    )
+    .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    for fd in [&opened.master, &opened.slave] {
+        fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))
+            .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    }
+    let stdin = opened
+        .slave
+        .try_clone()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let stdout = opened
+        .slave
+        .try_clone()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let stderr = opened
+        .slave
+        .try_clone()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let reader = opened
+        .master
+        .try_clone()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let writer = opened
+        .master
+        .try_clone()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let slave_fd = opened.slave.as_raw_fd();
+    if anchored.is_none() {
+        command.current_dir(cwd);
+    }
+    command
+        .stdin(Stdio::from(stdin))
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
     unsafe {
         command.pre_exec(move || {
+            if let Some(directory) = &anchored {
+                fchdir(directory).map_err(std::io::Error::other)?;
+            }
             setsid().map_err(std::io::Error::other)?;
             #[cfg(target_os = "macos")]
             let tiocsctty = libc::TIOCSCTTY as libc::c_ulong;
@@ -80,32 +152,27 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
             Ok(())
         });
     }
-    let mut process = match command.spawn() {
-        Ok(process) => process,
-        Err(error) => {
-            if let Some(startup) = startup.as_ref() {
-                let _ = fs::remove_dir_all(startup);
-            }
-            return Err(RpcError::new("terminal.spawnFailed", error.to_string()));
-        }
-    };
+    let mut process = command
+        .spawn()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
     drop(opened.slave);
     let pid = Pid::from_raw(process.id() as i32);
-    let exit: ExitState = Arc::new((Mutex::new(None), Condvar::new()));
+    let exit = Arc::new(ExitLatch::default());
     let waiter_exit = Arc::clone(&exit);
     std::thread::spawn(move || {
-        let status = process.wait();
-        let value = status
-            .map(|status| (status.code().unwrap_or(-1), status.signal().unwrap_or(0)))
-            .unwrap_or((-1, 0));
-        if let Some(startup) = startup {
-            let _ = fs::remove_dir_all(startup);
-        }
-        let (lock, ready) = &*waiter_exit;
-        if let Ok(mut current) = lock.lock() {
-            *current = Some(value);
-            ready.notify_all();
-        }
+        let observed = wait_until_exit(&mut process).map_err(|error| error.to_string());
+        waiter_exit.finish(|| {
+            // A managed command owns its process group, including descendants
+            // that would otherwise retain the terminal after the shell exits.
+            let cleanup = if observed.is_ok() && managed {
+                crate::daemon::process::platform::terminate_process_group(pid.as_raw(), true)
+            } else {
+                Ok(())
+            };
+            let status = reap(&mut process);
+            observed.and(cleanup).and(status)
+        });
+        drop(startup);
     });
 
     Ok(SpawnedTerminal {
@@ -152,18 +219,19 @@ fn prepare_shell_startup(shell: &str) -> Result<Option<PathBuf>, RpcError> {
 }
 
 struct UnixTerminalChild {
-    exit: ExitState,
+    exit: Arc<ExitLatch>,
     master: OwnedFd,
     pid: Pid,
 }
 
 impl TerminalChild for UnixTerminalChild {
     fn kill(&self) -> Result<(), String> {
-        match killpg(self.pid, Signal::SIGKILL) {
-            Ok(()) => Ok(()),
-            Err(nix::errno::Errno::ESRCH) => Ok(()),
-            Err(error) => Err(error.to_string()),
-        }
+        self.exit
+            .while_running(|| match killpg(self.pid, Signal::SIGKILL) {
+                Ok(()) => Ok(()),
+                Err(nix::errno::Errno::ESRCH) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            })
     }
 
     fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
@@ -177,20 +245,10 @@ impl TerminalChild for UnixTerminalChild {
         if result < 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
-        let _ = killpg(self.pid, Signal::SIGWINCH);
         Ok(())
     }
 
     fn wait(&self) -> Result<(i32, i32), String> {
-        let (lock, ready) = &*self.exit;
-        let mut current = lock
-            .lock()
-            .map_err(|_| "terminal exit lock poisoned".to_string())?;
-        while current.is_none() {
-            current = ready
-                .wait(current)
-                .map_err(|_| "terminal exit lock poisoned".to_string())?;
-        }
-        Ok(current.expect("terminal exit is present"))
+        self.exit.wait()
     }
 }

@@ -20,6 +20,8 @@ enum Command {
     Transport(InstanceArgs),
     Retire(InstanceArgs),
     Gc(GcArgs),
+    #[command(name = "_process-host", hide = true)]
+    ProcessHost(InstanceArgs),
     #[command(name = "_upgrade-restart", hide = true)]
     UpgradeRestart(UpgradeRestartArgs),
 }
@@ -70,6 +72,11 @@ pub fn run() -> Result<String, String> {
         Command::Transport(args) => crate::transport::run(&args.instance),
         Command::Retire(args) => instance::maintain::retire::run(args),
         Command::Gc(args) => instance::maintain::gc::run(args),
+        Command::ProcessHost(args) => {
+            let instance = crate::instance::InstanceName::parse(&args.instance)?;
+            crate::capability::process::host::serve(&instance)?;
+            Ok(String::new())
+        }
         Command::UpgradeRestart(args) => crate::host::lifecycle::update::restart(args),
     }
 }

@@ -746,7 +746,7 @@ fn wait(
     cancellation: &crate::tool::ToolCancellation,
 ) -> Result<BashWaitOutcome, ToolError> {
     loop {
-        match child_exited_without_reaping(&mut child.child) {
+        match crate::capability::process::child::exited_without_reaping(&mut child.child) {
             Ok(true) => {
                 child.terminate_group()?;
                 return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
@@ -765,38 +765,6 @@ fn wait(
         }
         thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
-}
-
-#[cfg(unix)]
-fn child_exited_without_reaping(child: &mut Child) -> std::io::Result<bool> {
-    use nix::libc;
-
-    // Child::try_wait() reaps the group leader. Its PID could then be reused
-    // before terminate_group() cleans up shell descendants, making killpg()
-    // target an unrelated group. WNOWAIT holds the leader until wait_and_reap().
-    loop {
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        let result = unsafe {
-            libc::waitid(
-                libc::P_PID,
-                child.id() as libc::id_t,
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        };
-        if result == 0 {
-            return Ok(unsafe { info.si_pid() != 0 });
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::Interrupted {
-            return Err(error);
-        }
-    }
-}
-
-#[cfg(windows)]
-fn child_exited_without_reaping(child: &mut Child) -> std::io::Result<bool> {
-    Ok(child.try_wait()?.is_some())
 }
 
 #[cfg(unix)]
@@ -834,7 +802,8 @@ mod tests {
     use crate::daemon::process::registry::ActiveProcessRegistry;
     use crate::tool::{ToolCancellation, ToolProcessGuard};
 
-    use super::{BashWaitOutcome, ManagedBashChild, child_exited_without_reaping, wait};
+    use super::{BashWaitOutcome, ManagedBashChild, wait};
+    use crate::capability::process::child::exited_without_reaping as child_exited_without_reaping;
 
     struct CheckUnreapedGuard {
         pid: i32,

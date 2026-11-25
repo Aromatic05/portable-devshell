@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
@@ -7,15 +7,12 @@ use crate::capability::rpc::error::RpcError;
 use crate::daemon::process::platform::terminate_process_group;
 
 use super::{SpawnedTerminal, TerminalChild};
+use crate::capability::process::shell::ShellCommand;
+use crate::instance::sandbox::path::ResolvedPath;
 
-type ExitState = Arc<(Mutex<Option<(i32, i32)>>, Condvar)>;
+use crate::capability::process::child::ExitLatch;
 
 pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(pty_size(cols, rows))
-        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-
     // Use the Windows PowerShell host that the rest of the Windows runtime
     // already depends on instead of portable-pty's implicit cmd.exe default.
     let mut command = CommandBuilder::new("powershell.exe");
@@ -24,17 +21,26 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     command.arg("-NoExit");
     command.cwd(cwd.as_os_str());
     command.env("TERM", "xterm-256color");
-    let mut process = pair
-        .slave
-        .spawn_command(command)
+    spawn_with(command, cols, rows)
+}
+
+pub(in crate::capability::process) fn spawn_managed(
+    command: &ShellCommand,
+    cwd: &ResolvedPath,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
+    let mut command = command.pty_command();
+    command.cwd(cwd.access_path().as_os_str());
+    spawn_with(command, cols, rows)
+}
+
+fn spawn_with(command: CommandBuilder, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(pty_size(cols, rows))
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
-    let pid = process.process_id().ok_or_else(|| {
-        RpcError::new(
-            "terminal.spawnFailed",
-            "ConPTY child process did not publish a process id.",
-        )
-    })?;
-    drop(pair.slave);
+
     let reader = pair
         .master
         .try_clone_reader()
@@ -43,25 +49,35 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
         .master
         .take_writer()
         .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let mut process = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
+    let Some(pid) = process.process_id() else {
+        let _ = process.kill();
+        let _ = process.wait();
+        return Err(RpcError::new(
+            "terminal.spawnFailed",
+            "ConPTY child process did not publish a process id.",
+        ));
+    };
+    drop(pair.slave);
 
-    let exit: ExitState = Arc::new((Mutex::new(None), Condvar::new()));
+    let exit = Arc::new(ExitLatch::default());
     let waiter_exit = Arc::clone(&exit);
     std::thread::spawn(move || {
         let value = process
             .wait()
             .map(|status| (i32::try_from(status.exit_code()).unwrap_or(-1), 0))
-            .unwrap_or((-1, 0));
-        let (lock, ready) = &*waiter_exit;
-        if let Ok(mut current) = lock.lock() {
-            *current = Some(value);
-            ready.notify_all();
-        }
+            .map_err(|error| error.to_string());
+        // Keep the process handle alive through publication of its exit.
+        waiter_exit.finish(|| value);
     });
 
     Ok(SpawnedTerminal {
         child: Box::new(WindowsTerminalChild {
             exit,
-            master: Mutex::new(pair.master),
+            master: Mutex::new(Some(pair.master)),
             pid,
         }),
         reader,
@@ -70,41 +86,43 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
 }
 
 struct WindowsTerminalChild {
-    exit: ExitState,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    exit: Arc<ExitLatch>,
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     pid: u32,
 }
 
 impl TerminalChild for WindowsTerminalChild {
     fn kill(&self) -> Result<(), String> {
-        let pid = i32::try_from(self.pid).map_err(|_| {
-            format!(
-                "ConPTY child pid is outside the supported range: {}",
-                self.pid
-            )
-        })?;
-        terminate_process_group(pid, true)
+        self.exit.while_running(|| {
+            let pid = i32::try_from(self.pid).map_err(|_| {
+                format!(
+                    "ConPTY child pid is outside the supported range: {}",
+                    self.pid
+                )
+            })?;
+            terminate_process_group(pid, true)
+        })
     }
 
     fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
         self.master
             .lock()
             .map_err(|_| "terminal ConPTY lock poisoned".to_string())?
+            .as_ref()
+            .ok_or_else(|| "terminal has exited".to_string())?
             .resize(pty_size(cols, rows))
             .map_err(|error| error.to_string())
     }
 
     fn wait(&self) -> Result<(i32, i32), String> {
-        let (lock, ready) = &*self.exit;
-        let mut current = lock
+        let exit = self.exit.wait();
+        // Close the pseudoconsole after child exit while the reader still
+        // drains its output; keeping it alive can prevent pipe EOF.
+        self.master
             .lock()
-            .map_err(|_| "terminal exit lock poisoned".to_string())?;
-        while current.is_none() {
-            current = ready
-                .wait(current)
-                .map_err(|_| "terminal exit lock poisoned".to_string())?;
-        }
-        Ok(current.expect("terminal exit is present"))
+            .map_err(|_| "terminal ConPTY lock poisoned".to_string())?
+            .take();
+        exit
     }
 }
 

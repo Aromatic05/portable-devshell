@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -91,4 +93,112 @@ fn detect_shell_runtime() -> Result<ShellRuntime, ToolError> {
         "bash.shellUnavailable",
         "neither pwsh.exe nor powershell.exe is available",
     ))
+}
+
+const RESERVED_ENV: [&str; 4] = [
+    crate::instance::runtime::INTERNAL_INSTANCE_ENV,
+    crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV,
+    crate::capability::execution::CONFIG_ENV,
+    "DEVSHELL_WORKER_INTERNAL_WORKSPACE",
+];
+
+/// The managed command's executable, arguments and environment are prepared
+/// once, independently of its pipe or PTY transport.
+pub(super) struct ShellCommand {
+    program: PathBuf,
+    args: Vec<OsString>,
+    env: BTreeMap<String, Option<String>>,
+}
+
+impl ShellCommand {
+    pub fn prepare(
+        shell: &ShellRuntime,
+        command: &str,
+        env: &BTreeMap<String, Option<String>>,
+        execution: Option<&crate::capability::execution::ExecutionConfig>,
+        tty: bool,
+    ) -> Result<Self, ToolError> {
+        let sandbox = crate::capability::execution::process_sandbox(execution)
+            .map_err(|error| ToolError::new("execution.sandboxFailed", error))?;
+        let mut args: Vec<OsString> = Vec::new();
+        let program = if let Some((wrapper, wrapper_args)) = sandbox {
+            #[cfg(windows)]
+            {
+                let _ = (wrapper, wrapper_args);
+                return Err(ToolError::new(
+                    "execution.sandboxFailed",
+                    "bubblewrap process sandbox is unavailable on Windows",
+                ));
+            }
+            #[cfg(unix)]
+            {
+                args.extend(wrapper_args.into_iter().map(OsString::from));
+                args.push("--".into());
+                args.push(shell.executable.as_os_str().to_owned());
+                PathBuf::from(wrapper)
+            }
+        } else {
+            shell.executable.clone()
+        };
+        #[cfg(unix)]
+        {
+            args.extend(["--noprofile", "--norc", "-c"].map(OsString::from));
+            args.push(command.into());
+        }
+        #[cfg(windows)]
+        {
+            args.extend(["-NoLogo", "-NoProfile"].map(OsString::from));
+            if !tty {
+                args.push("-NonInteractive".into());
+            }
+            args.push("-Command".into());
+            args.push(powershell_command(command).into());
+        }
+
+        let mut env = env.clone();
+        #[cfg(unix)]
+        env.entry("BASH_ENV".to_string()).or_insert(None);
+        if tty {
+            env.entry("TERM".to_string())
+                .or_insert_with(|| Some("xterm-256color".to_string()));
+        }
+        Ok(Self { program, args, env })
+    }
+
+    pub fn std_command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.args);
+        for (key, value) in &self.env {
+            match value {
+                Some(value) => {
+                    command.env(key, value);
+                }
+                None => {
+                    command.env_remove(key);
+                }
+            }
+        }
+        for key in RESERVED_ENV {
+            command.env_remove(key);
+        }
+        command
+    }
+
+    #[cfg(windows)]
+    pub fn pty_command(&self) -> portable_pty::CommandBuilder {
+        let mut command = portable_pty::CommandBuilder::new(&self.program);
+        for arg in &self.args {
+            command.arg(arg);
+        }
+        for (key, value) in &self.env {
+            match value {
+                Some(value) => command.env(key, value),
+                None => command.env_remove(key),
+            }
+        }
+        for key in RESERVED_ENV {
+            command.env_remove(key);
+        }
+        command
+    }
 }

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 use nix::unistd::{Pid, fchdir, setpgid};
 
+use crate::capability::process::shell::{ShellCommand, ShellRuntime};
 use crate::instance::sandbox::path::ResolvedPath;
 use crate::tool::ToolError;
-use crate::capability::process::shell::ShellRuntime;
 
 pub fn spawn_shell(
     shell: &ShellRuntime,
@@ -18,25 +18,15 @@ pub fn spawn_shell(
     let anchored_cwd = cwd
         .cloned_directory_file()
         .map_err(|error| ToolError::new("bash.invalidCwd", error.to_string()))?;
-    let sandbox = crate::capability::execution::process_sandbox(execution)
-        .map_err(|error| ToolError::new("execution.sandboxFailed", error))?;
-    let mut command = if let Some((wrapper, args)) = sandbox {
-        let mut command = Command::new(wrapper);
-        command.args(args).arg("--").arg(&shell.executable);
-        command
-    } else {
-        Command::new(&shell.executable)
-    };
+    let prepared = ShellCommand::prepare(shell, command_text, env, execution, false)?;
+    let mut command = prepared.std_command();
     command
-        .args(["--noprofile", "--norc", "-c"])
-        .arg(command_text)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if anchored_cwd.is_none() {
         command.current_dir(cwd.access_path());
     }
-    apply_environment(&mut command, env);
     unsafe {
         command.pre_exec(move || {
             if let Some(directory) = &anchored_cwd {
@@ -51,33 +41,14 @@ pub fn spawn_shell(
     })
 }
 
-fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String>>) {
-    command.env_remove("BASH_ENV");
-    for (key, value) in env {
-        match value {
-            Some(value) => {
-                command.env(key, value);
-            }
-            None => {
-                command.env_remove(key);
-            }
-        }
-    }
-    command
-        .env_remove(crate::instance::runtime::INTERNAL_INSTANCE_ENV)
-        .env_remove(crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV)
-        .env_remove(crate::capability::execution::CONFIG_ENV)
-        .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::os::unix::fs::symlink;
 
-    use crate::instance::sandbox::path::{parse_requested_path, resolve_existing_target};
     use crate::capability::process::shell::ShellRuntime;
+    use crate::instance::sandbox::path::{parse_requested_path, resolve_existing_target};
 
     use super::spawn_shell;
 

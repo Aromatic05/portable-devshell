@@ -223,7 +223,7 @@ pub fn current_security_mode() -> SecurityMode {
     read_security_mode_from_env()
 }
 
-fn read_security_mode_from_env() -> SecurityMode {
+pub(crate) fn read_security_mode_from_env() -> SecurityMode {
     let raw = std::env::var(INTERNAL_SECURITY_MODE_ENV)
         .ok()
         .or_else(|| std::env::var(SECURITY_MODE_ENV).ok());
