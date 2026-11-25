@@ -15,7 +15,7 @@ export const SAFE_ACTIONS = [
     "bash_run",
     "file_read",
     "workspace_goal",
-    "tmux_run",
+    "pty",
 ];
 const GOAL_OBJECTIVE = "testspace connector activity";
 const GOAL_ACTIVITY_INTERVAL_MS = 35_000;
@@ -59,15 +59,15 @@ export function createSafeAction(name, { ctxId, iteration, goal }) {
                 },
                 name,
             };
-        case "tmux_run":
+        case "pty":
             return {
                 arguments: {
-                    command: `printf '\\033[32mtestspace tmux tick ${iteration}\\033[0m\\n'`,
+                    command: `printf '\\033[32mtestspace pty tick ${iteration}\\033[0m\\n'`,
                     ctxId,
-                    timeout: 2000,
-                    wait: "block",
+                    waitMs: 2000,
+                    tty: true,
                 },
-                name,
+                name: "bash_run",
             };
         default:
             throw new Error(`unsupported safe action: ${name}`);

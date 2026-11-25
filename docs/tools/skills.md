@@ -2,7 +2,7 @@
 
 portable-devshell 的 Skill 功能由 builtin **Skill Extension** 提供。Extension 运行在 Control：负责 native 本机 discovery、model Worker workspace discovery、catalog、内容快照与显式传输；Worker 不实现 Skill 协议，也不会在 provider 生命周期里自动同步 Skill。
 
-Skill 到达目标 Worker 后只是普通文件。Agent 可通过 model `skill load/read` 读取内容；直接读取文件和执行脚本仍使用 `file_read` / `file_grep` / `bash` / `tmux` 等普通 Worker tools。
+Skill 到达目标 Worker 后只是普通文件。Agent 可通过 model `skill load/read` 读取内容；直接读取文件和执行脚本仍使用 `file_read` / `file_grep` / `bash` / `task/terminal` 等普通 Worker tools。
 
 ## 目录优先级
 
@@ -113,7 +113,7 @@ Worker Resource Host 只负责受控的 instance-scoped resource namespace；Art
 
 ## Model command
 
-模型通过 MCP `bash_run` / managed `tmux_run` 中的 Context-bound `devshell` shim 使用独立的 `cli.model-commands/skill`：
+模型通过 MCP `bash_run` 中的 Context-bound `devshell` shim 使用独立的 `cli.model-commands/skill`：
 
 ```bash
 devshell skill list

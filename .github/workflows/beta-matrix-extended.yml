@@ -89,10 +89,10 @@ jobs:
               if: inputs.suite == 'browser'
               shell: bash
               run: pnpm acceptance:web 2>&1 | tee "$RUNNER_TEMP/beta-matrix-browser.log"
-            - name: Real 190-second tmux handoff and recovery
+            - name: Real 190-second process handoff and recovery
               if: inputs.suite == 'handoff'
               shell: bash
-              run: pnpm acceptance:tmux-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
+              run: pnpm acceptance:process-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
             - name: Install Chromium for multi-client chain
               if: inputs.suite == 'chains'
               shell: bash

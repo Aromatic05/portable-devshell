@@ -138,7 +138,7 @@ devshell context disable <ctxId>
 devshell context renew <ctxId>
 ```
 
-`context disable` 会使后续依赖该 Context 的操作失效，并让关联资源按各自生命周期完成清理；它不是“停止所有 tmux task”的快捷键。
+`context disable` 会使后续依赖该 Context 的操作失效，并让关联资源按各自生命周期完成清理；它不是“停止所有 process task”的快捷键。
 
 ## Execution 与自动 re-entry
 

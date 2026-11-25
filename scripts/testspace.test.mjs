@@ -426,17 +426,17 @@ test("connector activity publishes health that status can expose", async (t) => 
     assert.equal(statuses[TESTSPACE_REVERSE_INSTANCE].health?.status, "active");
 });
 
-test("testspace tmux activity uses the public tmux_run timeout contract", () => {
+test("testspace PTY activity uses the unified bash_run wait contract", () => {
     assert.deepEqual(
-        createSafeAction("tmux_run", { ctxId: "ctx-test", iteration: 7 }),
+        createSafeAction("pty", { ctxId: "ctx-test", iteration: 7 }),
         {
             arguments: {
-                command: "printf '\\033[32mtestspace tmux tick 7\\033[0m\\n'",
+                command: "printf '\\033[32mtestspace pty tick 7\\033[0m\\n'",
                 ctxId: "ctx-test",
-                timeout: 2000,
-                wait: "block",
+                waitMs: 2000,
+                tty: true,
             },
-            name: "tmux_run",
+            name: "bash_run",
         },
     );
 });

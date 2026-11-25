@@ -32,7 +32,7 @@ provider transport
 Rust devshell-worker daemon
   ├── bash
   ├── file
-  ├── tmux
+  ├── process
   └── artifact payload
 ```
 
@@ -212,9 +212,9 @@ automatic model re-entry
 
 详见 [Workspace](workspace.md)。
 
-## tmux task 与 Context 解耦
+## process task 与 Context 解耦
 
-managed tmux task 属于 worker/runtime，不属于某个 HTTP request 或 Context 生命周期。
+managed process task 属于 worker/runtime，不属于某个 HTTP request 或 Context 生命周期。
 
 因此：
 
@@ -285,7 +285,7 @@ CLI↔Control 与 Core↔Worker 共享 Endpoint/Envelope/Packet 基础设施，�
 
 `data-home` 默认是 Unix `$XDG_DATA_HOME` 或 `~/.local/share`；Windows 使用 `$XDG_DATA_HOME` 或 `%LOCALAPPDATA%`。
 
-高频、可重建状态尽量不写成永久历史。例如 Context execution sidecar、临时 workspace data、tmux volatile runtime 会使用专门的 bounded/transient storage，而不是无限增长 Control 主状态文件。
+高频、可重建状态尽量不写成永久历史。例如 Context execution sidecar、临时 workspace data、Process Host volatile runtime 会使用专门的 bounded/transient storage，而不是无限增长 Control 主状态文件。
 
 Control IPC：
 
@@ -300,7 +300,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**
-3. **Workspace owns recovery; tmux task does not depend on Workspace.**
+3. **Workspace owns recovery; process task does not depend on Workspace.**
 4. **CLI/TUI/MCP share one authority path.**
 5. **Model-facing schema stays small; Control-plane management stays out of the model catalog.**
 6. **Compatibility is hidden at the wire boundary, not reintroduced into new product semantics.**

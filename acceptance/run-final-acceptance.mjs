@@ -32,11 +32,11 @@ export function createIntegrationSteps(state) {
                 }),
         },
         {
-            name: "Long tmux handoff smoke",
+            name: "Long process handoff smoke",
             run: () =>
                 runCommand(
                     process.execPath,
-                    ["acceptance/run-long-tmux-handoff-smoke.mjs"],
+                    ["acceptance/run-long-process-handoff-smoke.mjs"],
                     {
                         env: state.env,
                         inherit: true,
@@ -117,10 +117,10 @@ export function runFinalAcceptance() {
                 }),
         },
         {
-            name: "tmux Worker contracts",
+            name: "Process Host contracts",
             run() {
                 if (process.platform !== "win32") {
-                    runCommand("pnpm", ["test:worker:tmux"], {
+                    runCommand("pnpm", ["test:worker:process"], {
                         env: state.env,
                         inherit: true,
                     });

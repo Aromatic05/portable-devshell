@@ -249,7 +249,7 @@ close
 
 `context.capabilities.workerDelegate` 也是 Host-managed Worker execution，但用于“另一个 runtime 自己拥有完整 tool transcript”的委托执行，例如 Agent provider 内的 Pi session。它和 `worker.execute` 是独立 grant；Extension 不能在 `openSession()` 参数中自行切换 recording ownership。
 
-委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / tmux_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
+委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / task_*/terminal_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
 
 Agent provider runtime 由 Agent Extension 自己管理，不能套用 Extension generation 更新事务。`devshell agent provider update <id>` 强制重新安装已知 provider runtime；provider 正被运行中的 Agent 使用时拒绝更新。
 
@@ -395,9 +395,9 @@ Control 内部 static catalog 由 CLI domain 按 state 分别投影。Native dis
 
 Native command invocation 仍由 Control 的 CLI route 负责 CLI-only access、`workingDirectory` authority、payload/result validation 和 binding dispatch；Extension management route 负责 install/update/list/get/enable/disable/reload/remove，其中 update 在 CLI 层复用 install 的 generation transaction。Model command state不复用这条 native route。
 
-MCP `bash_run` / managed `tmux_run` 当前通过 Worker-owned executable shim 暴露 restricted `devshell`：Worker 只在 `source=mcp` 的 ToolCall 环境前置私有 `devshell` executable 到 `PATH`，由 shell 自己完成 quoting、pipeline、redirection 和 executable resolution；Control 不解析 command string。shim 通过 Worker local broker 取得 model command stdout/stderr/exit status，远端 Worker↔Control 仍复用已有 Worker RPC channel。
+MCP `bash_run` 当前通过 Worker-owned executable shim 暴露 restricted `devshell`：Worker 只在 `source=mcp` 的 ToolCall 环境前置私有 `devshell` executable 到 `PATH`，由 shell 自己完成 quoting、pipeline、redirection 和 executable resolution；Control 不解析 command string。shim 通过 Worker local broker 取得 model command stdout/stderr/exit status，远端 Worker↔Control 仍复用已有 Worker RPC channel。
 
-Control 根据 authoritative tool audit + MCP Context 校验 shim 上报的 `ctxId / parentCallId / workspace / taskId`。这些值只是 integrity assertion，不是 bearer authority；不匹配会作为 `worker.protocolIntegrityFault` 拒绝并记录。持久 tmux task 在父 `tmux_run` 完成后通过 audit result 中的 `task.id` 证明原始绑定；Context 已失效时不会自动重绑。Model resolver 最终只连接 `cli.model-commands`，从结构上排除 builtin/native fallback。
+Control 根据 authoritative tool audit + MCP Context 校验 shim 上报的 `ctxId / parentCallId / workspace / taskId`。这些值只是 integrity assertion，不是 bearer authority；不匹配会作为 `worker.protocolIntegrityFault` 拒绝并记录。持久 process task 在父 `tmux_run` 完成后通过 audit result 中的 `task.id` 证明原始绑定；Context 已失效时不会自动重绑。Model resolver 最终只连接 `cli.model-commands`，从结构上排除 builtin/native fallback。
 
 CLI command implementation 自己抛出的 usage/business error 仍属于 command contract，可以作为命令反馈呈现；但在执行实现之前如果对应 state 的 registration/generation 无法取得，CLI owner 会翻译成固定 `control.cliCommandFailed` / `CLI command <id> is unavailable.`，只带 `commandId`，不把 ExtensionHost error code、generation path 或原始 cause 暴露到 wire error。
 

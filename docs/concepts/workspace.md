@@ -11,7 +11,7 @@ Context / Instance authoritative state
   ├── Goal
   ├── Agent Memory (var/agent-work; plans / checkpoint)
   ├── Tool Approval
-  ├── durable Wait (tmux task / long read)
+  ├── durable Wait (process task / long read)
   ├── ToolCall Audit / Activity
   └── re-entry ownership
           │
@@ -40,9 +40,9 @@ enabled = false
 inlineToolCalls = false
 ```
 
-启用后才提供 Workspace 的展示与自动恢复能力。关闭时回收当前 Instance 的 App presence/capability、Wait recovery 和相关 Goal continuation/re-entry 资格；它不停止 Worker、不删除 Context、不关闭 MCP endpoint，也不移除 bash/file/tmux 等基本工具。TUI 的 Instance Config 页面可以修改该设置。
+启用后才提供 Workspace 的展示与自动恢复能力。关闭时回收当前 Instance 的 App presence/capability、Wait recovery 和相关 Goal continuation/re-entry 资格；它不停止 Worker、不删除 Context、不关闭 MCP endpoint，也不移除 bash/file/task/terminal 等基本工具。TUI 的 Instance Config 页面可以修改该设置。
 
-`inlineToolCalls` 默认关闭，只影响普通工具调用的嵌入式结果 UI，**不影响 Fullscreen Workspace、必要的交互 UI 或 Audit**。如需在 Workspace 已启用的 Instance 上展示 Inline，可显式将其设为 `true`；目前仅 `bash_run`、`file_read`、`file_edit`、`tmux_run`、`artifact_viewImage` 会获得 Inline 资源。尤其 `progress_report`、`environ_info`、`tmux_read` 等不会创建额外 iframe。历史 ToolCall 的 UI 资源仍可读取。
+`inlineToolCalls` 默认关闭，只影响普通工具调用的嵌入式结果 UI，**不影响 Fullscreen Workspace、必要的交互 UI 或 Audit**。如需在 Workspace 已启用的 Instance 上展示 Inline，可显式将其设为 `true`；目前仅 `bash_run`、`file_read`、`file_edit`、`artifact_viewImage` 会获得 Inline 资源。尤其 `progress_report`、`environ_info`、`task_read` 等不会创建额外 iframe。历史 ToolCall 的 UI 资源仍可读取。
 
 App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知道 `ctxId` 不是授权；审批状态属于 Core，MCP App 只调用经过验证的审批操作。
 
@@ -52,7 +52,7 @@ MCP App 使用官方 MCP Apps SDK，按用途分三类资源：
 
 - **Fullscreen Workspace**：Overview、Activity；Overview 显示当前 Goal、待审批请求、后台 Wait，Activity 显示审计记录。
 - **Inline Interaction**：等待用户处理的 Approval / Wait，不要求打开 Fullscreen。
-- **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `tmux_read` 的结果在 Activity 中按对应 Task 汇聚。
+- **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `task_read` 的结果在 Activity 中按对应 Task 汇聚。
 
 ToolCall 的完整记录由 Audit 持久化；Activity 在原始 Inline 卡片被 Host 销毁后仍可按需读取输出、图片和 Terminal transcript。普通 ToolCall 的 Inline 输出不依赖 Workspace 的 Live Lease。
 
@@ -83,7 +83,7 @@ Goal 是当前 Context 跨多轮执行的**最终目标**，而非分步骤任�
 
 计划、任务清单、进度、Checkpoint、决策与 Agent 协作内容由 Memory 文件维护。`progress_report` 负责向用户发送进度消息，不存储计划，也不更改 Goal/Memory 状态。`todo_read`、`todo_write` 和独立 TodoStore 已退役。
 
-## durable Wait 与 tmux 长任务
+## durable Wait 与 process 长任务
 
 Wait 将底层 Task 是否仍在运行，与原 MCP `tools/call` 是否仍然保持连接分离：
 
@@ -94,17 +94,17 @@ waiting
   └── cancelled / consumed
 ```
 
-主要来源是 `tmux_run(wait=block)`、`tmux_read` 的长等待和其他需要后台恢复的工作。`detached` 不是 Task 失败，且不会自动停止进程。
+主要来源是 `bash_run(waitMs >= 180000)`、`task_read` 的长等待和其他需要后台恢复的工作。`detached` 不是 Task 失败，且不会自动停止进程。
 
-`tmux_run(wait=block)` 使用最长 180 秒同步等待窗口，HTTP SSE 每 15 秒发送 keepalive。窗口内 Task 完成则在当前工具调用返回结果；窗口结束后仍在运行则转为 durable handoff，Worker 上的 Task 继续运行，后台 tracker 观察最终结果或超时。
+`bash_run(waitMs >= 180000)` 使用最长 180 秒同步等待窗口，HTTP SSE 每 15 秒发送 keepalive。窗口内 Task 完成则在当前工具调用返回结果；窗口结束后仍在运行则转为 durable handoff，Worker 上的 Task 继续运行，后台 tracker 观察最终结果或超时。
 
 `timeout` 是 Task 自身的总 deadline，不因同步窗口缩短而改变。
 
 ## Stop waiting 与 Stop task
 
-用户选择 `Stop waiting` 只停止当前等待或其自动恢复链：同步阶段可让 held 调用返回 `interrupted`，detached 阶段撤销相关恢复资格。两者均不杀掉 Worker 上的 tmux Task。
+用户选择 `Stop waiting` 只停止当前等待或其自动恢复链：同步阶段可让 held 调用返回 `interrupted`，detached 阶段撤销相关恢复资格。两者均不杀掉 Worker 上的 process Task。
 
-真正结束 Task 需要明确执行 tmux Task control；长时间运行本身不是自动清理 Task 的理由。
+真正结束 Task 需要明确执行 process Task control；长时间运行本身不是自动清理 Task 的理由。
 
 ## 自动模型 re-entry
 
@@ -122,11 +122,11 @@ resolved Wait 或需要继续的 Goal 通过 `reentry.directives` 暴露恢复�
 
 Control/MCP/iframe 重启后，Context、Goal、Agent Memory、durable Wait 与 Audit 从权威持久状态恢复。原 HTTP 请求已消失的 held Wait 需要作为可恢复后台状态处理，而不是假定旧工具调用仍在。Workspace 重新获取 snapshot 后再考虑是否 re-entry。
 
-tmux Task 的生命周期属于 Worker/runtime，不因 MCP HTTP 断连、Context 刷新、Workspace remount 或 Control transport 重连而自动结束。
+process Task 的生命周期属于 Worker/runtime，不因 MCP HTTP 断连、Context 刷新、Workspace remount 或 Control transport 重连而自动结束。
 
 ## 相关文档
 
 - [Context](context.md)
 - [MCP](mcp.md)
-- [tmux 工具](../tools/tmux.md)
+- [Process 与终端工具](../tools/process.md)
 - [系统架构](architecture.md)

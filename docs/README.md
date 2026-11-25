@@ -18,7 +18,7 @@
 ## 工具
 
 - [文件工具](tools/file.md)：读取视图、搜索、隐式快照和有序 change set 编辑。
-- [tmux 工具](tools/tmux.md)：managed task、persistent pane、阻塞等待和 durable handoff。
+- [Process 与终端工具](tools/process.md)：managed task、persistent pane、阻塞等待和 durable handoff。
 - [Artifact](tools/artifacts.md)：Artifact 读取、图片、分享与跨实例传输。
 - [运行时 Debug Patch](tools/debug.md)：本地 owner-only、Context-scoped、可回滚运行时补丁。
 - [Agent Skills](tools/skills.md)：project / managed / global 三层 catalog 与 lazy loading。
@@ -51,7 +51,7 @@
 1. **CLI 输出和运行时 schema 是命令参考的最终来源。** 文档解释语义，不复制容易漂移的完整 `--help`。
 2. **Context 与 MCP transport session 是不同概念。** 2026-07-28 MCP 不依赖 protocol session；portable-devshell 的 Context 是应用状态。
 3. **workspace 不属于 instance 配置。** 它属于一次操作或一个 Context 在某个 instance 上的 environment attachment。
-4. **长任务与长 HTTP 请求分离。** `tmux_run(wait=block)` 可以同步等待一段时间，超过产品同步窗口后由 durable Wait/Workspace 接管，但 task 本身继续运行。
+4. **长任务与长 HTTP 请求分离。** `bash_run(waitMs >= 180000)` 可以同步等待一段时间，超过产品同步窗口后由 durable Wait/Workspace 接管，但 task 本身继续运行。
 5. **旧名称不代表现行协议支持。** MCP endpoint 拒绝 legacy 协议；少量隐藏 stale-recipient 转换不重新进入 catalog。当前 catalog 包含 Worker、Control primitive 与 Extension `mcp.tools`，shell command ACL 是另一条边界。
 6. **fresh 默认与旧配置默认分开。** fresh init 使用 OAuth token 审批和 `openai-session`；通用 client 应显式配置 `explicit`。
 7. **信任边界按实际部署定义。** Execute、发布与 Audit 不是统一 Commit；Secret 在可信本地运行时和本地 Audit 中出现不自动构成泄漏。跨越本地可信边界的授权与传输仍需审查，见 [安全说明](operations/security.md)和 [RC 收口记录](development/rc-preflight.md)。

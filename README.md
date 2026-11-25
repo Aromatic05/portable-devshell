@@ -9,8 +9,8 @@
 - `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
 - 每个 instance 独立 worker、生命周期、日志、审批策略和 MCP endpoint。
 - workspace 不持久化到 instance；CLI 操作显式给出路径，MCP 通过 Context 为每个 instance 绑定 workspace。
-- `bash`、`file`、`tmux`、`artifact`、`todo`、Workspace 以及可选跨实例连接。
-- managed tmux task、persistent pane、durable Wait 和 Workspace 自动恢复。
+- `bash`、`file`、`task/terminal`、`artifact`、`todo`、Workspace 以及可选跨实例连接。
+- managed process task、persistent terminal、durable Wait 和 Workspace 自动恢复。
 - MCP TypeScript SDK v2；支持 2026-07-28 语义，拒绝 legacy 协议请求。
 - request-scoped SSE keepalive，使长时间 `tools/call` 不因 HTTP idle timeout 被提前切断。
 - OAuth、Artifact 分享与跨实例传输、分层 Agent Skills、Secret 扫描、运行时 Debug Patch。
@@ -92,7 +92,7 @@ http://127.0.0.1:17890/<instance>/mcp
 ```
 
 MCP `tools/list` 合并 Worker schema、Control runtime primitive 和 Extension `mcp.tools` 声明；Extension contribution 变化会更新 catalog，不再按 instance group/capability 配置裁剪。模型通过
-`bash_run` / `tmux_run` 中的 Context-bound `devshell` 使用 Extension command；可用 root
+`bash_run` 中的 Context-bound `devshell` 使用 Extension command；可用 root
 由当前 instance 的 `[extensions].model` allowlist 决定：
 
 ```toml
@@ -116,9 +116,9 @@ Workspace App/Goal/Wait recovery 可以按 instance 独立关闭，而不停止 
 enabled = false
 ```
 
-MCP 模式由 URL 选择：`/<instance>/mcp` 和 `/<instance>/mcp/openai-session` 用于 OpenAI 会话，`/<instance>/mcp/agy-session` 用于 agy，`/<instance>/mcp/explicit` 用于 Gemini Web 和通用 MCP 客户端。这三种模式共用 Context 服务，自动会话模式不向模型暴露 `ctxId`。第四种 `/<instance>/mcp/stateless` 不绑定 Context，提供全部 10 个 Worker 基础工具（Bash、File、Tmux），路径使用 Worker 绝对路径。
+MCP 模式由 URL 选择：`/<instance>/mcp` 和 `/<instance>/mcp/openai-session` 用于 OpenAI 会话，`/<instance>/mcp/agy-session` 用于 agy，`/<instance>/mcp/explicit` 用于 Gemini Web 和通用 MCP 客户端。这三种模式共用 Context 服务，自动会话模式不向模型暴露 `ctxId`。第四种 `/<instance>/mcp/stateless` 不绑定 Context，提供全部 9 个 Worker 基础工具（Bash、File、Task、Terminal），路径使用 Worker 绝对路径。
 
-`tmux_run(wait=block)` 当前产品同步窗口统一为 **180 秒**。除 `environ_info` 外的 `tools/call` 使用 request-scoped SSE 和 1 秒 keepalive；其他请求使用 auto handler，keepalive 为 15 秒；如果 task 在 180 秒内结束，tool call 直接返回结果，否则转成 durable Wait，由 Workspace 继续跟踪而不停止 task。
+`bash_run(waitMs >= 180000)` 当前产品同步窗口统一为 **180 秒**。除 `environ_info` 外的 `tools/call` 使用 request-scoped SSE 和 1 秒 keepalive；其他请求使用 auto handler，keepalive 为 15 秒；如果 task 在 180 秒内结束，tool call 直接返回结果，否则转成 durable Wait，由 Workspace 继续跟踪而不停止 task。
 
 详细说明见 [MCP](docs/concepts/mcp.md)、[Context](docs/concepts/context.md) 和 [Workspace](docs/concepts/workspace.md)。
 
@@ -149,6 +149,6 @@ instance 再独立选择 `auth = "oauth2"`。fresh `devshell init` 默认生成 
 - [Control 管理面](docs/operations/control-plane.md)
 - [配置与运行目录](docs/operations/configuration.md)
 - [安全、审批与 Secret 扫描](docs/operations/security.md)
-- [tmux 工具](docs/tools/tmux.md)
+- [Process 与终端工具](docs/tools/process.md)
 - [Agent Skills](docs/tools/skills.md)
 - [验收与发布门禁](docs/development/acceptance.md)
