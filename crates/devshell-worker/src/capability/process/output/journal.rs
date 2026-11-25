@@ -3,14 +3,14 @@ use std::collections::VecDeque;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
-pub(super) const READ_CHUNK: usize = 16 * 1024;
+pub(in crate::capability::process) const READ_CHUNK: usize = 16 * 1024;
 const RETAIN_FRAMES: usize = 4096;
 const RETAIN_BYTES: usize = 4 * 1024 * 1024;
 const PAGE_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum OutputChannel {
+pub(in crate::capability::process) enum OutputChannel {
     Stdout,
     Stderr,
     Terminal,
@@ -24,7 +24,7 @@ struct Chunk {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct OutputFrame {
+pub(in crate::capability::process) struct OutputFrame {
     seq: u64,
     channel: OutputChannel,
     data_base64: String,
@@ -32,7 +32,7 @@ pub(super) struct OutputFrame {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct OutputPage {
+pub(in crate::capability::process) struct OutputPage {
     oldest_seq: u64,
     latest_seq: u64,
     gap: bool,
@@ -40,7 +40,7 @@ pub(super) struct OutputPage {
 }
 
 #[derive(Default)]
-pub(super) struct OutputJournal {
+pub(in crate::capability::process) struct OutputJournal {
     latest_seq: u64,
     bytes: usize,
     chunks: VecDeque<Chunk>,

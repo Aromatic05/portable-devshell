@@ -1,7 +1,7 @@
 //! Start a resource owner independent of the Worker process group.
 use crate::instance::{InstanceName, sandbox::SecurityMode, storage::InstancePaths};
 
-pub(super) fn spawn(
+pub(in crate::capability::process) fn spawn(
     instance: &InstanceName,
     paths: &InstancePaths,
     mode: &SecurityMode,

@@ -10,14 +10,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
 
-use super::output::OutputChannel;
+use super::journal::OutputChannel;
 
 const STREAM_LIMIT: usize = 256 * 1024 * 1024;
 const INSTANCE_LIMIT: usize = 1024 * 1024 * 1024;
 const PAGE_LIMIT: usize = 256 * 1024;
 
 #[derive(Default)]
-pub(super) struct CaptureBudget(AtomicUsize);
+pub(in crate::capability::process) struct CaptureBudget(AtomicUsize);
 
 impl CaptureBudget {
     fn reserve(&self, requested: usize) -> usize {
@@ -46,7 +46,7 @@ struct Capture {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct CapturePage {
+pub(in crate::capability::process) struct CapturePage {
     source_bytes: usize,
     stored_bytes: usize,
     truncated: bool,
@@ -112,7 +112,7 @@ impl Drop for Capture {
     }
 }
 
-pub(super) struct Captures {
+pub(in crate::capability::process) struct Captures {
     stdout: Capture,
     stderr: Capture,
 }

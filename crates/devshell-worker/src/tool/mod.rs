@@ -2,6 +2,7 @@ pub mod bash;
 pub mod contract;
 pub mod environment;
 pub mod file;
+pub(crate) mod process;
 pub mod registry;
 pub mod tmux;
 

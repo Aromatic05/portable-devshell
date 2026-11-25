@@ -48,3 +48,92 @@ pub(super) fn ownership_lock(paths: &InstancePaths) -> PathBuf {
 pub(super) fn launch_lock(paths: &InstancePaths) -> PathBuf {
     paths.state_dir.join("process-host-launch.lock")
 }
+
+use super::output::OutputChannel;
+use std::collections::BTreeMap;
+
+pub(super) const MAX_WAIT_MS: u64 = 30_000;
+pub(super) const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SpawnInput {
+    pub command: String,
+    pub cwd: String,
+    pub workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub tty: bool,
+    pub cols: Option<u16>,
+    pub rows: Option<u16>,
+    #[serde(default)]
+    pub env: BTreeMap<String, Option<String>>,
+    pub stdin: Option<String>,
+    #[serde(default)]
+    pub keep_stdin: bool,
+    pub id: Option<String>,
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub prepared_env: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct Target {
+    pub id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ReadInput {
+    pub id: String,
+    #[serde(default)]
+    pub from_seq: u64,
+    #[serde(default)]
+    pub wait_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CaptureInput {
+    pub id: String,
+    pub channel: OutputChannel,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct WriteInput {
+    pub id: String,
+    pub data_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ResizeInput {
+    pub id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+use crate::capability::rpc::{error::RpcError, request::RpcRequest};
+use serde_json::Value;
+pub(super) fn validate_dimensions(cols: u16, rows: u16) -> Result<(), RpcError> {
+    if cols == 0 || rows == 0 || cols > 1000 || rows > 1000 {
+        return Err(invalid("invalid terminal dimensions"));
+    }
+    Ok(())
+}
+
+pub(super) fn parse<T: serde::de::DeserializeOwned>(request: &RpcRequest) -> Result<T, RpcError> {
+    serde_json::from_value(request.params.clone()).map_err(|error| invalid(error.to_string()))
+}
+
+pub(super) fn serialize(value: impl serde::Serialize) -> Result<Value, RpcError> {
+    serde_json::to_value(value)
+        .map_err(|error| RpcError::new("process.internal", error.to_string()))
+}
+
+pub(super) fn invalid(message: impl Into<String>) -> RpcError {
+    RpcError::new("rpc.invalidParams", message)
+}

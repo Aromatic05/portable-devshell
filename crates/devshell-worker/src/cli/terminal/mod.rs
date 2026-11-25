@@ -3,7 +3,6 @@ use serde_json::Value;
 
 use crate::capability::process::client::ProcessHostClient;
 
-#[path = "terminal/attach.rs"]
 mod attach;
 
 #[derive(Args, Debug)]

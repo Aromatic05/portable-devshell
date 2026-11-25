@@ -122,7 +122,7 @@ impl ProcessHostClient {
                 "independent Process Host is not available inside a daemon-phase sandbox".into(),
             );
         }
-        super::launcher::spawn(instance, &paths, &mode)?;
+        super::host::launcher::spawn(instance, &paths, &mode)?;
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match Self::connect(instance, &paths, &endpoints) {
