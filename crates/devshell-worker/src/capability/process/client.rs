@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::capability::rpc::{codec, request::RpcRequest};
+use crate::capability::rpc::{codec, error::RpcError, request::RpcRequest};
 use crate::instance::InstanceName;
 use crate::instance::storage::{InstanceLock, InstancePaths, ensure_dir};
 use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcStream};
@@ -148,6 +148,29 @@ impl ProcessHostClient {
     }
 
     pub fn subscribe(&self, id: &str, takeover: bool) -> Result<LocalIpcStream, String> {
+        self.subscribe_from(id, takeover, None)
+    }
+
+    pub fn subscribe_from(
+        &self,
+        id: &str,
+        takeover: bool,
+        from_seq: Option<u64>,
+    ) -> Result<LocalIpcStream, String> {
+        self.subscribe_stream(id, takeover, from_seq, false)
+    }
+
+    pub(crate) fn subscribe_remote_control(&self, id: &str) -> Result<LocalIpcStream, String> {
+        self.subscribe_stream(id, true, None, true)
+    }
+
+    fn subscribe_stream(
+        &self,
+        id: &str,
+        takeover: bool,
+        from_seq: Option<u64>,
+        remote: bool,
+    ) -> Result<LocalIpcStream, String> {
         let mut channel = LocalIpcStream::connect_with_timeout(&self.endpoint, CONNECT_TIMEOUT)
             .map_err(|error| error.to_string())?;
         codec::write_request_frame(
@@ -155,7 +178,7 @@ impl ProcessHostClient {
             &RpcRequest::request(
                 "subscribe",
                 "process.v1.subscribe",
-                json!({"id": id, "generation": self.handshake.generation, "takeover": takeover}),
+                json!({"id": id, "generation": self.handshake.generation, "takeover": takeover, "fromSeq": from_seq, "remote": remote}),
             ),
         )?;
         Ok(channel)
@@ -171,14 +194,26 @@ impl ProcessHostClient {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, String> {
+        self.call_rpc(method, params, timeout)
+            .map_err(|error| format!("{}: {}", error.code, error.message))
+    }
+
+    pub(crate) fn call_rpc(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, RpcError> {
         // The generation is checked atomically by the owner, so a replacement
         // Host cannot accept a request intended for the previous generation.
-        let mut params = params
-            .as_object()
-            .cloned()
-            .ok_or_else(|| "Process Host parameters must be an object".to_string())?;
+        let mut params = params.as_object().cloned().ok_or_else(|| {
+            RpcError::new(
+                "rpc.invalidParams",
+                "Process Host parameters must be an object",
+            )
+        })?;
         params.insert("generation".to_string(), json!(self.handshake.generation));
-        request(&self.endpoint, method, Value::Object(params), timeout)
+        request_rpc(&self.endpoint, method, Value::Object(params), timeout)
     }
 }
 
@@ -188,29 +223,47 @@ fn request(
     params: Value,
     timeout: Duration,
 ) -> Result<Value, String> {
-    let mut channel = LocalIpcStream::connect_with_timeout(endpoint, CONNECT_TIMEOUT)
-        .map_err(|error| format!("cannot connect to Process Host: {error}"))?;
-    channel
-        .set_request_timeout(timeout)
-        .map_err(|error| error.to_string())?;
+    request_rpc(endpoint, method, params, timeout)
+        .map_err(|error| format!("{}: {}", error.code, error.message))
+}
+
+fn request_rpc(
+    endpoint: &Path,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<Value, RpcError> {
+    fn transport(error: impl std::fmt::Display) -> RpcError {
+        RpcError::new("process.hostFailed", error.to_string())
+    }
+    let mut channel =
+        LocalIpcStream::connect_with_timeout(endpoint, CONNECT_TIMEOUT).map_err(transport)?;
+    channel.set_request_timeout(timeout).map_err(transport)?;
     let id = Uuid::new_v4().to_string();
-    codec::write_request_frame(&mut channel, &RpcRequest::request(&id, method, params))?;
-    channel
-        .wait_for_response(timeout)
-        .map_err(|error| error.to_string())?;
-    let response = codec::read_response(&mut channel)?
-        .ok_or_else(|| "Process Host closed without a response".to_string())?;
+    codec::write_request_frame(&mut channel, &RpcRequest::request(&id, method, params))
+        .map_err(transport)?;
+    channel.wait_for_response(timeout).map_err(transport)?;
+    let response = codec::read_response(&mut channel)
+        .map_err(transport)?
+        .ok_or_else(|| transport("Process Host closed without a response"))?;
     if response.id != id {
-        return Err("Process Host returned a different request identity".into());
+        return Err(transport(
+            "Process Host returned a different request identity",
+        ));
     }
     if response.ok {
         return response
             .result
-            .ok_or_else(|| "Process Host returned no result".to_string());
+            .ok_or_else(|| transport("Process Host returned no result"));
     }
     Err(match response.error {
-        Some(error) => format!("{}: {}", error.code, error.message),
-        None => "Process Host rejected the request".into(),
+        Some(error) => RpcError {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+            details: error.details,
+        },
+        None => transport("Process Host rejected the request"),
     })
 }
 

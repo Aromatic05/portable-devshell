@@ -119,6 +119,32 @@ impl ShellCommand {
         execution: Option<&crate::capability::execution::ExecutionConfig>,
         tty: bool,
     ) -> Result<Self, ToolError> {
+        let mut args = Vec::new();
+        #[cfg(unix)]
+        {
+            args.extend(["--noprofile", "--norc", "-c"].map(OsString::from));
+            args.push(command.into());
+        }
+        #[cfg(windows)]
+        {
+            args.extend(["-NoLogo", "-NoProfile"].map(OsString::from));
+            if !tty {
+                args.push("-NonInteractive".into());
+            }
+            args.push("-Command".into());
+            args.push(powershell_command(command).into());
+        }
+
+        Self::prepare_program(shell.executable.clone(), args, env, execution, tty)
+    }
+
+    pub fn prepare_program(
+        program: PathBuf,
+        program_args: Vec<OsString>,
+        env: &BTreeMap<String, Option<String>>,
+        execution: Option<&crate::capability::execution::ExecutionConfig>,
+        tty: bool,
+    ) -> Result<Self, ToolError> {
         let sandbox = crate::capability::execution::process_sandbox(execution)
             .map_err(|error| ToolError::new("execution.sandboxFailed", error))?;
         let mut args: Vec<OsString> = Vec::new();
@@ -135,27 +161,13 @@ impl ShellCommand {
             {
                 args.extend(wrapper_args.into_iter().map(OsString::from));
                 args.push("--".into());
-                args.push(shell.executable.as_os_str().to_owned());
+                args.push(program.as_os_str().to_owned());
                 PathBuf::from(wrapper)
             }
         } else {
-            shell.executable.clone()
+            program
         };
-        #[cfg(unix)]
-        {
-            args.extend(["--noprofile", "--norc", "-c"].map(OsString::from));
-            args.push(command.into());
-        }
-        #[cfg(windows)]
-        {
-            args.extend(["-NoLogo", "-NoProfile"].map(OsString::from));
-            if !tty {
-                args.push("-NonInteractive".into());
-            }
-            args.push("-Command".into());
-            args.push(powershell_command(command).into());
-        }
-
+        args.extend(program_args);
         let mut env = env.clone();
         #[cfg(unix)]
         env.entry("BASH_ENV".to_string()).or_insert(None);

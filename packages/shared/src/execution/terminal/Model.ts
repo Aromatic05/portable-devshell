@@ -30,6 +30,7 @@ export interface TerminalOpenResult extends TerminalSessionDescriptor {}
 
 export interface TerminalAttachInput {
     fromSeq: number;
+    takeover?: boolean;
     generation: number;
     terminalId: string;
 }
@@ -55,7 +56,11 @@ export interface TerminalExitEvent {
 }
 
 export type TerminalStreamMessage =
-    | { kind: "seed"; session: TerminalSessionDescriptor }
+    | {
+          kind: "seed";
+          session: TerminalSessionDescriptor;
+          snapshot?: { seq: number; data: string };
+      }
     | { frame: TerminalOutputFrame; kind: "output" }
     | {
           clientSeq: number;

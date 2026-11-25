@@ -17,7 +17,8 @@ const OPERATION_ACK_TIMEOUT_MS = 30_000;
 export type TuiControlTerminalClient = Pick<
     TerminalTransport,
     "attach" | "kill" | "open"
->;
+> &
+    Partial<Pick<TerminalTransport, "list">>;
 
 interface StoredTerminalIdentity extends TerminalSessionDescriptor {}
 
@@ -53,16 +54,21 @@ export class TuiControlTerminalPtyFactory {
     }
 
     create(instance?: string): TuiTerminalPtyFactory {
-        return (command, _args, options) => {
+        return (command, args, options) => {
             const targetInstance = instance ?? command;
+            const terminalId = args[0];
+            const key =
+                terminalId === undefined
+                    ? targetInstance
+                    : `${targetInstance}:${terminalId}`;
             return new TuiControlTerminalPty({
                 client: this.#client(targetInstance),
                 operationAckTimeoutMs: this.#operationAckTimeoutMs,
                 options,
-                readIdentity: () => this.#sessions.get(targetInstance),
+                readIdentity: () => this.#sessions.get(key),
+                terminalId,
                 workspace: this.#workspaceForInstance(targetInstance),
-                writeIdentity: (identity) =>
-                    this.#sessions.set(targetInstance, identity),
+                writeIdentity: (identity) => this.#sessions.set(key, identity),
             });
         };
     }
@@ -109,6 +115,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     readonly #readIdentity: () => StoredTerminalIdentity | undefined;
     readonly #writeIdentity: (identity: StoredTerminalIdentity) => void;
     readonly #ready: Promise<void>;
+    readonly #terminalId?: string;
     #clientSeq = 0;
     #closed = false;
     #exited = false;
@@ -120,6 +127,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         operationAckTimeoutMs: number;
         options: TuiTerminalPtyOptions;
         readIdentity(): StoredTerminalIdentity | undefined;
+        terminalId?: string;
         workspace: string;
         writeIdentity(identity: StoredTerminalIdentity): void;
     }) {
@@ -128,6 +136,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         this.#options = options.options;
         this.#workspace = options.workspace;
         this.#readIdentity = options.readIdentity;
+        this.#terminalId = options.terminalId;
         this.#writeIdentity = options.writeIdentity;
         this.#ready = this.#connect().catch((error: unknown) => {
             this.#fail(asError(error), false);
@@ -166,6 +175,16 @@ class TuiControlTerminalPty implements TuiTerminalPty {
 
     async #connect(): Promise<void> {
         let identity = this.#readIdentity();
+        if (this.#terminalId !== undefined) {
+            identity = (await this.#client.list?.())?.find(
+                (session) =>
+                    session.terminalId === this.#terminalId &&
+                    session.state === "running",
+            );
+            if (identity === undefined)
+                throw new Error("Selected terminal is not running.");
+            this.#writeIdentity(identity);
+        }
         if (identity === undefined || identity.state !== "running") {
             identity = await this.#client.open({
                 cols: this.#options.columns,
@@ -180,6 +199,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         const fromSeq = 0;
         const stream = await this.#client.attach({
             fromSeq,
+            takeover: true,
             generation: identity.generation,
             terminalId: identity.terminalId,
         });
@@ -191,7 +211,14 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         if (seed.kind !== "seed")
             throw new Error("Terminal stream seed is missing.");
         const acknowledged = seed.session;
-        this.#writeIdentity({ ...acknowledged, latestSeq: fromSeq });
+        this.#writeIdentity({
+            ...acknowledged,
+            latestSeq: seed.snapshot?.seq ?? fromSeq,
+        });
+        if (seed.snapshot !== undefined) {
+            for (const listener of this.#dataListeners)
+                listener(seed.snapshot.data);
+        }
         this.#stream = stream;
         void this.#consume(stream).catch((error: unknown) => {
             if (!this.#closed)
@@ -239,7 +266,10 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                             command,
                         );
                     } else {
-                        const resize = payload as { cols: number; rows: number };
+                        const resize = payload as {
+                            cols: number;
+                            rows: number;
+                        };
                         await stream.sendResize(
                             resize.cols,
                             resize.rows,
@@ -286,10 +316,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 await stream.ack(updated, frame.seq);
                 continue;
             }
-            if (
-                next.kind === "inputAccepted" ||
-                next.kind === "resized"
-            ) {
+            if (next.kind === "inputAccepted" || next.kind === "resized") {
                 this.#acceptOperation(next);
                 continue;
             }

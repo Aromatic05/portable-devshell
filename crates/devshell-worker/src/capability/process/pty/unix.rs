@@ -23,7 +23,13 @@ use crate::capability::process::child::{ExitLatch, reap, wait_until_exit};
 
 static SHELL_STARTUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
+pub(in crate::capability::process) fn spawn_interactive(
+    cwd: &ResolvedPath,
+    env: &std::collections::BTreeMap<String, Option<String>>,
+    execution: Option<&crate::capability::execution::ExecutionConfig>,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
     let shell = if cfg!(test) {
         "/bin/sh".to_string()
     } else {
@@ -37,19 +43,30 @@ pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcErr
     } else {
         prepare_shell_startup(&shell)?
     };
-    let mut command = Command::new(&shell);
-    if !cfg!(test) {
-        command.arg("-l");
-    }
+    let startup = startup.map(StartupDirectory);
+    let mut env = env.clone();
     if let Some(zdotdir) = startup.as_ref() {
-        command.env("ZDOTDIR", zdotdir);
+        env.insert(
+            "ZDOTDIR".into(),
+            Some(zdotdir.0.to_string_lossy().into_owned()),
+        );
     }
+    let args = if cfg!(test) {
+        Vec::new()
+    } else {
+        vec!["-l".into()]
+    };
+    let prepared =
+        ShellCommand::prepare_program(PathBuf::from(&shell), args, &env, execution, true)?;
+    let anchored = cwd
+        .cloned_directory_file()
+        .map_err(|error| RpcError::new("terminal.spawnFailed", error.to_string()))?;
     spawn_with(
-        command,
-        cwd,
-        None,
-        startup.map(StartupDirectory),
-        false,
+        prepared.std_command(),
+        cwd.access_path(),
+        anchored,
+        startup,
+        true,
         cols,
         rows,
     )

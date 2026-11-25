@@ -42,7 +42,9 @@ export interface TerminalTransport {
     get(
         identity: Pick<TerminalVersionedIdentity, "generation" | "terminalId">,
     ): Promise<TerminalSessionDescriptor>;
-    kill(identity: TerminalVersionedIdentity): Promise<TerminalSessionDescriptor>;
+    kill(
+        identity: TerminalVersionedIdentity,
+    ): Promise<TerminalSessionDescriptor>;
     list(): Promise<TerminalSessionDescriptor[]>;
     open(input: TerminalOpenInput): Promise<TerminalOpenResult>;
 }
@@ -57,8 +59,10 @@ export function createTerminalTransport(
             new MessageStreamTerminalAttachment(
                 await port.open("attach", input),
             ),
-        get: (identity) => port.request<TerminalSessionDescriptor>("get", identity),
-        kill: (identity) => port.request<TerminalSessionDescriptor>("kill", identity),
+        get: (identity) =>
+            port.request<TerminalSessionDescriptor>("get", identity),
+        kill: (identity) =>
+            port.request<TerminalSessionDescriptor>("kill", identity),
         list: () => port.request<TerminalSessionDescriptor[]>("list"),
         open: (input) => port.request<TerminalOpenResult>("open", input),
     };
@@ -191,9 +195,24 @@ function readTerminalStreamMessage(
     const payload: Record<string, JsonValue> = record(envelope.payload) ?? {};
     if (envelope.name === "seed") {
         const session = payload.session;
+        const snapshot =
+            payload.snapshot === undefined
+                ? undefined
+                : readRecord(payload.snapshot);
         return session === undefined
             ? undefined
-            : { kind: "seed", session: readTerminalSession(session) };
+            : {
+                  kind: "seed",
+                  session: readTerminalSession(session),
+                  ...(snapshot === undefined
+                      ? {}
+                      : {
+                            snapshot: {
+                                seq: readInteger(snapshot, "seq"),
+                                data: readString(snapshot, "data"),
+                            },
+                        }),
+              };
     }
     if (envelope.name === "output") {
         return {

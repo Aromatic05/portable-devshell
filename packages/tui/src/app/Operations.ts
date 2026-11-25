@@ -1,6 +1,5 @@
 import { TuiRuntimeControlOperations } from "./operation/Control.js";
 import { TuiRuntimeExecutionOperations } from "./operation/Execution.js";
-import { TuiRuntimeTmuxOperations } from "./operation/Tmux.js";
 import { type TuiAppStore } from "../state/store/App.js";
 import type { TuiDomainSession } from "./control/Client.js";
 import type {
@@ -40,7 +39,6 @@ export class TuiRuntimeOperations {
     readonly revokeArtifactShare: TuiRuntimeControlOperations["revokeArtifactShare"];
     readonly runInstanceAction: TuiRuntimeExecutionOperations["runInstanceAction"];
     readonly setInstanceEnabled: TuiRuntimeControlOperations["setInstanceEnabled"];
-    readonly tmuxOperations: TuiRuntimeTmuxOperations;
     readonly updateConfig: TuiRuntimeControlOperations["updateConfig"];
     readonly updateInstanceConfig: TuiRuntimeControlOperations["updateInstanceConfig"];
     readonly updateMcpEndpoint: TuiRuntimeControlOperations["updateMcpEndpoint"];
@@ -64,12 +62,6 @@ export class TuiRuntimeOperations {
             operationTimeoutMs: timeout,
             reconnect: options.reconnect,
             store: options.store,
-        });
-        this.tmuxOperations = new TuiRuntimeTmuxOperations({
-            clients: options.clients,
-            domains: options.domains,
-            operationTimeoutMs: timeout,
-            reconnect: options.reconnect,
         });
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);

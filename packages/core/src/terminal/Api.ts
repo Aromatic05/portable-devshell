@@ -23,6 +23,7 @@ export interface WorkerTerminalOpenInput {
 }
 
 export interface WorkerTerminalIdentity {
+    controller?: string;
     clientSeq: number;
     generation: number;
     terminalId: string;
@@ -34,13 +35,23 @@ export interface WorkerTerminalOutputFrame {
     seq: number;
 }
 
+export interface TerminalRestore {
+    seq: number;
+    data: string;
+}
+
 export interface WorkerTerminalAttachResult {
+    snapshot?: TerminalRestore;
     exit?: { exitCode: number; signal: number };
     replay: WorkerTerminalOutputFrame[];
     session: WorkerTerminalDescriptor;
 }
 
 export type WorkerTerminalNotification =
+    | {
+          method: "terminal.error";
+          params: { terminalId: string; generation: number; message: string };
+      }
     | {
           method: "terminal.output";
           params: {
@@ -67,7 +78,20 @@ export interface WorkerTerminalPort {
         fromSeq: number;
         generation: number;
         terminalId: string;
+        restore?: boolean;
     }): Promise<WorkerTerminalAttachResult>;
+    control?(input: {
+        terminalId: string;
+        generation: number;
+        controller?: string;
+        renew?: boolean;
+    }): Promise<{
+        controller?: string;
+        session?: WorkerTerminalDescriptor;
+        snapshot?: TerminalRestore;
+        released?: boolean;
+        renewed?: boolean;
+    }>;
     write(
         input: WorkerTerminalIdentity & { data: string },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
@@ -90,6 +114,8 @@ export interface TerminalProcessExit {
 
 export interface TerminalProcess {
     dispose?(): void;
+    acquireControl?(): Promise<TerminalRestore>;
+    releaseControl?(): Promise<void>;
     kill(): void | Promise<void>;
     onData(listener: (data: string, sourceSeq?: number) => void): () => void;
     onError?(listener: (error: Error) => void): () => void;
@@ -122,12 +148,11 @@ export interface TerminalBackendSession {
 }
 
 export type TerminalBackendOpenResult =
-    | TerminalProcess
-    | TerminalBackendSession;
+    TerminalProcess | TerminalBackendSession;
 
 export interface TerminalBackend {
     open(input: TerminalBackendOpenInput): Promise<TerminalBackendOpenResult>;
-    recover?(): Promise<TerminalBackendSession[]>;
+    recover?(known?: ReadonlySet<string>): Promise<TerminalBackendSession[]>;
 }
 
 export interface TerminalSessionRuntimeOptions {
@@ -149,6 +174,7 @@ export interface TerminalOpenRequest {
 
 export interface TerminalAttachRequest {
     fromSeq: number;
+    takeover?: boolean;
     generation: number;
     onExit?(exit: TerminalProcessExit): void;
     onOutput(frame: TerminalOutputFrame): void;
@@ -160,18 +186,30 @@ export interface TerminalAttachment {
     readonly replay: TerminalOutputFrame[];
     readonly session: TerminalSessionDescriptor;
     detach(): void;
+    takeControl(): Promise<TerminalRestore | undefined>;
     resize(cols: number, rows: number): Promise<void>;
     write(data: string): Promise<void>;
 }
 
 export interface TerminalSessionApi {
     open(request: TerminalOpenRequest): Promise<TerminalSessionDescriptor>;
-    recover(instance: string, backend: TerminalBackend): Promise<TerminalSessionDescriptor[]>;
+    recover(
+        instance: string,
+        backend: TerminalBackend,
+    ): Promise<TerminalSessionDescriptor[]>;
     attach(request: TerminalAttachRequest): TerminalAttachment;
     get(terminalId: string): TerminalSessionDescriptor;
-    assertVersion(terminalId: string, generation: number, version: number): TerminalSessionDescriptor;
+    assertVersion(
+        terminalId: string,
+        generation: number,
+        version: number,
+    ): TerminalSessionDescriptor;
     list(instance?: string): TerminalSessionDescriptor[];
-    kill(terminalId: string, generation: number, version: number): Promise<TerminalSessionDescriptor>;
+    kill(
+        terminalId: string,
+        generation: number,
+        version: number,
+    ): Promise<TerminalSessionDescriptor>;
     closeInstance(instance: string): Promise<void>;
 }
 

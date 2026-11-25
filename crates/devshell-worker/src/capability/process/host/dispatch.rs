@@ -2,6 +2,9 @@ use super::super::protocol::*;
 use super::Host;
 use super::registry::lock_error;
 use crate::capability::rpc::{codec, error::RpcError, request::RpcRequest, response::RpcResponse};
+use crate::capability::terminal::{
+    TerminalAttachInput, TerminalCommandInput, TerminalResizeInput, TerminalWriteInput,
+};
 use crate::transport::endpoint::channel::LocalIpcStream;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
@@ -53,6 +56,34 @@ impl Host {
                     .input(&data, input.controller.as_deref())?;
                 Ok(json!({ "accepted": true }))
             }
+            "process.v1.terminalAttach" => {
+                let input = parse::<TerminalRequest<TerminalAttachInput>>(request)?.terminal;
+                serialize(self.require(&input.terminal_id)?.terminal_attach(input)?)
+            }
+            "process.v1.terminalWrite" => {
+                let input = parse::<TerminalRequest<TerminalWriteInput>>(request)?.terminal;
+                let data = STANDARD
+                    .decode(&input.data)
+                    .map_err(|error| invalid(error.to_string()))?;
+                if data.len() > MAX_INPUT_BYTES {
+                    return Err(invalid("input exceeds the input limit"));
+                }
+                self.require(&input.identity.terminal_id)?
+                    .terminal_write(input.identity, &data)
+            }
+            "process.v1.terminalResize" => {
+                let input = parse::<TerminalRequest<TerminalResizeInput>>(request)?.terminal;
+                validate_dimensions(input.cols, input.rows)?;
+                self.require(&input.identity.terminal_id)?.terminal_resize(
+                    input.identity,
+                    input.cols,
+                    input.rows,
+                )
+            }
+            "process.v1.terminalKill" => {
+                let input = parse::<TerminalRequest<TerminalCommandInput>>(request)?.terminal;
+                serialize(self.require(&input.terminal_id)?.terminal_kill(input)?)
+            }
             "process.v1.inspect" => {
                 let input: Target = parse(request)?;
                 serialize(self.require(&input.id)?.inspect()?)
@@ -66,6 +97,11 @@ impl Host {
                     input.controller.as_deref(),
                 )?;
                 Ok(json!({ "resized": true }))
+            }
+            "process.v1.renewControl" => {
+                let input: ReleaseInput = parse(request)?;
+                self.require(&input.id)?.renew_control(&input.controller)?;
+                Ok(json!({"renewed": true}))
             }
             "process.v1.releaseControl" => {
                 let input: ReleaseInput = parse(request)?;
@@ -121,11 +157,18 @@ impl Host {
             if request.method == "process.v1.subscribe" {
                 let result = parse::<SubscribeInput>(&request).and_then(|input| {
                     self.require(&input.id)
-                        .map(|process| (process, input.takeover))
+                        .map(|process| (process, input.takeover, input.from_seq, input.remote))
                 });
                 match result {
-                    Ok((process, takeover)) => {
-                        return super::stream::serve(channel, &request.id, process, takeover);
+                    Ok((process, takeover, from_seq, remote)) => {
+                        return super::stream::serve(
+                            channel,
+                            &request.id,
+                            process,
+                            takeover,
+                            from_seq,
+                            remote,
+                        );
                     }
                     Err(error) => {
                         return codec::write_response(

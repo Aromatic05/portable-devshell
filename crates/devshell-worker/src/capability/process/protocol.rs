@@ -63,6 +63,8 @@ pub(super) struct SpawnInput {
     pub workspace: Option<PathBuf>,
     #[serde(default)]
     pub tty: bool,
+    #[serde(default)]
+    pub interactive: bool,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
     #[serde(default)]
@@ -146,6 +148,9 @@ pub(super) struct SubscribeInput {
     pub id: String,
     #[serde(default)]
     pub takeover: bool,
+    #[serde(default)]
+    pub remote: bool,
+    pub from_seq: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -153,4 +158,10 @@ pub(super) struct SubscribeInput {
 pub(super) struct ReleaseInput {
     pub id: String,
     pub controller: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TerminalRequest<T> {
+    pub terminal: T,
 }

@@ -1,0 +1,161 @@
+//! The public terminal protocol is an identity/version view of a PTY resource.
+use serde_json::{Value, json};
+
+use super::managed::{ManagedProcess, State, lock_error};
+use crate::capability::rpc::error::RpcError;
+use crate::capability::terminal::{
+    TerminalAttachInput, TerminalAttachResult, TerminalCommandInput, TerminalDescriptor,
+    TerminalExit, TerminalOutputFrame, TerminalRestore,
+};
+
+impl ManagedProcess {
+    pub(super) fn terminal_descriptor(&self, state: &State) -> Option<TerminalDescriptor> {
+        let (cols, rows) = state.screen.as_ref()?.size();
+        Some(TerminalDescriptor {
+            terminal_id: self.id.clone(),
+            generation: 1, // A globally unique process ID is never recycled.
+            version: state.version,
+            cols,
+            rows,
+            latest_seq: state.output.latest_seq(),
+            state: if state.completion.is_none() {
+                "running"
+            } else {
+                "exited"
+            }
+            .into(),
+            created_at_ms: state.created_at_ms,
+        })
+    }
+
+    pub fn terminal_attach(
+        &self,
+        input: TerminalAttachInput,
+    ) -> Result<TerminalAttachResult, RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        let session = self.terminal_descriptor(&state).ok_or_else(not_terminal)?;
+        if input.generation != session.generation {
+            return Err(conflict("Terminal generation changed."));
+        }
+        let snapshot = if input.restore {
+            let screen = state
+                .screen
+                .as_ref()
+                .ok_or_else(not_terminal)?
+                .snapshot(state.output.latest_seq());
+            Some(TerminalRestore {
+                seq: screen.seq,
+                data: screen.restore,
+            })
+        } else {
+            None
+        };
+        let output = state.output.replay_after(
+            snapshot
+                .as_ref()
+                .map_or(input.from_seq, |screen| screen.seq),
+        );
+        if output.gap {
+            return Err(RpcError::new(
+                "stream.gap",
+                "Requested terminal output is no longer retained.",
+            ));
+        }
+        let exit = state.completion.as_ref().map(|result| match result {
+            Ok(exit) => TerminalExit {
+                exit_code: exit.exit_code,
+                signal: exit.signal,
+            },
+            Err(_) => TerminalExit {
+                exit_code: -1,
+                signal: 0,
+            },
+        });
+        Ok(TerminalAttachResult {
+            session,
+            snapshot,
+            replay: output
+                .frames
+                .into_iter()
+                .map(|frame| TerminalOutputFrame {
+                    seq: frame.seq,
+                    data_base64: frame.data_base64,
+                })
+                .collect(),
+            exit,
+        })
+    }
+
+    fn validate_terminal(
+        &self,
+        state: &State,
+        input: &TerminalCommandInput,
+    ) -> Result<(), RpcError> {
+        let descriptor = self.terminal_descriptor(state).ok_or_else(not_terminal)?;
+        if input.generation != descriptor.generation || input.version != descriptor.version {
+            return Err(conflict("Terminal generation or version changed."));
+        }
+        if state.completion.is_some() {
+            return Err(conflict("Terminal has exited."));
+        }
+        Self::authorize_controller(state, input.controller.as_deref())
+    }
+
+    pub fn terminal_write(
+        &self,
+        input: TerminalCommandInput,
+        data: &[u8],
+    ) -> Result<Value, RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        self.validate_terminal(&state, &input)?;
+        self.enqueue(data)?;
+        Ok(accepted(&input, state.version))
+    }
+
+    pub fn terminal_resize(
+        &self,
+        input: TerminalCommandInput,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Value, RpcError> {
+        let mut state = self.state.lock().map_err(lock_error)?;
+        self.validate_terminal(&state, &input)?;
+        self.control
+            .resize(cols, rows)
+            .map_err(|error| RpcError::new("terminal.resizeFailed", error))?;
+        state
+            .screen
+            .as_mut()
+            .ok_or_else(not_terminal)?
+            .resize(cols, rows)?;
+        state.version += 1;
+        Ok(accepted(&input, state.version))
+    }
+
+    pub fn terminal_kill(
+        &self,
+        input: TerminalCommandInput,
+    ) -> Result<TerminalDescriptor, RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        self.validate_terminal(&state, &input)?;
+        self.control
+            .kill()
+            .map_err(|error| RpcError::new("terminal.killFailed", error))?;
+        self.terminal_descriptor(&state).ok_or_else(not_terminal)
+    }
+}
+
+fn accepted(input: &TerminalCommandInput, version: u64) -> Value {
+    json!({
+        "terminalId": input.terminal_id, "generation": input.generation,
+        "version": version, "clientSeq": input.client_seq, "accepted": true
+    })
+}
+
+fn not_terminal() -> RpcError {
+    RpcError::new("process.notTerminal", "process has no PTY")
+}
+
+fn conflict(message: &str) -> RpcError {
+    RpcError::new("instance.conflict", message)
+}

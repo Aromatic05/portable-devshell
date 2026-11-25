@@ -59,6 +59,7 @@ impl RpcRouter {
         let notifications = Arc::new(WorkerNotificationQueue::new(DEFAULT_MAX_NOTIFICATION_BYTES));
         let reverse_reconnect_requested = Arc::new(AtomicBool::new(false));
         let terminals = TerminalManager::with_policy_notifications(
+            runtime.instance.clone(),
             Arc::clone(&policy),
             Arc::clone(&notifications),
         );

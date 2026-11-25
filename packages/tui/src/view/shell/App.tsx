@@ -9,11 +9,9 @@ import {
     TuiComponentTerminal,
     type TuiTerminalRenderSource,
 } from "../../terminal/control/View.js";
-import {
-    TuiComponentTerminalTabs,
-    TuiComponentTmuxPanes,
-    type TuiTmuxPanesRenderSource,
-} from "../../terminal/tmux/View.js";
+import { TuiComponentTerminalTabs } from "../../terminal/Tabs.js";
+import { TuiComponentSharedTerminals } from "../../terminal/SharedView.js";
+import type { TuiSharedTerminalList } from "../../terminal/SharedList.js";
 import { TuiComponentTextSelection } from "../component/Selection.js";
 import { TuiOverlayView } from "../overlay/View.js";
 import { TuiScreenRouter } from "./Router.js";
@@ -124,8 +122,8 @@ export function TuiApp(props: TuiAppProps) {
                                         "terminal"
                                     }
                                 />
-                                {selectTerminalTab(state) === "tmuxPanes" ? (
-                                    <TuiComponentTmuxPanes
+                                {selectTerminalTab(state) === "sessions" ? (
+                                    <TuiComponentSharedTerminals
                                         columns={Math.max(1, contentWidth)}
                                         focused={
                                             state.interaction.focusScope ===
@@ -133,7 +131,11 @@ export function TuiApp(props: TuiAppProps) {
                                         }
                                         instance={state.ui.selectedInstance}
                                         rows={Math.max(1, terminalRows - 1)}
-                                        source={props.runtime.tmuxPanes}
+                                        source={props.runtime.sharedTerminals}
+                                        terminal={props.runtime.terminal}
+                                        onGraphicsVisibility={
+                                            renderTerminalGraphics
+                                        }
                                     />
                                 ) : (
                                     <TuiComponentTerminal
@@ -217,7 +219,7 @@ export interface TuiAppController {
     readonly scheduler: TuiAppRenderSource;
     readonly selection: TuiTextSelectionRenderSource;
     readonly terminal: TuiTerminalRenderSource;
-    readonly tmuxPanes: TuiTmuxPanesRenderSource;
+    readonly sharedTerminals: TuiSharedTerminalList;
     readonly viewport: TuiViewportRenderSource;
     handleInput(input: string, key: TuiAppKey): Promise<void>;
     renderTextDetailImage(visible: boolean): void;

@@ -4,11 +4,11 @@ mod unix;
 mod windows;
 
 #[cfg(unix)]
-pub(crate) use unix::spawn as spawn_terminal;
+pub(super) use unix::spawn_interactive;
 #[cfg(unix)]
 pub(super) use unix::spawn_managed;
 #[cfg(windows)]
-pub(crate) use windows::spawn as spawn_terminal;
+pub(super) use windows::spawn_interactive;
 #[cfg(windows)]
 pub(super) use windows::spawn_managed;
 

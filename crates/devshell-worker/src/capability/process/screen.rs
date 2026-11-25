@@ -47,6 +47,11 @@ impl TerminalScreen {
         Ok(())
     }
 
+    pub fn size(&self) -> (u16, u16) {
+        let (rows, cols) = self.parser.screen().size();
+        (cols.get(), rows.get())
+    }
+
     pub fn snapshot(&self, seq: u64) -> ScreenSnapshot {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();

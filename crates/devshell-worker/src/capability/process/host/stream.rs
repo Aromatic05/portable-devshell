@@ -24,21 +24,44 @@ pub(super) fn serve(
     id: &str,
     process: Arc<ManagedProcess>,
     takeover: bool,
+    from_seq: Option<u64>,
+    remote: bool,
 ) -> Result<(), String> {
     channel
         .set_request_timeout(Duration::from_secs(3))
         .map_err(|error| error.to_string())?;
-    let (controller, screen) = match process.begin_attach(takeover) {
-        Ok(value) => value,
-        Err(error) => {
-            return codec::write_response(&mut channel, &RpcResponse::failure(id.to_owned(), error));
+    let (controller, screen, mut cursor) = if let Some(seq) = from_seq {
+        if takeover {
+            return codec::write_response(
+                &mut channel,
+                &RpcResponse::failure(
+                    id.to_owned(),
+                    RpcError::new(
+                        "rpc.invalidParams",
+                        "control takeover requires initial terminal restoration",
+                    ),
+                ),
+            );
+        }
+        (None, None, seq)
+    } else {
+        match process.begin_attach(takeover, remote) {
+            Ok((controller, screen)) => {
+                let seq = screen.seq;
+                (controller, Some(screen), seq)
+            }
+            Err(error) => {
+                return codec::write_response(
+                    &mut channel,
+                    &RpcResponse::failure(id.to_owned(), error),
+                );
+            }
         }
     };
     let lease = ControlLease {
         process: Arc::clone(&process),
         controller,
     };
-    let mut cursor = screen.seq;
     codec::write_response(
         &mut channel,
         &RpcResponse::success(
@@ -49,6 +72,13 @@ pub(super) fn serve(
         ),
     )?;
     loop {
+        if lease
+            .controller
+            .as_deref()
+            .is_some_and(|controller| !process.has_control(controller))
+        {
+            return Ok(());
+        }
         let page = match process.read(cursor, Duration::from_secs(1)) {
             Ok(value) => value,
             Err(error) => {

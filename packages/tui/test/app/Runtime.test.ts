@@ -49,7 +49,9 @@ import {
             await startSession();
             await startupGate;
         };
-        const loadToolCalls = domains.session.toolCalls.load.bind(domains.session.toolCalls);
+        const loadToolCalls = domains.session.toolCalls.load.bind(
+            domains.session.toolCalls,
+        );
         let auditLoads = 0;
         domains.session.toolCalls.load = async (...args) => {
             auditLoads += 1;
@@ -59,7 +61,8 @@ import {
 
         try {
             await waitUntil(
-                () => runtime.store.getState().connection.status === "connected",
+                () =>
+                    runtime.store.getState().connection.status === "connected",
             );
             // Control is online, but its complete startup has not returned.
             runtime.store.setSelectedPage("audit");
@@ -304,7 +307,10 @@ import {
                     1,
             );
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.some(
                     (candidate) => candidate.id === "audit-call:rapid-input",
                 ),
             );
@@ -401,14 +407,14 @@ import {
             );
             runtime.store.setSelectedInstance("alpha");
             await waitUntil(
-                () =>
-                    runtime.reader.runtime("alpha").snapshot?.ready === true,
+                () => runtime.reader.runtime("alpha").snapshot?.ready === true,
             );
             runtime.store.setSelectedPage("config");
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
-                    (box) => box.id === "logs",
-                ),
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.some((box) => box.id === "logs"),
             );
             const logs = selectMainScreenModel(
                 runtime.store.getState(),
@@ -574,10 +580,14 @@ import {
                     ] === true,
             );
 
-            const createRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find((region) => {
+            const createRegion = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            ).find((region) => {
                 return (
                     region.target.kind === "boxBody" &&
                     region.target.lineId?.endsWith(":button:create") === true
@@ -690,8 +700,7 @@ import {
 
         try {
             await waitUntil(
-                () =>
-                    runtime.store.getState().connection.status === "error",
+                () => runtime.store.getState().connection.status === "error",
             );
             await waitUntil(() =>
                 terminal.output.includes("control server is not running."),
@@ -728,10 +737,14 @@ import {
 
             runtime.store.setSidebarCursor({ id: "help", kind: "context" });
             runtime.store.setFocusScope("sidebarContext");
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find(
+            const helpRegion = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            ).find(
                 (region) =>
                     region.target.kind === "context" &&
                     region.target.id === "help",
@@ -807,10 +820,14 @@ import {
             ).boxes.find((box) => box.id === "help-navigation");
             assert.ok(navigationBox);
             runtime.store.toggleExpanded(navigationBox.expandedKey);
-            const helpRegions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            });
+            const helpRegions = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            );
             const contentRegion = helpRegions.find(
                 (region) => region.target.kind === "boxBody",
             );
@@ -893,10 +910,14 @@ import {
                 title: "Confirm navigation",
                 type: "overlay.openConfirm",
             });
-            let regions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            });
+            let regions = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            );
             const confirm = regions.find(
                 (region) =>
                     region.target.kind === "overlayAction" &&
@@ -922,10 +943,14 @@ import {
                 instance: "alpha",
                 type: "approval.open",
             });
-            regions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            });
+            regions = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            );
             const approve = regions.find(
                 (region) =>
                     region.target.kind === "overlayAction" &&
@@ -1056,10 +1081,14 @@ import {
             runtime.store.setSidebarCursor({ id: "config", kind: "context" });
             runtime.store.setFocusScope("sidebarContext");
 
-            const region = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find(
+            const region = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            ).find(
                 (candidate) =>
                     candidate.target.kind === "boxBody" &&
                     candidate.target.boxId === "help-navigation" &&
@@ -1115,10 +1144,14 @@ import {
             assert.notEqual(helpRow, undefined);
             runtime.selection.clearSelection();
 
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find(
+            const helpRegion = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            ).find(
                 (region) =>
                     region.target.kind === "context" &&
                     region.target.id === "help",
@@ -1530,9 +1563,10 @@ import {
             runtime.store.setSelectedPage("instances");
 
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
-                    (box) => box.id === "instance:alpha",
-                ),
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.some((box) => box.id === "instance:alpha"),
             );
             let instanceBox = selectMainScreenModel(
                 runtime.store.getState(),
@@ -1771,10 +1805,14 @@ import {
             );
             await waitUntil(() => writes.includes("\u001B[<0;5;3M"));
 
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
-                columns: runtime.columns,
-                rows: runtime.rows,
-            }).find(
+            const helpRegion = buildTuiHitRegions(
+                runtime.store.getState(),
+                runtime.reader,
+                {
+                    columns: runtime.columns,
+                    rows: runtime.rows,
+                },
+            ).find(
                 (region) =>
                     region.target.kind === "context" &&
                     region.target.id === "help",
@@ -1802,11 +1840,11 @@ import {
         assert.equal(host.rawModes.at(-1), false);
     });
 
-    test("real Ink runtime switches terminal sources and drives tmux View and Attach", async () => {
+    test("real Ink runtime switches terminal sources and attaches shared PTY sessions", async () => {
         const host = createTerminal();
         const ptyWrites: string[] = [];
         const embedded = new TuiTerminalSession({
-            ptyFactory: () => ({
+            ptyFactory: (_command, args) => ({
                 kill() {},
                 onData() {
                     return { dispose() {} };
@@ -1816,7 +1854,7 @@ import {
                 },
                 resize() {},
                 write(data) {
-                    ptyWrites.push(data);
+                    ptyWrites.push(args.length === 0 ? data : `shared:${data}`);
                 },
             }),
         });
@@ -1843,63 +1881,19 @@ import {
                     provider: "ssh",
                 },
             ],
-            toolCallRecords: [
+            terminalSessions: [
                 {
-                    callId: "call-existing-tmux",
-                    inputSummary: "{}",
+                    terminalId: "process-agent",
+                    generation: 1,
+                    version: 1,
                     instance: "alpha",
-                    source: "mcp",
-                    startedAt: "2026-08-30T00:00:00.000Z",
-                    status: "completed",
-                    toolName: "tmux_manage",
-                    workspace: process.cwd(),
-                } as ToolCallRecord,
+                    state: "running",
+                    createdAt: "2026-08-30T00:00:00.000Z",
+                    latestSeq: 0,
+                    cols: 80,
+                    rows: 24,
+                },
             ],
-            toolCall(_instance, toolName, input) {
-                if (
-                    toolName === "tmux_manage" &&
-                    (input as { command?: string }).command === "list"
-                ) {
-                    return {
-                        panes: [
-                            {
-                                id: "%1",
-                                name: "agent",
-                                status: "running",
-                                workspace: process.cwd(),
-                                task: { id: "task-agent", status: "running" },
-                            },
-                        ],
-                    };
-                }
-                if (toolName === "tmux_inspect") {
-                    return {
-                        panes: [
-                            {
-                                command: "read first; read second",
-                                cwd: process.cwd(),
-                                id: "%1",
-                                lines: ["ready"],
-                                name: "agent",
-                                status: "running",
-                                task: { id: "task-agent", status: "running" },
-                            },
-                        ],
-                    };
-                }
-                if (toolName === "tmux_input") {
-                    assert.deepEqual(input, {
-                        input: "echo hello^M",
-                        task: "task-agent",
-                        timeMs: 0,
-                    });
-                    return {
-                        output: ["echo hello", "hello"],
-                        task: { id: "task-agent", status: "running" },
-                    };
-                }
-                throw new Error(`Unexpected tool ${toolName}`);
-            },
         });
         const runtime = new TuiRuntime(
             { stdin: host.stdin, stdout: host.stdout },
@@ -1956,17 +1950,17 @@ import {
             host.write("\u0014");
             await waitUntil(() => {
                 const route = currentTuiRoute(runtime.store.getState());
-                return route.page === "terminal" && route.tab === "tmuxPanes";
+                return route.page === "terminal" && route.tab === "sessions";
             });
             await waitUntil(
-                () => runtime.tmuxPanes.getSnapshot().panes.length === 1,
+                () =>
+                    runtime.sharedTerminals.getSnapshot().sessions.length === 1,
             );
-            assert.equal(
+            assert.ok(
                 buildTuiTerminalViewportRegion(runtime.store.getState(), {
                     columns: runtime.columns,
                     rows: runtime.rows,
                 }),
-                undefined,
             );
 
             const fullScreenRegions = buildTuiHitRegions(
@@ -1988,7 +1982,7 @@ import {
                         region.target.kind === "instance",
                 ),
                 true,
-                "tmux output must retain the main side panel for switching and exit",
+                "shared terminal output must retain the main side panel for switching and exit",
             );
 
             const instancesTabRegion = tabTargets.find(
@@ -2034,7 +2028,7 @@ import {
             const tmuxTabRegion = instancesLayoutRegions.find(
                 (region) =>
                     region.target.kind === "terminalTab" &&
-                    region.target.tab === "tmuxPanes",
+                    region.target.tab === "sessions",
             )!;
             host.write(
                 mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "press"),
@@ -2044,28 +2038,32 @@ import {
             );
             await waitUntil(() => {
                 const route = currentTuiRoute(runtime.store.getState());
-                return route.page === "terminal" && route.tab === "tmuxPanes";
+                return route.page === "terminal" && route.tab === "sessions";
             });
             await waitUntil(
-                () => runtime.tmuxPanes.getSnapshot().panes.length === 1,
+                () =>
+                    runtime.sharedTerminals.getSnapshot().sessions.length === 1,
             );
 
             host.write("\r");
             await waitUntil(
-                () => runtime.tmuxPanes.getSnapshot().active?.attached === true,
+                () =>
+                    runtime.sharedTerminals.getSnapshot().active?.terminalId ===
+                    "process-agent",
             );
             host.write("echo hello\r");
             await waitUntil(() =>
-                domains
-                    .toolCalls()
-                    .some((call) => call.toolName === "tmux_input"),
+                ptyWrites
+                    .filter((value) => value.startsWith("shared:"))
+                    .map((value) => value.slice(7))
+                    .join("")
+                    .includes("echo hello\r"),
             );
-            await waitUntil(() => host.output.includes("hello"));
-
             host.write("\u001B");
-            await waitUntil(
-                () =>
-                    runtime.tmuxPanes.getSnapshot().active?.attached === false,
+            await waitUntil(() => ptyWrites.includes("shared:\u001B"));
+            assert.equal(
+                runtime.sharedTerminals.getSnapshot().active?.terminalId,
+                "process-agent",
             );
             host.write("\u0014");
             await waitUntil(() => {
@@ -2087,12 +2085,7 @@ import {
 
             host.write("\t");
             await waitUntil(() => ptyWrites.includes("\t"));
-            assert.equal(
-                domains
-                    .toolCalls()
-                    .filter((call) => call.toolName === "tmux_input").length,
-                1,
-            );
+            assert.equal(domains.toolCalls().length, 0);
 
             host.write("\u001D");
             await waitUntil(
@@ -2266,114 +2259,271 @@ import {
 
     test("T03 real bracketed paste with a trailing newline stays in the Comment draft until a separate Enter", async () => {
         const terminal = createTerminal({ columns: 80, rows: 20 });
-        const domains = createDomains({ contextRecords: [{
-            ctxId: "paste-context", createdAt: "2026-01-01T00:00:00Z", lastAccessedAt: "2026-01-01T00:00:00Z",
-            environments: [{ instance: "alpha", workspace: "/work" }], status: "active",
-        } as never] });
+        const domains = createDomains({
+            contextRecords: [
+                {
+                    ctxId: "paste-context",
+                    createdAt: "2026-01-01T00:00:00Z",
+                    lastAccessedAt: "2026-01-01T00:00:00Z",
+                    environments: [{ instance: "alpha", workspace: "/work" }],
+                    status: "active",
+                } as never,
+            ],
+        });
         let historyLoads = 0;
-        domains.session.messageHistory.loadContext = async () => { historyLoads++; };
+        domains.session.messageHistory.loadContext = async () => {
+            historyLoads++;
+        };
         domains.session.messageHistory.clearContext = () => {};
         let sent = 0;
-        const queue = domains.session.messages.queue.bind(domains.session.messages);
-        domains.session.messages.queue = async (...args) => { sent++; return await queue(...args); };
-        const runtime = new TuiRuntime({ stdin: terminal.stdin, stdout: terminal.stdout }, { domains: domains.session });
+        const queue = domains.session.messages.queue.bind(
+            domains.session.messages,
+        );
+        domains.session.messages.queue = async (...args) => {
+            sent++;
+            return await queue(...args);
+        };
+        const runtime = new TuiRuntime(
+            { stdin: terminal.stdin, stdout: terminal.stdout },
+            { domains: domains.session },
+        );
         const running = runtime.run();
         try {
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().connection.status === "connected",
+            );
             runtime.store.setSelectedPage("messages");
-            runtime.store.pushRoute({ page: "messages", view: "thread", instance: "alpha", ctxId: "paste-context" });
-            await runtime.commandDispatcher.dispatch({ type: "contextMessage.edit" });
+            runtime.store.pushRoute({
+                page: "messages",
+                view: "thread",
+                instance: "alpha",
+                ctxId: "paste-context",
+            });
+            await runtime.commandDispatcher.dispatch({
+                type: "contextMessage.edit",
+            });
             terminal.write("\u001b[200~line one\nline two\n\u001b[201~");
-            await waitUntil(() => readContextMessageDraft(runtime.store.getState(), "alpha", "paste-context").includes("line two"));
+            await waitUntil(() =>
+                readContextMessageDraft(
+                    runtime.store.getState(),
+                    "alpha",
+                    "paste-context",
+                ).includes("line two"),
+            );
             await yieldEventLoop();
             assert.equal(sent, 0);
-            assert.equal(readContextMessageDraft(runtime.store.getState(), "alpha", "paste-context"), "line one\nline two\n");
+            assert.equal(
+                readContextMessageDraft(
+                    runtime.store.getState(),
+                    "alpha",
+                    "paste-context",
+                ),
+                "line one\nline two\n",
+            );
             await waitUntil(() => historyLoads > 0);
             const beforeRetry = historyLoads;
             terminal.write("\u0012");
             await waitUntil(() => historyLoads > beforeRetry);
-            assert.equal(readContextMessageDraft(runtime.store.getState(), "alpha", "paste-context"), "line one\nline two\n");
+            assert.equal(
+                readContextMessageDraft(
+                    runtime.store.getState(),
+                    "alpha",
+                    "paste-context",
+                ),
+                "line one\nline two\n",
+            );
             terminal.write("\r");
             await waitUntil(() => sent === 1);
-            assert.equal(readContextMessageDraft(runtime.store.getState(), "alpha", "paste-context"), "");
+            assert.equal(
+                readContextMessageDraft(
+                    runtime.store.getState(),
+                    "alpha",
+                    "paste-context",
+                ),
+                "",
+            );
         } finally {
-            await runtime.stop(); await running;
+            await runtime.stop();
+            await running;
         }
     });
 
     test("T04 80x20 real Create wizard Tab keeps each focused field visible in the terminal screen", async () => {
         const terminal = createTerminal({ columns: 80, rows: 20 });
         const domains = createDomains();
-        const runtime = new TuiRuntime({ stdin: terminal.stdin, stdout: terminal.stdout }, { domains: domains.session });
+        const runtime = new TuiRuntime(
+            { stdin: terminal.stdin, stdout: terminal.stdout },
+            { domains: domains.session },
+        );
         const running = runtime.run();
         try {
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
-            runtime.store.setSelectedPage("instances"); runtime.store.setMainFocusId("create-instance");
-            runtime.store.setFocusScope("mainBoxes"); terminal.write("\r");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.kind === "create");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().connection.status === "connected",
+            );
+            runtime.store.setSelectedPage("instances");
+            runtime.store.setMainFocusId("create-instance");
+            runtime.store.setFocusScope("mainBoxes");
+            terminal.write("\r");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.kind ===
+                    "create",
+            );
             for (let index = 0; index < 8; index++) {
                 const state = runtime.store.getState();
-                const box = selectMainScreenModel(state, runtime.reader).boxes.find((item) => item.id === "create-wizard");
+                const box = selectMainScreenModel(
+                    state,
+                    runtime.reader,
+                ).boxes.find((item) => item.id === "create-wizard");
                 assert.ok(box);
-                const selected = state.interaction.selectedDetailLineIds[box.expandedKey];
-                const line = box.expandedLines.find((item) => item.id === selected);
+                const selected =
+                    state.interaction.selectedDetailLineIds[box.expandedKey];
+                const line = box.expandedLines.find(
+                    (item) => item.id === selected,
+                );
                 assert.ok(line);
                 // Ink throttles terminal output independently of store updates.
                 await new Promise<void>((resolve) => setTimeout(resolve, 50));
                 const buffer = new TuiTerminalBuffer({ columns: 80, rows: 20 });
-                await buffer.write(terminal.output.replace(/(?<!\r)\n/gu, "\r\n"));
-                const screen = buffer.getSnapshot().lines.map((row) => row.segments.map((segment) => segment.text).join("")).join("\n");
+                await buffer.write(
+                    terminal.output.replace(/(?<!\r)\n/gu, "\r\n"),
+                );
+                const screen = buffer
+                    .getSnapshot()
+                    .lines.map((row) =>
+                        row.segments.map((segment) => segment.text).join(""),
+                    )
+                    .join("\n");
                 buffer.dispose();
                 const label = line.text.trim().split(/\s+/u)[0]!;
-                assert.ok(screen.includes(label), `Focused ${selected} (${label}) must be visible:\n${screen}`);
+                assert.ok(
+                    screen.includes(label),
+                    `Focused ${selected} (${label}) must be visible:\n${screen}`,
+                );
                 terminal.write("\t");
-                await waitUntil(() => runtime.store.getState().interaction.selectedDetailLineIds[box.expandedKey] !== selected);
+                await waitUntil(
+                    () =>
+                        runtime.store.getState().interaction
+                            .selectedDetailLineIds[box.expandedKey] !==
+                        selected,
+                );
             }
         } finally {
-            await runtime.stop(); await running;
+            await runtime.stop();
+            await running;
         }
     });
 
     test("T06 80x20 real SSH wizard tail editing keeps the typed character and cursor visible", async () => {
         const terminal = createTerminal({ columns: 80, rows: 20 });
         const domains = createDomains();
-        const runtime = new TuiRuntime({ stdin: terminal.stdin, stdout: terminal.stdout }, { domains: domains.session });
+        const runtime = new TuiRuntime(
+            { stdin: terminal.stdin, stdout: terminal.stdout },
+            { domains: domains.session },
+        );
         const running = runtime.run();
         try {
-            await waitUntil(() => runtime.store.getState().connection.status === "connected");
-            runtime.store.setSelectedPage("instances"); runtime.store.setMainFocusId("create-instance");
-            runtime.store.setFocusScope("mainBoxes"); terminal.write("\r");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.kind === "create");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().connection.status === "connected",
+            );
+            runtime.store.setSelectedPage("instances");
+            runtime.store.setMainFocusId("create-instance");
+            runtime.store.setFocusScope("mainBoxes");
             terminal.write("\r");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.editing === true);
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.kind ===
+                    "create",
+            );
+            terminal.write("\r");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.editing ===
+                    true,
+            );
             terminal.write("\u001b[200~ssh-demo\u001b[201~");
-            await waitUntil(() => (runtime.store.getState().ui.formDrafts.create as { name?: string }).name === "ssh-demo");
+            await waitUntil(
+                () =>
+                    (
+                        runtime.store.getState().ui.formDrafts.create as {
+                            name?: string;
+                        }
+                    ).name === "ssh-demo",
+            );
             terminal.write("\t");
-            await waitUntil(() => runtime.store.getState().interaction.selectedDetailLineIds["instances:all:create-wizard"] === "create-wizard:field:provider");
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.selectedDetailLineIds[
+                        "instances:all:create-wizard"
+                    ] === "create-wizard:field:provider",
+            );
             terminal.write("\u001b[C");
-            await waitUntil(() => (runtime.store.getState().ui.formDrafts.create as { provider?: string }).provider === "ssh");
-            runtime.store.setSelectedDetailLine("instances:all:create-wizard", "create-wizard:button:next");
+            await waitUntil(
+                () =>
+                    (
+                        runtime.store.getState().ui.formDrafts.create as {
+                            provider?: string;
+                        }
+                    ).provider === "ssh",
+            );
+            runtime.store.setSelectedDetailLine(
+                "instances:all:create-wizard",
+                "create-wizard:button:next",
+            );
             terminal.write("\r");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.step === 2);
+            await waitUntil(
+                () => runtime.store.getState().interaction.editor?.step === 2,
+            );
             terminal.write("\r");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.editing === true);
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.editing ===
+                    true,
+            );
             const command = `ssh ${"long-host-".repeat(18)}TAIL`;
             terminal.write(`\u001b[200~${command}\u001b[201~`);
-            await waitUntil(() => runtime.store.getState().interaction.editor?.cursor === command.length);
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.cursor ===
+                    command.length,
+            );
             terminal.write("Z");
-            await waitUntil(() => runtime.store.getState().interaction.editor?.cursor === command.length + 1);
+            await waitUntil(
+                () =>
+                    runtime.store.getState().interaction.editor?.cursor ===
+                    command.length + 1,
+            );
             await new Promise<void>((resolve) => setTimeout(resolve, 50));
             const buffer = new TuiTerminalBuffer({ columns: 80, rows: 20 });
             await buffer.write(terminal.output.replace(/(?<!\r)\n/gu, "\r\n"));
             const snapshot = buffer.getSnapshot();
-            const row = snapshot.lines.find((line) => line.segments.some((segment) => segment.text.includes("TAILZ")));
-            assert.ok(row, "The edited command tail must be on the terminal screen");
-            const box = selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes[0]!;
-            const editableRow = renderExpandableBoxLines(box, 72).find((line) => line.lineId === "create-wizard:field:ssh.command");
-            assert.ok(editableRow?.segments?.some((segment) => segment.underline && segment.text === " "), "Ink must receive the visible cursor segment");
+            const row = snapshot.lines.find((line) =>
+                line.segments.some((segment) => segment.text.includes("TAILZ")),
+            );
+            assert.ok(
+                row,
+                "The edited command tail must be on the terminal screen",
+            );
+            const box = selectMainScreenModel(
+                runtime.store.getState(),
+                runtime.reader,
+            ).boxes[0]!;
+            const editableRow = renderExpandableBoxLines(box, 72).find(
+                (line) => line.lineId === "create-wizard:field:ssh.command",
+            );
+            assert.ok(
+                editableRow?.segments?.some(
+                    (segment) => segment.underline && segment.text === " ",
+                ),
+                "Ink must receive the visible cursor segment",
+            );
             buffer.dispose();
         } finally {
-            await runtime.stop(); await running;
+            await runtime.stop();
+            await running;
         }
     });
 

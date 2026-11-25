@@ -14,18 +14,6 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-
-
-
-
-
-
-
-
-
-
-
-
 export class WorkerTerminal implements WorkerTerminalPort {
     readonly #endpoint: Endpoint;
     readonly #port: PortClient;
@@ -49,8 +37,20 @@ export class WorkerTerminal implements WorkerTerminalPort {
         fromSeq: number;
         generation: number;
         terminalId: string;
+        restore?: boolean;
     }): Promise<WorkerTerminalAttachResult> {
         return await this.#request("terminal.attach", input);
+    }
+
+    async control(input: {
+        terminalId: string;
+        generation: number;
+        controller?: string;
+        renew?: boolean;
+    }): Promise<
+        Awaited<ReturnType<NonNullable<WorkerTerminalPort["control"]>>>
+    > {
+        return await this.#request("terminal.control", input);
     }
 
     async write(
@@ -107,7 +107,11 @@ function parseNotification(
     method: string,
     params: JsonValue,
 ): WorkerTerminalNotification | undefined {
-    if (method !== "terminal.output" && method !== "terminal.exit")
+    if (
+        method !== "terminal.output" &&
+        method !== "terminal.exit" &&
+        method !== "terminal.error"
+    )
         return undefined;
     if (typeof params !== "object" || params === null || Array.isArray(params))
         return undefined;
@@ -115,6 +119,12 @@ function parseNotification(
     const terminalId = readString(value.terminalId);
     const generation = readInteger(value.generation);
     if (terminalId === undefined || generation === undefined) return undefined;
+    if (method === "terminal.error") {
+        const message = readString(value.message);
+        return message === undefined
+            ? undefined
+            : { method, params: { terminalId, generation, message } };
+    }
     if (method === "terminal.output") {
         const seq = readInteger(value.seq);
         const dataBase64 = readString(value.dataBase64);

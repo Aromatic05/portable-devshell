@@ -30,18 +30,12 @@ export function createTerminalRouteModule(
     options: TerminalRouteModuleOptions,
 ): ControlPortDefinition {
     const maxUnackedBytes = options.maxUnackedBytes ?? 1024 * 1024;
-    let recovered = false;
     let recovery: Promise<void> | undefined;
     const ensureRecovered = async (): Promise<void> => {
-        if (recovered || options.backend.recover === undefined) {
-            recovered = true;
-            return;
-        }
+        if (options.backend.recover === undefined) return;
         recovery ??= options.sessions
             .recover(options.instance, options.backend)
-            .then(() => {
-                recovered = true;
-            })
+            .then(() => undefined)
             .finally(() => {
                 recovery = undefined;
             });
@@ -111,11 +105,6 @@ export function createTerminalRouteModule(
                     input.generation,
                     input.terminalId,
                 );
-                await stream.send({
-                    name: "seed",
-                    payload: { session: current } as unknown as JsonValue,
-                });
-
                 let sendTail = Promise.resolve();
                 let terminal = false;
                 let pendingBytes = 0;
@@ -125,6 +114,12 @@ export function createTerminalRouteModule(
                 // Keep this binding unset until a durable attachment exists.
                 // eslint-disable-next-line prefer-const
                 let attachment: TerminalAttachment | undefined;
+                let seeded = false;
+                let beforeSeedBytes = 0;
+                let seedOverflow = false;
+                const beforeSeed: TerminalOutputFrame[] = [];
+                let beforeSeedExit:
+                    { exitCode: number; signal: number } | undefined;
 
                 const offData = stream.onData(async (message) => {
                     const event = message as ControlStreamMessage;
@@ -226,6 +221,16 @@ export function createTerminalRouteModule(
                 const offClose = stream.onClose(end);
                 const offCancel = stream.onCancel(end);
                 const enqueueOutput = (frame: TerminalOutputFrame) => {
+                    if (!seeded) {
+                        beforeSeedBytes += Buffer.byteLength(
+                            frame.data,
+                            "utf8",
+                        );
+                        if (beforeSeedBytes > maxUnackedBytes)
+                            seedOverflow = true;
+                        if (!seedOverflow) beforeSeed.push(frame);
+                        return;
+                    }
                     if (terminal || frame.seq <= lastAckedSeq) return;
                     const bytes = Buffer.byteLength(frame.data, "utf8");
                     if (pendingBytes + bytes > maxUnackedBytes) {
@@ -261,6 +266,10 @@ export function createTerminalRouteModule(
                     exitCode: number;
                     signal: number;
                 }) => {
+                    if (!seeded) {
+                        beforeSeedExit = exit;
+                        return;
+                    }
                     if (terminal) return;
                     terminal = true;
                     const completed = options.sessions.get(input.terminalId);
@@ -276,6 +285,7 @@ export function createTerminalRouteModule(
 
                 attachment = options.sessions.attach({
                     fromSeq: input.fromSeq,
+                    takeover: input.takeover,
                     generation: input.generation,
                     onExit: enqueueExit,
                     onOutput: enqueueOutput,
@@ -291,11 +301,48 @@ export function createTerminalRouteModule(
                     // the wait here lets the Instance drain its stream lease.
                     end();
                     resolveRetiring();
-                    void sendTail.then(() => stream.close()).catch(() => undefined);
+                    void sendTail
+                        .then(() => stream.close())
+                        .catch(() => undefined);
                 });
                 try {
+                    const snapshot = input.takeover
+                        ? await attachment.takeControl()
+                        : undefined;
+                    if (endedFlag) {
+                        attachment.detach();
+                        return;
+                    }
+                    if (seedOverflow)
+                        throw createRemoteError({
+                            code: STREAM_GAP_CODE,
+                            message:
+                                "Terminal output exceeded the attach buffer while restoring state.",
+                            retryable: true,
+                        });
+                    if (snapshot !== undefined)
+                        lastAckedSeq = Math.max(lastAckedSeq, snapshot.seq);
+                    await stream.send({
+                        name: "seed",
+                        payload: {
+                            session: options.sessions.get(input.terminalId),
+                            ...(snapshot === undefined ? {} : { snapshot }),
+                        } as unknown as JsonValue,
+                    });
+                    if (seedOverflow)
+                        throw createRemoteError({
+                            code: STREAM_GAP_CODE,
+                            message:
+                                "Terminal output exceeded the attach buffer while sending the state seed.",
+                            retryable: true,
+                        });
+                    seeded = true;
                     for (const frame of attachment.replay) enqueueOutput(frame);
-                    if (attachment.exit !== undefined) enqueueExit(attachment.exit);
+                    for (const frame of beforeSeed) enqueueOutput(frame);
+                    if (beforeSeedExit !== undefined)
+                        enqueueExit(beforeSeedExit);
+                    if (attachment.exit !== undefined)
+                        enqueueExit(attachment.exit);
                     // A client can indefinitely backpressure a send. Retiring
                     // an Instance must still detach and release the stream
                     // lease rather than waiting on that client's network IO.
@@ -333,6 +380,7 @@ function readAttachInput(value: JsonValue | undefined): TerminalAttachInput {
     const payload = readRecord(value);
     return {
         fromSeq: readIntegerField(payload, "fromSeq"),
+        ...(payload.takeover === true ? { takeover: true } : {}),
         generation: readIntegerField(payload, "generation"),
         terminalId: readStringField(payload, "terminalId"),
     };
@@ -455,4 +503,3 @@ function invalidInput(message: string): Error {
         retryable: false,
     });
 }
-

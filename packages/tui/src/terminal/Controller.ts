@@ -3,7 +3,7 @@ import type { WriteStream } from "node:tty";
 import type { TuiDomainSession } from "../app/control/Client.js";
 import type { TuiAppStore } from "../state/store/App.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
-import { nextTuiTerminalTab } from "./tmux/Model.js";
+import { nextTuiTerminalTab } from "./Tabs.js";
 import type { TuiTerminalInputAction } from "./Input.js";
 import { selectTerminalTab } from "../view/projection/View.js";
 import { buildTuiTerminalViewportRegion } from "../view/projection/HitRegion.js";
@@ -13,7 +13,7 @@ import {
     type TuiTerminalGraphicsSupport,
 } from "./graphics/Renderer.js";
 import type { TuiTerminalSession } from "./emulation/Session.js";
-import type { TuiTmuxPaneTerminalSession } from "./tmux/Session.js";
+import type { TuiSharedTerminalList } from "./SharedList.js";
 
 export interface TuiTerminalMouseEvent {
     button: number;
@@ -34,7 +34,7 @@ export interface TuiTerminalControllerOptions {
     store: TuiAppStore;
     terminal: TuiTerminalSession;
     writeAppInput(data: string): void;
-    tmuxPanes: TuiTmuxPaneTerminalSession;
+    sharedTerminals: TuiSharedTerminalList;
 }
 
 export class TuiTerminalController {
@@ -44,8 +44,7 @@ export class TuiTerminalController {
     #instance?: string;
     #rows = 1;
     #selecting = false;
-    #tmuxPanesActive = false;
-    #tmuxPanesInstance?: string;
+    #sharedInstance?: string;
 
     constructor(options: TuiTerminalControllerOptions) {
         this.#options = options;
@@ -92,10 +91,9 @@ export class TuiTerminalController {
             return;
         }
 
-        const entry =
-            this.#options.domains.instances.state.instances.find(
-                (candidate) => candidate.name === instance,
-            );
+        const entry = this.#options.domains.instances.state.instances.find(
+            (candidate) => candidate.name === instance,
+        );
         if (entry === undefined) {
             this.#instance = instance;
             this.#options.terminal.setError(
@@ -132,7 +130,7 @@ export class TuiTerminalController {
         )
             return;
         const keepTerminalFocus = state.interaction.focusScope === "terminal";
-        if (tab === "instances") this.#options.tmuxPanes.exitAttach();
+        if (tab === "instances") this.#leaveShared();
         this.#options.store.replaceRoute({
             page: "terminal",
             tab,
@@ -148,6 +146,15 @@ export class TuiTerminalController {
             rows: this.#options.rows(),
         });
         if (region === undefined) return;
+        this.#columns = region.width;
+        this.#rows = region.height;
+        if (selectTerminalTab(state) === "sessions") {
+            if (
+                this.#options.sharedTerminals.getSnapshot().active !== undefined
+            )
+                this.#options.terminal.resize(region.width, region.height);
+            return;
+        }
         await this.open(state.ui.selectedInstance, region.width, region.height);
     }
 
@@ -156,7 +163,9 @@ export class TuiTerminalController {
         const focused =
             state.ui.selectedPage === "terminal" &&
             state.interaction.focusScope === "terminal" &&
-            selectTerminalTab(state) === "instances";
+            (selectTerminalTab(state) === "instances" ||
+                this.#options.sharedTerminals.getSnapshot().active !==
+                    undefined);
         if (focused === this.#focused) return;
         this.#focused = focused;
         this.#options.terminal.setFocused(focused);
@@ -165,60 +174,40 @@ export class TuiTerminalController {
         );
     }
 
-    syncTmuxPanes(): void {
+    syncSharedTerminals(): void {
         const state = this.#options.store.getState();
-        const instance = state.ui.selectedInstance;
-        const active =
+        const instance =
             state.ui.selectedPage === "terminal" &&
-            selectTerminalTab(state) === "tmuxPanes" &&
-            instance !== undefined;
-        if (!active) {
-            if (this.#tmuxPanesActive) {
-                this.#tmuxPanesActive = false;
-                this.#tmuxPanesInstance = undefined;
-                this.#options.tmuxPanes.stopPolling();
-                void this.#options.tmuxPanes.bind(undefined);
-            }
-            return;
-        }
-        if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) {
-            this.#tmuxPanesActive = true;
-            this.#tmuxPanesInstance = instance;
-            this.#options.tmuxPanes.stopPolling();
-            void this.#options.tmuxPanes
-                .bind(undefined)
-                .then(async () => {
-                    if (
-                        !this.#tmuxPanesActive ||
-                        this.#tmuxPanesInstance !== instance
-                    )
-                        return;
-                    await this.#options.domains.toolCalls.load(instance);
-                    if (
-                        !this.#tmuxPanesActive ||
-                        this.#tmuxPanesInstance !== instance
-                    )
-                        return;
-                    await this.#options.tmuxPanes.bind(instance);
-                    if (
-                        this.#tmuxPanesActive &&
-                        this.#tmuxPanesInstance === instance
-                    ) {
-                        this.#options.tmuxPanes.startPolling(2000);
-                    }
-                })
-                .catch((error: unknown) => {
-                    if (
-                        this.#tmuxPanesActive &&
-                        this.#tmuxPanesInstance === instance
-                    ) {
-                        this.#options.store.setScreenStatus(
-                            "terminal",
-                            `Tmux pane load failed: ${readErrorMessage(error)}`,
-                        );
-                    }
-                });
-        }
+            selectTerminalTab(state) === "sessions"
+                ? state.ui.selectedInstance
+                : undefined;
+        if (instance === this.#sharedInstance) return;
+        const wasShared = this.#sharedInstance !== undefined;
+        this.#sharedInstance = instance;
+        if (wasShared || instance !== undefined) this.#leaveShared();
+        void this.#options.sharedTerminals.bind(instance);
+    }
+
+    #leaveShared(): void {
+        this.#options.sharedTerminals.leave();
+        this.#instance = undefined;
+        this.#options.terminal.setUnavailable(
+            "Select a terminal session.",
+            this.#columns,
+            this.#rows,
+        );
+    }
+
+    async #attachShared(): Promise<void> {
+        const session = this.#options.sharedTerminals.enter();
+        if (session === undefined) return;
+        await this.#options.terminal.start({
+            columns: this.#columns,
+            rows: this.#rows,
+            command: { args: [session.terminalId], command: session.instance },
+            instance: session.instance,
+        });
+        this.syncFocus();
     }
 
     scroll(direction: "pageUp" | "pageDown" | "top" | "bottom"): void {
@@ -239,11 +228,12 @@ export class TuiTerminalController {
     }
 
     scrollViewport(delta: number): void {
-        if (selectTerminalTab(this.#options.store.getState()) === "instances") {
-            this.#options.terminal.scrollLines(delta);
-        } else {
-            this.#options.tmuxPanes.scroll(delta);
-        }
+        if (
+            selectTerminalTab(this.#options.store.getState()) === "sessions" &&
+            this.#options.sharedTerminals.getSnapshot().active === undefined
+        )
+            this.#options.sharedTerminals.move(delta);
+        else this.#options.terminal.scrollLines(delta);
     }
 
     renderGraphics(visible: boolean): void {
@@ -296,7 +286,7 @@ export class TuiTerminalController {
             }
             if (action.type === "focus.leave") {
                 focused = false;
-                this.#options.tmuxPanes.exitAttach();
+                if (tab === "sessions") this.#leaveShared();
                 const cursor =
                     this.#options.store.getState().interaction.sidebarCursor;
                 this.#options.store.setFocusScope(
@@ -316,24 +306,29 @@ export class TuiTerminalController {
                 }
                 continue;
             }
-            if (tab === "tmuxPanes") {
-                if (
-                    action.type === "data" &&
-                    action.data === "\u001B" &&
-                    this.#options.tmuxPanes.getSnapshot().active === undefined
-                ) {
-                    focused = false;
-                    const cursor =
-                        this.#options.store.getState().interaction
-                            .sidebarCursor;
-                    this.#options.store.setFocusScope(
-                        cursor?.kind === "instance"
-                            ? "sidebarInstances"
-                            : "sidebarContext",
+            if (
+                tab === "sessions" &&
+                this.#options.sharedTerminals.getSnapshot().active === undefined
+            ) {
+                if (action.type === "data") {
+                    const list = this.#options.sharedTerminals;
+                    if (action.data === "\u001B[A" || action.data === "k")
+                        list.move(-1);
+                    else if (action.data === "\u001B[B" || action.data === "j")
+                        list.move(1);
+                    else if (action.data === "r") void list.refresh();
+                    else if (action.data === "\r" || action.data === "\n")
+                        this.#options.enqueueInput(() => this.#attachShared());
+                } else if (action.type === "scroll")
+                    listScroll(
+                        this.#options.sharedTerminals,
+                        action.direction,
+                        this.#rows,
                     );
-                    continue;
-                }
-                this.#dispatchTmuxPaneInputAction(action);
+                else if (action.type === "mouse")
+                    this.#options.enqueueInput(() =>
+                        this.#options.handleAppMouse(action),
+                    );
                 continue;
             }
             if (action.type === "data")
@@ -415,36 +410,25 @@ export class TuiTerminalController {
             );
         }
     }
-
-    #dispatchTmuxPaneInputAction(
-        action: Exclude<
-            TuiTerminalInputAction,
-            { type: "focus.leave" } | { type: "source.toggle" }
-        >,
-    ): void {
-        if (action.type === "data" || action.type === "paste") {
-            void this.#options.tmuxPanes.handleRawInput(action.data);
-            return;
-        }
-        if (action.type === "scroll") {
-            const rows = Math.max(1, this.#options.rows() - 8);
-            const delta =
-                action.direction === "pageUp"
-                    ? -rows
-                    : action.direction === "pageDown"
-                      ? rows
-                      : action.direction === "top"
-                        ? -1_000_000
-                        : 1_000_000;
-            this.#options.tmuxPanes.scroll(delta);
-            return;
-        }
-        this.#options.enqueueInput(
-            async () => await this.#options.handleAppMouse(action),
-        );
-    }
 }
 
 function readErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function listScroll(
+    list: TuiSharedTerminalList,
+    direction: "pageUp" | "pageDown" | "top" | "bottom",
+    rows: number,
+): void {
+    const length = list.getSnapshot().sessions.length;
+    list.move(
+        direction === "pageUp"
+            ? -rows
+            : direction === "pageDown"
+              ? rows
+              : direction === "top"
+                ? -length
+                : length,
+    );
 }

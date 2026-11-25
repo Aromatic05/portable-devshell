@@ -10,6 +10,7 @@ import type {
     TerminalBackendSession,
     TerminalProcess,
     TerminalProcessExit,
+    TerminalRestore,
 } from "./Api.js";
 
 export class WorkerTerminalBackend implements TerminalBackend {
@@ -36,9 +37,13 @@ export class WorkerTerminalBackend implements TerminalBackend {
         };
     }
 
-    async recover(): Promise<TerminalBackendSession[]> {
+    async recover(
+        known?: ReadonlySet<string>,
+    ): Promise<TerminalBackendSession[]> {
         const descriptors = (await this.options.worker.list()).filter(
-            (descriptor) => descriptor.state === "running",
+            (descriptor) =>
+                descriptor.state === "running" &&
+                !known?.has(descriptor.terminalId),
         );
         return await Promise.all(
             descriptors.map(async (descriptor) => {
@@ -70,6 +75,9 @@ class WorkerTerminalProcess implements TerminalProcess {
     #descriptor: WorkerTerminalDescriptor;
     #exit?: TerminalProcessExit;
     #lastSeq = 0;
+    #localSeq = 0;
+    #controller?: string;
+    #controlHeartbeat?: ReturnType<typeof setInterval>;
     #operationTail = Promise.resolve();
     #resumeTail = Promise.resolve();
 
@@ -101,6 +109,90 @@ class WorkerTerminalProcess implements TerminalProcess {
         if (this.#closed) return;
         this.#closed = true;
         this.#disposeSubscriptions();
+        void this.releaseControl().catch(() => undefined);
+    }
+
+    async acquireControl(): Promise<TerminalRestore> {
+        let snapshot: TerminalRestore | undefined;
+        await this.#serialize(async () => {
+            if (this.#worker.control === undefined)
+                throw new Error("Worker does not provide terminal control.");
+            if (this.#controller !== undefined)
+                throw new Error(
+                    "Terminal already has a controlling attachment.",
+                );
+            const result = await this.#worker.control({
+                terminalId: this.#descriptor.terminalId,
+                generation: this.#descriptor.generation,
+            });
+            if (
+                result.controller === undefined ||
+                result.snapshot === undefined ||
+                result.session === undefined
+            ) {
+                throw new Error(
+                    "Worker returned incomplete terminal control state.",
+                );
+            }
+            this.#controller = result.controller;
+            this.#startControlHeartbeat();
+            this.#descriptor = result.session;
+            try {
+                if (result.snapshot.seq > this.#lastSeq) await this.#resume();
+                const seq =
+                    this.#localSeq - (this.#lastSeq - result.snapshot.seq);
+                if (seq < 0 || result.snapshot.seq > this.#lastSeq)
+                    throw new Error(
+                        "Terminal control snapshot is outside the output boundary.",
+                    );
+                snapshot = { seq, data: result.snapshot.data };
+            } catch (error) {
+                await this.#releaseControl();
+                throw error;
+            }
+        });
+        if (snapshot === undefined)
+            throw new Error("Terminal control snapshot is missing.");
+        return snapshot;
+    }
+
+    async releaseControl(): Promise<void> {
+        await this.#serialize(async () => await this.#releaseControl());
+    }
+
+    #startControlHeartbeat(): void {
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = setInterval(() => {
+            const controller = this.#controller;
+            if (controller === undefined || this.#worker.control === undefined)
+                return;
+            void this.#worker
+                .control({
+                    terminalId: this.#descriptor.terminalId,
+                    generation: this.#descriptor.generation,
+                    controller,
+                    renew: true,
+                })
+                .catch((error: unknown) => {
+                    if (this.#controller === controller)
+                        this.#fail(asError(error));
+                });
+        }, 10_000);
+        this.#controlHeartbeat.unref?.();
+    }
+
+    async #releaseControl(): Promise<void> {
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
+        const controller = this.#controller;
+        if (controller === undefined || this.#worker.control === undefined)
+            return;
+        await this.#worker.control({
+            terminalId: this.#descriptor.terminalId,
+            generation: this.#descriptor.generation,
+            controller,
+        });
+        if (this.#controller === controller) this.#controller = undefined;
     }
 
     async kill(): Promise<void> {
@@ -179,6 +271,9 @@ class WorkerTerminalProcess implements TerminalProcess {
             generation: this.#descriptor.generation,
             terminalId: this.#descriptor.terminalId,
             version: this.#descriptor.version,
+            ...(this.#controller === undefined
+                ? {}
+                : { controller: this.#controller }),
         };
     }
 
@@ -214,6 +309,9 @@ class WorkerTerminalProcess implements TerminalProcess {
         if (this.#closed) return;
         const attached = await this.#worker.attach({
             fromSeq: this.#lastSeq,
+            ...(this.#localSeq === 0 && this.#worker.control !== undefined
+                ? { restore: true }
+                : {}),
             generation: this.#descriptor.generation,
             terminalId: this.#descriptor.terminalId,
         });
@@ -225,6 +323,13 @@ class WorkerTerminalProcess implements TerminalProcess {
             throw new Error("Remote terminal attachment identity changed.");
         }
         this.#descriptor = attached.session;
+        if (attached.snapshot !== undefined) {
+            // Reset the decoder as well as the terminal. A snapshot is a
+            // complete state seed at an explicit Host sequence boundary.
+            this.#decoder.end();
+            this.#lastSeq = attached.snapshot.seq;
+            this.#emitData(attached.snapshot.data, ++this.#localSeq);
+        }
         for (const frame of attached.replay)
             this.#acceptOutput(frame.seq, frame.dataBase64);
         if (attached.exit !== undefined) {
@@ -244,6 +349,10 @@ class WorkerTerminalProcess implements TerminalProcess {
             notification.params.generation !== this.#descriptor.generation ||
             this.#closed
         ) {
+            return;
+        }
+        if (notification.method === "terminal.error") {
+            this.#scheduleResume();
             return;
         }
         if (notification.method === "terminal.output") {
@@ -279,14 +388,14 @@ class WorkerTerminalProcess implements TerminalProcess {
             latestSeq: Math.max(this.#descriptor.latestSeq, seq),
         };
         const decoded = this.#decoder.write(Buffer.from(dataBase64, "base64"));
-        this.#emitData(decoded, seq);
+        this.#emitData(decoded, ++this.#localSeq);
     }
 
     #acceptExit(exit: TerminalProcessExit, version: number): void {
         if (this.#closed) return;
         const finalText = this.#decoder.end();
         if (finalText.length > 0 && this.#lastSeq > 0) {
-            this.#emitData(finalText, this.#lastSeq);
+            this.#emitData(finalText, ++this.#localSeq);
         }
         this.#descriptor = { ...this.#descriptor, state: "exited", version };
         this.#exit = exit;
@@ -311,6 +420,8 @@ class WorkerTerminalProcess implements TerminalProcess {
     }
 
     #disposeSubscriptions(): void {
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
         this.#unsubscribeConnected();
         this.#unsubscribeDisconnected();
         this.#unsubscribeNotification();

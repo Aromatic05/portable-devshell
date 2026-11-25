@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -12,16 +11,23 @@ use crate::instance::sandbox::path::ResolvedPath;
 
 use crate::capability::process::child::ExitLatch;
 
-pub fn spawn(cwd: &Path, cols: u16, rows: u16) -> Result<SpawnedTerminal, RpcError> {
-    // Use the Windows PowerShell host that the rest of the Windows runtime
-    // already depends on instead of portable-pty's implicit cmd.exe default.
-    let mut command = CommandBuilder::new("powershell.exe");
-    command.arg("-NoLogo");
-    command.arg("-NoProfile");
-    command.arg("-NoExit");
-    command.cwd(cwd.as_os_str());
-    command.env("TERM", "xterm-256color");
-    spawn_with(command, cols, rows)
+pub(in crate::capability::process) fn spawn_interactive(
+    cwd: &ResolvedPath,
+    env: &std::collections::BTreeMap<String, Option<String>>,
+    execution: Option<&crate::capability::execution::ExecutionConfig>,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
+    let command = ShellCommand::prepare_program(
+        "powershell.exe".into(),
+        ["-NoLogo", "-NoProfile", "-NoExit"]
+            .map(std::ffi::OsString::from)
+            .to_vec(),
+        env,
+        execution,
+        true,
+    )?;
+    spawn_managed(&command, cwd, cols, rows)
 }
 
 pub(in crate::capability::process) fn spawn_managed(

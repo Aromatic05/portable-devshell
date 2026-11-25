@@ -593,3 +593,62 @@ fn hosted_pipe_wait_deadline_and_retained_output() {
     assert_eq!(large["stdoutTruncated"], true);
     assert_eq!(large["stdoutArtifact"]["storedBytes"], 6291456);
 }
+
+#[test]
+fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
+    let fixture = WorkerFixture::start();
+    let started = fixture.tool("bash_run", json!({
+        "command": "stty -echo; printf 'ready\\n'; IFS= read -r human; printf 'remote:%s\\n' \"$human\"; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
+        "tty": true, "waitMs": 20,
+    }));
+    let id = started["task"]["id"].as_str().unwrap();
+    let call = |method: &str, message: Value| {
+        fixture.env.rpc(INSTANCE, "terminal", &json!({
+        "protocol": "rpc", "type": "request", "id": method, "method": method, "message": message
+    }))
+    };
+    let listed = call("terminal.list", json!({}));
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let descriptor = listed["message"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["terminalId"] == id)
+        .unwrap();
+    let taken = call(
+        "terminal.control",
+        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    );
+    assert_eq!(taken["type"], "reply", "{taken}");
+    let token = taken["message"]["controller"].as_str().unwrap();
+    let rejected = fixture.env.rpc(INSTANCE, "tool", &json!({
+        "protocol": "rpc", "type": "request", "id": "model-during-remote-control", "method": "task_input",
+        "message": {"input": {"task": id, "input": "unwanted\n"}, "context": {"workspace": fixture.env.protocol_workspace()}}
+    }));
+    assert_eq!(rejected["type"], "error", "{rejected}");
+    let resized = call(
+        "terminal.resize",
+        json!({"terminalId": id, "generation": descriptor["generation"], "version": taken["message"]["session"]["version"], "clientSeq": 1, "controller": token, "cols": 101, "rows": 31}),
+    );
+    assert_eq!(resized["type"], "reply", "{resized}");
+    let written = call(
+        "terminal.write",
+        json!({"terminalId": id, "generation": descriptor["generation"], "version": resized["message"]["version"], "clientSeq": 2, "controller": token, "data": STANDARD.encode("operator\n")}),
+    );
+    assert_eq!(written["type"], "reply", "{written}");
+    let released = call(
+        "terminal.control",
+        json!({"terminalId": id, "generation": descriptor["generation"], "controller": token}),
+    );
+    assert_eq!(released["type"], "reply", "{released}");
+    fixture.tool("task_input", json!({"task": id, "input": "agent\n"}));
+    let result = fixture.wait_task(id, json!({}));
+    assert_eq!(result["exitCode"], 0, "{result}");
+    assert!(
+        result["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("remote:operator")
+    );
+    assert!(result["stdout"].as_str().unwrap().contains("model:agent"));
+}

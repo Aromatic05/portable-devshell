@@ -1,6 +1,6 @@
 use super::super::child::{ExitLatch, reap, wait_until_exit};
 use super::super::output::{Captures, OutputChannel, OutputJournal, READ_CHUNK};
-use super::super::pty::spawn_managed;
+use super::super::pty::{spawn_interactive, spawn_managed};
 use super::super::screen::TerminalScreen;
 use super::super::shell::ShellCommand;
 use super::managed::{Control, Exit, ManagedProcess, Reader, SpawnSpec, State, Writer};
@@ -19,14 +19,18 @@ impl ManagedProcess {
             .transpose()?;
         let (control, writer, outputs): (Control, Writer, Vec<(OutputChannel, Reader)>) =
             if let Some((cols, rows)) = spec.dimensions {
-                let prepared = ShellCommand::prepare(
-                    spec.shell,
-                    spec.command,
-                    spec.env,
-                    spec.execution,
-                    true,
-                )?;
-                let terminal = spawn_managed(&prepared, spec.cwd, cols, rows)?;
+                let terminal = if spec.interactive {
+                    spawn_interactive(spec.cwd, spec.env, spec.execution, cols, rows)?
+                } else {
+                    let prepared = ShellCommand::prepare(
+                        spec.shell,
+                        spec.command,
+                        spec.env,
+                        spec.execution,
+                        true,
+                    )?;
+                    spawn_managed(&prepared, spec.cwd, cols, rows)?
+                };
                 (
                     Control::Pty(terminal.child),
                     terminal.writer,
@@ -90,7 +94,8 @@ impl ManagedProcess {
                 screen,
                 captures,
                 output: OutputJournal::default(),
-                revision: 0,
+                version: 1,
+                created_at_ms: crate::tool::unix_time_millis(),
                 controller: None,
                 completion: None,
             }),
@@ -127,12 +132,11 @@ impl ManagedProcess {
                                 } else {
                                     Vec::new()
                                 };
-                                if state.controller.is_none() && !replies.is_empty() {
+                                if state.active_controller().is_none() && !replies.is_empty() {
                                     process.enqueue(&replies).map_err(|error| error.message)?;
                                 }
                                 state.captures.append(channel, &bytes[..n]);
                                 state.output.append(channel, &bytes[..n]);
-                                state.revision += 1;
                                 process.changed.notify_all();
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -180,7 +184,7 @@ impl ManagedProcess {
                 Some(error) => Err(error),
                 None => exit,
             });
-            state.revision += 1;
+            state.version += 1;
             observed.changed.notify_all();
         });
 

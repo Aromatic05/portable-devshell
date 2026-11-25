@@ -28,6 +28,7 @@ const DEFAULT_MAX_TERMINAL_HISTORY = 64;
 
 interface TerminalSessionRecord {
     attachments: Set<TerminalAttachmentRecord>;
+    controller?: TerminalAttachmentRecord;
     cols: number;
     createdAt: string;
     exit?: TerminalProcessExit;
@@ -126,7 +127,12 @@ export class TerminalSessionService implements TerminalSessionApi {
         this.#assertOpen();
         if (backend.recover === undefined) return this.list(instance);
         const epoch = this.#instanceEpoch(instance);
-        const recovered = await backend.recover();
+        const known = new Set(
+            [...this.#sessions.values()]
+                .filter((session) => session.instance === instance)
+                .map((session) => session.terminalId),
+        );
+        const recovered = await backend.recover(known);
         if (this.#closed || this.#instanceEpoch(instance) !== epoch) {
             await Promise.all(recovered.map(disposeUnregistered));
             throw this.#closed
@@ -153,7 +159,10 @@ export class TerminalSessionService implements TerminalSessionApi {
         assertSequence(request.fromSeq);
         const oldestAvailableSeq =
             session.replay[0]?.seq ?? session.latestSeq + 1;
-        if (request.fromSeq < oldestAvailableSeq - 1) {
+        if (
+            request.fromSeq < oldestAvailableSeq - 1 &&
+            !(request.takeover && session.process.acquireControl !== undefined)
+        ) {
             throw createRemoteError({
                 code: STREAM_GAP_CODE,
                 details: {
@@ -186,9 +195,48 @@ export class TerminalSessionService implements TerminalSessionApi {
                 if (attachment.detached) return;
                 attachment.detached = true;
                 session.attachments.delete(attachment);
+                if (session.controller === attachment) {
+                    session.controller = undefined;
+                    void session.process
+                        .releaseControl?.()
+                        .catch(() => undefined);
+                }
+            },
+            takeControl: async () => {
+                if (attachment.detached)
+                    throw new Error("Terminal attachment has detached.");
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
+                session.controller = attachment;
+                try {
+                    const snapshot = await session.process.acquireControl?.();
+                    if (attachment.detached) {
+                        await session.process.releaseControl?.();
+                        throw new Error(
+                            "Terminal attachment detached during takeover.",
+                        );
+                    }
+                    return snapshot;
+                } catch (error) {
+                    if (session.controller === attachment)
+                        session.controller = undefined;
+                    throw error;
+                }
             },
             resize: async (cols, rows) => {
                 this.#assertActive(session);
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
                 assertDimensions(cols, rows);
                 await session.process.resize(cols, rows);
                 this.#assertActive(session);
@@ -198,6 +246,13 @@ export class TerminalSessionService implements TerminalSessionApi {
             },
             write: async (data) => {
                 this.#assertActive(session);
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
                 await session.process.write(data);
             },
         };

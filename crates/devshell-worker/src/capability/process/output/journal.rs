@@ -67,6 +67,14 @@ impl OutputJournal {
     }
 
     pub fn read_after(&self, from_seq: u64) -> OutputPage {
+        self.read_with_limit(from_seq, PAGE_BYTES)
+    }
+
+    pub fn replay_after(&self, from_seq: u64) -> OutputPage {
+        self.read_with_limit(from_seq, RETAIN_BYTES)
+    }
+
+    fn read_with_limit(&self, from_seq: u64, limit: usize) -> OutputPage {
         let oldest_seq = self
             .chunks
             .front()
@@ -78,7 +86,7 @@ impl OutputJournal {
             .filter(|chunk| chunk.seq > from_seq)
             .take_while(|chunk| {
                 bytes += chunk.bytes.len();
-                bytes <= PAGE_BYTES
+                bytes <= limit
             })
             .map(|chunk| OutputFrame {
                 seq: chunk.seq,

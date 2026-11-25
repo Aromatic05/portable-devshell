@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -24,6 +24,7 @@ pub(in crate::capability::process) struct SpawnSpec<'a> {
     pub env: &'a BTreeMap<String, Option<String>>,
     pub execution: Option<&'a ExecutionConfig>,
     pub dimensions: Option<(u16, u16)>,
+    pub interactive: bool,
     pub stdin: Option<String>,
     pub keep_stdin: bool,
     pub workspace: Option<std::path::PathBuf>,
@@ -49,6 +50,7 @@ pub(in crate::capability::process) struct Descriptor {
     pub workspace: Option<std::path::PathBuf>,
     pub timed_out: bool,
     pub human_control: bool,
+    pub terminal: Option<crate::capability::terminal::TerminalDescriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit: Option<Exit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,7 +74,7 @@ pub(super) enum Control {
 }
 
 impl Control {
-    fn kill(&self) -> Result<(), String> {
+    pub(super) fn kill(&self) -> Result<(), String> {
         match self {
             Self::Pipe { pid, exit } => exit.while_running(|| {
                 crate::daemon::process::platform::terminate_process_group(*pid, true)
@@ -88,7 +90,7 @@ impl Control {
         }
     }
 
-    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+    pub(super) fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
         match self {
             Self::Pipe { .. } => Err("process has no PTY".into()),
             Self::Pty(child) => child.resize(cols, rows),
@@ -100,9 +102,30 @@ pub(super) struct State {
     pub(super) output: OutputJournal,
     pub(super) captures: Captures,
     pub(super) screen: Option<TerminalScreen>,
-    pub(super) controller: Option<String>,
-    pub(super) revision: u64,
+    pub(super) controller: Option<ControlOwner>,
+    pub(super) version: u64,
+    pub(super) created_at_ms: u128,
     pub(super) completion: Option<Result<Exit, String>>,
+}
+
+pub(super) struct ControlOwner {
+    token: String,
+    deadline: Option<Instant>,
+}
+
+const REMOTE_CONTROL_LEASE: Duration = Duration::from_secs(30);
+
+impl State {
+    pub(super) fn active_controller(&self) -> Option<&str> {
+        self.controller
+            .as_ref()
+            .filter(|owner| {
+                owner
+                    .deadline
+                    .is_none_or(|deadline| deadline > Instant::now())
+            })
+            .map(|owner| owner.token.as_str())
+    }
 }
 
 pub(in crate::capability::process) struct ManagedProcess {
@@ -121,7 +144,7 @@ impl ManagedProcess {
         self.describe(&self.state.lock().expect("process state lock poisoned"))
     }
 
-    fn describe(&self, state: &State) -> Descriptor {
+    pub(super) fn describe(&self, state: &State) -> Descriptor {
         let (status, exit, error) = match &state.completion {
             None => ("running", None, None),
             Some(Ok(exit)) => ("exited", Some(exit.clone()), None),
@@ -134,7 +157,8 @@ impl ManagedProcess {
             latest_seq: state.output.latest_seq(),
             workspace: self.workspace.clone(),
             timed_out: self.timed_out.load(std::sync::atomic::Ordering::Acquire),
-            human_control: state.controller.is_some(),
+            human_control: state.active_controller().is_some(),
+            terminal: self.terminal_descriptor(state),
             exit,
             error,
         }
@@ -200,8 +224,11 @@ impl ManagedProcess {
         })
     }
 
-    fn authorize_controller(state: &State, controller: Option<&str>) -> Result<(), RpcError> {
-        if state.controller.as_deref() != controller {
+    pub(super) fn authorize_controller(
+        state: &State,
+        controller: Option<&str>,
+    ) -> Result<(), RpcError> {
+        if state.active_controller() != controller {
             return Err(RpcError::new(
                 "process.controlOwned",
                 "terminal input is controlled by another participant",
@@ -213,6 +240,7 @@ impl ManagedProcess {
     pub fn begin_attach(
         &self,
         takeover: bool,
+        remote: bool,
     ) -> Result<(Option<String>, ScreenSnapshot), RpcError> {
         let mut state = self.state.lock().map_err(lock_error)?;
         let screen = state
@@ -221,14 +249,17 @@ impl ManagedProcess {
             .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
         let snapshot = screen.snapshot(state.output.latest_seq());
         let controller = if takeover {
-            if state.controller.is_some() {
+            if state.active_controller().is_some() {
                 return Err(RpcError::new(
                     "process.controlOwned",
                     "another participant controls this terminal",
                 ));
             }
             let id = uuid::Uuid::new_v4().to_string();
-            state.controller = Some(id.clone());
+            state.controller = Some(ControlOwner {
+                token: id.clone(),
+                deadline: remote.then(|| Instant::now() + REMOTE_CONTROL_LEASE),
+            });
             Some(id)
         } else {
             None
@@ -236,9 +267,26 @@ impl ManagedProcess {
         Ok((controller, snapshot))
     }
 
+    pub fn has_control(&self, controller: &str) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|state| state.active_controller() == Some(controller))
+    }
+
+    pub fn renew_control(&self, controller: &str) -> Result<(), RpcError> {
+        let mut state = self.state.lock().map_err(lock_error)?;
+        Self::authorize_controller(&state, Some(controller))?;
+        if let Some(owner) = state.controller.as_mut() {
+            if owner.deadline.is_some() {
+                owner.deadline = Some(Instant::now() + REMOTE_CONTROL_LEASE);
+            }
+        }
+        Ok(())
+    }
+
     pub fn release_control(&self, controller: &str) {
         if let Ok(mut state) = self.state.lock() {
-            if state.controller.as_deref() == Some(controller) {
+            if state.active_controller() == Some(controller) {
                 state.controller = None;
             }
         }
@@ -276,7 +324,7 @@ impl ManagedProcess {
             .resize(cols, rows)
             .map_err(|error| RpcError::new("process.resizeFailed", error))?;
         screen.resize(cols, rows)?;
-        state.revision += 1;
+        state.version += 1;
         self.changed.notify_all();
         Ok(())
     }
@@ -288,6 +336,6 @@ impl ManagedProcess {
     }
 }
 
-fn lock_error<T>(_: std::sync::PoisonError<T>) -> RpcError {
+pub(super) fn lock_error<T>(_: std::sync::PoisonError<T>) -> RpcError {
     RpcError::new("process.internal", "process state lock poisoned")
 }

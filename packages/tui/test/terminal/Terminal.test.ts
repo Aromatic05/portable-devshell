@@ -21,7 +21,7 @@ import {
         return line.segments.map((segment) => segment.text).join("");
     }
 
-    test("terminal viewport region exists only for the Instances terminal tab", () => {
+    test("terminal viewport region exists for both real terminal tabs", () => {
         const store = new TuiAppStore();
         store.setSelectedPage("terminal");
         assert.ok(
@@ -33,15 +33,14 @@ import {
 
         store.replaceRoute({
             page: "terminal",
-            tab: "tmuxPanes",
+            tab: "sessions",
             view: "session",
         });
-        assert.equal(
+        assert.ok(
             buildTuiTerminalViewportRegion(store.getState(), {
                 columns: 120,
                 rows: 40,
             }),
-            undefined,
         );
     });
 

@@ -25,7 +25,7 @@ pub(super) struct Registry {
 
 impl Host {
     pub(super) fn spawn(&self, mut input: SpawnInput) -> Result<Value, RpcError> {
-        if input.command.trim().is_empty() {
+        if input.command.trim().is_empty() && !input.interactive {
             return Err(invalid("command is required"));
         }
         if input
@@ -67,6 +67,9 @@ impl Host {
         let cwd = resolve_existing_target(&workspace, &requested)?;
         if !cwd.metadata().map_err(io_error)?.is_dir() {
             return Err(invalid("cwd must be a directory"));
+        }
+        if input.interactive && !input.tty {
+            return Err(invalid("interactive shell requires tty"));
         }
         let dimensions = if input.tty {
             let cols = input.cols.unwrap_or(80);
@@ -137,6 +140,7 @@ impl Host {
                 env: &input.env,
                 execution: self.execution.as_ref(),
                 dimensions,
+                interactive: input.interactive,
                 stdin: input.stdin,
                 keep_stdin: input.keep_stdin,
                 workspace: input.workspace.map(|_| workspace),
