@@ -24,7 +24,6 @@ export interface McpContextSelector {
     bindings(
         requestContext: McpContextRequestContext,
     ): ContextExternalBinding[];
-    expose(record: ContextRecord): Record<string, JsonValue>;
     resolve(
         contexts: Pick<ContextTransport, "resolve">,
         input: JsonValue,
@@ -51,15 +50,18 @@ class UnifiedContextSelector implements McpContextSelector {
     bindings(
         requestContext: McpContextRequestContext,
     ): ContextExternalBinding[] {
-        if (this.id !== "openai-session") return [];
-        const session = requestContext.requestMeta?.["openai/session"];
-        return typeof session === "string" && session.length > 0
-            ? [{ kind: "openai/session", value: session }]
-            : [];
-    }
-
-    expose(record: ContextRecord): Record<string, JsonValue> {
-        return this.requiresExplicitContextId ? { ctxId: record.ctxId } : {};
+        if (this.requiresExplicitContextId) return [];
+        const kind = this.id === "openai-session"
+            ? "openai/session"
+            : "antigravity.google/conversation_id";
+        const value = requestContext.requestMeta?.[kind];
+        if (typeof value !== "string" || value.trim().length === 0)
+            throw createRemoteError({
+                code: contextErrorCodes.invalid,
+                message: `This MCP endpoint requires the client to supply ${kind} metadata. Use the /explicit endpoint if your client does not supply it.`,
+                retryable: false,
+            });
+        return [{ kind, value }];
     }
 
     async resolve(

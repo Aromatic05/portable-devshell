@@ -13,7 +13,6 @@ export class McpEndpointFactory {
     ): McpHostInstanceConfig {
         return {
             auth: toMcpAuthConfig(auth),
-            contextMode: descriptor.config.mcpContextMode ?? "explicit",
             inlineToolCalls: descriptor.config.workspaceEnabled === true &&
                 descriptor.config.inlineToolCalls === true,
             name: descriptor.config.name,

@@ -60,8 +60,8 @@ import {
 
 test("testspace URLs point at the isolated instance and Web UI", () => {
     assert.deepEqual(testspaceUrls({ mcpPort: 19000, webPort: 19001 }), {
-        mcp: `http://127.0.0.1:19000/${TESTSPACE_INSTANCE}/mcp`,
-        reverseMcp: `http://127.0.0.1:19000/${TESTSPACE_REVERSE_INSTANCE}/mcp`,
+        mcp: `http://127.0.0.1:19000/${TESTSPACE_INSTANCE}/mcp/explicit`,
+        reverseMcp: `http://127.0.0.1:19000/${TESTSPACE_REVERSE_INSTANCE}/mcp/explicit`,
         web: "http://127.0.0.1:19001/web/",
     });
 });
@@ -100,7 +100,7 @@ test("testspace instance fixtures use v4 model ACL without retired MCP policy", 
         buildTestspaceReverseInstanceConfig(),
     ]) {
         assert.match(config, /^version = 4$/mu);
-        assert.match(config, /^contextMode = "explicit"$/mu);
+        assert.doesNotMatch(config, /^contextMode\s*=/mu);
         assert.match(config, /^\[extensions\]$/mu);
         assert.match(
             config,
@@ -395,7 +395,7 @@ test("connector activity publishes health that status can expose", async (t) => 
             ctxId: "ctx-testspace-health",
             toolNames: new Set(["bash_run"]),
         }),
-        endpoint: "http://127.0.0.1:19000/testspace-reverse/mcp",
+        endpoint: "http://127.0.0.1:19000/testspace-reverse/mcp/explicit",
         healthFile,
         instance: TESTSPACE_REVERSE_INSTANCE,
         intervalMs: 1,
@@ -475,7 +475,7 @@ test("a connector tool error is exposed as degraded rather than active", async (
             ctxId: "ctx-testspace-degraded",
             toolNames: new Set(["bash_run"]),
         }),
-        endpoint: "http://127.0.0.1:19000/testspace-local/mcp",
+        endpoint: "http://127.0.0.1:19000/testspace-local/mcp/explicit",
         healthFile,
         instance: TESTSPACE_INSTANCE,
         intervalMs: 1,

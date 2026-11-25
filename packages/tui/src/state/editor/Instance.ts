@@ -10,7 +10,7 @@ export function createDefaultInstanceDraft(): Record<string, JsonValue> {
         extensions: {
             model: [...defaultConfigNormalizeContext.defaultModelExtensions],
         },
-        mcp: { auth: "none", contextMode: "openai-session", enabled: true },
+        mcp: { auth: "none", enabled: true },
         name: "",
         provider: "local",
         security: { mode: "disabled" },

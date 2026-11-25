@@ -63,7 +63,7 @@ export function projectMcpModelOutput(
     const maximum = policy.maxTokens ?? DEFAULT_MAX_TOKENS;
     const configured = policy.byTool?.[toolName] ??
         policy.defaultTokens ?? DEFAULT_TOOL_TOKENS[toolName] ?? DEFAULT_TOKENS;
-    // The explicit MCP response mirrors structuredContent as text when no
+    // Text-oriented MCP routes mirror structuredContent when no
     // presentation text exists. Both copies share the same model budget.
     const mirrored = mirrorStructuredText &&
         (!(original instanceof McpNativeToolResult) || original.content.length === 0);

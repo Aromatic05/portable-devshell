@@ -60,7 +60,7 @@ try {
                 name: instanceName,
                 provider: "reverse",
                 enabled: true,
-                mcp: { enabled: true, auth: "none", contextMode: "explicit" },
+                mcp: { enabled: true, auth: "none" },
                 extensions: { model: ["artifact", "instance", "mcp", "secret", "skill"] },
                 logs: { eventBufferSize: 100 },
             });
@@ -99,7 +99,7 @@ try {
     await waitForReady(fixture.runtime, instanceName);
     stage("real Rust Worker enrolled, installed in isolated HOME, and connected over Reverse transport");
 
-    const endpoint = `http://127.0.0.1:${fixture.port}/${instanceName}/mcp`;
+    const endpoint = `http://127.0.0.1:${fixture.port}/${instanceName}/mcp/explicit`;
     client = new Client({ name: "provider-chain-acceptance", version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
     const available = await client.listTools();
@@ -206,7 +206,7 @@ try {
                 name: instanceName,
                 provider: "reverse",
                 enabled: true,
-                mcp: { enabled: true, auth: "none", contextMode: "explicit" },
+                mcp: { enabled: true, auth: "none" },
                 extensions: { model: ["artifact", "instance", "mcp", "secret", "skill"] },
                 logs: { eventBufferSize: 100 },
             });

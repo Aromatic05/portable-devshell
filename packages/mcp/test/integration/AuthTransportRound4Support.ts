@@ -14,7 +14,8 @@ import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 import { McpOAuthProtectedResource } from "../../src/oauth/Route.ts";
 import { McpOAuthProviderRuntime } from "../../src/oauth/provider/Provider.ts";
 import { McpOAuthApprovalService } from "../../src/oauth/interaction/Approval.ts";
-import { McpProtocolRoute } from "../../src/protocol/Route.ts";
+import { McpExtensionRegistry } from "../../src/protocol/extension/Registry.ts";
+import { createMcpRouteEntries, McpProtocolRoute } from "../../src/protocol/Route.ts";
 import { HttpHost } from "../../src/testing/Http.ts";
 import { createTestMcpRuntimeState } from "../ContextRuntime.ts";
 import { modernRequestInit, modernRpcRequest } from "./ModernProtocol.ts";
@@ -72,12 +73,12 @@ export async function authFixture(t: TestContext, mode: ControlMcpContextMode = 
     await runtime.contexts.initialize();
     const protocol = new McpProtocolRoute(http, { oauth, publicBaseUrl: origin });
     let reads = 0;
-    const mount = (name: string, contextMode = mode) => protocol.registerInstance({
+    const mount = (name: string, contextMode = mode) => protocol.register(name, createMcpRouteEntries({
         instanceName: name, contextMode, instanceRoutingEnabled: true,
         auth: { enabled: true, provider: "oauth2", oauth2: config },
         context: runtime.contextTransport, tools: runtime.toolCallRuntime.api, toolSource: runtime.toolSource,
-        extensions: [{ id: "round4-resource", resources: [{ uri: resourceUri, name: "Round4", mimeType: "text/plain",
-            read() { reads++; return { text: "authenticated fixture resource" }; } }] }] }, `/${name}/mcp`);
+        extensions: new McpExtensionRegistry([{ id: "round4-resource", resources: [{ uri: resourceUri, name: "Round4", mimeType: "text/plain",
+            read() { reads++; return { text: "authenticated fixture resource" }; } }] }]) }, [`/${name}/mcp`]));
     mount("demo");
     mount("other");
     protocol.start();

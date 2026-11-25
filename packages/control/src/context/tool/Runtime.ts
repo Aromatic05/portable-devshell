@@ -83,7 +83,7 @@ class ContextToolRuntime {
         context: ToolCallContext & { instance: string },
         signal?: AbortSignal,
     ): Promise<JsonValue> {
-        const allowContextId = context.contextMode !== "openai-session";
+        const allowContextId = context.contextMode === undefined || context.contextMode === "explicit";
         const parsed = readEnvironmentInfoInput(input, allowContextId);
         let resolution;
         try {
@@ -216,7 +216,7 @@ class ContextToolRuntime {
         context: ToolCallContext & { instance: string },
         signal?: AbortSignal,
     ): Promise<JsonValue> {
-        const allowContextId = context.contextMode !== "openai-session";
+        const allowContextId = context.contextMode === undefined || context.contextMode === "explicit";
         const parsed = readRemoteEnvironmentInput(input, allowContextId);
         if (parsed.command === "help") {
             assertRemoteArguments(parsed, { handle: false, workspace: false });
@@ -322,8 +322,9 @@ class ContextToolRuntime {
         record: ContextRecord;
     }> {
         const principal = this.#principal(context);
+        const automatic = context.contextMode !== undefined && context.contextMode !== "explicit";
         if (input.ctxId !== undefined) {
-            if (context.contextMode === "openai-session")
+            if (automatic)
                 throw createRemoteError({
                     code: contextErrorCodes.invalid,
                     message:
@@ -347,6 +348,12 @@ class ContextToolRuntime {
         }
 
         const bindings = context.externalBindings ?? [];
+        if (automatic && bindings.length === 0)
+            throw createRemoteError({
+                code: contextErrorCodes.invalid,
+                message: "Client session binding is required on this MCP endpoint.",
+                retryable: false,
+            });
         let bound: ContextRecord | undefined;
         for (const binding of bindings) {
             const candidate = await this.#contexts.registry.lookupExternal(
@@ -371,7 +378,7 @@ class ContextToolRuntime {
             await this.#contexts.registry.validate(bound.ctxId, { principal });
 
         if (input.workspace === undefined)
-            throw unboundContext(context.contextMode !== "openai-session");
+            throw unboundContext(!automatic);
         return {
             bindings,
             created: true,
@@ -397,9 +404,9 @@ class ContextToolRuntime {
         record: ContextRecord,
         context: ToolCallContext,
     ): Record<string, JsonValue> {
-        return context.contextMode === "openai-session"
-            ? {}
-            : { ctxId: record.ctxId };
+        return context.contextMode === undefined || context.contextMode === "explicit"
+            ? { ctxId: record.ctxId }
+            : {};
     }
 
     #principal(context: ToolCallContext): string {

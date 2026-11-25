@@ -166,7 +166,7 @@ Secret Extension 使用 Rewrite 展开输入引用并 mask 输出；Host interfa
 /<instance>/mcp
 ```
 
-当前 MCP server 使用 SDK v2 `createMcpHandler`，提供 2026-07-28 stateless per-request handling；两个 handler 均为 `legacy = "reject"`，不接受旧协议 fallback。除 `environ_info` 外的 `tools/call` 使用 SSE / 1 秒 keepalive，其他请求使用 auto / 15 秒 keepalive。Context 是独立应用状态。
+当前 MCP server 使用 SDK v2 `createMcpHandler`，提供 2026-07-28 stateless per-request handling；也通过 SDK 支持旧版 Streamable HTTP 握手；客户端协议版本不改变 MCP URL 所选的 Context 模式。除 `environ_info` 外的 `tools/call` 使用 SSE / 1 秒 keepalive，其他请求使用 auto / 15 秒 keepalive。Context 是独立应用状态。
 
 工具 catalog 合并 Worker schema、固定 Control runtime primitives 与 Extension `mcp.tools` 声明。Extension contribution 变化会同步目录和 executor；instance group/capability policy 不裁剪 `tools/list`。Context-bound `devshell` shim 的 `cli.model-commands` 则由 `[extensions].model` 单独授权。
 

@@ -140,7 +140,6 @@ function configView() {
                 logs: { retentionDays: 7 },
                 mcp: {
                     auth: "none",
-                    contextMode: "explicit",
                     enabled: true,
                     path: "/alpha/mcp",
                 },

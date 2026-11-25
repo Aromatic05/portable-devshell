@@ -222,7 +222,6 @@ test("config editor returns each patch apply summary to the initiating request",
         patch: {
             mcp: {
                 auth: "token",
-                contextMode: "explicit",
                 token: "0123456789abcdef0123456789abcdef",
             },
         },
@@ -399,7 +398,6 @@ test("config view and validation mask all tokens while updates preserve masked s
     };
     config.web.auth = { mode: "token", token: strongToken };
     config.instances[0]!.mcp.auth = { mode: "token", token: instanceToken };
-    config.instances[0]!.mcp.contextMode = "explicit";
     const registry = new InstanceRegistryFactory().build(config);
     const engine = configEngine(() => config, (nextConfig) => {
         config = nextConfig;
@@ -2559,9 +2557,8 @@ test("config editor allows deleting a running instance but rejects rebuild patch
     assert.deepEqual(config.instances, []);
 });
 
-test("config editor hot-applies model Extension ACL and MCP context changes without restarting control", async () => {
+test("config editor hot-applies model Extension ACL and MCP auth changes without restarting control", async () => {
     let config = createConfig();
-    config.instances[0]!.mcp.contextMode = "explicit";
     config.instances[0]!.workspace.enabled = true;
     const registry = new InstanceRegistry([
         descriptor(
@@ -2585,7 +2582,6 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
                     },
                     async touch() {},
                 },
-                mcpContextMode: "explicit",
                 modelExtensions: ["instance"],
                 todo: {
                     async cancelAll() {},
@@ -2664,11 +2660,11 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
 
     await service.updateInstanceConfig({
         instanceName: "demo-local",
-        patch: { mcp: { contextMode: "openai-session" } },
+        patch: { mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" } },
     });
     assert.equal(registered[1]?.instance, "demo-local");
     assert.equal(config.instances[0]?.workspace.enabled, true);
-    assert.equal(registry.get("demo-local")?.config.mcpContextMode, "openai-session");
+    assert.deepEqual(registered[1]?.auth, { mode: "token", token: "0123456789abcdef0123456789abcdef" });
 
     await service.updateInstanceConfig({
         instanceName: "demo-local",
@@ -2683,7 +2679,6 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         patch: {
             mcp: {
                 auth: "token",
-                contextMode: "explicit",
                 token: "0123456789abcdef0123456789abcdef",
             },
         },
@@ -2904,9 +2899,6 @@ function descriptor(
                 (extra.modelExtensions as string[] | undefined) ?? ["instance"],
         },
         mcp: {
-            contextMode:
-                (extra.mcpContextMode as "explicit" | "openai-session" | undefined) ??
-                "openai-session",
             enabled: (extra.mcpEnabled as boolean | undefined) ?? true,
             path: (extra.mcpPath as string | undefined) ?? "/demo-local/mcp",
         },
@@ -2969,7 +2961,6 @@ function descriptor(
         "enabled",
         "mcpEnabled",
         "mcpPath",
-        "mcpContextMode",
         "modelExtensions",
         "name",
         "provider",

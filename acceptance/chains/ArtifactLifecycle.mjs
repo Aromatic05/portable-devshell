@@ -59,7 +59,7 @@ class ArtifactAcceptanceFixture {
         for (const name of names) {
             await writeFile(join(this.devshell, "control", "instances", `${name}.toml`), [
                 "version = 4", `name = "${name}"`, "enabled = true", 'provider = "local"',
-                "[mcp]", "enabled = true", 'auth = "none"', 'contextMode = "explicit"',
+                "[mcp]", "enabled = true", 'auth = "none"',
                 `path = "/${name}/mcp"`, "[extensions]",
                 'model = ["artifact", "instance", "mcp", "secret", "skill"]',
                 "[logs]", "eventBufferSize = 100", "",
@@ -106,7 +106,7 @@ class ArtifactAcceptanceFixture {
         // CLI start and instance start acknowledge a running daemon before the
         // HTTP listener can become observable. Wait for the public MCP route,
         // not a fixed sleep or a hidden internal readiness flag.
-        const route = `http://127.0.0.1:${this.port}/${names[index]}/mcp`;
+        const route = `http://127.0.0.1:${this.port}/${names[index]}/mcp/explicit`;
         const deadline = Date.now() + 15_000;
         let last;
         let routeReady = false;
@@ -133,7 +133,7 @@ class ArtifactAcceptanceFixture {
             { versionNegotiation: { mode: "auto" } });
         this.clients.add(client);
         await client.connect(new StreamableHTTPClientTransport(
-            new URL(`http://127.0.0.1:${this.port}/${names[index]}/mcp`)));
+            new URL(`http://127.0.0.1:${this.port}/${names[index]}/mcp/explicit`)));
         const tools = await client.listTools();
         assert.ok(tools.tools.some((tool) => tool.name === "bash_run"));
         const environment = await tool(client, "environ_info", { workspace });

@@ -444,30 +444,6 @@ export function Config({
                                     updateDraft("mcp.enabled", value)
                                 }
                             />
-                            <Field label="Context mode">
-                                <select
-                                    disabled={
-                                        !interactive ||
-                                        parsed.value === undefined
-                                    }
-                                    onChange={(event) =>
-                                        updateDraft(
-                                            "mcp.contextMode",
-                                            event.target.value,
-                                        )
-                                    }
-                                    value={stringValue(
-                                        parsed.value,
-                                        "mcp.contextMode",
-                                        "openai-session",
-                                    )}
-                                >
-                                    <option value="explicit">explicit</option>
-                                    <option value="openai-session">
-                                        openai-session
-                                    </option>
-                                </select>
-                            </Field>
                             <Field label="MCP path">
                                 <input
                                     disabled

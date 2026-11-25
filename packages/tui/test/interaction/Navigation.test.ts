@@ -2554,62 +2554,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
         assert.equal(draft.workspace?.inlineToolCalls, true);
     });
 
-    test("MCP context mode is selectable in create and config editors", async () => {
-        const harness = createHarness();
-        await openCreateWizard(harness);
-        harness.store.setEditor({
-            ...harness.store.getState().interaction.editor!,
-            step: 3,
-        });
-        const wizard = selectMainScreenModel(harness.store.getState(), harness.domains.reader)
-            .boxes[0]!;
-        const createMode = wizard.expandedLines.find((line) =>
-            line.id?.includes(":field:mcp.contextMode"),
-        );
-        assert.equal(createMode?.editableValue?.value, "openai-session");
-        assert.ok(createMode?.id);
-        harness.store.setSelectedDetailLine(wizard.expandedKey, createMode.id);
-        await harness.dispatch({
-            direction: "right",
-            type: "editor.cursorMove",
-        });
-        let draft = harness.store.getState().ui.formDrafts.create as {
-            mcp?: { contextMode?: string };
-        };
-        assert.equal(draft.mcp?.contextMode, "explicit");
-
-        harness.store.setSelectedPage("config");
-        openEditorForBox(harness, "config", "mcp");
-        harness.store.setFormDraft("config:alpha", {
-            ...(harness.store.getState().ui.formDrafts[
-                "config:alpha"
-            ] as Record<string, JsonValue>),
-            extensions: { model: ["instance"] },
-            mcp: {
-                contextMode: "explicit",
-                enabled: true,
-                path: "/alpha/mcp",
-            },
-        });
-        const mcp = expandBox(harness, "mcp");
-        const configMode = mcp.expandedLines.find((line) =>
-            line.id?.includes(":field:mcp.contextMode"),
-        );
-        assert.equal(configMode?.editableValue?.value, "explicit");
-        assert.ok(configMode?.id);
-        harness.store.setMainFocusId("mcp");
-        harness.store.setFocusScope("form");
-        harness.store.setSelectedDetailLine(mcp.expandedKey, configMode.id);
-        await harness.dispatch({
-            direction: "right",
-            type: "editor.cursorMove",
-        });
-        draft = harness.store.getState().ui.formDrafts["config:alpha"] as {
-            mcp?: { contextMode?: string };
-        };
-        assert.equal(draft.mcp?.contextMode, "openai-session");
-    });
-
     test("self-managed reverse hides Control lifecycle actions and requires remote restart for rebuild changes", () => {
         const harness = createHarness();
         const configView = harness.domains.config.state.view!;
@@ -4330,7 +4274,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                     extensions: { model: ["instance"] },
                     mcp: {
                         auth: "none",
-                        contextMode: "explicit",
                         enabled: true,
                         path: "/alpha/mcp",
                     },
@@ -4422,7 +4365,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                         : { mode: draft.mcp?.auth ?? "none" },
                 enabled: draft.mcp?.enabled ?? true,
                 path: `/${draft.name}/mcp`,
-                contextMode: draft.mcp?.contextMode ?? "explicit",
             },
             name: draft.name,
             provider: draft.provider,
@@ -4673,7 +4615,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                     extensions: { model: ["instance"] },
                     mcp: {
                         auth: "none",
-                        contextMode: "explicit",
                         enabled: true,
                         path: "/alpha/mcp",
                     },
@@ -4686,7 +4627,6 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
                     extensions: { model: ["instance"] },
                     mcp: {
                         auth: "none",
-                        contextMode: "explicit",
                         enabled: false,
                         path: "/beta/mcp",
                     },

@@ -28,6 +28,13 @@ export class ControlInstanceTomlDocument {
             "is not supported; use ssh.command",
         );
         const { version: _version, ...versionless } = record;
+        // Retire the persisted v4 selector on read. Public draft/patch inputs
+        // no longer accept this key; the next write emits canonical TOML.
+        const { mcp } = versionless;
+        if (typeof mcp === "object" && mcp !== null && !Array.isArray(mcp) && "contextMode" in mcp) {
+            const { contextMode: _retired, ...settings } = mcp;
+            return parseConfigInstanceDraft({ ...versionless, mcp: settings });
+        }
         return parseConfigInstanceDraft(versionless);
     }
 
@@ -48,7 +55,6 @@ export class ControlInstanceTomlDocument {
             alerts: instance.alerts,
             mcp: {
                 auth: instance.mcp.auth.mode,
-                contextMode: instance.mcp.contextMode,
                 enabled: instance.mcp.enabled,
                 oauth2:
                     instance.mcp.auth.mode === "oauth2"

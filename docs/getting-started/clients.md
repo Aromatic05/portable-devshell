@@ -3,17 +3,17 @@
 下面示例使用 `demo-local`：
 
 ```text
-本地 endpoint  http://127.0.0.1:17890/demo-local/mcp
-远程 endpoint  https://devshell.example.com/demo-local/mcp
+本地 endpoint  http://127.0.0.1:17890/demo-local/mcp/explicit
+远程 endpoint  https://devshell.example.com/demo-local/mcp/explicit
 ```
 
-portable-devshell 使用 MCP v2 的 2026-07-28 请求语义；当前 endpoint 配置 `legacy = "reject"`，不支持旧 Streamable HTTP 协议回退。客户端必须支持当前协议。
+DevShell 通过 SDK 提供 2026-07-28 协议和受支持的旧 Streamable HTTP 握手；版本协商与 Context 模式无关。
 
 客户端接入时需要区分三件事：
 
 1. **网络可达性**：Host 能否访问 endpoint；
 2. **认证**：`none`、静态 bearer 或 OAuth；
-3. **Context selector**：通用 client 使用 `explicit`，ChatGPT 可选 `openai-session`。
+3. **Context selector**：由 URL 决定，通用客户端使用 `explicit`，ChatGPT 使用 `openai-session`。
 
 ## Codex
 
@@ -21,7 +21,7 @@ Codex 可以配置远程 HTTP MCP server。常见 `config.toml` 形式：
 
 ```toml
 [mcp_servers.portable_devshell]
-url = "http://127.0.0.1:17890/demo-local/mcp"
+url = "http://127.0.0.1:17890/demo-local/mcp/explicit"
 ```
 
 使用 OAuth endpoint 时把 URL 改成实际 HTTPS 地址，并使用当前 Codex 的 MCP 登录入口完成授权。
@@ -37,7 +37,7 @@ Claude Code 当前支持 remote HTTP MCP：
 ```bash
 claude mcp add --transport http \
   portable-devshell \
-  http://127.0.0.1:17890/demo-local/mcp
+  http://127.0.0.1:17890/demo-local/mcp/explicit
 ```
 
 需要用户级复用时：
@@ -45,7 +45,7 @@ claude mcp add --transport http \
 ```bash
 claude mcp add --transport http --scope user \
   portable-devshell \
-  https://devshell.example.com/demo-local/mcp
+  https://devshell.example.com/demo-local/mcp/explicit
 ```
 
 管理：
@@ -110,24 +110,15 @@ OpenAI workspace 管理员可能需要先审核/发布自定义 App。后续 MCP
 
 这也是 portable-devshell 保留隐藏 stale-recipient compatibility 的原因之一。
 
-## ChatGPT Context mode
+## 按客户端选择入口
 
-给 ChatGPT 使用的 instance 可以配置：
+| 客户端 | `demo-local` 的 URL 路径 |
+| --- | --- |
+| ChatGPT | `/demo-local/mcp` 或 `/demo-local/mcp/openai-session` |
+| agy | `/demo-local/mcp/agy-session` |
+| Gemini Web / 通用 MCP 客户端 | `/demo-local/mcp/explicit` |
 
-```toml
-[mcp]
-contextMode = "openai-session"
-```
-
-这样 model-facing tool schema 不需要携带 portable-devshell 内部 `ctxId`。Host metadata 只作为 external binding；Todo、Wait、Workspace 等服务端状态仍由内部 Context 管理。
-
-fresh instance 默认使用 `openai-session`。如果使用通用 client 或 Host 不提供稳定 session binding，需要显式切换为：
-
-```toml
-contextMode = "explicit"
-```
-
-详见 [Context](../concepts/context.md)。
+已有 ChatGPT connector 保持原 URL。原先使用裸 URL、但不发送 OpenAI 会话 metadata 的客户端，应改为 `/explicit`；OAuth 客户端换 URL 后需授权新 resource。实例 TOML 不再配置 `contextMode`。详见 [Context](../concepts/context.md)。
 
 ## OAuth 与刷新
 
@@ -153,7 +144,7 @@ devshell instance logs demo-local
 2. instance `[mcp].enabled = true`；
 3. OAuth registration/authorization 已批准；
 4. Host 是否使用了旧的冻结 tool snapshot；
-5. `contextMode` 是否与 Host 能力匹配；
+5. MCP URL 的模式是否与 Host 能力匹配；
 6. remote Host 到 endpoint 的 HTTPS/tunnel 链路是否真实可达。
 
 MCP `tools/list` 合并 Worker、Control primitive 和 Extension `mcp.tools`，Extension contribution 变化会更新目录；instance group/capability policy 不裁剪目录。如果缺少的是 `bash_run` / `tmux_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。

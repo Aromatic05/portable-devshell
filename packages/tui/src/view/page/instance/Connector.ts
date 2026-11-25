@@ -115,6 +115,11 @@ export function buildConnectorPageBoxes(
                 : [
                       `Local MCP          ${localValue}`,
                       `Public MCP         ${publicValue}`,
+                      ...(instanceName === undefined ? [] : [
+                          "MCP modes          OpenAI: bare URL or /openai-session",
+                          "                   Gemini Web: add /explicit",
+                          "                   agy: add /agy-session",
+                      ]),
                       `Web UI             ${webEndpoint.value}`,
                       `Runtime            ${runtime.runtime}`,
                       `Auth               ${String(currentAuthMode ?? "none")}`,
@@ -528,7 +533,6 @@ function selectedInstanceDraft(
             },
             mcp: {
                 auth: "none",
-                contextMode: "openai-session",
                 enabled: true,
                 path: `/${instanceName}/mcp`,
             },

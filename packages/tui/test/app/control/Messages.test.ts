@@ -701,7 +701,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                     extensions: { model: [] },
                     mcp: {
                         auth: { mode: "none" },
-                        contextMode: "explicit",
                         enabled: true,
                         path: "/alpha/mcp",
                     },

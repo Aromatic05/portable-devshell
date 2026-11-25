@@ -298,11 +298,6 @@ function wizardFields(
                     "mcp.enabled",
                     readPath(draft, "mcp.enabled"),
                 ),
-                choiceLine(
-                    "mcp.contextMode",
-                    "mcp.contextMode",
-                    readPath(draft, "mcp.contextMode"),
-                ),
                 choiceLine("mcp.auth", "mcp.auth", auth),
                 ...(auth === "token"
                     ? [

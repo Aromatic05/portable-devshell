@@ -81,36 +81,17 @@ test("config parser trims values and preserves explicit patch removals", () => {
     });
 });
 
-test("instance MCP context mode defaults to openai-session and accepts explicit", () => {
-    const defaulted = normalizeConfigInstanceDraft({
-        name: "defaulted",
-        provider: "local",
-    });
-    assert.equal(defaulted.mcp.contextMode, "openai-session");
-
-    const parsed = parseConfigDraft({
-        instances: [
-            {
-                mcp: { contextMode: "explicit" },
-                name: "explicit",
-                provider: "local",
-            },
-        ],
-    });
-    assert.equal(parsed.instances?.[0]?.mcp?.contextMode, "explicit");
-    assert.equal(
-        normalizeConfigDraft(parsed).instances[0]?.mcp.contextMode,
-        "explicit",
-    );
-
-    const patched = applyConfigInstancePatch(defaulted, {
-        mcp: { contextMode: "explicit" },
-    });
-    assert.equal(
-        normalizeConfigInstanceDraft(patched).mcp.contextMode,
-        "explicit",
+test("MCP URLs, not instance configuration, select Context mode", () => {
+    const instance = { name: "local-one", provider: "local" } as const;
+    assert.equal(normalizeConfigInstanceDraft(instance).mcp.path, "/local-one/mcp");
+    assertConfigIssue(
+        () => parseConfigDraft({ instances: [{ ...instance, mcp: { contextMode: "explicit" } }] }),
+        "parse",
+        ["instances", 0, "mcp", "contextMode"],
+        "config.field.unknown",
     );
 });
+
 
 test("Workspace switch defaults disabled without restoring persistent workspace path authority", () => {
     const instance = normalizeConfigInstanceDraft({
@@ -272,7 +253,7 @@ test("instance token auth requires a non-trivial configured secret", () => {
         normalizeConfigDraft({
             instances: [
                 {
-                    mcp: { auth: "token", contextMode: "explicit", token },
+                    mcp: { auth: "token", token },
                     name: "local-one",
                     provider: "local",
                 },
@@ -286,7 +267,6 @@ test("instance token auth requires a non-trivial configured secret", () => {
             {
                 mcp: {
                     auth: "token",
-                    contextMode: "explicit",
                     token: "too-short",
                 },
                 name: "local-one",
@@ -302,38 +282,7 @@ test("instance token auth requires a non-trivial configured secret", () => {
     );
 });
 
-test("openai-session context mode rejects custom token authentication", () => {
-    const token = "0123456789abcdef0123456789abcdef";
-    const config = normalizeConfigDraft({
-        instances: [
-            {
-                mcp: { auth: "token", contextMode: "openai-session", token },
-                name: "chatgpt-one",
-                provider: "local",
-            },
-        ],
-    });
-    assertConfigIssue(
-        () => validateConfigSemantics(config),
-        "semantic",
-        ["instances", 0, "mcp", "contextMode"],
-        "config.instance.mcpContextAuth",
-    );
 
-    assert.doesNotThrow(() =>
-        validateConfigSemantics(
-            normalizeConfigDraft({
-                instances: [
-                    {
-                        mcp: { auth: "none", contextMode: "openai-session" },
-                        name: "chatgpt-none",
-                        provider: "local",
-                    },
-                ],
-            }),
-        ),
-    );
-});
 
 test("config normalization deduplicates model Extension allowlists", () => {
     const config = normalizeConfigDraft({

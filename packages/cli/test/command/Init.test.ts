@@ -42,7 +42,6 @@ test("init starts stopped Control before reconciling first-run state through RPC
                     assert.deepEqual(draft, {
                         mcp: {
                             auth: "oauth2",
-                            contextMode: "openai-session",
                             oauth2: {
                                 requiredScopes: ["mcp"],
                                 resourceName: "local-pc",
@@ -129,7 +128,6 @@ test("init reconciles a running fresh-like Control through RPC without restartin
                     assert.deepEqual(draft, {
                         mcp: {
                             auth: "oauth2",
-                            contextMode: "openai-session",
                             oauth2: {
                                 requiredScopes: ["mcp"],
                                 resourceName: "local-pc",
@@ -481,7 +479,6 @@ function configView(input?: {
                                 resourceName: "local-pc",
                             },
                         },
-                        contextMode: "explicit",
                         enabled: true,
                         path: "/local-pc/mcp",
                     },

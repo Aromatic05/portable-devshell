@@ -4,7 +4,6 @@ import { type ApprovalPolicy } from "./Policy.js";
 export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
-export type ControlMcpContextMode = "explicit" | "openai-session";
 export type ControlMcpOAuth2ApprovalMode = "token" | "tui";
 export type ControlWebAuthMode = "none" | "oauth2" | "token";
 export type ControlSecurityMode = "disabled" | "workspace";
@@ -41,7 +40,6 @@ export interface ControlInstanceToolsConfig {
 }
 export interface ControlInstanceMcpConfig {
     auth: ControlMcpAuthConfig;
-    contextMode: ControlMcpContextMode;
     enabled: boolean;
     path: string;
 }
@@ -317,7 +315,6 @@ export type InstanceContainerDraft =
 
 export interface ConfigInstanceMcpDraft {
     auth?: ControlMcpAuthMode;
-    contextMode?: ControlMcpContextMode;
     enabled?: boolean;
     oauth2?: ConfigOAuth2Draft;
     path?: string;
@@ -414,7 +411,6 @@ export interface ConfigInstancePatch {
     logs?: ConfigNullable<ControlInstanceLogsConfig>;
     mcp?: {
         auth?: ControlMcpAuthMode;
-        contextMode?: ControlMcpContextMode;
         enabled?: boolean;
         oauth2?: ConfigOAuth2Draft;
         path?: ConfigNullable<string>;

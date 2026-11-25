@@ -4,7 +4,7 @@ import { presentToolCallResult, runtimeErrorCodes, type JsonValue, type ToolCall
 import { McpExtensionService } from "../../../../src/extension/api/point/mcp/index.ts";
 import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import { round4Target } from "../../../../../core/test/unit/tool/Round4Harness.ts";
-import { McpProtocolRoute } from "../../../../../mcp/src/protocol/Route.ts";
+import { createMcpRouteEntries, McpProtocolRoute } from "../../../../../mcp/src/protocol/Route.ts";
 import { Round4MemoryHttp } from "../../../../../mcp/test/integration/AuthTransportRound4MemoryHttp.ts";
 import { modernRequestInit, modernRpcRequest } from "../../../../../mcp/test/integration/ModernProtocol.ts";
 import { parseMcpHttpResponse } from "../../../../../mcp/test/TestMcpHttpResponse.ts";
@@ -76,7 +76,7 @@ async function fixture(t: TestContext, rewrite?: (value: ToolCallHookValue) => T
     } });
     const http = new Round4MemoryHttp();
     const protocol = new McpProtocolRoute(http);
-    protocol.registerInstance({
+    protocol.register("round4", createMcpRouteEntries({
         instanceName: "round4", toolSource: registry, tools: h.runtime.api,
         context: { async resolve() { return {
             ctxId: "sentinel-context", principal: "local", status: "active",
@@ -84,7 +84,7 @@ async function fixture(t: TestContext, rewrite?: (value: ToolCallHookValue) => T
             expiresAt: "2099-10-28T00:00:00Z",
             environments: [{ instance: "round4", workspace: h.directory }],
         }; } },
-    }, "/round4/mcp");
+    }, ["/round4/mcp"]));
     protocol.start();
     t.after(async () => { protocol.stop(); await protocol.drain(); });
     const call = async (name = "sentinel_read") => {
@@ -165,8 +165,8 @@ test("MCP tools without presentation retain the result payload Rewrite contract"
         return { ...value, payload: { message: "REWRITTEN" } };
     }, { structuredContent: original.structuredContent });
     const output = await h.call();
-    assert.deepEqual(output.result, { ...protocolMeta, content: [], isError: false,
-        structuredContent: { message: "REWRITTEN" } });
+    assert.deepEqual(output.result, { ...protocolMeta, content: [{ type: "text", text: '{"message":"REWRITTEN"}' }],
+        isError: false, structuredContent: { message: "REWRITTEN" } });
     const [record] = await h.history.read();
     assert.deepEqual(record?.output, { message: "REWRITTEN" });
 });

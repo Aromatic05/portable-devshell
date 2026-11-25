@@ -1,4 +1,4 @@
-import type { ContextTransport, ControlMcpContextMode } from "@portable-devshell/shared";
+import type { ContextTransport } from "@portable-devshell/shared";
 import type { McpHttpAccess, McpHttpListener } from "./Api.js";
 import type { McpAuthConfig, McpOAuthApprovalConfig } from "../oauth/Config.js";
 import type { McpOAuthProtectedResource } from "../oauth/Route.js";
@@ -7,14 +7,15 @@ import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
 import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
 import type { McpToolSource } from "../protocol/tool/Source.js";
 import type { McpServer } from "./index.js";
-import { McpProtocolRoute } from "../protocol/Route.js";
+import { createMcpRouteEntries, McpProtocolRoute } from "../protocol/Route.js";
+import { McpExtensionRegistry } from "../protocol/extension/Registry.js";
+import type { McpEndpointOptions } from "../protocol/Endpoint.js";
 import { McpAppRoute } from "../mcpapp/Route.js";
 import { McpAppCall } from "../mcpapp/Call.js";
 import type { McpModelOutputBudget } from "../protocol/call/ModelOutput.js";
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
-    contextMode?: ControlMcpContextMode;
     inlineToolCalls?: boolean;
     name: string;
     modelOutput?: McpModelOutputBudget;
@@ -177,15 +178,22 @@ export class McpHost {
         });
         try {
             if (mountApp) this.#appRoute?.register(instance.name);
-            this.#protocol.registerInstance(
-                {
-                    auth: instance.auth,
-                    context: this.#contexts,
-                    contextMode: instance.contextMode ?? "explicit",
-                    extensions: [mcpAppExtension],
-                    instanceName: instance.name,
-                    instanceRoutingEnabled: true,
-                    modelOutput: instance.modelOutput ?? this.#config.modelOutput,
+            const common = {
+                auth: instance.auth,
+                context: this.#contexts,
+                instanceName: instance.name,
+                instanceRoutingEnabled: true,
+                modelOutput: instance.modelOutput ?? this.#config.modelOutput,
+                toolProvenance: this.#config.toolProvenance,
+                toolSource: this.#config.toolSource,
+                tools: this.#runtimeState.tools,
+            } satisfies McpEndpointOptions;
+            const version = this.#config.serverVersion;
+            this.#protocol.register(instance.name, [
+                ...createMcpRouteEntries({
+                    ...common,
+                    contextMode: "openai-session",
+                    extensions: new McpExtensionRegistry([mcpAppExtension]),
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
                             actions: this.#runtimeState.app.actions,
@@ -209,23 +217,20 @@ export class McpHost {
                             ...(this.#runtimeState.app.view === undefined
                                 ? {}
                                 : { view: this.#runtimeState.app.view }),
-                            bootstrap: (result, request) =>
+                            bootstrap: (_result, request) =>
                                 this.#runtimeState.app.bootstrap({
                                     context: this.#contexts,
-                                    contextMode: instance.contextMode,
                                     instance: instance.name,
                                     publicBaseUrl: this.#config.publicBaseUrl,
                                     request,
-                                    result,
                                 }),
                         }),
-                    toolProvenance: this.#config.toolProvenance,
-                    toolSource: this.#config.toolSource,
-                    tools: this.#runtimeState.tools,
-                },
-                path,
-                this.#config.serverVersion,
-            );
+                }, [path, `${path}/openai-session`], version),
+                ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "explicit" },
+                    [`${path}/explicit`], version),
+                ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "agy-session" },
+                    [`${path}/agy-session`], version),
+            ]);
         } catch (error) {
             if (mountApp) this.#appRoute?.unregister(instance.name);
             if (mountOAuth) {

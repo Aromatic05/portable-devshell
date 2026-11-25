@@ -9,9 +9,8 @@ import type { McpAuthConfig } from "../oauth/Config.js";
 import { McpAuthProviderToken } from "../oauth/Provider.js";
 import type { McpOAuthProtectedResource } from "../oauth/Route.js";
 import { McpEndpointBinding } from "./Binding.js";
-import { McpEndpoint, type McpEndpointOptions } from "./Endpoint.js";
-import { McpExtensionRegistry } from "./extension/Registry.js";
-import type { McpExtension } from "./extension/Contract.js";
+import type { McpEndpointOptions } from "./Endpoint.js";
+import { McpEndpoint } from "./Endpoint.js";
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MCP_DRAIN_TIMEOUT_MS = 5_000;
@@ -20,6 +19,19 @@ export interface McpHostRouteEntry {
     auth?: McpAuthConfig;
     binding: McpEndpointBinding;
     path: string;
+}
+
+export function createMcpRouteEntries(
+    options: McpEndpointOptions,
+    paths: readonly string[],
+    serverVersion?: string,
+): McpHostRouteEntry[] {
+    const endpoint = new McpEndpoint(options);
+    return paths.map((path) => ({
+        auth: options.auth,
+        binding: new McpEndpointBinding(endpoint, serverVersion, options.modelOutput),
+        path,
+    }));
 }
 
 interface McpInstanceRoutes {
@@ -54,45 +66,6 @@ export class McpProtocolRoute {
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
         this.#requestLogger = options.requestLogger;
-    }
-
-    /** Each Protocol Route generation owns its Endpoint, extension registry and Binding. */
-    registerInstance(
-        options: Omit<McpEndpointOptions, "extensions"> & { extensions?: readonly McpExtension[] },
-        path: string,
-        serverVersion?: string,
-    ): void {
-        const explicitFallback = options.contextMode === "openai-session"
-            ? new McpEndpoint({
-                  ...options,
-                  contextMode: "explicit",
-                  extensions: new McpExtensionRegistry(
-                      options.extensions?.filter((extension) => extension.id !== "mcpapp"),
-                  ),
-                  toolAdapter: undefined,
-                  toolSource: {
-                      list: (instance) => options.toolSource.list(instance)
-                          .filter((entry) => !entry.definition.name.startsWith("mcpapp_")),
-                      get: (instance, name) => name.startsWith("mcpapp_")
-                          ? undefined
-                          : options.toolSource.get(instance, name),
-                  },
-              })
-            : undefined;
-        const binding = new McpEndpointBinding(
-            new McpEndpoint({
-                ...options,
-                extensions: new McpExtensionRegistry(options.extensions),
-            }),
-            serverVersion,
-            options.modelOutput,
-            explicitFallback,
-        );
-        this.register(options.instanceName, [{
-            auth: options.auth ?? { enabled: false, provider: "none" },
-            binding,
-            path,
-        }]);
     }
 
     register(instance: string, entries: readonly McpHostRouteEntry[]): void {

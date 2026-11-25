@@ -231,7 +231,7 @@ export class McpEndpointDispatch {
 
 }
 
-function isAppOnlyInteractionTool(toolName: string): boolean {
+export function isAppOnlyInteractionTool(toolName: string): boolean {
     return (
         toolName === "mcpapp_reconnect" ||
         toolName === "mcpapp_snapshot" ||

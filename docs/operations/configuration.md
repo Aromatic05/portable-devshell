@@ -208,7 +208,6 @@ provider = "local"
 [mcp]
 enabled = true
 auth = "none"
-contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
@@ -240,9 +239,9 @@ timeoutMs = 5000
 - `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Todo/Approval/Wait 交互与自动 re-entry。fresh instance 默认 `false`；旧 version 2/3 instance 迁移时为保持历史行为写成 `true`。设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
-- `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。fresh instance 默认 `openai-session`，使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外；`explicit` 允许 model-facing 工具显式携带 `ctxId`。旧 version 2/3 instance 未显式配置该字段时迁移为 `explicit`，保持旧版本行为。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
+- MCP Context 模式由请求 URL 选择，不是实例配置开关。已有 version 4 TOML 中的 `contextMode` 在读取时移除，保存后不再输出；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
-- `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
+- `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；它是模式路由的基路径，也是 OpenAI 会话别名；
 - `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`，`recall` 授权只读的 `recall`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
@@ -254,7 +253,7 @@ timeoutMs = 5000
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
-全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除旧的持久化 workspace path，并丢弃已经退役的 `[mcp.tools]` group/capability policy。迁移同时保留旧缺省语义：`contextMode = "explicit"`、`[workspace].enabled = true`。version 4 fresh defaults 则分别是 `openai-session` 与 Workspace disabled；`[workspace]` 只接受 `enabled`，不是项目路径。
+全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除旧的持久化 workspace path，并丢弃已经退役的 `[mcp.tools]` group/capability policy。version 4 的 Workspace fresh default 为 disabled；`[workspace]` 只接受 `enabled`，不是项目路径。
 
 ## Execution providers
 

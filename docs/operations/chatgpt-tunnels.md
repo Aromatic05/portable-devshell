@@ -56,7 +56,7 @@ Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、
 
 当前 endpoint 的协议与认证边界如下（Host 还必须支持当前 MCP 协议）：
 
-- MCP v2 / 2026-07-28 request handling，`legacy = "reject"`，无旧协议回退；
+- MCP 2026-07-28 与 SDK 支持的旧版 Streamable HTTP 握手；使用裸 `/mcp` 或 `/mcp/openai-session` 保留 OpenAI 会话模式；
 - 除 `environ_info` 外的 `tools/call` 使用 request-scoped SSE / 1 秒 keepalive；其他请求为 auto / 15 秒 keepalive；
 - `401` Bearer challenge 与 `resource_metadata`；
 - OAuth protected-resource metadata 和 authorization-server discovery；

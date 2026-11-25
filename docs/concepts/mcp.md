@@ -33,7 +33,7 @@ listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
 ```
 
-认证、Context selector 和 model Extension ACL 属于各 instance：
+认证和 model Extension ACL 属于各 instance：
 
 ```toml
 # ~/.devshell/control/instances/demo-local.toml
@@ -45,14 +45,13 @@ provider = "local"
 [mcp]
 enabled = true
 auth = "none"
-contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
 model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 ```
 
-这是 version 4 fresh defaults 对 Context selector / model Extension ACL 的示例；需要模型显式携带 `ctxId` 的通用 Host 应改用 `contextMode = "explicit"`。MCP `tools/list` 本身合并 Worker、Control primitive 与 Extension `mcp.tools` 声明，不由 `[extensions].model` 裁剪。
+这是 version 4 instance 配置示例；需要模型显式携带 `ctxId` 的通用 Host 使用 `/<instance>/mcp/explicit`。MCP `tools/list` 本身合并 Worker、Control primitive 与 Extension `mcp.tools` 声明，不由 `[extensions].model` 裁剪。
 
 `path` 由 instance 名生成，当前契约固定为 `/<instance>/mcp`。
 
@@ -62,7 +61,7 @@ model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 
 2026-07-28 请求按新的 stateless protocol core 服务：不依赖 `initialize`/`initialized` 握手，也不依赖 `Mcp-Session-Id`。portable-devshell 自己的 Context 仍然可以跨请求保持，因为它是应用状态，不是 transport session。
 
-当前两个 HTTP handler 均设置 `legacy = "reject"`：2025-era legacy 协议路径不被接受。Context 持续性不能用作旧协议兼容的依据。
+SDK 同时处理 2026-07-28 请求和受支持的旧 Streamable HTTP 握手。协议版本协商不会改变 URL 决定的 Context 模式。
 
 ## 长调用 transport
 
@@ -93,28 +92,13 @@ MCP 按请求选择两个共享 event bus 的 handler：
 
 ## Context selector
 
-`[mcp].contextMode` 只决定 MCP 请求如何解析到内部 Context：
+同一 instance 的 MCP URL 同时提供三个模式：
 
-### `explicit`
+- `/<instance>/mcp` 与 `/<instance>/mcp/openai-session`：OpenAI 会话绑定，保留 MCP App 私有能力；裸 URL 仍使用原 OAuth resource。
+- `/<instance>/mcp/agy-session`：agy 对话绑定。只提供会话绑定，不承诺客户端自动唤醒或续跑。
+- `/<instance>/mcp/explicit`：Gemini Web / 通用客户端，显式传递 `ctxId`。
 
-通用 MCP client 应显式配置此模式（fresh instance 产品默认仍为 `openai-session`）：
-
-- `environ_info` 可以返回 `ctxId`；
-- 后续需要 Context 的 model-facing 工具显式携带它；
-- server 仍校验 principal 与 Context 生命周期。
-
-### `openai-session`
-
-适用于会给 model-facing tool call 提供稳定 Host metadata 的 ChatGPT 集成：
-
-- model-facing schema 不包含内部 `ctxId`；
-- server 从 external binding 找到内部 Context；
-- App-only Workspace helper 仍可使用 `ctxId` + 隐藏 capability；
-- 如果当前请求没有可解析 binding，调用 fail closed。
-
-`openai-session` 只负责 Context 选择，不负责授权。
-
-完整模型见 [Context](context.md)。
+`tools/list`、`tools/call` 和资源使用同一入口契约，不按 metadata 切换。OAuth audience 按完整 URL 校验。完整模型见 [Context](context.md)。
 
 ## 认证
 
@@ -221,9 +205,9 @@ server 对一小部分历史 recipient 保留隐藏兼容：能安全等价转�
 
 ## 手动验证
 
-使用支持 2026-07-28 的真实 MCP client 读取 `tools/list`，再按该 endpoint 实际 schema 调用 `environ_info`。OAuth endpoint 应先完成认证；通用 client 应显式配置 `contextMode = "explicit"`。
+使用支持 2026-07-28 的真实 MCP client 读取 `tools/list`，再按该 endpoint 实际 schema 调用 `environ_info`。OAuth endpoint 应先完成认证；通用客户端使用 `/<instance>/mcp/explicit`。
 
-网络层可单独验证 OAuth discovery/challenge，见 [OAuth](../operations/oauth.md)。旧 `initialize(protocolVersion=2025-11-25)` 请求属于 legacy 负向检查，应被拒绝，不能作为当前 endpoint 成功验证。不要把 `Mcp-Session-Id` 当作 portable-devshell Context。
+网络层可单独验证 OAuth discovery/challenge，见 [OAuth](../operations/oauth.md)。验证旧版客户端时，也要在目标 URL 上测试相应的 `tools/list` 和 `tools/call`。不要把 `Mcp-Session-Id` 当作 portable-devshell Context。
 
 ## 本地与公网
 

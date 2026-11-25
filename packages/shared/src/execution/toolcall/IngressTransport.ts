@@ -189,7 +189,8 @@ function readIngress(value: unknown): {
     if (
         context.contextMode !== undefined &&
         context.contextMode !== "explicit" &&
-        context.contextMode !== "openai-session"
+        context.contextMode !== "openai-session" &&
+        context.contextMode !== "agy-session"
     )
         throw new TypeError("Invalid ToolCall ingress context mode.");
     if (

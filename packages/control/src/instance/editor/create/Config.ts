@@ -60,7 +60,6 @@ export function resolveInstanceCreateSchema(options: {
             ],
             presets: containerPresets,
         },
-        defaultMcpContextMode: "openai-session",
         defaultModelExtensions:
             defaultConfigNormalizeContext.defaultModelExtensions,
         defaultEnabled: defaultConfigNormalizeContext.defaultEnabled,
@@ -150,7 +149,6 @@ export function summarizeInstanceCreate(
                     ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
                     : {}),
             },
-            contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
         },

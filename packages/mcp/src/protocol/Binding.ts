@@ -49,21 +49,18 @@ export class McpEndpointBinding {
     readonly #streamNodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #endpoint: McpEndpoint;
-    readonly #explicitFallback?: McpEndpoint;
     readonly #modelOutput: McpModelOutputBudget;
 
     constructor(
         endpoint: McpEndpoint,
         serverVersion = "0.0.0",
         modelOutput: McpModelOutputBudget = {},
-        explicitFallback?: McpEndpoint,
     ) {
         validateMcpModelOutputBudget(modelOutput);
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
-        this.#explicitFallback = explicitFallback;
         this.#modelOutput = modelOutput;
-        // Per-request modes share a bus so subscriptions and tool calls
+        // Both response handlers on this route share a bus so subscriptions and tool calls
         // remain on the same notification stream across both handlers.
         const bus = new InMemoryServerEventBus();
         const common = {
@@ -73,11 +70,11 @@ export class McpEndpointBinding {
             // handshake revisions through the SDK's Streamable HTTP fallback.
             legacy: "stateless" as const,
         };
-        this.#handler = createMcpHandler(({ era }) => this.#createServer(era), {
+        this.#handler = createMcpHandler(() => this.#createServer(), {
             ...common,
             responseMode: "auto",
         });
-        this.#streamHandler = createMcpHandler(({ era }) => this.#createServer(era), {
+        this.#streamHandler = createMcpHandler(() => this.#createServer(), {
             ...common,
             // The Node adapter flushes headers with the first body frame.
             // Send a prompt heartbeat even if a long call emits no progress.
@@ -102,14 +99,9 @@ export class McpEndpointBinding {
             : this.#nodeHandler)(request, response, body);
     }
 
-    #selectEndpoint(meta: Record<string, unknown> | undefined, fallback: McpEndpoint): McpEndpoint {
-        return hasOpenaiSession(meta) ? this.#endpoint : this.#explicitFallback ?? fallback;
-    }
-
-    #createServer(era: "legacy" | "modern"): Server {
-        const endpoint = era === "legacy"
-            ? this.#explicitFallback ?? this.#endpoint
-            : this.#endpoint;
+    #createServer(): Server {
+        const endpoint = this.#endpoint;
+        const mirrorStructuredText = endpoint.contextMode !== "openai-session";
         const resources = endpoint.listResources();
         const appResources = endpoint.hasAppResources();
         const server = new Server(
@@ -158,11 +150,10 @@ export class McpEndpointBinding {
             });
         }
 
-        server.setRequestHandler("tools/list", async (request) => {
+        server.setRequestHandler("tools/list", async () => {
             try {
-                const requestEndpoint = this.#selectEndpoint(readRequestMeta(request.params?._meta), endpoint);
                 return {
-                    tools: requestEndpoint.listTools().map(toProtocolTool),
+                    tools: endpoint.listTools().map(toProtocolTool),
                 };
             } catch (error) {
                 throw toMcpError(error);
@@ -177,8 +168,7 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(ctx.mcpReq.id),
                 };
-                const requestEndpoint = this.#selectEndpoint(requestMeta, endpoint);
-                const result = await requestEndpoint.callTool(
+                const result = await endpoint.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
@@ -188,8 +178,8 @@ export class McpEndpointBinding {
                     request.params.name,
                     result,
                     this.#modelOutput,
-                    requestEndpoint.contextMode === "explicit",
-                ), requestEndpoint.contextMode === "explicit");
+                    mirrorStructuredText,
+                ), mirrorStructuredText);
             } catch (error) {
                 throw toMcpError(error);
             }
@@ -215,11 +205,6 @@ function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     return meta as Record<string, unknown>;
 }
 
-function hasOpenaiSession(meta: Record<string, unknown> | undefined): boolean {
-    const session = meta?.["openai/session"];
-    return typeof session === "string" && session.length > 0;
-}
-
 function toRequestId(value: unknown): string | undefined {
     if (typeof value === "string") {
         return value;
@@ -232,12 +217,12 @@ function toRequestId(value: unknown): string | undefined {
     return undefined;
 }
 
-function toCallToolResult(result: McpEndpointResult, explicit: boolean) {
+function toCallToolResult(result: McpEndpointResult, mirrorStructuredText: boolean) {
     const structured = result instanceof McpNativeToolResult
         ? result.structuredContent : result;
     const originalContent = result instanceof McpNativeToolResult
         ? result.content : [];
-    const content = explicit && originalContent.length === 0
+    const content = mirrorStructuredText && originalContent.length === 0
         ? [{ type: "text" as const, text: JSON.stringify(structured) }]
         : originalContent;
     if (result instanceof McpNativeToolResult) {

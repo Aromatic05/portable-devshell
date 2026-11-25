@@ -42,7 +42,7 @@ export async function runTestspaceExtensionSmoke() {
         // in-memory generation must continue processing genuine MCP tools.
         const state = JSON.parse(await readFile(join(root, "state.json"), "utf8"));
         delivered = await runTestspaceCommentSmoke({
-            endpoint: `http://127.0.0.1:${state.mcpPort}/testspace-local/mcp`,
+            endpoint: `http://127.0.0.1:${state.mcpPort}/testspace-local/mcp/explicit`,
             instance: "testspace-local",
             runtimeDirectory: process.env.XDG_RUNTIME_DIR,
             workspace: join(root, "workspace"),

@@ -10,7 +10,6 @@ import type {
     ControlInstanceLogsConfig,
     ControlInstanceToolsConfig,
     ControlMcpAuthMode,
-    ControlMcpContextMode,
     ControlOAuth2Config,
     ControlProviderKind,
     ControlSecurityMode,
@@ -36,7 +35,6 @@ export interface InstanceCreateSchema {
     providers: readonly InstanceCreateProvider[];
     defaultProvider: InstanceCreateProvider;
     defaultEnabled: boolean;
-    defaultMcpContextMode?: ControlMcpContextMode;
     defaultMcpEnabled: boolean;
     defaultModelExtensions: readonly string[];
     defaultSecurityMode: ControlSecurityMode;
@@ -44,7 +42,6 @@ export interface InstanceCreateSchema {
 }
 export interface InstanceMcpDraft {
     auth?: ControlMcpAuthMode;
-    contextMode?: ControlMcpContextMode;
     enabled?: boolean;
     oauth2?: InstanceMcpOAuth2Draft;
     path?: string;
@@ -93,7 +90,6 @@ export interface InstanceCreateSummary extends Omit<
             mode: ControlMcpAuthMode;
             oauth2?: ControlOAuth2Config;
         };
-        contextMode?: ControlMcpContextMode;
         enabled: boolean;
         path: string;
     };

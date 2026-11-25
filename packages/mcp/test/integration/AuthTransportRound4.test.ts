@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { createMcpRouteEntries } from "../../src/protocol/Route.ts";
+import { McpExtensionRegistry } from "../../src/protocol/extension/Registry.ts";
 import { authFixture, contextId, resourceUri, resourceText } from "./AuthTransportRound4Support.ts";
 
 test("round4 HTTP auth gates discovery and resources before dispatch", async (t) => {
@@ -92,22 +94,39 @@ test("round4 bearer audience prevents reads and Context creation on another name
     assert.equal((await f.raw(alpha.token, "resources/list")).status, 200);
 });
 
-test("round4 external session mapping uses verified principal and rejects explicit ctxId overrides", async (t) => {
-    const f = await authFixture(t, "openai-session");
+test("agy conversation binding is isolated by the verified OAuth subject", async (t) => {
+    const f = await authFixture(t, "agy-session");
     const alpha = await f.issue("alpha", "subject-alpha");
     const beta = await f.issue("beta", "subject-beta");
-    const params = (workspace?: string) => ({ name: "environ_info", arguments: workspace ? { workspace } : {}, _meta: { "openai/session": "shared-session" } });
-    assert.equal((await f.raw(alpha.token, "tools/call", params(join(f.directory, "a")))).payload.error, undefined);
-    assert.equal((await f.raw(beta.token, "tools/call", params(join(f.directory, "b")))).payload.error, undefined);
-    const before = await f.runtime.contexts.registry.list();
-    assert.equal(before.length, 2);
-    assert.notEqual(before[0]?.ctxId, before[1]?.ctxId);
-    assert.deepEqual(new Set(before.map(({ principal }) => principal)), new Set([alpha.subject, beta.subject]));
-    assert.equal((await f.raw(alpha.token, "tools/call", params())).payload.error, undefined);
-    const override = await f.raw(beta.token, "tools/call", { ...params(), arguments: { ctxId: before.find(({ principal }) => principal === alpha.subject)!.ctxId } });
-    assert.equal(override.payload.error?.data?.code, "control.invalidTarget");
-    assert.match(override.payload.error?.message ?? "", /externally bound/iu);
-    assert.equal((await f.runtime.contexts.registry.list()).length, 2);
+    const key = "antigravity.google/conversation_id";
+    const bootstrap = (token: string, workspace: string) => f.raw(token, "tools/call", {
+        name: "environ_info", arguments: { workspace }, _meta: { [key]: "shared-session", principal: beta.subject },
+    });
+    const a = await bootstrap(alpha.token, join(f.directory, "a"));
+    const b = await bootstrap(beta.token, join(f.directory, "b"));
+    for (const response of [a, b]) {
+        assert.equal(response.payload.error, undefined);
+        assert.equal(response.payload.result?.structuredContent?.ctxId, undefined);
+    }
+    const records = await f.runtime.contexts.registry.list();
+    assert.equal(records.length, 2);
+    const aContext = records.find((record) => record.principal === alpha.subject);
+    const bContext = records.find((record) => record.principal === beta.subject);
+    assert.ok(aContext);
+    assert.ok(bContext);
+    assert.notEqual(aContext.ctxId, bContext.ctxId);
+    const binding = { kind: key, value: "shared-session" };
+    assert.equal((await f.runtime.contexts.registry.lookupExternal(binding, { principal: alpha.subject }))?.ctxId, aContext.ctxId);
+    assert.equal((await f.runtime.contexts.registry.lookupExternal(binding, { principal: beta.subject }))?.ctxId, bContext.ctxId);
+    const override = await f.raw(alpha.token, "tools/call", {
+        name: "environ_info", arguments: { ctxId: bContext.ctxId, workspace: join(f.directory, "a2") },
+        _meta: { [key]: "shared-session", principal: beta.subject },
+    });
+    assert.equal(override.payload.error, undefined);
+    const after = await f.runtime.contexts.registry.list();
+    assert.equal(after.length, 2);
+    assert.equal(after.find((record) => record.ctxId === aContext.ctxId)?.environments[0]?.workspace, join(f.directory, "a2"));
+    assert.equal(after.find((record) => record.ctxId === bContext.ctxId)?.environments[0]?.workspace, join(f.directory, "b"));
 });
 
 test("round4 explicit Context survives bearer rotation without storing credentials", async (t) => {
@@ -167,11 +186,11 @@ test("round4 live static bearer rotation rejects the stale client on tools and r
     const credential = new McpAuthProviderToken("round4-static-old").authenticate("Bearer round4-static-old");
     assert.ok(credential);
     const record = await f.runtime.contexts.registry.create({ principal: credential.clientId, environments: [{ instance: "static", workspace: join(f.directory, "static") }] });
-    const mount = (token: string) => f.protocol.registerInstance({ instanceName: "static",
+    const mount = (token: string) => f.protocol.register("static", createMcpRouteEntries({ instanceName: "static",
         auth: { enabled: true, provider: "token", token }, context: f.runtime.contextTransport,
         tools: f.runtime.toolCallRuntime.api, toolSource: f.runtime.toolSource,
-        extensions: [{ id: "static-resource", resources: [{ uri: resourceUri, name: "Static", mimeType: "text/plain", read: () => ({ text: "static generation" }) }] }],
-    }, "/static/mcp");
+        extensions: new McpExtensionRegistry([{ id: "static-resource", resources: [{ uri: resourceUri, name: "Static", mimeType: "text/plain", read: () => ({ text: "static generation" }) }] }]),
+    }, ["/static/mcp"]));
     mount("round4-static-old");
     assert.equal((await f.raw("round4-static-old", "resources/read", { uri: resourceUri }, "/static/mcp")).status, 200);
     mount("round4-static-new");

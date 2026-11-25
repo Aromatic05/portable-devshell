@@ -525,7 +525,6 @@ describe("WebStore", () => {
             extensions: { model: ["instance"] },
             mcp: {
                 auth: "none" as const,
-                contextMode: "explicit" as const,
                 enabled: true,
             },
             name: "reverse-web",

@@ -226,17 +226,6 @@ function validateMcpAuth(
     instance: ControlInstanceConfig,
     base: readonly (string | number)[],
 ): void {
-    if (
-        instance.mcp.contextMode === "openai-session" &&
-        instance.mcp.auth.mode === "token"
-    ) {
-        throw configInputError(
-            "semantic",
-            [...base, "mcp", "contextMode"],
-            "config.instance.mcpContextAuth",
-            "openai-session requires MCP auth none or oauth2; ChatGPT does not support custom token credentials",
-        );
-    }
     if (instance.mcp.auth.mode === "oauth2") {
         const oauth2 = instance.mcp.auth.oauth2;
         if (oauth2.documentationUrl !== undefined) {

@@ -709,19 +709,12 @@ function parseInstanceMcpDraft(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["auth", "contextMode", "enabled", "oauth2", "path", "token"],
+        ["auth", "enabled", "oauth2", "path", "token"],
         path,
     );
 
     return {
         ...parseMcpNamespaceAuth(record, path),
-        contextMode:
-            record.contextMode === undefined
-                ? undefined
-                : readEnum(record.contextMode, [...path, "contextMode"], [
-                      "explicit",
-                      "openai-session",
-                  ] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readOptionalTrimmedString(record.path, [...path, "path"]),
     };
@@ -734,19 +727,12 @@ function parseInstanceMcpPatch(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["auth", "contextMode", "enabled", "oauth2", "path", "token"],
+        ["auth", "enabled", "oauth2", "path", "token"],
         path,
     );
 
     return {
         ...parseMcpNamespaceAuth(record, path),
-        contextMode:
-            record.contextMode === undefined
-                ? undefined
-                : readEnum(record.contextMode, [...path, "contextMode"], [
-                      "explicit",
-                      "openai-session",
-                  ] as const),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         path: readNullable(record.path, (entry) =>
             readRequiredTrimmedString(entry, [...path, "path"]),

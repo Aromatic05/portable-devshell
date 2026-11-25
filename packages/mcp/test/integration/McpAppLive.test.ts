@@ -190,15 +190,17 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
             environments: [{ instance: "demo", workspace: "/workspace" }],
         });
         ctxId = record.ctxId;
+        await runtime.contexts.registry.attachEnvironment(ctxId, { instance: "demo", workspace: "/workspace" },
+            { principal: "local", bindings: [{ kind: "openai/session", value: "allowed" }] });
         const address = host.server.address;
         assert.ok(typeof address === "object" && address !== null);
         const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
-        const call = async () => {
+        const call = async (session: string) => {
             const response = await postModern(
                 endpoint,
                 "test-bootstrap",
                 "tools/call",
-                { arguments: {}, name: "environ_info" },
+                { arguments: {}, name: "environ_info", _meta: { "openai/session": session } },
             );
             assert.equal(response.status, 200);
             return parseMcpHttpResponse<{
@@ -206,13 +208,13 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
                 result?: { _meta?: Record<string, unknown>; structuredContent?: Record<string, unknown> };
             }>(await response.text());
         };
-        const response = await call();
+        const response = await call("allowed");
         assert.equal(response.error, undefined);
         const meta = response.result?._meta?.["portable-devshell/mcpapp"] as Record<string, string> | undefined;
         assert.equal(meta?.ctxId, ctxId);
         assert.ok(typeof meta?.token === "string" && meta.token.length >= 16);
         assert.equal(meta?.liveBaseUrl, "https://devshell.example.com/api/live/demo/workspace");
-        assert.deepEqual(response.result?.structuredContent, { ctxId, instance: "demo", status: "active" });
+        assert.deepEqual(response.result?.structuredContent, { instance: "demo", status: "active" });
         assert.equal(JSON.stringify(response.result?.structuredContent).includes(meta!.token), false);
         assert.equal(await runtime.state.mcpAppLeases.verify("demo", ctxId, meta!.token), true);
         assert.equal(runtime.state.mcpAppPresence.has("demo", ctxId), true);
@@ -221,11 +223,13 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
             principal: "different-user", environments: [{ instance: "demo", workspace: "/private" }],
         });
         ctxId = unauthorized.ctxId;
-        const rejected = await call();
+        await runtime.contexts.registry.attachEnvironment(ctxId, { instance: "demo", workspace: "/private" },
+            { principal: "different-user", bindings: [{ kind: "openai/session", value: "cross-principal" }] });
+        const rejected = await call("cross-principal");
         // A Live bootstrap failure must not turn a completed ToolCall into an error.
         assert.equal(rejected.error, undefined);
         assert.deepEqual(rejected.result?.structuredContent, {
-            ctxId, instance: "demo", status: "active",
+            instance: "demo", status: "active",
         });
         assert.equal(rejected.result?._meta?.["portable-devshell/mcpapp"], undefined);
         assert.equal(runtime.state.mcpAppPresence.has("demo", ctxId), false);
@@ -245,7 +249,7 @@ test("MCP App bootstrap resolves OpenAI-session Context without making its ID mo
         } },
     });
     const host = new TestMcpHost({
-        instances: [{ name: "demo", contextMode: "openai-session" }],
+        instances: [{ name: "demo" }],
         listenHost: "127.0.0.1", listenPort: 0,
         publicBaseUrl: "https://devshell.example.com",
     }, runtime);
@@ -261,7 +265,7 @@ test("MCP App bootstrap resolves OpenAI-session Context without making its ID mo
         const address = host.server.address;
         assert.ok(typeof address === "object" && address !== null);
         const response = await postModern(
-            `http://127.0.0.1:${address.port}/demo/mcp`,
+            `http://127.0.0.1:${address.port}/demo/mcp/openai-session`,
             "test-openai-session",
             "tools/call",
             {

@@ -117,7 +117,6 @@ export function createTestInstance(
     return new Instance({
         config: {
             enabled: config.enabled,
-            mcpContextMode: config.mcp.contextMode,
             mcpEnabled: config.mcp.enabled,
             mcpPath: config.mcp.path,
             modelExtensions: [...config.extensions.model],

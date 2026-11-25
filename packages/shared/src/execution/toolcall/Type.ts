@@ -30,6 +30,8 @@ export interface ToolCallExternalBinding {
     value: string;
 }
 
+export type ControlMcpContextMode = "explicit" | "openai-session" | "agy-session";
+
 export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
@@ -38,7 +40,7 @@ export interface ToolCallContext {
     workspace?: string;
     principal?: string;
     externalBindings?: readonly ToolCallExternalBinding[];
-    contextMode?: "explicit" | "openai-session";
+    contextMode?: ControlMcpContextMode;
     source: ToolCallSource;
 }
 

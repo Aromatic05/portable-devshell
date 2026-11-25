@@ -109,7 +109,7 @@ test('C-T2 negative: completed Message RPC permits normal Escape, route and Ctrl
   await h.key('\x04');await until(()=>h.fixture.closed()>0);assert.equal(h.fixture.closed(),1);
  }finally{await h.close();peer.close();}
 });
-test('C-T3 regression: TUI edit of SSH command preserves remote update of unrelated MCP contextMode',async()=>{
+test('C-T3 regression: TUI edit of SSH command preserves remote update of unrelated MCP enabled flag',async()=>{
  const authoritative=createDefaultControlConfig();authoritative.instances=[normalizeConfigInstanceDraft({name:'alpha',provider:'ssh',ssh:{command:'ssh C-fixture-host'}})];
  const updates:ConfigBatchUpdateRequest[]=[];
  const h=await launch(80,20,{configUpdate:(request)=>{
@@ -121,18 +121,18 @@ test('C-T3 regression: TUI edit of SSH command preserves remote update of unrela
   h.runtime.store.setMainFocusId('provider');const box=selectMainScreenModel(h.runtime.store.getState(),h.runtime.reader).boxes.find(b=>b.id==='provider')!;
   h.runtime.store.toggleExpanded(box.expandedKey);h.runtime.store.setSelectedDetailLine(box.expandedKey,'provider:field:ssh.command');h.runtime.store.setFocusScope('boxDetail');
   await h.key('\r');await h.key('\r');await h.key('X');
-  authoritative.instances[0]=normalizeConfigInstanceDraft(applyConfigInstancePatch(authoritative.instances[0]!,{mcp:{contextMode:'explicit'}}));
+  authoritative.instances[0]=normalizeConfigInstanceDraft(applyConfigInstancePatch(authoritative.instances[0]!,{mcp:{enabled:false}}));
   h.fixture.setControlState([instance],{...toConfigView(authoritative)});await pause();
-  assert.equal(h.runtime.reader.config.view?.instances[0]?.mcp.contextMode,'explicit');
+  assert.equal(h.runtime.reader.config.view?.instances[0]?.mcp.enabled,false);
   await h.key('\x13');await until(()=>updates.length>0);
   assert.equal(updates[0]!.instance!.patch.mcp, undefined);
   assert.deepEqual(updates[0]!.instance!.patch.ssh, {command:'ssh C-fixture-hostX'});
   assert.equal(authoritative.instances[0]!.ssh?.command,'ssh C-fixture-hostX');
-  assert.equal(authoritative.instances[0]!.mcp.contextMode,'explicit');
+  assert.equal(authoritative.instances[0]!.mcp.enabled,false);
  }finally{await h.close();}
 });
-test('C-T3 negative: editing starts from the updated MCP contextMode and preserves it on save',async()=>{
- const authoritative=createDefaultControlConfig();authoritative.instances=[normalizeConfigInstanceDraft({name:'alpha',provider:'ssh',ssh:{command:'ssh C-fixture-host'},mcp:{contextMode:'explicit'}})];
+test('C-T3 negative: editing starts from the updated MCP enabled flag and preserves it on save',async()=>{
+ const authoritative=createDefaultControlConfig();authoritative.instances=[normalizeConfigInstanceDraft({name:'alpha',provider:'ssh',ssh:{command:'ssh C-fixture-host'},mcp:{enabled:false}})];
  const updates:ConfigBatchUpdateRequest[]=[];const h=await launch(80,20,{configUpdate:(request)=>{updates.push(request);authoritative.instances[0]=normalizeConfigInstanceDraft(applyConfigInstancePatch(authoritative.instances[0]!,request.instance!.patch));return toConfigView(authoritative);}});
  try{
   h.fixture.setControlState([{name:'alpha',provider:'ssh',enabled:true,mcpEnabled:true,homeDirectory:'/fixture',snapshot:{daemonState:'stopped',ready:false}}],{...toConfigView(authoritative)});
@@ -140,7 +140,7 @@ test('C-T3 negative: editing starts from the updated MCP contextMode and preserv
   const box=selectMainScreenModel(h.runtime.store.getState(),h.runtime.reader).boxes.find(b=>b.id==='provider')!;
   h.runtime.store.toggleExpanded(box.expandedKey);h.runtime.store.setSelectedDetailLine(box.expandedKey,'provider:field:ssh.command');h.runtime.store.setFocusScope('boxDetail');
   await h.key('\r');await h.key('\r');await h.key('X');await h.key('\x13');await until(()=>updates.length>0);
-  assert.equal(authoritative.instances[0]!.ssh?.command,'ssh C-fixture-hostX');assert.equal(authoritative.instances[0]!.mcp.contextMode,'explicit');
+  assert.equal(authoritative.instances[0]!.ssh?.command,'ssh C-fixture-hostX');assert.equal(authoritative.instances[0]!.mcp.enabled,false);
  }finally{await h.close();}
 });
 
