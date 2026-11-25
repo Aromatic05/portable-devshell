@@ -12,10 +12,20 @@ import { McpEndpointBinding } from "./Binding.js";
 import { McpEndpoint, type McpEndpointOptions } from "./Endpoint.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
 import type { McpExtension } from "./extension/Contract.js";
-import { McpHostRouteRegistry, type McpHostRouteEntry } from "./Registry.js";
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MCP_DRAIN_TIMEOUT_MS = 5_000;
+
+export interface McpHostRouteEntry {
+    auth?: McpAuthConfig;
+    binding: McpEndpointBinding;
+    path: string;
+}
+
+interface McpInstanceRoutes {
+    entries: readonly McpHostRouteEntry[];
+    release?: () => void;
+}
 
 interface AcceptedMcpRequest {
     done: Promise<void>;
@@ -24,13 +34,12 @@ interface AcceptedMcpRequest {
 
 /** Protocol routes consume HTTP registration; they never create or close listeners. */
 export class McpProtocolRoute {
-    readonly #registry = new McpHostRouteRegistry();
+    readonly #instances = new Map<string, McpInstanceRoutes>();
     readonly #inFlight = new Set<AcceptedMcpRequest>();
     readonly #http: McpHttpRoute;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #publicBaseUrl?: string;
     readonly #requestLogger?: (line: string) => void;
-    readonly #releases = new Map<string, () => void>();
     #active = false;
 
     constructor(
@@ -79,55 +88,62 @@ export class McpProtocolRoute {
             options.modelOutput,
             explicitFallback,
         );
-        this.register({
+        this.register(options.instanceName, [{
             auth: options.auth ?? { enabled: false, provider: "none" },
             binding,
             path,
-        });
+        }]);
     }
 
-    register(entry: { binding: McpEndpointBinding; path: string; auth?: McpAuthConfig }): void {
-        if (!this.#active) {
-            this.#registry.register(entry);
-            return;
-        }
-        // Mount first: a failed registration must leave the previous Binding
-        // and its HTTP routes untouched.
-        const release = this.#mount(entry);
-        const instance = entry.binding.instanceName;
-        try {
-            this.#unmount(instance);
-            this.#registry.register(entry);
-            this.#releases.set(instance, release);
-        } catch (error) {
-            try { release(); }
-            catch (cleanupError) {
-                throw new AggregateError([error, cleanupError], "MCP Protocol replacement rollback failed.");
+    register(instance: string, entries: readonly McpHostRouteEntry[]): void {
+        const paths = new Set<string>();
+        for (const [name, group] of this.#instances) {
+            if (name !== instance) {
+                for (const entry of group.entries) paths.add(entry.path);
             }
-            throw error;
         }
+        if (entries.length === 0) throw new Error("MCP instance requires at least one route.");
+        for (const { binding, path } of entries) {
+            if (binding.instanceName !== instance) throw new Error("MCP route belongs to a different instance.");
+            if (!path.startsWith("/") || path.startsWith("//") ||
+                new URL(path, "http://localhost").pathname !== path)
+                throw new Error(`Invalid MCP route path: ${path}`);
+            if (paths.has(path)) throw new Error(`Duplicate MCP route path: ${path}`);
+            paths.add(path);
+        }
+        const next: McpInstanceRoutes = { entries: [...entries] };
+        // Install the whole candidate synchronously, retaining the previous
+        // handlers if any HTTP or OAuth registration fails.
+        if (this.#active) next.release = this.#mountGroup(next.entries);
+        const previous = this.#instances.get(instance);
+        this.#instances.set(instance, next);
+        previous?.release?.();
     }
 
     unregister(instance: string): void {
-        this.#unmount(instance);
-        this.#registry.unregister(instance);
+        const group = this.#instances.get(instance);
+        this.#instances.delete(instance);
+        group?.release?.();
     }
 
     start(): void {
         if (this.#active) return;
         try {
-            for (const entry of this.#registry.list())
-                this.#releases.set(entry.binding.instanceName, this.#mount(entry));
+            for (const group of this.#instances.values()) group.release = this.#mountGroup(group.entries);
             this.#active = true;
         } catch (error) {
-            for (const instance of this.#releases.keys()) this.#unmount(instance);
-            throw error;
+            rollbackRoutes(error, [() => this.stop()]);
         }
     }
 
     stop(): void {
         this.#active = false;
-        for (const instance of [...this.#releases.keys()]) this.#unmount(instance);
+        const releases = [];
+        for (const group of this.#instances.values()) {
+            if (group.release !== undefined) releases.push(group.release);
+            group.release = undefined;
+        }
+        releaseRoutes(releases);
     }
 
     /**
@@ -179,12 +195,21 @@ export class McpProtocolRoute {
     }
 
     list(): McpHostRouteEntry[] {
-        return this.#registry.list();
+        return [...this.#instances.values()].flatMap((group) => group.entries);
     }
 
-    #unmount(instance: string): void {
-        this.#releases.get(instance)?.();
-        this.#releases.delete(instance);
+    instanceNames(): string[] {
+        return [...this.#instances.keys()];
+    }
+
+    #mountGroup(entries: readonly McpHostRouteEntry[]): () => void {
+        const releases: Array<() => void> = [];
+        try {
+            for (const entry of entries) releases.push(this.#mount(entry));
+        } catch (error) {
+            rollbackRoutes(error, releases);
+        }
+        return () => releaseRoutes(releases);
     }
 
     #mount(entry: McpHostRouteEntry): () => void {
@@ -202,12 +227,7 @@ export class McpProtocolRoute {
         const releaseAll = () => {
             if (released) return;
             released = true;
-            const errors: unknown[] = [];
-            for (const release of [...releases].reverse()) {
-                try { release(); } catch (error) { errors.push(error); }
-            }
-            if (errors.length > 0)
-                throw new AggregateError(errors, "Failed to release MCP Protocol routes.");
+            releaseRoutes(releases);
         };
         try {
             if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceUrl !== undefined) {
@@ -334,11 +354,7 @@ export class McpProtocolRoute {
                 }),
             );
         } catch (error) {
-            try { releaseAll(); }
-            catch (cleanupError) {
-                throw new AggregateError([error, cleanupError], "MCP Protocol mount and rollback failed.");
-            }
-            throw error;
+            rollbackRoutes(error, [releaseAll]);
         }
         return releaseAll;
     }
@@ -353,6 +369,22 @@ export class McpProtocolRoute {
         recordMethod(traceField(body !== null && typeof body === "object" && !Array.isArray(body) ? body.method : undefined));
         await binding.handleRequest(request, response, body);
     }
+}
+
+function releaseRoutes(releases: readonly (() => void)[]): void {
+    const errors: unknown[] = [];
+    for (const release of [...releases].reverse()) {
+        try { release(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "Failed to release MCP Protocol routes.");
+}
+
+function rollbackRoutes(error: unknown, releases: readonly (() => void)[]): never {
+    try { releaseRoutes(releases); }
+    catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "MCP Protocol mount and rollback failed.");
+    }
+    throw error;
 }
 
 function traceField(value: unknown): string {

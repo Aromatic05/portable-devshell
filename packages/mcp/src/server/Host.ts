@@ -100,7 +100,7 @@ export class McpHost {
             if (appReady) {
                 try {
                     const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts, this.#config.publicBaseUrl);
-                    for (const entry of this.#protocol.list()) route.register(entry.binding.instanceName);
+                    for (const instance of this.#protocol.instanceNames()) route.register(instance);
                     this.#appRoute = route;
                     this.#appReady = true;
                 } catch (error) {
