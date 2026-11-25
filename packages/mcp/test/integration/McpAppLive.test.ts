@@ -195,12 +195,12 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
         const address = host.server.address;
         assert.ok(typeof address === "object" && address !== null);
         const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
-        const call = async (session: string) => {
+        const call = async (session: string, workspace: string) => {
             const response = await postModern(
                 endpoint,
                 "test-bootstrap",
                 "tools/call",
-                { arguments: {}, name: "environ_info", _meta: { "openai/session": session } },
+                { arguments: { workspace }, name: "environ_info", _meta: { "openai/session": session } },
             );
             assert.equal(response.status, 200);
             return parseMcpHttpResponse<{
@@ -208,7 +208,7 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
                 result?: { _meta?: Record<string, unknown>; structuredContent?: Record<string, unknown> };
             }>(await response.text());
         };
-        const response = await call("allowed");
+        const response = await call("allowed", "/workspace");
         assert.equal(response.error, undefined);
         const meta = response.result?._meta?.["portable-devshell/mcpapp"] as Record<string, string> | undefined;
         assert.equal(meta?.ctxId, ctxId);
@@ -225,7 +225,7 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
         ctxId = unauthorized.ctxId;
         await runtime.contexts.registry.attachEnvironment(ctxId, { instance: "demo", workspace: "/private" },
             { principal: "different-user", bindings: [{ kind: "openai/session", value: "cross-principal" }] });
-        const rejected = await call("cross-principal");
+        const rejected = await call("cross-principal", "/private");
         // A Live bootstrap failure must not turn a completed ToolCall into an error.
         assert.equal(rejected.error, undefined);
         assert.deepEqual(rejected.result?.structuredContent, {
@@ -269,7 +269,7 @@ test("MCP App bootstrap resolves OpenAI-session Context without making its ID mo
             "test-openai-session",
             "tools/call",
             {
-                arguments: {},
+                arguments: { workspace: "/shared" },
                 name: "environ_info",
                 _meta: { "openai/session": "chat-session-mcpapp" },
             },

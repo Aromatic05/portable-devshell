@@ -18,8 +18,6 @@ type CurrentMemory = {
     mailbox: string;
 };
 
-const workspaceAdvice = "No workspace is attached to this Context. If the user already supplied an absolute workspace path, call environ_info with that path. Otherwise ask the user for the absolute workspace path, then call environ_info with workspace.";
-
 export function installContextTools(
     contexts: ContextApi,
     hooks: ToolCallRegistration,
@@ -84,43 +82,20 @@ class ContextToolRuntime {
         signal?: AbortSignal,
     ): Promise<JsonValue> {
         const allowContextId = context.contextMode === undefined || context.contextMode === "explicit";
-        const parsed = readEnvironmentInfoInput(input, allowContextId);
-        let resolution;
-        try {
-            resolution = await this.#resolveContext(
-                {
-                    ...((parsed.ctxId ?? context.ctxId) === undefined
-                        ? {}
-                        : { ctxId: parsed.ctxId ?? context.ctxId }),
-                    ...((parsed.workspace ?? context.workspace) === undefined
-                        ? {}
-                        : { workspace: parsed.workspace ?? context.workspace }),
-                },
-                context,
-                false,
-            );
-        } catch (error) {
-            const body = toRemoteErrorBody(error);
-            if (body?.code === contextErrorCodes.invalid &&
-                body.message.startsWith("No Context is bound to this request."))
-                return { comment: [workspaceAdvice] };
-            throw error;
-        }
+        const { ctxId: requestedContextId, workspace } = readEnvironmentInfoInput(input, allowContextId);
+        const ctxId = requestedContextId ?? context.ctxId;
+        const resolution = await this.#resolveContext(
+            { ...(ctxId === undefined ? {} : { ctxId }), workspace },
+            context,
+            false,
+        );
         let record = resolution.record;
-        const workspace =
-            parsed.workspace ??
-            context.workspace ??
-            contextWorkspace(record, context.instance);
-        if (workspace === undefined)
-            return { ...this.#expose(record, context), comment: [workspaceAdvice] };
 
         let committed = false;
         let alertCleanupWorkspace: string | undefined;
         try {
-            if (!resolution.created) {
+            if (!resolution.created)
                 record = await this.#touchContext(record, context);
-                resolution = { ...resolution, record };
-            }
             await this.#contexts.cleanup.reconcile(record.ctxId);
 
             const generation = this.#requireGeneration(context.instance);
@@ -472,15 +447,6 @@ async function readOptionalMemory(
     } finally {
         if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
     }
-}
-
-function contextWorkspace(
-    record: ContextRecord,
-    instance: string,
-): string | undefined {
-    return record.environments.find(
-        (environment) => environment.instance === instance,
-    )?.workspace;
 }
 
 function conflictingExternalBindings() {

@@ -70,7 +70,8 @@ test("authorized OAuth clients with distinct principals cannot read or mutate ea
         assert.equal(betaAuth.clientId, "client-beta");
         assert.deepEqual(alphaAuth.scopes, ["mcp"]);
         assert.deepEqual(betaAuth.scopes, ["mcp"]);
-        const alpha = await call(alphaAuth.clientId, { workspace: join(storageDir, "alpha") });
+        const alphaWorkspace = join(storageDir, "alpha");
+        const alpha = await call(alphaAuth.clientId, { workspace: alphaWorkspace });
         const beta = await call(betaAuth.clientId, { workspace: join(storageDir, "beta") });
         assert.ok(typeof alpha.ctxId === "string");
         assert.ok(typeof beta.ctxId === "string");
@@ -81,7 +82,7 @@ test("authorized OAuth clients with distinct principals cannot read or mutate ea
         assert.equal(before.find(({ ctxId }) => ctxId === beta.ctxId)?.principal, betaAuth.clientId);
 
         await assert.rejects(
-            call(betaAuth.clientId, { ctxId: alpha.ctxId }),
+            call(betaAuth.clientId, { ctxId: alpha.ctxId, workspace: alphaWorkspace }),
             { code: "mcp.contextInvalid" },
         );
         await assert.rejects(
@@ -93,7 +94,7 @@ test("authorized OAuth clients with distinct principals cannot read or mutate ea
         );
         assert.deepEqual(await runtime.contexts.registry.list(), before);
 
-        const ownRead = await call(alphaAuth.clientId, { ctxId: alpha.ctxId });
+        const ownRead = await call(alphaAuth.clientId, { ctxId: alpha.ctxId, workspace: alphaWorkspace });
         const ownWrite = await call(betaAuth.clientId, {
             ctxId: beta.ctxId,
             workspace: join(storageDir, "beta-updated"),

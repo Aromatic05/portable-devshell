@@ -63,7 +63,7 @@ External binding 是 Host 身份与内部 Context 的映射，例如 ChatGPT 的
 environ_info(workspace=<absolute worker path>)
 ```
 
-开始。它一次完成：
+开始。每次调用 `environ_info` 都必须传入用户提供的 `workspace`；如果用户还没给出 Worker 上的绝对路径，先询问，再调用。它一次完成：
 
 1. 创建 Context 或恢复其工作区资源；
 2. 在当前 instance 上 prepare workspace；

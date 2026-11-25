@@ -37,25 +37,26 @@ function environmentInfoDefinition(): ToolDefinition {
                         readOnlyHint: false,
                     },
                     inputHints: {
-                        workspace: "Absolute workspace to attach or switch; if unknown, ask the user for its absolute path.",
+                        workspace: "Absolute workspace path on the Worker, supplied by the user. Ask the user if it is unknown.",
                     },
                     title: "Create environment",
                 },
             },
         },
         description:
-            "Prepare the current workspace. If no Context is bound, use the workspace path already supplied by the user or ask for its absolute path. Idle Contexts are restored automatically on tool use; no explicit renewal is needed.",
+            "Prepare the workspace at the absolute path supplied by the user. If the user has not supplied it, ask before calling. Idle Contexts are restored automatically on tool use; no explicit renewal is needed.",
         group: "environ",
         inputSchema: {
             additionalProperties: false,
             properties: {
                 workspace: {
                     description:
-                        "Absolute workspace path. Required when the current Context has no workspace attachment; may switch the attachment for this instance.",
+                        "Absolute workspace path on the Worker, supplied by the user. May switch the attachment for this instance.",
                     minLength: 1,
                     type: "string",
                 },
             },
+            required: ["workspace"],
             type: "object",
         },
         name: environmentInfoToolName,

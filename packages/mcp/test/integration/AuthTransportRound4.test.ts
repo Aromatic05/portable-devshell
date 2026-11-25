@@ -37,12 +37,12 @@ test("round4 two SDK clients isolate Context despite forged principal and identi
     const before = await f.runtime.contexts.registry.list();
     assert.equal(before.find(({ ctxId }) => ctxId === aId)?.principal, alpha.subject);
     assert.equal(before.find(({ ctxId }) => ctxId === bId)?.principal, beta.subject);
-    for (const [client, target] of [[a, bId], [b, aId]] as const) {
-        await assert.rejects(client.callTool({ name: "environ_info", arguments: { ctxId: target } }), (error: unknown) => { assert.ok(error instanceof Error && "data" in error); assert.equal((error.data as { code: string }).code, "mcp.contextInvalid"); return true; });
+    for (const [client, target, directory] of [[a, bId, "b"], [b, aId, "a"]] as const) {
+        await assert.rejects(client.callTool({ name: "environ_info", arguments: { ctxId: target, workspace: join(f.directory, directory) } }), (error: unknown) => { assert.ok(error instanceof Error && "data" in error); assert.equal((error.data as { code: string }).code, "mcp.contextInvalid"); return true; });
         await assert.rejects(client.callTool({ name: "environ_info", arguments: { ctxId: target, workspace: join(f.directory, "stolen") } }), (error: unknown) => { assert.ok(error instanceof Error && "data" in error); assert.equal((error.data as { code: string }).code, "mcp.contextInvalid"); return true; });
     }
     assert.deepEqual(await f.runtime.contexts.registry.list(), before);
-    assert.equal((await a.callTool({ name: "environ_info", arguments: { ctxId: aId } })).isError, false);
+    assert.equal((await a.callTool({ name: "environ_info", arguments: { ctxId: aId, workspace: join(f.directory, "a") } })).isError, false);
     assert.equal((await b.callTool({ name: "environ_info", arguments: { ctxId: bId, workspace: join(f.directory, "b2") } })).isError, false);
     assert.equal((await f.runtime.contexts.registry.list()).find(({ ctxId }) => ctxId === bId)?.environments[0]?.workspace, join(f.directory, "b2"));
 });
@@ -132,10 +132,11 @@ test("agy conversation binding is isolated by the verified OAuth subject", async
 test("round4 explicit Context survives bearer rotation without storing credentials", async (t) => {
     const f = await authFixture(t);
     const alpha = await f.issue("alpha");
-    const ctxId = contextId((await f.raw(alpha.token, "tools/call", { name: "environ_info", arguments: { workspace: join(f.directory, "a") } })).payload);
+    const workspace = join(f.directory, "a");
+    const ctxId = contextId((await f.raw(alpha.token, "tools/call", { name: "environ_info", arguments: { workspace } })).payload);
     const rotated = await f.form("/token", { grant_type: "refresh_token", client_id: alpha.clientId, refresh_token: alpha.refresh });
     assert.equal(rotated.status, 200);
-    assert.equal(contextId((await f.raw(rotated.body.access_token, "tools/call", { name: "environ_info", arguments: { ctxId }, _meta: { "openai/session": "different-session" } })).payload), ctxId);
+    assert.equal(contextId((await f.raw(rotated.body.access_token, "tools/call", { name: "environ_info", arguments: { ctxId, workspace }, _meta: { "openai/session": "different-session" } })).payload), ctxId);
     assert.equal((await f.runtime.contexts.registry.list()).length, 1);
     const persisted = await readFile(join(f.directory, "contexts.jsonl"), "utf8");
     assert.ok(persisted.includes(ctxId));
@@ -198,7 +199,7 @@ test("round4 live static bearer rotation rejects the stale client on tools and r
         assert.equal((await f.raw("round4-static-old", method, { uri: resourceUri, name: "environ_info", arguments: { ctxId: record.ctxId } }, "/static/mcp")).status, 401);
     }
     assert.equal((await f.raw("round4-static-new", "resources/read", { uri: resourceUri }, "/static/mcp")).status, 200);
-    const denied = await f.raw("round4-static-new", "tools/call", { name: "environ_info", arguments: { ctxId: record.ctxId } }, "/static/mcp");
+    const denied = await f.raw("round4-static-new", "tools/call", { name: "environ_info", arguments: { ctxId: record.ctxId, workspace: join(f.directory, "static") } }, "/static/mcp");
     assert.equal(denied.payload.error?.data?.code, "mcp.contextInvalid");
     assert.deepEqual(await f.runtime.contexts.registry.lookup(record.ctxId, { principal: credential.clientId }), record);
 });

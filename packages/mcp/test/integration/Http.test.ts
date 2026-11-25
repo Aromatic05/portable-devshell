@@ -216,7 +216,7 @@ test("legacy clients explicitly select Context by URL without activating OpenAI 
                 body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
             });
             assert.equal(response.status, 200, method);
-            return parseMcpHttpResponse<{ error?: unknown; result?: {
+            return parseMcpHttpResponse<{ error?: { message?: string }; result?: {
                 capabilities?: Record<string, unknown>;
                 content?: Array<{ type?: string; text?: string }>;
                 structuredContent?: { ctxId?: string };
@@ -233,6 +233,8 @@ test("legacy clients explicitly select Context by URL without activating OpenAI 
         const listed = await legacyRpc(2, "tools/list", {});
         const bash = listed.result?.tools?.find((tool) => tool.name === "bash_run");
         assert.ok(bash?.inputSchema?.required?.includes("ctxId"));
+        const environment = listed.result?.tools?.find((tool) => tool.name === "environ_info");
+        assert.deepEqual(environment?.inputSchema?.required, ["workspace"]);
         for (const name of ["environ_info", "environ_remote"]) {
             const bootstrap = listed.result?.tools?.find((tool) => tool.name === name);
             assert.equal(bootstrap?.inputSchema?.properties?.ctxId, undefined);
@@ -255,10 +257,10 @@ test("legacy clients explicitly select Context by URL without activating OpenAI 
         assert.ok(typeof ctxId === "string", JSON.stringify(info));
         assert.match(ctxId, /^ctx-/u);
         assert.equal(info.result?.structuredContent?.ctxId, ctxId);
-        const resumed = await legacyRpc(4, "tools/call", {
+        const missingWorkspace = await legacyRpc(4, "tools/call", {
             name: "environ_info", arguments: { ctxId },
         });
-        assert.equal(resumed.result?.structuredContent?.ctxId, ctxId);
+        assert.equal(missingWorkspace.error?.message, "workspace is required.");
         const executed = await legacyRpc(5, "tools/call", {
             name: "bash_run", arguments: { ctxId, command: "pwd" },
         });
@@ -316,6 +318,8 @@ test("automatic route schemas stay fixed without session metadata and only bind 
     for (const [suffix, key, wrongKey] of [["", openai, agy], ["/agy-session", agy, openai]] as const) {
         const first = await list(suffix);
         assert.deepEqual(await list(suffix, { [key]: "chat" }), first);
+        const environment = first.find((entry) => entry.name === "environ_info");
+        assert.deepEqual(environment?.inputSchema.required, ["workspace"]);
         for (const name of ["bash_run", "environ_info", "environ_remote"]) {
             const tool = first.find((entry) => entry.name === name);
             assert.ok(tool, name);
@@ -336,6 +340,10 @@ test("automatic route schemas stay fixed without session metadata and only bind 
         assert.equal(bound.error, undefined);
         assert.ok(bound.result?.structuredContent);
         assert.equal(bound.result.structuredContent.ctxId, undefined);
+        const missingWorkspace = await rpc(suffix, "tools/call", {
+            name: "environ_info", arguments: {}, _meta: { [key]: "chat" },
+        });
+        assert.equal(missingWorkspace.error?.message, "workspace is required.");
         const call = await rpc(suffix === "" ? "/openai-session" : suffix, "tools/call", {
             name: "bash_run", arguments: { command: "pwd", ctxId: "must-not-select-context" },
             _meta: { [key]: "chat" },
