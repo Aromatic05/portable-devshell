@@ -31,7 +31,7 @@ interface ToolCallCompletionResult {
     stderrBytes?: number;
     stdoutBytes?: number;
     termSignal?: number;
-    termination?: "exited" | "signaled" | "timeout";
+    termination?: "exited" | "signaled" | "timeout" | "running";
 }
 
 export class ToolCallHistory {

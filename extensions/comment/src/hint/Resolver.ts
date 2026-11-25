@@ -31,6 +31,7 @@ type ErrorResolver = (
 
 const resultResolvers: Record<string, ResultResolver> = {
     bash_run: (_toolName, result) => bashResultHints(result),
+    task_read: (_toolName, result) => bashResultHints(result),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),

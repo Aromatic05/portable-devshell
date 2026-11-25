@@ -138,7 +138,7 @@ export class ModelCommandBroker {
             parent.workspace !== request.workspace ||
             (request.taskId === undefined
                 ? parent.toolName !== "bash_run" || parent.status !== "running"
-                : parent.toolName !== "tmux_run" ||
+                : !["tmux_run", "bash_run"].includes(parent.toolName) ||
                     (parent.status !== "running" &&
                         (parent.status !== "completed" || taskIdFromResult(parent.output) !== request.taskId))))
             throw new Error("Model command provenance does not match the owning ToolCall.");

@@ -271,9 +271,7 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
         true,
     );
     wait_for_output(&fixture, &task, "stdout", "ready");
-    let listed = fixture
-        .env
-        .json_command(&["terminal", "list", "--instance", INSTANCE]);
+    let listed = fixture.env.json_command(&["terminal", "list"]);
     assert!(
         listed
             .as_array()
@@ -313,10 +311,265 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
         true
     );
     assert!(request(&fixture.socket, "process.handshake", json!({})).is_err());
-    assert_eq!(
+    assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
+}
+
+struct WorkerFixture {
+    env: TestEnv,
+}
+
+impl WorkerFixture {
+    fn start() -> Self {
+        let fixture = Self {
+            env: TestEnv::new(),
+        };
+        fixture.env.json_command(&["start", "--instance", INSTANCE]);
         fixture
+    }
+
+    fn tool(&self, method: &str, input: Value) -> Value {
+        let result = self.env.rpc(
+            INSTANCE,
+            "tool",
+            &json!({
+                "protocol": "rpc",
+                "type": "request",
+                "id": uuid::Uuid::new_v4().to_string(),
+                "method": method,
+                "message": {
+                    "input": input,
+                    "context": {"workspace": self.env.protocol_workspace()}
+                }
+            }),
+        );
+        assert_eq!(result["type"], "reply", "{method}: {result}");
+        result["message"].clone()
+    }
+
+    fn wait_task(&self, task: &str, cursor: Value) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut cursor = cursor;
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        loop {
+            let mut result = self.tool(
+                "task_read",
+                json!({
+                    "task": task, "cursor": cursor, "timeMs": 500,
+                }),
+            );
+            stdout.push_str(result["stdout"].as_str().unwrap());
+            stderr.push_str(result["stderr"].as_str().unwrap());
+            if result["termination"] != "running" {
+                result["stdout"] = json!(stdout);
+                result["stderr"] = json!(stderr);
+                return result;
+            }
+            cursor = result["cursor"].clone();
+            assert!(Instant::now() < deadline, "task did not exit: {result}");
+        }
+    }
+}
+
+impl Drop for WorkerFixture {
+    fn drop(&mut self) {
+        let _ = self
             .env
-            .json_command(&["terminal", "list", "--instance", INSTANCE]),
-        json!([])
+            .std_command()
+            .args(["stop", "--instance", INSTANCE])
+            .output();
+        let _ = self
+            .env
+            .std_command()
+            .args(["retire", "--instance", INSTANCE])
+            .output();
+    }
+}
+
+struct LocalAttach {
+    child: Child,
+    master: std::fs::File,
+    received: Vec<u8>,
+}
+
+impl LocalAttach {
+    fn start(env: &TestEnv, task: &str) -> Self {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let opened = nix::pty::openpty(
+            Some(&nix::pty::Winsize {
+                ws_row: 24,
+                ws_col: 80,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            }),
+            None,
+        )
+        .unwrap();
+        let slave = opened.slave;
+        let mut command = env.std_command();
+        command
+            .args(["terminal", "attach", task])
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave));
+        unsafe {
+            command.pre_exec(|| {
+                nix::unistd::setsid().map_err(std::io::Error::other)?;
+                if nix::libc::ioctl(0, nix::libc::TIOCSCTTY, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let child = command.spawn().unwrap();
+        let master = std::fs::File::from(opened.master);
+        // Bound the read deadline without blocking on the attached terminal.
+        unsafe {
+            let fd = master.as_raw_fd();
+            let flags = nix::libc::fcntl(fd, nix::libc::F_GETFL);
+            assert_ne!(
+                nix::libc::fcntl(fd, nix::libc::F_SETFL, flags | nix::libc::O_NONBLOCK),
+                -1
+            );
+        }
+        Self {
+            child,
+            master,
+            received: Vec::new(),
+        }
+    }
+
+    fn expect(&mut self, marker: &str) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut buffer = [0; 8192];
+        loop {
+            if self
+                .received
+                .windows(marker.len())
+                .any(|bytes| bytes == marker.as_bytes())
+            {
+                return;
+            }
+            match self.master.read(&mut buffer) {
+                Ok(n) if n != 0 => self.received.extend_from_slice(&buffer[..n]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                other => panic!(
+                    "attach read ended: {other:?}; output={}",
+                    String::from_utf8_lossy(&self.received)
+                ),
+            }
+            assert!(
+                Instant::now() < deadline,
+                "missing {marker}: {}",
+                String::from_utf8_lossy(&self.received)
+            );
+        }
+    }
+
+    fn input(&mut self, bytes: &[u8]) {
+        self.master.write_all(bytes).unwrap();
+    }
+
+    fn detach(&mut self) {
+        self.input(&[0x1d]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                assert!(status.success(), "{status}");
+                return;
+            }
+            assert!(Instant::now() < deadline, "attach did not detach");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for LocalAttach {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+#[test]
+fn worker_command_and_native_attach_share_one_pty() {
+    let fixture = WorkerFixture::start();
+    assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
+    let started = fixture.tool("bash_run", json!({
+        "command": "stty -echo; printf 'attach-ready\\n'; IFS= read -r human; printf 'human:%s\\n' \"$human\"; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
+        "tty": true, "waitMs": 20,
+    }));
+    assert_eq!(started["termination"], "running");
+    let task = started["task"]["id"].as_str().unwrap().to_owned();
+    let listed = fixture.env.json_command(&["terminal", "list"]);
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == task && item["instance"] == INSTANCE)
     );
+    let mut attach = LocalAttach::start(&fixture.env, &task);
+    attach.expect("attach-ready");
+    attach.input(b"operator\n");
+    attach.expect("human:operator");
+    attach.detach();
+    let inspected = fixture.tool("terminal_inspect", json!({"terminal": task}));
+    assert!(
+        inspected["text"]
+            .as_str()
+            .unwrap()
+            .contains("human:operator")
+    );
+    fixture.tool("task_input", json!({"task": task, "input": "agent\n"}));
+    let finished = fixture.wait_task(&task, json!({}));
+    assert_eq!(finished["exitCode"], 0);
+    assert!(
+        finished["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("human:operator")
+    );
+    assert!(finished["stdout"].as_str().unwrap().contains("model:agent"));
+}
+
+#[test]
+fn hosted_pipe_wait_deadline_and_retained_output() {
+    let fixture = WorkerFixture::start();
+    let task = fixture.tool("bash_run", json!({
+        "command": "IFS= read -r data; printf 'out:%s\\n' \"$data\"; printf 'error\\n' >&2; exit 7",
+        "waitMs": 0, "keepStdin": true,
+    }));
+    assert_eq!(task["termination"], "running");
+    let id = task["task"]["id"].as_str().unwrap();
+    fixture.tool("task_input", json!({"task": id, "input": "pipe\n"}));
+    let result = fixture.wait_task(id, task["cursor"].clone());
+    assert_eq!(result["exitCode"], 7);
+    assert_eq!(result["stdout"], "out:pipe\n");
+    assert_eq!(result["stderr"], "error\n");
+    let timeout = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "sleep 30", "waitMs": 0, "timeoutMs": 100,
+        }),
+    );
+    let result = fixture.wait_task(timeout["task"]["id"].as_str().unwrap(), json!({}));
+    assert_eq!(result["termination"], "timeout");
+    assert_eq!(result["timedOut"], true);
+    let large = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "head -c 6291456 /dev/zero | tr '\\000' x",
+            "waitMs": 10000, "maxCaptureBytes": 1024,
+        }),
+    );
+    assert_eq!(large["exitCode"], 0, "{large}");
+    assert_eq!(large["stdoutBytes"], 6291456);
+    assert_eq!(large["stdoutTruncated"], true);
+    assert_eq!(large["stdoutArtifact"]["storedBytes"], 6291456);
 }

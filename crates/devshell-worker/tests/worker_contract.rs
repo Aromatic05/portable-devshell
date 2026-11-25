@@ -341,6 +341,10 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "file_glob",
         "file_grep",
         "file_read",
+        "task_input",
+        "task_read",
+        "terminal_inspect",
+        "terminal_manage",
     ];
     if cfg!(windows)
         || (cfg!(unix)
@@ -399,7 +403,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     assert!(
         bash_schema["inputSchema"]["required"]
             .as_array()
-            .is_some_and(|required| required.iter().any(|field| field == "timeoutMs"))
+            .is_some_and(|required| required.iter().any(|field| field == "command")
+                && !required.iter().any(|field| field == "timeoutMs"))
     );
     assert_eq!(
         bash_schema["inputSchema"]["properties"]["command"]["minLength"],
@@ -573,7 +578,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .find(|tool| tool["name"] == "bash_run")
             .unwrap();
         let bash_description = bash_run["description"].as_str().unwrap();
-        assert!(bash_description.contains("tmux_run"));
+        assert!(bash_description.contains("task_read"));
+        assert!(bash_description.contains("waitMs"));
         assert!(bash_description.contains("file_read"));
         assert_eq!(
             bash_run["_meta"]["devshell"]["mcp"]["title"],
@@ -976,13 +982,9 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "message": { "input": { "command": "true" }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(missing_timeout["type"], "error", "{missing_timeout}");
-    assert_eq!(missing_timeout["error"]["code"], "tool.invalidArguments");
-    assert!(
-        missing_timeout["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("timeoutMs"))
-    );
+    assert_eq!(missing_timeout["type"], "reply", "{missing_timeout}");
+    assert_eq!(missing_timeout["message"]["exitCode"], 0);
+    assert_eq!(missing_timeout["message"]["termination"], "exited");
 
     let timed_out = env.rpc(
         instance,
@@ -1028,7 +1030,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         too_long["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("tmux_run")
+            .contains("100000")
     );
 
     #[cfg(unix)]
@@ -1662,6 +1664,12 @@ fn stateless_tools_still_enforce_workspace_security() {
         })),
         ("file_glob", serde_json::json!({"patterns": [outside]})),
         ("file_grep", serde_json::json!({"paths": [outside], "pattern": "original"})),
+        ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "waitMs": 0})),
+        ("task_read", serde_json::json!({"task": "denied"})),
+        ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
+        ("terminal_inspect", serde_json::json!({"terminal": "denied"})),
+        ("terminal_manage", serde_json::json!({"command": "list"})),
+        ("terminal_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
         ("tmux_run", serde_json::json!({"command": "pwd", "cwd": env.home()})),
         ("tmux_manage", serde_json::json!({"command": "create", "name": "denied", "cwd": env.home()})),
         ("tmux_read", serde_json::json!({"task": "denied"})),

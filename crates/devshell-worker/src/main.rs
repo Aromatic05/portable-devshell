@@ -46,6 +46,12 @@ fn main() {
 }
 
 fn run() -> Result<String, String> {
+    #[cfg(windows)]
+    if let Some(instance) = std::env::var_os("DEVSHELL_WORKER_INTERNAL_PROCESS_HOST") {
+        let instance = InstanceName::parse(&instance.to_string_lossy())?;
+        capability::process::host::serve(&instance)?;
+        return Ok(String::new());
+    }
     #[cfg(any(unix, windows))]
     if let Some(result) = tool::tmux::transcript::try_run_transcript_logger() {
         result?;

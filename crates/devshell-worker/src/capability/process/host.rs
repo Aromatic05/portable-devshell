@@ -23,7 +23,9 @@ use crate::instance::sandbox::{SecurityPolicy, build_security_policy};
 use crate::instance::storage::{InstanceLock, InstancePaths, ensure_dir, ensure_file_mode};
 use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcListener, LocalIpcStream};
 
+use super::capture::CaptureBudget;
 use super::managed::{ManagedProcess, SpawnSpec};
+use super::output::OutputChannel;
 use super::shell::ShellRuntime;
 
 use super::protocol::{Handshake, PROTOCOL_VERSION, execution_identity};
@@ -46,6 +48,10 @@ struct SpawnInput {
     stdin: Option<String>,
     #[serde(default)]
     keep_stdin: bool,
+    id: Option<String>,
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    prepared_env: bool,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +68,15 @@ struct ReadInput {
     from_seq: u64,
     #[serde(default)]
     wait_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CaptureInput {
+    id: String,
+    channel: OutputChannel,
+    offset: usize,
+    limit: usize,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +109,8 @@ struct Host {
     instance_root: PathBuf,
     stopped: AtomicBool,
     handshake: Handshake,
+    capture_root: PathBuf,
+    capture_budget: Arc<CaptureBudget>,
 }
 
 impl Host {
@@ -152,7 +169,9 @@ impl Host {
             }
             None
         };
-        if let Some(execution) = self.execution.as_ref() {
+        if !input.prepared_env
+            && let Some(execution) = self.execution.as_ref()
+        {
             let mut env = execution
                 .environment(cwd.access_path())
                 .map_err(|error| RpcError::new("execution.providerFailed", error))?;
@@ -184,7 +203,21 @@ impl Host {
                 .expect("finished process index");
             registry.processes.remove(&id);
         }
-        let id = format!("process-{}", Uuid::new_v4());
+        let id = input
+            .id
+            .unwrap_or_else(|| format!("process-{}", Uuid::new_v4()));
+        if !id
+            .strip_prefix("process-")
+            .is_some_and(|id| Uuid::parse_str(id).is_ok())
+        {
+            return Err(invalid("invalid process id"));
+        }
+        if registry.processes.contains_key(&id) {
+            return Err(RpcError::new(
+                "process.duplicateId",
+                "process id already exists",
+            ));
+        }
         let process = ManagedProcess::spawn(
             id.clone(),
             SpawnSpec {
@@ -196,6 +229,10 @@ impl Host {
                 dimensions,
                 stdin: input.stdin,
                 keep_stdin: input.keep_stdin,
+                workspace: input.workspace.map(|_| workspace),
+                timeout_ms: input.timeout_ms,
+                capture_root: &self.capture_root,
+                capture_budget: Arc::clone(&self.capture_budget),
             },
         )?;
         let descriptor = process.descriptor();
@@ -259,6 +296,14 @@ impl Host {
                         .read(input.from_seq, Duration::from_millis(input.wait_ms))?,
                 )
             }
+            "process.v1.capture" => {
+                let input: CaptureInput = parse(request)?;
+                serialize(self.require(&input.id)?.capture(
+                    input.channel,
+                    input.offset,
+                    input.limit,
+                )?)
+            }
             "process.v1.input" => {
                 let input: WriteInput = parse(request)?;
                 let data = STANDARD
@@ -280,6 +325,15 @@ impl Host {
                 self.require(&input.id)?.resize(input.cols, input.rows)?;
                 Ok(json!({ "resized": true }))
             }
+            "process.v1.describe" => {
+                let input: Target = parse(request)?;
+                serialize(self.require(&input.id)?.descriptor())
+            }
+            "process.v1.closeInput" => {
+                let input: Target = parse(request)?;
+                self.require(&input.id)?.close_input()?;
+                Ok(json!({"closed": true}))
+            }
             "process.v1.kill" => {
                 let input: Target = parse(request)?;
                 self.require(&input.id)?.kill()?;
@@ -290,6 +344,42 @@ impl Host {
                 Ok(json!({ "retired": true }))
             }
             _ => Err(RpcError::new("rpc.methodNotFound", &request.method)),
+        }
+    }
+
+    fn stream_viewport(
+        &self,
+        mut channel: LocalIpcStream,
+        id: &str,
+        process: Arc<ManagedProcess>,
+    ) -> Result<(), String> {
+        channel
+            .set_request_timeout(Duration::from_secs(3))
+            .map_err(|error| error.to_string())?;
+        let mut revision = None;
+        loop {
+            let (next, descriptor, screen) = match process.viewport(revision) {
+                Ok(value) => value,
+                Err(error) => {
+                    return codec::write_response(
+                        &mut channel,
+                        &RpcResponse::failure(id.to_owned(), error),
+                    );
+                }
+            };
+            let exited = descriptor.state != "running";
+            // Emit periodic heartbeats even without output so an idle,
+            // disconnected subscriber does not retain a server thread.
+            let payload = if revision == Some(next) {
+                json!({"process": descriptor})
+            } else {
+                json!({"process": descriptor, "screen": screen})
+            };
+            codec::write_response(&mut channel, &RpcResponse::success(id.to_owned(), payload))?;
+            if exited {
+                return Ok(());
+            }
+            revision = Some(next);
         }
     }
 
@@ -317,6 +407,18 @@ impl Host {
             .and_then(Value::as_str)
             == Some(self.handshake.generation.as_str())
         {
+            if request.method == "process.v1.subscribe" {
+                let result = parse::<Target>(&request).and_then(|input| self.require(&input.id));
+                match result {
+                    Ok(process) => return self.stream_viewport(channel, &request.id, process),
+                    Err(error) => {
+                        return codec::write_response(
+                            &mut channel,
+                            &RpcResponse::failure(request.id, error),
+                        );
+                    }
+                }
+            }
             self.dispatch(&request)
         } else {
             Err(RpcError::new(
@@ -382,6 +484,8 @@ pub(crate) fn serve(instance: &InstanceName) -> Result<(), String> {
         policy: build_security_policy(security_mode.clone()),
         instance_root: paths.instance_root,
         stopped: AtomicBool::new(false),
+        capture_root: paths.state_dir.clone(),
+        capture_budget: Arc::new(CaptureBudget::default()),
         handshake: Handshake {
             version: PROTOCOL_VERSION,
             pid: std::process::id(),

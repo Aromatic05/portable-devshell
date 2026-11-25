@@ -9,7 +9,7 @@ export interface WorkerInstanceBashToolResult {
     stdout: string;
     stdoutBytes: number;
     termSignal?: number;
-    termination?: "exited" | "signaled" | "timeout";
+    termination?: "exited" | "signaled" | "timeout" | "running";
 }
 
 export function asCommandResult(error: unknown): CommandResult | undefined {
@@ -112,7 +112,8 @@ export function asBashToolResult(
             : {}),
         ...(termination === "exited" ||
         termination === "signaled" ||
-        termination === "timeout"
+        termination === "timeout" ||
+        termination === "running"
             ? { termination }
             : {}),
     };

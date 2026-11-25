@@ -95,11 +95,12 @@ fn detect_shell_runtime() -> Result<ShellRuntime, ToolError> {
     ))
 }
 
-const RESERVED_ENV: [&str; 4] = [
+const RESERVED_ENV: [&str; 5] = [
     crate::instance::runtime::INTERNAL_INSTANCE_ENV,
     crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV,
     crate::capability::execution::CONFIG_ENV,
     "DEVSHELL_WORKER_INTERNAL_WORKSPACE",
+    "DEVSHELL_WORKER_INTERNAL_PROCESS_HOST",
 ];
 
 /// The managed command's executable, arguments and environment are prepared

@@ -606,6 +606,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "clap",
+ "crossterm",
  "diffy",
  "filetime",
  "globset",

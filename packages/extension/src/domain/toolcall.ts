@@ -22,7 +22,7 @@ export type ToolCallStatus =
     | "queueTimeout"
     | "cancelled";
 export type ToolCallFailureStage = "postExecution" | "outboundHook";
-export type ToolTermination = "exited" | "signaled" | "timeout";
+export type ToolTermination = "exited" | "signaled" | "timeout" | "running";
 
 export interface ToolCallContext {
     ctxId?: string;

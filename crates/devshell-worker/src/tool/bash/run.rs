@@ -10,17 +10,17 @@ use std::time::{Duration, Instant};
 use crate::capability::artifact::result_path::tool_result_path;
 use crate::capability::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::capability::artifact::types::{ArtifactReference, ArtifactStream};
+use crate::capability::process::pipe::spawn_shell;
+use crate::capability::process::shell::ShellRuntime;
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, resolve_existing_target,
 };
 use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::bash::bash_run_name;
-use crate::capability::process::shell::ShellRuntime;
 use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
-use crate::capability::process::pipe::spawn_shell;
-use crate::tool::file::{FileToolState, requested_path};
 #[cfg(unix)]
 use crate::tool::file::observation::{CommandReadPlan, MAX_OUTPUT_BYTES};
+use crate::tool::file::{FileToolState, requested_path};
 use crate::tool::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolProcessGuard,
     ToolProgressEmitter,
@@ -46,12 +46,14 @@ pub struct BashRunTool {
     #[cfg_attr(windows, allow(dead_code))]
     files: Arc<FileToolState>,
     shell: ShellRuntime,
+    instance: crate::instance::InstanceName,
 }
 impl BashRunTool {
     pub fn new(
         artifacts: Arc<ArtifactStore>,
         model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
         files: Arc<FileToolState>,
+        instance: crate::instance::InstanceName,
     ) -> Result<Self, ToolError> {
         Ok(Self {
             name: bash_run_name(),
@@ -59,6 +61,7 @@ impl BashRunTool {
             model_devshell,
             files,
             shell: ShellRuntime::detect()?,
+            instance,
         })
     }
 }
@@ -69,7 +72,7 @@ impl ToolHandler for BashRunTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
-            "Execute short, bounded, non-interactive shell work. For long-running or PTY-oriented work call tmux_run instead. When retained stdout/stderr paths are returned, file_read can retrieve omitted output.",
+            "Execute a shell command. waitMs controls how long to wait; a running command returns a task ID. timeoutMs is an optional hard execution deadline. tty allocates a PTY at startup. Use task_read and task_input to continue. Retained output paths can be read with file_read.",
             [ToolCapability::Execute],
             serde_json::json!({
                 "devshell": { "mcp": {
@@ -83,7 +86,7 @@ impl ToolHandler for BashRunTool {
                         "command": "Shell command. Run devshell help to discover authorized MCP model CLI commands.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                         "stdin": "Omit to send EOF.",
-                        "timeoutMs": "Required timeout in milliseconds."
+                        "timeoutMs": "Optional hard execution deadline.", "waitMs": "Wait before returning a running task ID; does not stop the process.", "tty": "Allocate a PTY at startup."
                     },
                     "title": "Run shell command"
                 }}
@@ -99,7 +102,17 @@ impl ToolHandler for BashRunTool {
                 "command cannot be empty",
             ));
         }
-        let timeout_ms = params.timeout_ms;
+        let requires_persistence = params.timeout_ms.is_none()
+            || params.wait_ms.is_some()
+            || params.tty
+            || params.keep_stdin;
+        let timeout_ms = params.timeout_ms.unwrap_or(MAX_TIMEOUT_MS);
+        if params.wait_ms.is_some_and(|wait| wait > MAX_TIMEOUT_MS) {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "waitMs cannot exceed 100000",
+            ));
+        }
         let max_capture = params
             .max_capture_bytes
             .unwrap_or(DEFAULT_MAX_CAPTURE_BYTES);
@@ -112,7 +125,7 @@ impl ToolHandler for BashRunTool {
         if timeout_ms > MAX_TIMEOUT_MS {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                "timeoutMs cannot exceed 100000; use tmux_run for long-running commands",
+                "timeoutMs cannot exceed 100000",
             ));
         }
         if max_capture > MAX_CAPTURE_BYTES {
@@ -136,9 +149,21 @@ impl ToolHandler for BashRunTool {
             .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
         #[cfg(unix)]
-        let read_plan = if call.stateless { None } else { CommandReadPlan::analyze(&params.command, &cwd.canonical) };
+        let read_plan = if call.stateless {
+            None
+        } else {
+            CommandReadPlan::analyze(&params.command, &cwd.canonical)
+        };
         let execution = crate::capability::execution::ExecutionConfig::from_env()
             .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
+        // The outer launcher still owns daemon-phase containment. Until it
+        // can launch the Host independently, preserve the existing bounded
+        // command path in that environment. Never escape its sandbox.
+        let daemon_sandbox = execution
+            .as_ref()
+            .and_then(|config| config.sandbox.as_ref())
+            .is_some_and(|sandbox| sandbox.phase == "daemon");
+        let hosted = !daemon_sandbox || requires_persistence;
         if let Some(config) = execution.as_ref() {
             let mut effective_env = config
                 .environment(cwd.access_path())
@@ -148,13 +173,38 @@ impl ToolHandler for BashRunTool {
             }
             params.env = effective_env;
         }
+        let task_id = hosted.then(|| format!("process-{}", uuid::Uuid::new_v4()));
         let requested_path = match params.env.get("PATH") {
             Some(Some(value)) => Some(value.as_str()),
             Some(None) => Some(""),
             None => None,
         };
-        if !call.stateless && let Some(environment) = self.model_devshell.environment(&call, None, requested_path) {
+        if !call.stateless
+            && let Some(environment) =
+                self.model_devshell
+                    .environment(&call, task_id.as_deref(), requested_path)
+        {
             environment.inject(&mut params.env);
+        }
+        if let Some(task_id) = task_id {
+            let result = super::hosted::run(
+                &self.instance,
+                &self.artifacts,
+                &call,
+                params,
+                &task_id,
+                max_capture,
+            )?;
+            #[cfg(unix)]
+            if result.termination == BashTermination::Exited
+                && !result.stdout_truncated
+                && !result.stderr_truncated
+                && result.stdout_bytes.saturating_add(result.stderr_bytes) <= MAX_OUTPUT_BYTES
+                && let Some(plan) = read_plan
+            {
+                plan.observe(&call, &self.files, &result.stdout);
+            }
+            return crate::tool::contract::serialize(result);
         }
         let started = Instant::now();
         let mut child = spawn_shell(
@@ -314,6 +364,8 @@ impl ToolHandler for BashRunTool {
             artifact_warnings: (!artifact_warnings.is_empty()).then_some(artifact_warnings),
             duration_ms: started.elapsed().as_millis(),
             termination,
+            task: None,
+            cursor: None,
         })?;
         #[cfg(unix)]
         if !stdout.truncated
@@ -389,15 +441,18 @@ impl Drop for ManagedBashChild {
     }
 }
 
-struct StreamOutput {
-    kept: Vec<u8>,
-    truncated: bool,
-    artifact_draft: Option<ArtifactDraft>,
-    artifact_warning: Option<String>,
+pub(super) struct StreamOutput {
+    pub(super) kept: Vec<u8>,
+    pub(super) truncated: bool,
+    pub(super) artifact_draft: Option<ArtifactDraft>,
+    pub(super) artifact_warning: Option<String>,
 }
 fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolError> {
     if call.stateless && raw.is_none() {
-        return Err(ToolError::new("bash.invalidCwd", "cwd is required in stateless mode"));
+        return Err(ToolError::new(
+            "bash.invalidCwd",
+            "cwd is required in stateless mode",
+        ));
     }
     let requested = requested_path(call, raw.unwrap_or("./"))
         .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
@@ -426,7 +481,7 @@ fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolE
     }
     Ok(resolved)
 }
-fn spawn_reader(
+pub(super) fn spawn_reader(
     mut reader: impl Read + Send + 'static,
     bytes: Arc<AtomicUsize>,
     max: usize,
@@ -487,12 +542,12 @@ fn spawn_reader(
 }
 
 #[derive(Clone, Copy)]
-enum BashProgressStream {
+pub(super) enum BashProgressStream {
     Stdout,
     Stderr,
 }
 
-struct BashProgress {
+pub(super) struct BashProgress {
     emitter: ToolProgressEmitter,
     inner: Mutex<BashProgressState>,
     started: Instant,
@@ -510,7 +565,7 @@ struct BashProgressState {
 }
 
 impl BashProgress {
-    fn new(started: Instant, emitter: ToolProgressEmitter) -> Self {
+    pub(super) fn new(started: Instant, emitter: ToolProgressEmitter) -> Self {
         Self {
             emitter,
             inner: Mutex::new(BashProgressState {
@@ -527,7 +582,7 @@ impl BashProgress {
         }
     }
 
-    fn emit_initial(&self) {
+    pub(super) fn emit_initial(&self) {
         self.emitter.emit(serde_json::json!({
             "durationMs": 0,
             "stderr": "",
@@ -591,7 +646,7 @@ impl BashProgress {
         }
     }
 
-    fn finish(&self) {
+    pub(super) fn finish(&self) {
         let Ok(mut state) = self.inner.lock() else {
             return;
         };
@@ -645,7 +700,7 @@ fn spawn_stdin_writer(
     })
 }
 
-fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
+pub(super) fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
     if json_string_upper_bound(&output.kept) <= MAX_INLINE_JSON_BYTES_PER_STREAM {
         return;
     }
@@ -662,7 +717,7 @@ fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
     output.truncated = true;
 }
 
-fn render_inline_stream(output: &StreamOutput) -> String {
+pub(super) fn render_inline_stream(output: &StreamOutput) -> String {
     if !output.truncated {
         return String::from_utf8_lossy(&output.kept).to_string();
     }
@@ -697,7 +752,7 @@ fn json_string_upper_bound(bytes: &[u8]) -> usize {
     body.saturating_add(2)
 }
 
-fn begin_artifact(
+pub(super) fn begin_artifact(
     store: &ArtifactStore,
     stream: ArtifactStream,
 ) -> (Option<ArtifactDraft>, Option<String>) {
@@ -707,7 +762,7 @@ fn begin_artifact(
     }
 }
 
-fn persist_artifact(
+pub(super) fn persist_artifact(
     store: &ArtifactStore,
     output: &mut StreamOutput,
     stream_name: &str,

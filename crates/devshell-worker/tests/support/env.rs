@@ -182,12 +182,7 @@ impl TestEnv {
         self.rpc_with_command(self.std_command(), instance, port, packet)
     }
 
-    pub fn rpc_without_runtime_dir(
-        &self,
-        instance: &str,
-        port: &str,
-        packet: &Value,
-    ) -> Value {
+    pub fn rpc_without_runtime_dir(&self, instance: &str, port: &str, packet: &Value) -> Value {
         self.rpc_with_command(
             self.std_command_without_runtime_dir(),
             instance,
@@ -264,6 +259,10 @@ impl TestEnv {
                 std::process::Command::new(assert_cmd::cargo::cargo_bin("devshell-worker"));
             self.configure_std_command(&mut command);
             let _ = command.args(["stop", "--instance", &instance]).output();
+            if entry.path().join("state/process-host.lock").exists() {
+                let mut command = self.std_command();
+                let _ = command.args(["retire", "--instance", &instance]).output();
+            }
         }
     }
 

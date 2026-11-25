@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -9,6 +10,7 @@ use crate::capability::execution::ExecutionConfig;
 use crate::capability::rpc::error::RpcError;
 use crate::instance::sandbox::path::ResolvedPath;
 
+use super::capture::{CaptureBudget, CapturePage, Captures};
 use super::child::{ExitLatch, reap, wait_until_exit};
 use super::output::{OutputChannel, OutputJournal, OutputPage, READ_CHUNK};
 use super::pty::{TerminalChild, spawn_managed};
@@ -24,6 +26,10 @@ pub(super) struct SpawnSpec<'a> {
     pub dimensions: Option<(u16, u16)>,
     pub stdin: Option<String>,
     pub keep_stdin: bool,
+    pub workspace: Option<std::path::PathBuf>,
+    pub timeout_ms: Option<u64>,
+    pub capture_root: &'a std::path::Path,
+    pub capture_budget: Arc<CaptureBudget>,
 }
 
 #[derive(Clone, Serialize)]
@@ -40,6 +46,8 @@ pub(super) struct Descriptor {
     pub tty: bool,
     pub state: &'static str,
     pub latest_seq: u64,
+    pub workspace: Option<std::path::PathBuf>,
+    pub timed_out: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit: Option<Exit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,10 +95,11 @@ impl Control {
     }
 }
 
-#[derive(Default)]
 struct State {
     output: OutputJournal,
+    captures: Captures,
     screen: Option<TerminalScreen>,
+    revision: u64,
     completion: Option<Result<Exit, String>>,
 }
 
@@ -98,13 +107,17 @@ pub(super) struct ManagedProcess {
     id: String,
     tty: bool,
     control: Control,
-    writer: Mutex<Option<Writer>>,
+    input: Mutex<Option<SyncSender<Vec<u8>>>>,
+    workspace: Option<std::path::PathBuf>,
+    timed_out: std::sync::atomic::AtomicBool,
     state: Mutex<State>,
     changed: Condvar,
 }
 
 impl ManagedProcess {
     pub fn spawn(id: String, spec: SpawnSpec<'_>) -> Result<Arc<Self>, RpcError> {
+        let captures = Captures::new(spec.capture_root, Arc::clone(&spec.capture_budget))
+            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))?;
         let screen = spec
             .dimensions
             .map(|(cols, rows)| TerminalScreen::new(cols, rows))
@@ -162,16 +175,42 @@ impl ManagedProcess {
             };
 
         let tty = spec.dimensions.is_some();
+        let keep_stdin = tty || spec.keep_stdin;
+        let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
+        // Initial input enters the same ordered queue as later input. The
+        // request thread never waits for a blocked child to consume bytes.
+        if let Some(stdin) = spec.stdin {
+            input_tx
+                .try_send(stdin.into_bytes())
+                .expect("empty input queue");
+        }
         let process = Arc::new(Self {
             id,
             tty,
             control,
-            writer: Mutex::new(Some(writer)),
+            input: Mutex::new(if keep_stdin { Some(input_tx) } else { None }),
+            workspace: spec.workspace,
+            timed_out: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(State {
                 screen,
-                ..State::default()
+                captures,
+                output: OutputJournal::default(),
+                revision: 0,
+                completion: None,
             }),
             changed: Condvar::new(),
+        });
+        std::thread::spawn(move || {
+            let mut writer = writer;
+            while let Ok(bytes) = input_rx.recv() {
+                if writer
+                    .write_all(&bytes)
+                    .and_then(|_| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
         });
         let readers: Vec<_> = outputs
             .into_iter()
@@ -187,11 +226,19 @@ impl ManagedProcess {
                                     .state
                                     .lock()
                                     .map_err(|_| "process state lock poisoned")?;
-                                if let Some(screen) = state.screen.as_mut() {
-                                    screen.process(&bytes[..n]);
-                                }
+                                let replies = if let Some(screen) = state.screen.as_mut() {
+                                    screen.process(&bytes[..n])
+                                } else {
+                                    Vec::new()
+                                };
+                                state.captures.append(channel, &bytes[..n]);
                                 state.output.append(channel, &bytes[..n]);
+                                state.revision += 1;
                                 process.changed.notify_all();
+                                drop(state);
+                                if !replies.is_empty() {
+                                    process.input(&replies).map_err(|error| error.message)?;
+                                }
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
                                 continue;
@@ -216,8 +263,8 @@ impl ManagedProcess {
                 .wait()
                 .map(|(exit_code, signal)| Exit { exit_code, signal });
             // The input endpoint no longer belongs to a live process.
-            if let Ok(mut writer) = observed.writer.lock() {
-                writer.take();
+            if let Ok(mut input) = observed.input.lock() {
+                input.take();
             }
             // Publish terminal status only after both output streams have
             // drained, so an exited result includes the command's final bytes.
@@ -238,32 +285,25 @@ impl ManagedProcess {
                 Some(error) => Err(error),
                 None => exit,
             });
+            state.revision += 1;
             observed.changed.notify_all();
         });
 
-        // The caller can read and kill while the initial stdin is being
-        // delivered. For an ordinary pipe command, omission delivers EOF.
-        let keep_stdin = spec.keep_stdin;
-        if let Some(stdin) = spec.stdin {
-            let target = Arc::clone(&process);
-            let (ready, started) = std::sync::mpsc::sync_channel(0);
+        if let Some(timeout_ms) = spec.timeout_ms {
+            let target = Arc::downgrade(&process);
             std::thread::spawn(move || {
-                let mut writer = target.writer.lock().expect("process stdin lock poisoned");
-                let _ = ready.send(());
-                if let Some(writer) = writer.as_mut() {
-                    let _ = writer
-                        .write_all(stdin.as_bytes())
-                        .and_then(|_| writer.flush());
-                }
-                if !tty && !keep_stdin {
-                    writer.take();
+                if let Some(target) = target.upgrade() {
+                    if target
+                        .wait_done(Duration::from_millis(timeout_ms))
+                        .is_ok_and(|done| !done)
+                    {
+                        target
+                            .timed_out
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        let _ = target.kill();
+                    }
                 }
             });
-            started
-                .recv()
-                .map_err(|error| RpcError::new("process.ioFailed", error.to_string()))?;
-        } else if !tty && !keep_stdin {
-            process.writer.lock().map_err(lock_error)?.take();
         }
         Ok(process)
     }
@@ -283,6 +323,8 @@ impl ManagedProcess {
             tty: self.tty,
             state: status,
             latest_seq: state.output.latest_seq(),
+            workspace: self.workspace.clone(),
+            timed_out: self.timed_out.load(std::sync::atomic::Ordering::Acquire),
             exit,
             error,
         }
@@ -302,6 +344,20 @@ impl ManagedProcess {
         })
     }
 
+    pub fn capture(
+        &self,
+        channel: OutputChannel,
+        offset: usize,
+        limit: usize,
+    ) -> Result<CapturePage, RpcError> {
+        self.state
+            .lock()
+            .map_err(lock_error)?
+            .captures
+            .read(channel, offset, limit)
+            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))
+    }
+
     pub fn wait_done(&self, timeout: Duration) -> Result<bool, RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         let (state, _) = self
@@ -312,14 +368,51 @@ impl ManagedProcess {
     }
 
     pub fn input(&self, data: &[u8]) -> Result<(), RpcError> {
-        let mut writer = self.writer.lock().map_err(lock_error)?;
-        let writer = writer
-            .as_mut()
+        let input = self.input.lock().map_err(lock_error)?;
+        let input = input
+            .as_ref()
             .ok_or_else(|| RpcError::new("process.stdinClosed", "stdin is closed"))?;
-        writer
-            .write_all(data)
-            .and_then(|_| writer.flush())
-            .map_err(io_error)
+        input.try_send(data.to_vec()).map_err(|error| match error {
+            TrySendError::Full(_) => {
+                RpcError::new("process.inputBusy", "terminal input queue is full")
+            }
+            TrySendError::Disconnected(_) => {
+                RpcError::new("process.stdinClosed", "stdin is closed")
+            }
+        })
+    }
+
+    pub fn close_input(&self) -> Result<(), RpcError> {
+        if self.tty {
+            return Err(RpcError::new(
+                "process.notPipe",
+                "send terminal EOF using the terminal input sequence",
+            ));
+        }
+        self.input.lock().map_err(lock_error)?.take();
+        Ok(())
+    }
+
+    pub fn viewport(
+        &self,
+        revision: Option<u64>,
+    ) -> Result<(u64, Descriptor, ScreenSnapshot), RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| {
+                state.completion.is_none() && revision == Some(state.revision)
+            })
+            .map_err(lock_error)?;
+        let screen = state
+            .screen
+            .as_ref()
+            .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
+        Ok((
+            state.revision,
+            self.describe(&state),
+            screen.snapshot(state.output.latest_seq()),
+        ))
     }
 
     pub fn inspect(&self) -> Result<ScreenSnapshot, RpcError> {
@@ -341,7 +434,10 @@ impl ManagedProcess {
         self.control
             .resize(cols, rows)
             .map_err(|error| RpcError::new("process.resizeFailed", error))?;
-        screen.resize(cols, rows)
+        screen.resize(cols, rows)?;
+        state.revision += 1;
+        self.changed.notify_all();
+        Ok(())
     }
 
     pub fn kill(&self) -> Result<(), RpcError> {
@@ -353,8 +449,4 @@ impl ManagedProcess {
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> RpcError {
     RpcError::new("process.internal", "process state lock poisoned")
-}
-
-fn io_error(error: std::io::Error) -> RpcError {
-    RpcError::new("process.ioFailed", error.to_string())
 }

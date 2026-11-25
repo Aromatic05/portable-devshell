@@ -18,9 +18,18 @@ pub struct BashRunParams {
     #[serde(default)]
     /// Standard input text. Omit to close stdin immediately and deliver EOF.
     pub stdin: Option<String>,
-    /// Required command timeout in milliseconds. Range: 1..=100000.
+    /// Optional hard execution deadline in milliseconds.
     #[schemars(range(min = 1, max = 100000))]
-    pub timeout_ms: u64,
+    pub timeout_ms: Option<u64>,
+    /// Time to wait for the command before returning a running task ID.
+    #[schemars(range(min = 0, max = 100000))]
+    pub wait_ms: Option<u64>,
+    /// Allocate a PTY at process creation.
+    #[serde(default)]
+    pub tty: bool,
+    /// Keep pipe stdin open for later task_input.
+    #[serde(default)]
+    pub keep_stdin: bool,
     #[serde(default)]
     /// Maximum captured bytes per output stream. Defaults to 4194304.
     #[schemars(range(min = 1, max = 16777216))]
@@ -58,6 +67,10 @@ pub struct BashRunOutput {
     pub artifact_warnings: Option<Vec<String>>,
     pub duration_ms: u128,
     pub termination: BashTermination,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<super::hosted::TaskDescriptor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<super::hosted::TaskCursor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
@@ -66,4 +79,5 @@ pub enum BashTermination {
     Exited,
     Signaled,
     Timeout,
+    Running,
 }

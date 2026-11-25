@@ -179,7 +179,8 @@ impl RpcRouter {
             }
             if !matches!(request.method.as_str(),
                 "bash_run" | "file_read" | "file_edit" | "file_glob" | "file_grep"
-                | "tmux_run" | "tmux_read" | "tmux_input" | "tmux_inspect" | "tmux_manage") {
+                | "tmux_run" | "tmux_read" | "tmux_input" | "tmux_inspect" | "tmux_manage"
+                | "task_read" | "task_input" | "terminal_inspect" | "terminal_manage") {
                 return Err(RpcError::new("rpc.methodNotFound", "Tool is not available in stateless mode."));
             }
             // The tools still share a Worker call type. The instance root is

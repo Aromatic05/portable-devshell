@@ -27,9 +27,11 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
         hints.push(
             errorHint(
                 "bash.timeout",
-                "Command timed out; use tmux_run for long tasks.",
+                "The execution deadline terminated the command. Use waitMs to return while a long task keeps running.",
             ),
         );
+    } else if (termination === "running") {
+        hints.push(diagnosticHint("bash.taskRunning", "Continue with task_read using the returned task ID and cursor; the process is still running."));
     } else if (termination === "signaled") {
         hints.push(
             errorHint(

@@ -13,7 +13,7 @@ type ToolCallStatus =
     | "queueTimeout"
     | "cancelled";
 type ToolCallFailureStage = "postExecution" | "outboundHook";
-type ToolTermination = "exited" | "signaled" | "timeout";
+type ToolTermination = "exited" | "signaled" | "timeout" | "running";
 
 export interface ToolDefinition {
     _meta?: JsonValue;

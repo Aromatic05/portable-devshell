@@ -8,6 +8,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -61,7 +62,7 @@ impl LocalIpcListener {
             .lock()
             .map_err(|_| Error::other("named pipe listener lock poisoned"))?;
         match accepted.try_recv() {
-            Ok(Ok(inner)) => Ok(LocalIpcStream { inner }),
+            Ok(Ok(inner)) => Ok(LocalIpcStream { inner, read_timeout_ms: AtomicU64::new(0) }),
             Ok(Err(error)) => Err(error),
             Err(TryRecvError::Empty) => Err(Error::new(
                 ErrorKind::WouldBlock,
@@ -77,6 +78,7 @@ impl LocalIpcListener {
 
 pub struct LocalIpcStream {
     inner: File,
+    read_timeout_ms: AtomicU64,
 }
 
 impl LocalIpcStream {
@@ -88,7 +90,7 @@ impl LocalIpcStream {
         let deadline = Instant::now() + timeout;
         loop {
             match OpenOptions::new().read(true).write(true).open(path) {
-                Ok(inner) => return Ok(Self { inner }),
+                Ok(inner) => return Ok(Self { inner, read_timeout_ms: AtomicU64::new(0) }),
                 Err(error)
                     if matches!(
                         error.raw_os_error(),
@@ -107,6 +109,7 @@ impl LocalIpcStream {
     pub fn try_clone(&self) -> IoResult<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
+            read_timeout_ms: AtomicU64::new(self.read_timeout_ms.load(Ordering::Relaxed)),
         })
     }
 
@@ -114,7 +117,8 @@ impl LocalIpcStream {
         Ok(())
     }
 
-    pub fn set_request_timeout(&self, _timeout: Duration) -> IoResult<()> {
+    pub fn set_request_timeout(&self, timeout: Duration) -> IoResult<()> {
+        self.read_timeout_ms.store(timeout.as_millis().clamp(1, u64::MAX as u128) as u64, Ordering::Relaxed);
         Ok(())
     }
 
@@ -137,11 +141,10 @@ impl LocalIpcStream {
             if succeeded == 0 {
                 return Err(Error::last_os_error());
             }
+            // Wait for the header only. The payload may exceed the pipe's
+            // buffer; reading it incrementally lets the writer make progress.
             if bytes_read == header.len() as u32 {
-                let payload_length = u32::from_be_bytes(header) as u64;
-                if bytes_available as u64 >= header.len() as u64 + payload_length {
-                    return Ok(());
-                }
+                return Ok(());
             }
             if Instant::now() >= deadline {
                 return Err(Error::new(
@@ -168,6 +171,8 @@ impl Read for LocalIpcStream {
         if buffer.is_empty() {
             return Ok(0);
         }
+        let timeout = self.read_timeout_ms.load(Ordering::Relaxed);
+        let started = Instant::now();
         loop {
             let mut available = 0_u32;
             let succeeded = unsafe {
@@ -196,6 +201,9 @@ impl Read for LocalIpcStream {
             if available != 0 {
                 let readable = buffer.len().min(available as usize);
                 return self.inner.read(&mut buffer[..readable]);
+            }
+            if timeout != 0 && started.elapsed() >= Duration::from_millis(timeout) {
+                return Err(Error::new(ErrorKind::TimedOut, "named pipe read timed out"));
             }
             thread::sleep(Duration::from_millis(1));
         }

@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(super) const READ_CHUNK: usize = 16 * 1024;
 const RETAIN_FRAMES: usize = 4096;
 const RETAIN_BYTES: usize = 4 * 1024 * 1024;
 const PAGE_BYTES: usize = 256 * 1024;
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum OutputChannel {
     Stdout,

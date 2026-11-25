@@ -1,6 +1,8 @@
+mod capture;
 pub mod child;
 pub(crate) mod client;
 pub(crate) mod host;
+mod launcher;
 mod managed;
 mod output;
 pub mod pipe;

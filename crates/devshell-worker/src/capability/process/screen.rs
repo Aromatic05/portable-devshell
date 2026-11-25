@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::capability::rpc::error::RpcError;
 
 pub(super) struct TerminalScreen {
-    parser: vt100::Parser,
+    parser: vt100::Parser<QueryReplies>,
 }
 
 #[derive(Serialize)]
@@ -31,12 +31,13 @@ impl TerminalScreen {
         Ok(Self {
             // The journal already owns the output history; keep only the
             // terminal's visible screen and its native alternate grid here.
-            parser: vt100::Parser::new(rows, cols, 0),
+            parser: vt100::Parser::new_with_callbacks(rows, cols, 0, QueryReplies::default()),
         })
     }
 
-    pub fn process(&mut self, bytes: &[u8]) {
+    pub fn process(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.parser.process(bytes);
+        std::mem::take(&mut self.parser.callbacks_mut().0)
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), RpcError> {
@@ -58,6 +59,41 @@ impl TerminalScreen {
             alternate_screen: screen.alternate_screen(),
             text: screen.contents(),
             formatted: screen.state_formatted(),
+        }
+    }
+}
+
+/// Only the terminal emulator replies to device status and attributes.
+#[derive(Default)]
+struct QueryReplies(Vec<u8>);
+
+impl vt100::Callbacks for QueryReplies {
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        i1: Option<u8>,
+        i2: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if i2.is_some() {
+            return;
+        }
+        let parameter = match params {
+            [value] if value.len() == 1 => Some(value[0]),
+            [] => Some(0),
+            _ => None,
+        };
+        match (i1, parameter, command) {
+            (None, Some(5), 'n') => self.0.extend_from_slice(b"\x1b[0n"),
+            (None, Some(6), 'n') => {
+                let (row, col) = screen.cursor_position();
+                self.0
+                    .extend_from_slice(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes());
+            }
+            (None, Some(0), 'c') => self.0.extend_from_slice(b"\x1b[?1;2c"),
+            (Some(b'>'), Some(0), 'c') => self.0.extend_from_slice(b"\x1b[>0;0;0c"),
+            _ => {}
         }
     }
 }

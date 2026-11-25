@@ -1,3 +1,4 @@
+pub(crate) mod hosted;
 pub mod model;
 pub mod run;
 
