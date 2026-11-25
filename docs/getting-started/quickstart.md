@@ -140,7 +140,7 @@ environ_info(workspace=/absolute/path/on/worker)
 
 `openai-session` 把内部 `ctxId` 隐藏在 model-facing schema 之外；`explicit` Context mode 则让通用 MCP client 显式携带它。详见 [Context](../concepts/context.md)。
 
-使用 `/local-pc/mcp/stateless` 时跳过这一步，直接调用 `bash_run`、`file_read` 或 `file_edit`；路径必须是 Worker 绝对路径，`bash_run.cwd` 必填。该入口不提供 `tmux_run` 或 MCP App。
+使用 `/local-pc/mcp/stateless` 时跳过这一步，直接调用全部 10 个 Bash、File、Tmux 基础工具；路径必须是 Worker 绝对路径，`bash_run`、`tmux_run` 及创建 pane 时的 `cwd` 必填。该入口不提供 MCP App 或 Context 功能。
 
 ## 7. 验证长任务
 

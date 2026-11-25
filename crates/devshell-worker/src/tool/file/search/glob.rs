@@ -59,6 +59,9 @@ impl ToolHandler for FileGlobTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
+        if call.stateless {
+            crate::tool::file::authorize(&call, crate::instance::sandbox::path::PathNamespace::Absolute, false)?;
+        }
         let input: FileGlobInput = call.parse_params()?;
         let (mut continuation, source_cursor) = if let Some(cursor) = input.cursor {
             if input.patterns.is_some()

@@ -144,9 +144,29 @@ impl TmuxBackend {
         runtime: &WorkerRuntimeContext,
         workspace: &Path,
     ) -> Result<Self, ToolError> {
-        let workspace_key = workspace_key(&instance_paths.instance_root, workspace);
+        Self::new_scoped(instance_paths, socket_paths, runtime, workspace, false)
+    }
+
+    pub fn new_stateless(
+        instance_paths: &InstancePaths,
+        socket_paths: &EndpointPaths,
+        runtime: &WorkerRuntimeContext,
+    ) -> Result<Self, ToolError> {
+        Self::new_scoped(instance_paths, socket_paths, runtime, &instance_paths.instance_root, true)
+    }
+
+    fn new_scoped(
+        instance_paths: &InstancePaths,
+        socket_paths: &EndpointPaths,
+        runtime: &WorkerRuntimeContext,
+        workspace: &Path,
+        stateless: bool,
+    ) -> Result<Self, ToolError> {
+        // A relative scope discriminator cannot be an actual absolute workspace.
+        let scope = if stateless { stateless_scope() } else { workspace };
+        let workspace_key = workspace_key(&instance_paths.instance_root, scope);
         let (root, socket) =
-            workspace_storage(instance_paths, socket_paths, workspace, &workspace_key)?;
+            workspace_storage(instance_paths, socket_paths, scope, &workspace_key)?;
         #[cfg(windows)]
         let psmux_data_dir = instance_paths.instance_root.join("tmux").join("psmux");
         let shell_dir = root.join("shell");
@@ -162,7 +182,9 @@ impl TmuxBackend {
         for path in [&panes_dir, &psmux_data_dir] {
             ensure_dir(path, 0o700).map_err(|error| ToolError::new("tmux.storageFailed", error))?;
         }
-        persist_workspace(&root, workspace)?;
+        if !stateless {
+            persist_workspace(&root, workspace)?;
+        }
         Ok(Self {
             instance_root: instance_paths.instance_root.clone(),
             instance: runtime.instance.as_str().to_string(),
@@ -194,9 +216,13 @@ impl TmuxBackend {
             Err(error) => return Err(storage_error(error)),
         };
         let mut workspaces = Vec::new();
+        let stateless_key = workspace_key(&instance_paths.instance_root, stateless_scope());
         for entry in entries {
             let entry = entry.map_err(storage_error)?;
             if !entry.file_type().map_err(storage_error)?.is_dir() {
+                continue;
+            }
+            if entry.file_name().to_str() == Some(stateless_key.as_str()) {
                 continue;
             }
             let path = entry.path().join("workspace.json");
@@ -1481,6 +1507,10 @@ pub fn validate_pane_name(name: &str) -> Result<(), ToolError> {
         ));
     }
     Ok(())
+}
+
+fn stateless_scope() -> &'static Path {
+    Path::new("stateless")
 }
 
 fn workspace_key(instance_root: &Path, workspace: &Path) -> String {

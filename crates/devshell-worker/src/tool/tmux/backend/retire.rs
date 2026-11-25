@@ -95,6 +95,9 @@ fn socket_candidates(
     // Never enumerate another HOME's sockets in a shared runtime directory or /tmp.
     let mut sockets = HashSet::new();
     sockets.insert(socket_paths.tmux_socket_file.clone());
+    let scope = super::stateless_scope();
+    let key = super::workspace_key(&instance_paths.instance_root, scope);
+    sockets.insert(super::workspace_socket(socket_paths, &instance_paths.instance_root, scope, &key));
     for workspace in
         super::TmuxBackend::discover_workspaces(instance_paths).map_err(|error| error.message)?
     {

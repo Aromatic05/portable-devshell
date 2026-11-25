@@ -11,9 +11,8 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::instance::sandbox::path::{
     ResolvedDirectory, ResolvedMetadata, ResolvedPath, normalize_requested_path,
-    parse_requested_path,
 };
-use crate::tool::file::{authorize, resolve_existing};
+use crate::tool::file::{authorize, requested_path, resolve_existing};
 use crate::tool::{ToolCall, ToolError};
 
 #[derive(Clone)]
@@ -82,7 +81,10 @@ impl DiscoveryCursor {
         let mut pending = VecDeque::with_capacity(specs.len());
         for spec in specs {
             call.check_cancelled()?;
-            let spec = normalize_requested_path(spec)?;
+            #[cfg(windows)]
+            let spec = spec.replace('\\', "/");
+            let spec = normalize_requested_path(&spec)?;
+            requested_path(call, &spec)?;
             pending.push_back(prepare_source(call, &spec, hidden, gitignore, max_depth)?);
         }
         Ok(Self {
@@ -170,7 +172,7 @@ fn prepare_glob(
     gitignore: bool,
     max_depth: Option<usize>,
 ) -> Result<DiscoverySource, ToolError> {
-    let requested = parse_requested_path(spec)?;
+    let requested = requested_path(call, spec)?;
     authorize(call, requested.namespace, false)?;
     let wildcard = spec
         .find(['*', '?', '['])
@@ -180,6 +182,8 @@ fn prepare_glob(
         .unwrap_or(if spec.starts_with("./") { 1 } else { 0 });
     let root_raw = if slash <= 1 && spec.starts_with("./") {
         "./"
+    } else if slash == 0 || cfg!(windows) && slash == 2 && spec.as_bytes().get(1) == Some(&b':') {
+        &spec[..slash + 1]
     } else {
         &spec[..slash]
     };

@@ -75,14 +75,17 @@ where
     }
 
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        if call.stateless {
+            call.policy.check_capability(FilesystemCapability::AbsoluteRead).map_err(ToolError::from)?;
+        }
         let params = call.parse_params()?;
         let result =
             crate::tool::contract::serialize((self.operation)(&self.states, &call, params)?)?;
         #[cfg(unix)]
         {
             let tool_name = self.name.as_str();
-            if matches!(tool_name.as_str(), "tmux_run" | "tmux_read") {
-                self.states.state_for(&call.workspace)?.observe_read_output(&call, &tool_name, &result);
+            if !call.stateless && matches!(tool_name.as_str(), "tmux_run" | "tmux_read") {
+                self.states.state_for(&call.workspace, call.stateless)?.observe_read_output(&call, &tool_name, &result);
             }
         }
         Ok(result)
@@ -95,7 +98,7 @@ struct TmuxStateRegistry {
     runtime: WorkerRuntimeContext,
     socket_paths: EndpointPaths,
     files: Arc<FileToolState>,
-    states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
+    states: Mutex<HashMap<(bool, PathBuf), Arc<TmuxState>>>,
 }
 
 impl TmuxStateRegistry {
@@ -116,36 +119,43 @@ impl TmuxStateRegistry {
         }
     }
 
-    fn state_for(&self, workspace: &Path) -> Result<Arc<TmuxState>, ToolError> {
+    fn state_for(&self, workspace: &Path, stateless: bool) -> Result<Arc<TmuxState>, ToolError> {
+        let key = (stateless, workspace.to_path_buf());
         let mut states = self.states.lock().map_err(|_| {
             ToolError::new(
                 "tmux.internalError",
                 "tmux workspace registry lock poisoned",
             )
         })?;
-        if let Some(state) = states.get(workspace) {
+        if let Some(state) = states.get(&key) {
             return Ok(Arc::clone(state));
         }
         let state = Arc::new(TmuxState::new(
-            TmuxBackend::new(
-                &self.instance_paths,
-                &self.socket_paths,
-                &self.runtime,
-                workspace,
-            )?,
+            if stateless {
+                TmuxBackend::new_stateless(&self.instance_paths, &self.socket_paths, &self.runtime)?
+            } else {
+                TmuxBackend::new(&self.instance_paths, &self.socket_paths, &self.runtime, workspace)?
+            },
             Arc::clone(&self.model_devshell),
             Arc::clone(&self.files),
         )?);
         TmuxState::start_reaper(&state);
-        states.insert(workspace.to_path_buf(), Arc::clone(&state));
+        states.insert(key, Arc::clone(&state));
         Ok(state)
     }
 
     fn manage(&self, call: &ToolCall, params: TmuxManageParams) -> Result<TmuxManageOutput, ToolError> {
         call.check_cancelled()?;
         call.policy.check_capability(FilesystemCapability::ProcessExecute).map_err(ToolError::from)?;
+        if call.stateless {
+            if params.scope == Some(TmuxListScope::Workspace)
+                || (params.scope.is_some() && params.command != TmuxManageCommand::List) {
+                return Err(ToolError::new("tool.invalidArguments", "stateless tmux_manage only supports instance scope for list"));
+            }
+            return self.state_for(&call.workspace, true)?.manage(call, params);
+        }
         if params.scope != Some(TmuxListScope::Instance) {
-            return self.state_for(&call.workspace)?.manage(call, params);
+            return self.state_for(&call.workspace, call.stateless)?.manage(call, params);
         }
         if params.command != TmuxManageCommand::List
             || params.name.is_some()
@@ -161,7 +171,7 @@ impl TmuxStateRegistry {
         let mut warnings = Vec::new();
         for workspace in TmuxBackend::discover_workspaces(&self.instance_paths)? {
             call.check_cancelled()?;
-            let listed = self.state_for(&workspace)?.list(call, false, true)?;
+            let listed = self.state_for(&workspace, false)?.list(call, false, true)?;
             result.panes.extend(listed.panes);
             warnings.extend(listed.warnings.unwrap_or_default());
         }
@@ -236,7 +246,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        |states, call, params| states.state_for(&call.workspace)?.run(call, params),
+        |states, call, params| states.state_for(&call.workspace, call.stateless)?.run(call, params),
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
@@ -255,7 +265,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        |states, call, params| states.state_for(&call.workspace)?.input(call, params),
+        |states, call, params| states.state_for(&call.workspace, call.stateless)?.input(call, params),
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
@@ -278,7 +288,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        |states, call, params| states.state_for(&call.workspace)?.read(call, params),
+        |states, call, params| states.state_for(&call.workspace, call.stateless)?.read(call, params),
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
@@ -301,7 +311,7 @@ pub fn register_tools(
             }}
         }),
         Arc::clone(&states),
-        |states, call, params| states.state_for(&call.workspace)?.inspect(call, params),
+        |states, call, params| states.state_for(&call.workspace, call.stateless)?.inspect(call, params),
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),

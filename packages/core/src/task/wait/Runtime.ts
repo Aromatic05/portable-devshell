@@ -32,7 +32,7 @@ export async function rewriteWaitToolCall(
     const { value } = input;
     if (input.direction === "inbound" && value.kind === "call")
         return rewriteInbound(value);
-    if (input.direction === "outbound") {
+    if (input.direction === "outbound" && value.context.contextMode !== "stateless") {
         const targetId = detachedTarget(value);
         if (targetId !== undefined) {
             await wait.detach(detachInput(input.callId, targetId, value));

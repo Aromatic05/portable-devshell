@@ -117,7 +117,7 @@ export class McpEndpointCatalog {
 
     adapt(tool: ToolDefinition): McpTool {
         const stateless = this.#contextSelector.id === "stateless";
-        if (stateless && tool.name === "bash_run") tool = withStatelessCwd(tool);
+        if (stateless && ["bash_run", "tmux_run"].includes(tool.name)) tool = withStatelessCwd(tool);
         const appEnabled = this.#appEnabled();
         const modelTool = appEnabled ? withBootstrapPresentation(
             tool,
@@ -198,11 +198,22 @@ const statelessToolDescriptions: Readonly<Record<string, string>> = {
     bash_run: "Run a shell command in the supplied absolute working directory. Retained output paths can be passed to file_read.",
     file_read: "Read absolute Worker paths or retained bash_run output paths. Use nextSelector to continue a truncated read.",
     file_edit: "Apply one ordered change set using absolute Worker paths. No prior file_read is required; later operations do not execute after a failure.",
+    file_glob: "Locate files and directories by absolute Worker paths or globs. Continue a paged traversal with cursor alone.",
+    file_grep: "Search text across absolute Worker paths, directories or globs. Continue per-file truncation with startLine and traversal pages with cursor alone.",
+    tmux_run: "Start a managed long-running or interactive task in an absolute Worker cwd. wait defaults to nonblock. A block-wait timeout leaves the task running; continue with tmux_read or tmux_input.",
+    tmux_read: "Read or wait for a stateless managed task by task ID.",
+    tmux_input: "Send input to a stateless managed task or persistent pane.",
+    tmux_inspect: "Inspect stateless persistent panes by pane ID or name, or inspect all panes.",
+    tmux_manage: "List, create or close persistent panes and managed tasks in the stateless instance namespace. Create requires an absolute cwd.",
 };
 
 const statelessInputHints: Readonly<Record<string, Record<string, string>>> = {
     bash_run: { cwd: statelessCwdHint, command: "Shell command." },
     file_read: { path: "Absolute Worker file path or a retained bash_run output path." },
+    file_glob: { patterns: "Absolute Worker paths or globs; required without cursor." },
+    file_grep: { paths: "Absolute Worker paths or globs; required without cursor." },
+    tmux_run: { cwd: statelessCwdHint },
+    tmux_manage: { cwd: "Required absolute Worker directory for command=create.", scope: "Omit or use instance for command=list; only stateless panes are listed." },
 };
 
 function isBootstrapTool(name: string): boolean {

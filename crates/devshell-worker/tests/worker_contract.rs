@@ -1660,6 +1660,13 @@ fn stateless_tools_still_enforce_workspace_security() {
         ("file_edit", serde_json::json!({
             "changes": format!("*** Begin Edit\n*** Patch File: {}\n@@\n-original\n+changed\n*** End Edit", outside.display())
         })),
+        ("file_glob", serde_json::json!({"patterns": [outside]})),
+        ("file_grep", serde_json::json!({"paths": [outside], "pattern": "original"})),
+        ("tmux_run", serde_json::json!({"command": "pwd", "cwd": env.home()})),
+        ("tmux_manage", serde_json::json!({"command": "create", "name": "denied", "cwd": env.home()})),
+        ("tmux_read", serde_json::json!({"task": "denied"})),
+        ("tmux_input", serde_json::json!({"task": "denied", "input": "x"})),
+        ("tmux_inspect", serde_json::json!({"panes": "all"})),
     ] {
         let denied = env.rpc(instance, "tool", &serde_json::json!({
             "protocol": "rpc",

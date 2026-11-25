@@ -177,7 +177,9 @@ impl RpcRouter {
             {
                 return Err(RpcError::new("rpc.invalidContext", "Invalid stateless tool context."));
             }
-            if !matches!(request.method.as_str(), "bash_run" | "file_read" | "file_edit") {
+            if !matches!(request.method.as_str(),
+                "bash_run" | "file_read" | "file_edit" | "file_glob" | "file_grep"
+                | "tmux_run" | "tmux_read" | "tmux_input" | "tmux_inspect" | "tmux_manage") {
                 return Err(RpcError::new("rpc.methodNotFound", "Tool is not available in stateless mode."));
             }
             // The tools still share a Worker call type. The instance root is

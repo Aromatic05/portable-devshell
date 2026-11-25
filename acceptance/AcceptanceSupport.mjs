@@ -152,17 +152,22 @@ export async function createAcceptanceFixture() {
         webPort,
         worker,
         workspace,
-        async cleanup() {
+        async cleanup({ retireWorker = false } = {}) {
             runCli(["instance", "stop", "aromatic-pc"], env, {
                 allowFailure: true,
             });
             runCli(["stop"], env, { allowFailure: true });
-            await stopTestspaceTmux({
-                devshellHome: join(home, ".devshell"),
-                instanceName: "aromatic-pc",
-                runtimeDirectory: runtime,
-                workspace,
-            });
+            if (retireWorker) {
+                const retired = spawnSync(worker, ["retire", "--instance", "aromatic-pc"], { env, encoding: "utf8" });
+                assert.equal(retired.status, 0, retired.stderr || retired.error?.message);
+            } else {
+                await stopTestspaceTmux({
+                    devshellHome: join(home, ".devshell"),
+                    instanceName: "aromatic-pc",
+                    runtimeDirectory: runtime,
+                    workspace,
+                });
+            }
             await rm(root, { force: true, recursive: true });
         },
     };

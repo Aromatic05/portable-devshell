@@ -13,15 +13,14 @@ use serde::{Deserialize, Serialize};
 
 use super::warning;
 use crate::tool::ToolCommandEnvironmentProvider;
-use crate::tool::file::FileToolState;
+use crate::tool::file::{FileToolState, requested_path};
 #[cfg(unix)]
 use crate::tool::file::observation::CommandReadPlan;
 #[cfg(unix)]
 use std::num::NonZeroUsize;
 
 use crate::instance::sandbox::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
-    parse_requested_path, resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, resolve_existing_target,
 };
 use crate::tool::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, TmuxBackend};
 use crate::tool::tmux::model::{
@@ -264,7 +263,7 @@ impl TmuxState {
         let line = validate_line(params.line.unwrap_or(DEFAULT_LINE))?;
 
         let task_id = new_task_id();
-        let model_environment = self.model_devshell.environment(call, Some(&task_id), None);
+        let model_environment = if call.stateless { None } else { self.model_devshell.environment(call, Some(&task_id), None) };
         let task_started_at;
         {
             let _structure_guard = self
@@ -512,7 +511,7 @@ impl TmuxState {
                     .structure
                     .lock()
                     .map_err(|_| lock_error("tmux structure"))?;
-                self.backend.ensure_session()?;
+                self.ensure_pane_session(call)?;
                 let mut workspace = self.backend.capture_workspace()?;
                 if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
                     workspace = self.backend.capture_workspace()?;
@@ -626,7 +625,10 @@ impl TmuxState {
             .structure
             .lock()
             .map_err(|_| lock_error("tmux structure"))?;
-        self.backend.ensure_session()?;
+        if call.stateless && all && !self.backend.existing_session()? {
+            return Ok(TmuxPaneOperationOutput { panes: Vec::new(), warnings: None });
+        }
+        self.ensure_pane_session(call)?;
         let mut workspace = self.backend.capture_workspace()?;
         if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
@@ -686,7 +688,7 @@ impl TmuxState {
                 let mut summary = pane_summary(
                     pane,
                     current_task(&tasks, &pane.id),
-                    self.backend.workspace(),
+                    (!call.stateless).then(|| self.backend.workspace()),
                 );
                 if !include_cwd {
                     summary.cwd = None;
@@ -720,7 +722,7 @@ impl TmuxState {
                         "tmux_manage command=list accepts only command and optional scope",
                     ));
                 }
-                self.list(call, true, false).map(Into::into)
+                self.list(call, !call.stateless, call.stateless).map(Into::into)
             }
             TmuxManageCommand::Create => {
                 if params.scope.is_some() || params.task.is_some() || params.pane.is_some() || params.force.is_some() {
@@ -824,7 +826,7 @@ impl TmuxState {
         require_execute(call)?;
         match params {
             TmuxCloseParams::Task(params) => self.close_task(&params.task, params.force),
-            TmuxCloseParams::Pane(params) => self.close_persistent_pane(&params.pane, params.force),
+            TmuxCloseParams::Pane(params) => self.close_persistent_pane(call, &params.pane, params.force),
         }
     }
 
@@ -913,8 +915,19 @@ impl TmuxState {
         })
     }
 
+    fn ensure_pane_session(&self, call: &ToolCall) -> Result<(), ToolError> {
+        if call.stateless {
+            if !self.backend.existing_session()? {
+                return Err(ToolError::new("tmux.paneNotFound", "no stateless terminal exists"));
+            }
+            return Ok(());
+        }
+        self.backend.ensure_session()
+    }
+
     fn close_persistent_pane(
         &self,
+        call: &ToolCall,
         selector: &str,
         force: bool,
     ) -> Result<TmuxCloseOutput, ToolError> {
@@ -922,7 +935,7 @@ impl TmuxState {
             .structure
             .lock()
             .map_err(|_| lock_error("tmux structure"))?;
-        self.backend.ensure_session()?;
+        self.ensure_pane_session(call)?;
         let mut workspace = self.backend.capture_workspace()?;
         if self.refresh_tasks_with_workspace(&workspace, &_structure_guard)? {
             workspace = self.backend.capture_workspace()?;
@@ -1603,6 +1616,9 @@ fn validate_line(value: i64) -> Result<i64, ToolError> {
 }
 
 fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
+    if call.stateless {
+        call.policy.check_capability(FilesystemCapability::AbsoluteWrite).map_err(ToolError::from)?;
+    }
     call.policy
         .check_capability(FilesystemCapability::ProcessExecute)
         .map_err(ToolError::from)
@@ -1610,16 +1626,16 @@ fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
 
 fn require_read(call: &ToolCall) -> Result<(), ToolError> {
     call.policy
-        .check_capability(FilesystemCapability::WorkspaceRead)
+        .check_capability(if call.stateless { FilesystemCapability::AbsoluteRead } else { FilesystemCapability::WorkspaceRead })
         .map_err(ToolError::from)
 }
 
 fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath, ToolError> {
     let explicit = requested.is_some();
-    let raw = requested.unwrap_or("./");
-    let normalized = normalize_requested_path(raw)
-        .map_err(|error| ToolError::new("tmux.invalidCwd", error.message))?;
-    let requested = parse_requested_path(&normalized)
+    if call.stateless && !explicit {
+        return Err(ToolError::new("tmux.invalidCwd", "cwd is required in stateless mode"));
+    }
+    let requested = requested_path(call, requested.unwrap_or("./"))
         .map_err(|error| ToolError::new("tmux.invalidCwd", error.message))?;
     if explicit {
         let (read, write) = match requested.namespace {

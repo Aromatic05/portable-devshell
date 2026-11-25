@@ -144,6 +144,25 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
         assert.equal((shortDeadline.payload as Record<string, JsonValue>).timedOut, true);
         assert.equal((shortDeadline.payload as Record<string, JsonValue>).detached, undefined);
 
+        const stateless = await rewrite({
+            callId: "call-stateless",
+            direction: "outbound",
+            value: {
+                context: {
+                    instance: instanceName,
+                    contextMode: "stateless",
+                    ctxId: "57a7e1e5-5000-8000-8000-000000000000",
+                    source: "mcp",
+                },
+                kind: "result",
+                payload: { task: { id: "stateless-task", status: "running" }, timeout: 300, timedOut: true },
+                toolName: "tmux_run",
+            },
+        }, runtime);
+        assert.equal((stateless.payload as Record<string, JsonValue>).timedOut, true);
+        assert.equal((stateless.payload as Record<string, JsonValue>).detached, undefined);
+        assert.equal(detached.length, 3);
+
         const read = await rewrite({
             callId: "call-read",
             direction: "inbound",
