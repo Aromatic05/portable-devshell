@@ -12,31 +12,41 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use support::TestEnv;
 
+const INSTANCE: &str = "process-host";
+
 struct Fixture {
     child: Child,
     socket: PathBuf,
+    generation: String,
     env: TestEnv,
 }
 
 impl Fixture {
     fn start() -> Self {
         let env = TestEnv::new();
-        let instance = "process-host";
+        let instance = INSTANCE;
         let child = env
             .std_command()
             .args(["_process-host", "--instance", instance])
             .stdout(Stdio::null())
             .spawn()
             .unwrap();
-        let fixture = Self {
+        let mut fixture = Self {
             child,
             socket: env.socket_file(instance).with_file_name("process.sock"),
             env,
+            generation: String::new(),
         };
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            if request(&fixture.socket, "process.handshake", json!({})).is_ok() {
-                break;
+            if let Ok(response) = request(&fixture.socket, "process.handshake", json!({})) {
+                if response["ok"] == true {
+                    fixture.generation = response["result"]["generation"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned();
+                    break;
+                }
             }
             assert!(
                 Instant::now() < deadline,
@@ -47,7 +57,10 @@ impl Fixture {
         fixture
     }
 
-    fn call(&self, method: &str, input: Value) -> Value {
+    fn call(&self, method: &str, mut input: Value) -> Value {
+        if method != "process.handshake" {
+            input["generation"] = json!(self.generation);
+        }
         let result = request(&self.socket, method, input).unwrap();
         assert_eq!(result["ok"], true, "{result}");
         result["result"].clone()
@@ -90,8 +103,12 @@ impl Drop for Fixture {
         if self.child.try_wait().ok().flatten().is_some() {
             return;
         }
-        let retired = request(&self.socket, "process.v1.retire", json!({}))
-            .is_ok_and(|response| response["ok"] == true);
+        let retired = request(
+            &self.socket,
+            "process.v1.retire",
+            json!({"generation": self.generation}),
+        )
+        .is_ok_and(|response| response["ok"] == true);
         if !retired {
             let _ = self.child.kill();
         }
@@ -223,4 +240,67 @@ fn independent_host_owns_pipe_and_pty_across_request_disconnects() {
     // Retiring this isolated host also terminates any remaining live task.
     let _ = fixture.spawn("sleep 30", true, None, true);
     fixture.call("process.v1.retire", json!({}));
+}
+
+#[test]
+fn worker_restart_preserves_process_host_and_retirement_releases_it() {
+    let fixture = Fixture::start();
+    let before = fixture.call("process.handshake", json!({}));
+    assert_eq!(before["instance"], INSTANCE);
+    assert_eq!(before["version"], 1);
+    let task = fixture.spawn(
+        "printf 'ready\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"",
+        false,
+        None,
+        true,
+    );
+    wait_for_output(&fixture, &task, "stdout", "ready");
+    let listed = fixture
+        .env
+        .json_command(&["terminal", "list", "--instance", INSTANCE]);
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == task)
+    );
+    let start = fixture.env.json_command(&["start", "--instance", INSTANCE]);
+    assert_eq!(start["started"], true);
+    assert_eq!(
+        fixture.env.json_command(&["stop", "--instance", INSTANCE])["stopped"],
+        true
+    );
+    assert_eq!(
+        fixture.env.json_command(&["start", "--instance", INSTANCE])["started"],
+        true
+    );
+    let after = fixture.call("process.handshake", json!({}));
+    assert_eq!(after, before);
+    assert_eq!(fixture.read(&task, 0, 0)["process"]["state"], "running");
+    let wrong_generation = request(
+        &fixture.socket,
+        "process.v1.kill",
+        json!({"id": task, "generation": "previous-generation"}),
+    )
+    .unwrap();
+    assert_eq!(wrong_generation["error"]["code"], "process.staleGeneration");
+    fixture.input(&task, b"reconnected\n");
+    let finished = finish(&fixture, &task);
+    assert!(output(&finished, "stdout").contains("received:reconnected"));
+    let _running = fixture.spawn("sleep 30", true, None, true);
+    fixture.env.json_command(&["stop", "--instance", INSTANCE]);
+    assert_eq!(
+        fixture
+            .env
+            .json_command(&["retire", "--instance", INSTANCE])["retired"],
+        true
+    );
+    assert!(request(&fixture.socket, "process.handshake", json!({})).is_err());
+    assert_eq!(
+        fixture
+            .env
+            .json_command(&["terminal", "list", "--instance", INSTANCE]),
+        json!([])
+    );
 }

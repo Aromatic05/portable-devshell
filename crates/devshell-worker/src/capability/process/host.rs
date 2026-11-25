@@ -26,7 +26,7 @@ use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcListener, Local
 use super::managed::{ManagedProcess, SpawnSpec};
 use super::shell::ShellRuntime;
 
-const VERSION: u32 = 1;
+use super::protocol::{Handshake, PROTOCOL_VERSION, execution_identity};
 const MAX_RESOURCES: usize = 64;
 const MAX_WAIT_MS: u64 = 30_000;
 const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
@@ -93,6 +93,7 @@ struct Host {
     policy: Arc<dyn SecurityPolicy>,
     instance_root: PathBuf,
     stopped: AtomicBool,
+    handshake: Handshake,
 }
 
 impl Host {
@@ -236,7 +237,7 @@ impl Host {
 
     fn dispatch(&self, request: &RpcRequest) -> Result<Value, RpcError> {
         match request.method.as_str() {
-            "process.handshake" => Ok(json!({ "version": VERSION, "pid": std::process::id() })),
+            "process.handshake" => serialize(&self.handshake),
             "process.v1.spawn" => self.spawn(parse(request)?),
             "process.v1.list" => {
                 let registry = self.registry.lock().map_err(lock_error)?;
@@ -301,7 +302,24 @@ impl Host {
                 );
             }
         };
-        let result = self.dispatch(&request);
+        let mut request = request;
+        let result = if request.method == "process.handshake" {
+            self.dispatch(&request)
+        } else if request
+            .params
+            .as_object_mut()
+            .and_then(|params| params.remove("generation"))
+            .as_ref()
+            .and_then(Value::as_str)
+            == Some(self.handshake.generation.as_str())
+        {
+            self.dispatch(&request)
+        } else {
+            Err(RpcError::new(
+                "process.staleGeneration",
+                "Process Host generation does not match; reconnect",
+            ))
+        };
         let retired = request.method == "process.v1.retire" && result.is_ok();
         let response = match result {
             Ok(value) => RpcResponse::success(request.id, value),
@@ -341,24 +359,32 @@ pub(crate) fn serve(instance: &InstanceName) -> Result<(), String> {
     let endpoints = EndpointPaths::resolve(instance)?;
     ensure_dir(&paths.state_dir, 0o700)?;
     ensure_dir(&endpoints.instance_runtime_dir, 0o700)?;
-    let _lock = InstanceLock::acquire_path(&paths.state_dir.join("process-host.lock"), true)?
+    let _lock = InstanceLock::acquire_path(&super::protocol::ownership_lock(&paths), true)?
         .ok_or_else(|| "process host already owns this instance".to_string())?;
     let endpoint = endpoint(&endpoints);
     crate::daemon::process::remove_ipc_endpoint_if_exists(&endpoint)?;
-    let listener = LocalIpcListener::bind(&endpoint).map_err(|error| error.to_string())?;
+    let listener = LocalIpcListener::bind_private(&endpoint).map_err(|error| error.to_string())?;
     let _endpoint = EndpointGuard(endpoint.clone());
     ensure_file_mode(&endpoint, 0o600)?;
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
 
+    let security_mode = crate::daemon::process::read_security_mode_from_env();
     let host = Arc::new(Host {
         registry: Mutex::new(Registry::default()),
         shell: ShellRuntime::detect().map_err(|error| error.message)?,
         execution: ExecutionConfig::from_env()?,
-        policy: build_security_policy(crate::daemon::process::read_security_mode_from_env()),
+        policy: build_security_policy(security_mode.clone()),
         instance_root: paths.instance_root,
         stopped: AtomicBool::new(false),
+        handshake: Handshake {
+            version: PROTOCOL_VERSION,
+            pid: std::process::id(),
+            instance: instance.as_str().to_owned(),
+            generation: Uuid::new_v4().to_string(),
+            execution_identity: execution_identity(&security_mode)?,
+        },
     });
     while !host.stopped.load(Ordering::Acquire) {
         match listener.accept() {

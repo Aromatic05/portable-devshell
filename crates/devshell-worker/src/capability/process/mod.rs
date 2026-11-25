@@ -1,7 +1,9 @@
 pub mod child;
-pub mod pipe;
-pub mod pty;
-pub mod shell;
+pub(crate) mod client;
+pub(crate) mod host;
 mod managed;
 mod output;
-pub(crate) mod host;
+pub mod pipe;
+mod protocol;
+pub mod pty;
+pub mod shell;

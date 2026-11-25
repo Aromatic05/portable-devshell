@@ -121,6 +121,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     let switched = (|| -> Result<(), String> {
         crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
         // Keep persisted user config, logs and artifacts across re-enrollment.
+        crate::capability::process::client::retire(&instance, &paths, &socket_paths)?;
         crate::tool::tmux::retire_instance_runtime(&paths, &socket_paths, instance.as_str())?;
         let _lock = InstanceLock::acquire(&paths)?;
         let mut config = match &previous_config {

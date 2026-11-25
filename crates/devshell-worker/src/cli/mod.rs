@@ -1,5 +1,6 @@
 pub mod enroll;
 pub mod instance;
+mod terminal;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -20,6 +21,7 @@ enum Command {
     Transport(InstanceArgs),
     Retire(InstanceArgs),
     Gc(GcArgs),
+    Terminal(terminal::TerminalArgs),
     #[command(name = "_process-host", hide = true)]
     ProcessHost(InstanceArgs),
     #[command(name = "_upgrade-restart", hide = true)]
@@ -72,6 +74,7 @@ pub fn run() -> Result<String, String> {
         Command::Transport(args) => crate::transport::run(&args.instance),
         Command::Retire(args) => instance::maintain::retire::run(args),
         Command::Gc(args) => instance::maintain::gc::run(args),
+        Command::Terminal(args) => terminal::run(args),
         Command::ProcessHost(args) => {
             let instance = crate::instance::InstanceName::parse(&args.instance)?;
             crate::capability::process::host::serve(&instance)?;

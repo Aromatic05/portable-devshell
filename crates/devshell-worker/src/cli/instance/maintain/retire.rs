@@ -51,6 +51,7 @@ pub fn retire_instance(instance: &InstanceName) -> Result<bool, String> {
         DaemonState::Stopped => {}
     }
 
+    crate::capability::process::client::retire(instance, &instance_paths, &socket_paths)?;
     tmux::retire_instance_runtime(&instance_paths, &socket_paths, instance.as_str())?;
     process::clear_runtime_files(&instance_paths, &socket_paths)?;
     remove_file(&instance_paths.config_file)?;

@@ -1,3 +1,6 @@
+#[path = "private_pipe.rs"]
+mod private_pipe;
+
 use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind, Read, Result as IoResult, Write};
 use std::os::windows::ffi::OsStrExt;
@@ -29,12 +32,20 @@ pub struct LocalIpcListener {
 
 impl LocalIpcListener {
     pub fn bind(path: &Path) -> IoResult<Self> {
-        let first = create_pipe_instance(path)?;
+        Self::bind_with_access(path, false)
+    }
+
+    pub fn bind_private(path: &Path) -> IoResult<Self> {
+        Self::bind_with_access(path, true)
+    }
+
+    fn bind_with_access(path: &Path, private: bool) -> IoResult<Self> {
+        let first = create_pipe_instance(path, private)?;
         let path = path.to_path_buf();
         let (sender, accepted) = mpsc::channel();
         thread::Builder::new()
             .name("devshell-worker-pipe-accept".to_string())
-            .spawn(move || accept_loop(path, first, sender))?;
+            .spawn(move || accept_loop(path, first, sender, private))?;
         Ok(Self {
             accepted: Mutex::new(accepted),
         })
@@ -201,7 +212,7 @@ impl Write for LocalIpcStream {
     }
 }
 
-fn accept_loop(path: PathBuf, first: File, sender: Sender<IoResult<File>>) {
+fn accept_loop(path: PathBuf, first: File, sender: Sender<IoResult<File>>, private: bool) {
     let mut pending = first;
     loop {
         match connect_pipe(pending) {
@@ -217,7 +228,7 @@ fn accept_loop(path: PathBuf, first: File, sender: Sender<IoResult<File>>) {
             }
         }
 
-        pending = match create_pipe_instance(&path) {
+        pending = match create_pipe_instance(&path, private) {
             Ok(file) => file,
             Err(error) => {
                 let _ = sender.send(Err(error));
@@ -241,8 +252,11 @@ fn connect_pipe(file: File) -> IoResult<File> {
     }
 }
 
-fn create_pipe_instance(path: &Path) -> IoResult<File> {
+fn create_pipe_instance(path: &Path, private: bool) -> IoResult<File> {
     let name = wide_path(path);
+    if private {
+        return private_pipe::create(&name);
+    }
     let handle = unsafe {
         CreateNamedPipeW(
             name.as_ptr(),
