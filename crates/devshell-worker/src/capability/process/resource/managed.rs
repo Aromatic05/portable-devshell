@@ -48,6 +48,7 @@ pub(in crate::capability::process) struct Descriptor {
     pub latest_seq: u64,
     pub workspace: Option<std::path::PathBuf>,
     pub timed_out: bool,
+    pub human_control: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit: Option<Exit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,9 +58,9 @@ pub(in crate::capability::process) struct Descriptor {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::capability::process) struct ReadResult {
-    process: Descriptor,
+    pub process: Descriptor,
     #[serde(flatten)]
-    output: OutputPage,
+    pub output: OutputPage,
 }
 
 pub(super) type Writer = Box<dyn Write + Send>;
@@ -99,6 +100,7 @@ pub(super) struct State {
     pub(super) output: OutputJournal,
     pub(super) captures: Captures,
     pub(super) screen: Option<TerminalScreen>,
+    pub(super) controller: Option<String>,
     pub(super) revision: u64,
     pub(super) completion: Option<Result<Exit, String>>,
 }
@@ -132,6 +134,7 @@ impl ManagedProcess {
             latest_seq: state.output.latest_seq(),
             workspace: self.workspace.clone(),
             timed_out: self.timed_out.load(std::sync::atomic::Ordering::Acquire),
+            human_control: state.controller.is_some(),
             exit,
             error,
         }
@@ -174,7 +177,15 @@ impl ManagedProcess {
         Ok(state.completion.is_some())
     }
 
-    pub fn input(&self, data: &[u8]) -> Result<(), RpcError> {
+    // The controller check and input enqueue share the resource lock.
+    // Once takeover succeeds, a model cannot enqueue input behind it.
+    pub fn input(&self, data: &[u8], controller: Option<&str>) -> Result<(), RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        Self::authorize_controller(&state, controller)?;
+        self.enqueue(data)
+    }
+
+    pub(super) fn enqueue(&self, data: &[u8]) -> Result<(), RpcError> {
         let input = self.input.lock().map_err(lock_error)?;
         let input = input
             .as_ref()
@@ -189,6 +200,50 @@ impl ManagedProcess {
         })
     }
 
+    fn authorize_controller(state: &State, controller: Option<&str>) -> Result<(), RpcError> {
+        if state.controller.as_deref() != controller {
+            return Err(RpcError::new(
+                "process.controlOwned",
+                "terminal input is controlled by another participant",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn begin_attach(
+        &self,
+        takeover: bool,
+    ) -> Result<(Option<String>, ScreenSnapshot), RpcError> {
+        let mut state = self.state.lock().map_err(lock_error)?;
+        let screen = state
+            .screen
+            .as_ref()
+            .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
+        let snapshot = screen.snapshot(state.output.latest_seq());
+        let controller = if takeover {
+            if state.controller.is_some() {
+                return Err(RpcError::new(
+                    "process.controlOwned",
+                    "another participant controls this terminal",
+                ));
+            }
+            let id = uuid::Uuid::new_v4().to_string();
+            state.controller = Some(id.clone());
+            Some(id)
+        } else {
+            None
+        };
+        Ok((controller, snapshot))
+    }
+
+    pub fn release_control(&self, controller: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.controller.as_deref() == Some(controller) {
+                state.controller = None;
+            }
+        }
+    }
+
     pub fn close_input(&self) -> Result<(), RpcError> {
         if self.tty {
             return Err(RpcError::new(
@@ -200,28 +255,6 @@ impl ManagedProcess {
         Ok(())
     }
 
-    pub fn viewport(
-        &self,
-        revision: Option<u64>,
-    ) -> Result<(u64, Descriptor, ScreenSnapshot), RpcError> {
-        let state = self.state.lock().map_err(lock_error)?;
-        let (state, _) = self
-            .changed
-            .wait_timeout_while(state, Duration::from_secs(1), |state| {
-                state.completion.is_none() && revision == Some(state.revision)
-            })
-            .map_err(lock_error)?;
-        let screen = state
-            .screen
-            .as_ref()
-            .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
-        Ok((
-            state.revision,
-            self.describe(&state),
-            screen.snapshot(state.output.latest_seq()),
-        ))
-    }
-
     pub fn inspect(&self) -> Result<ScreenSnapshot, RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         let screen = state
@@ -231,8 +264,9 @@ impl ManagedProcess {
         Ok(screen.snapshot(state.output.latest_seq()))
     }
 
-    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), RpcError> {
+    pub fn resize(&self, cols: u16, rows: u16, controller: Option<&str>) -> Result<(), RpcError> {
         let mut state = self.state.lock().map_err(lock_error)?;
+        Self::authorize_controller(&state, controller)?;
         let screen = state
             .screen
             .as_mut()

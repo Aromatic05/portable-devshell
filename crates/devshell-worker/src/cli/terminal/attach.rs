@@ -20,10 +20,6 @@ impl TerminalMode {
         let guard = Self;
         #[cfg(windows)]
         platform::enable_vt_input()?;
-        io::stdout()
-            .write_all(b"\x1b[?1049h\x1b[2J\x1b[H")
-            .map_err(io_error)?;
-        io::stdout().flush().map_err(io_error)?;
         Ok(guard)
     }
 }
@@ -43,7 +39,12 @@ enum Event {
     Eof,
 }
 
-pub(super) fn run(client: ProcessHostClient, id: &str, tty: bool) -> Result<(), String> {
+pub(super) fn run(
+    client: ProcessHostClient,
+    id: &str,
+    tty: bool,
+    takeover: bool,
+) -> Result<(), String> {
     if !tty {
         return watch_pipe(client, id);
     }
@@ -52,8 +53,34 @@ pub(super) fn run(client: ProcessHostClient, id: &str, tty: bool) -> Result<(), 
     }
     let _mode = TerminalMode::enter()?;
     let mut size = crossterm::terminal::size().map_err(io_error)?;
-    resize(&client, id, size)?;
-    let mut stream = client.subscribe(id)?;
+    let mut stream = client.subscribe(id, takeover)?;
+    let first = codec::read_response(&mut stream)?
+        .ok_or("terminal subscription closed before handshake")?;
+    if !first.ok {
+        return Err(first.error.map_or_else(
+            || "terminal subscription failed".into(),
+            |error| error.message,
+        ));
+    }
+    let first = first
+        .result
+        .ok_or("missing terminal subscription handshake")?;
+    let controller = first["controller"].as_str().map(str::to_owned);
+    let _lease = ClientLease {
+        client: &client,
+        id,
+        controller: controller.as_deref(),
+    };
+    let restore = first["screen"]["restore"]
+        .as_str()
+        .ok_or("missing terminal restore state")?;
+    io::stdout()
+        .write_all(restore.as_bytes())
+        .map_err(io_error)?;
+    io::stdout().flush().map_err(io_error)?;
+    if let Some(controller) = controller.as_deref() {
+        resize(&client, id, size, controller)?;
+    }
     let (sender, events) = mpsc::sync_channel(32);
     let output_sender = sender.clone();
     std::thread::spawn(move || {
@@ -110,7 +137,7 @@ pub(super) fn run(client: ProcessHostClient, id: &str, tty: bool) -> Result<(), 
             }
         }
     });
-    attach_loop(&client, id, &events, &mut size)
+    attach_loop(&client, id, &events, &mut size, controller.as_deref())
 }
 
 fn attach_loop(
@@ -118,6 +145,7 @@ fn attach_loop(
     id: &str,
     events: &Receiver<Event>,
     size: &mut (u16, u16),
+    controller: Option<&str>,
 ) -> Result<(), String> {
     let mut stdout = io::stdout();
     loop {
@@ -125,10 +153,10 @@ fn attach_loop(
             Ok(Event::Input(bytes)) => {
                 let detach = bytes.iter().position(|byte| *byte == DETACH);
                 let bytes = &bytes[..detach.unwrap_or(bytes.len())];
-                if !bytes.is_empty() {
+                if !bytes.is_empty() && controller.is_some() {
                     client.call(
                         "process.v1.input",
-                        json!({"id": id, "dataBase64": STANDARD.encode(bytes)}),
+                        json!({"id": id, "dataBase64": STANDARD.encode(bytes), "controller": controller}),
                         IO_TIMEOUT,
                     )?;
                 }
@@ -138,16 +166,20 @@ fn attach_loop(
             }
             Ok(Event::Output(value)) => {
                 let value = value?;
-                if let Some(screen) = value.get("screen") {
-                    let formatted = screen["formatted"]
-                        .as_str()
-                        .ok_or("missing formatted terminal screen")?;
-                    stdout.write_all(formatted.as_bytes()).map_err(io_error)?;
-                    stdout.flush().map_err(io_error)?;
+                for frame in value["frames"]
+                    .as_array()
+                    .ok_or("missing raw terminal frames")?
+                {
+                    let data = STANDARD
+                        .decode(
+                            frame["dataBase64"]
+                                .as_str()
+                                .ok_or("missing terminal bytes")?,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    stdout.write_all(&data).map_err(io_error)?;
                 }
-                if value["process"]["state"] != "running" {
-                    return Ok(());
-                }
+                stdout.flush().map_err(io_error)?;
             }
             Ok(Event::Eof) => return Ok(()),
             Err(RecvTimeoutError::Timeout) => {}
@@ -157,16 +189,41 @@ fn attach_loop(
         }
         let current = crossterm::terminal::size().map_err(io_error)?;
         if *size != current {
-            resize(client, id, current)?;
+            if let Some(controller) = controller {
+                resize(client, id, current, controller)?;
+            }
             *size = current;
         }
     }
 }
 
-fn resize(client: &ProcessHostClient, id: &str, (cols, rows): (u16, u16)) -> Result<(), String> {
+struct ClientLease<'a> {
+    client: &'a ProcessHostClient,
+    id: &'a str,
+    controller: Option<&'a str>,
+}
+
+impl Drop for ClientLease<'_> {
+    fn drop(&mut self) {
+        if let Some(controller) = self.controller {
+            let _ = self.client.call(
+                "process.v1.releaseControl",
+                json!({"id": self.id, "controller": controller}),
+                IO_TIMEOUT,
+            );
+        }
+    }
+}
+
+fn resize(
+    client: &ProcessHostClient,
+    id: &str,
+    (cols, rows): (u16, u16),
+    controller: &str,
+) -> Result<(), String> {
     client.call(
         "process.v1.resize",
-        json!({"id": id, "cols": cols, "rows": rows}),
+        json!({"id": id, "cols": cols, "rows": rows, "controller": controller}),
         IO_TIMEOUT,
     )?;
     Ok(())

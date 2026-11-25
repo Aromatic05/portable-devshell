@@ -25,18 +25,18 @@ struct Chunk {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::capability::process) struct OutputFrame {
-    seq: u64,
-    channel: OutputChannel,
-    data_base64: String,
+    pub seq: u64,
+    pub channel: OutputChannel,
+    pub data_base64: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::capability::process) struct OutputPage {
-    oldest_seq: u64,
-    latest_seq: u64,
-    gap: bool,
-    frames: Vec<OutputFrame>,
+    pub oldest_seq: u64,
+    pub latest_seq: u64,
+    pub gap: bool,
+    pub frames: Vec<OutputFrame>,
 }
 
 #[derive(Default)]

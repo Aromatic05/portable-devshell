@@ -91,6 +91,7 @@ impl ManagedProcess {
                 captures,
                 output: OutputJournal::default(),
                 revision: 0,
+                controller: None,
                 completion: None,
             }),
             changed: Condvar::new(),
@@ -126,14 +127,13 @@ impl ManagedProcess {
                                 } else {
                                     Vec::new()
                                 };
+                                if state.controller.is_none() && !replies.is_empty() {
+                                    process.enqueue(&replies).map_err(|error| error.message)?;
+                                }
                                 state.captures.append(channel, &bytes[..n]);
                                 state.output.append(channel, &bytes[..n]);
                                 state.revision += 1;
                                 process.changed.notify_all();
-                                drop(state);
-                                if !replies.is_empty() {
-                                    process.input(&replies).map_err(|error| error.message)?;
-                                }
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
                                 continue;

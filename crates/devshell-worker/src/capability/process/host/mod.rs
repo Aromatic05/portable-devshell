@@ -3,6 +3,7 @@ mod dispatch;
 pub(super) mod launcher;
 mod registry;
 mod server;
+mod stream;
 
 pub(crate) use server::{endpoint, serve};
 

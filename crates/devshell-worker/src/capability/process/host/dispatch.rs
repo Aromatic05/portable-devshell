@@ -1,12 +1,10 @@
 use super::super::protocol::*;
-use super::super::resource::ManagedProcess;
 use super::Host;
 use super::registry::lock_error;
 use crate::capability::rpc::{codec, error::RpcError, request::RpcRequest, response::RpcResponse};
 use crate::transport::endpoint::channel::LocalIpcStream;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -51,7 +49,8 @@ impl Host {
                 if data.len() > MAX_INPUT_BYTES {
                     return Err(invalid("input exceeds the input limit"));
                 }
-                self.require(&input.id)?.input(&data)?;
+                self.require(&input.id)?
+                    .input(&data, input.controller.as_deref())?;
                 Ok(json!({ "accepted": true }))
             }
             "process.v1.inspect" => {
@@ -61,8 +60,17 @@ impl Host {
             "process.v1.resize" => {
                 let input: ResizeInput = parse(request)?;
                 validate_dimensions(input.cols, input.rows)?;
-                self.require(&input.id)?.resize(input.cols, input.rows)?;
+                self.require(&input.id)?.resize(
+                    input.cols,
+                    input.rows,
+                    input.controller.as_deref(),
+                )?;
                 Ok(json!({ "resized": true }))
+            }
+            "process.v1.releaseControl" => {
+                let input: ReleaseInput = parse(request)?;
+                self.require(&input.id)?.release_control(&input.controller);
+                Ok(json!({"released": true}))
             }
             "process.v1.describe" => {
                 let input: Target = parse(request)?;
@@ -83,42 +91,6 @@ impl Host {
                 Ok(json!({ "retired": true }))
             }
             _ => Err(RpcError::new("rpc.methodNotFound", &request.method)),
-        }
-    }
-
-    fn stream_viewport(
-        &self,
-        mut channel: LocalIpcStream,
-        id: &str,
-        process: Arc<ManagedProcess>,
-    ) -> Result<(), String> {
-        channel
-            .set_request_timeout(Duration::from_secs(3))
-            .map_err(|error| error.to_string())?;
-        let mut revision = None;
-        loop {
-            let (next, descriptor, screen) = match process.viewport(revision) {
-                Ok(value) => value,
-                Err(error) => {
-                    return codec::write_response(
-                        &mut channel,
-                        &RpcResponse::failure(id.to_owned(), error),
-                    );
-                }
-            };
-            let exited = descriptor.state != "running";
-            // Emit periodic heartbeats even without output so an idle,
-            // disconnected subscriber does not retain a server thread.
-            let payload = if revision == Some(next) {
-                json!({"process": descriptor})
-            } else {
-                json!({"process": descriptor, "screen": screen})
-            };
-            codec::write_response(&mut channel, &RpcResponse::success(id.to_owned(), payload))?;
-            if exited {
-                return Ok(());
-            }
-            revision = Some(next);
         }
     }
 
@@ -147,9 +119,14 @@ impl Host {
             == Some(self.handshake.generation.as_str())
         {
             if request.method == "process.v1.subscribe" {
-                let result = parse::<Target>(&request).and_then(|input| self.require(&input.id));
+                let result = parse::<SubscribeInput>(&request).and_then(|input| {
+                    self.require(&input.id)
+                        .map(|process| (process, input.takeover))
+                });
                 match result {
-                    Ok(process) => return self.stream_viewport(channel, &request.id, process),
+                    Ok((process, takeover)) => {
+                        return super::stream::serve(channel, &request.id, process, takeover);
+                    }
                     Err(error) => {
                         return codec::write_response(
                             &mut channel,

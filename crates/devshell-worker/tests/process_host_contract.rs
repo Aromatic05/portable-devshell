@@ -409,7 +409,7 @@ impl LocalAttach {
         let slave = opened.slave;
         let mut command = env.std_command();
         command
-            .args(["terminal", "attach", task])
+            .args(["terminal", "attach", task, "--takeover"])
             .stdin(Stdio::from(slave.try_clone().unwrap()))
             .stdout(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave));
@@ -501,7 +501,7 @@ fn worker_command_and_native_attach_share_one_pty() {
     let fixture = WorkerFixture::start();
     assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
     let started = fixture.tool("bash_run", json!({
-        "command": "stty -echo; printf 'attach-ready\\n'; IFS= read -r human; printf 'human:%s\\n' \"$human\"; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
+        "command": "stty -echo; printf 'attach-ready\\n'; IFS= read -r human; printf 'human:%s\\n' \"$human\"; printf '\\033]2;raw-title\\007'; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
         "tty": true, "waitMs": 20,
     }));
     assert_eq!(started["termination"], "running");
@@ -516,8 +516,28 @@ fn worker_command_and_native_attach_share_one_pty() {
     );
     let mut attach = LocalAttach::start(&fixture.env, &task);
     attach.expect("attach-ready");
+    let rejected = fixture.env.rpc(
+        INSTANCE,
+        "tool",
+        &json!({
+            "protocol": "rpc", "type": "request", "id": "model-during-takeover",
+            "method": "task_input",
+            "message": {"input": {"task": task, "input": "unwanted\n"},
+                "context": {"workspace": fixture.env.protocol_workspace()}}
+        }),
+    );
+    assert_eq!(rejected["type"], "error", "{rejected}");
+    assert!(
+        rejected["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("controlled by another participant")
+    );
     attach.input(b"operator\n");
     attach.expect("human:operator");
+    // The live client must receive the original OSC control sequence,
+    // which cannot be reconstructed from the visible screen.
+    attach.expect("\x1b]2;raw-title\x07");
     attach.detach();
     let inspected = fixture.tool("terminal_inspect", json!({"terminal": task}));
     assert!(

@@ -147,7 +147,7 @@ impl ProcessHostClient {
         Ok(self)
     }
 
-    pub fn subscribe(&self, id: &str) -> Result<LocalIpcStream, String> {
+    pub fn subscribe(&self, id: &str, takeover: bool) -> Result<LocalIpcStream, String> {
         let mut channel = LocalIpcStream::connect_with_timeout(&self.endpoint, CONNECT_TIMEOUT)
             .map_err(|error| error.to_string())?;
         codec::write_request_frame(
@@ -155,7 +155,7 @@ impl ProcessHostClient {
             &RpcRequest::request(
                 "subscribe",
                 "process.v1.subscribe",
-                json!({"id": id, "generation": self.handshake.generation}),
+                json!({"id": id, "generation": self.handshake.generation, "takeover": takeover}),
             ),
         )?;
         Ok(channel)

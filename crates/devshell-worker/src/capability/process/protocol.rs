@@ -106,6 +106,7 @@ pub(super) struct CaptureInput {
 pub(super) struct WriteInput {
     pub id: String,
     pub data_base64: String,
+    pub controller: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +115,7 @@ pub(super) struct ResizeInput {
     pub id: String,
     pub cols: u16,
     pub rows: u16,
+    pub controller: Option<String>,
 }
 
 use crate::capability::rpc::{error::RpcError, request::RpcRequest};
@@ -136,4 +138,19 @@ pub(super) fn serialize(value: impl serde::Serialize) -> Result<Value, RpcError>
 
 pub(super) fn invalid(message: impl Into<String>) -> RpcError {
     RpcError::new("rpc.invalidParams", message)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SubscribeInput {
+    pub id: String,
+    #[serde(default)]
+    pub takeover: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ReleaseInput {
+    pub id: String,
+    pub controller: String,
 }

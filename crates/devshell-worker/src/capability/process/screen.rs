@@ -23,6 +23,7 @@ pub(super) struct ScreenSnapshot {
     pub alternate_screen: bool,
     pub text: String,
     pub formatted: String,
+    pub restore: String,
 }
 
 impl TerminalScreen {
@@ -59,8 +60,46 @@ impl TerminalScreen {
             alternate_screen: screen.alternate_screen(),
             text: screen.contents(),
             formatted: screen.state_formatted(),
+            restore: restore_state(screen),
         }
     }
+}
+
+fn restore_state(screen: &vt100::Screen) -> String {
+    let (rows, cols) = screen.size();
+    let mut primary = vt100::Parser::new(rows, cols, 0);
+    *primary.screen_mut() = screen.clone();
+    primary.process(b"\x1b[?47l");
+    let mut alternate = vt100::Parser::new(rows, cols, 0);
+    *alternate.screen_mut() = screen.clone();
+    alternate.process(b"\x1b[?47h");
+
+    // Initialize the terminal's primary and alternate buffers separately.
+    // Restoring saved cursor and attributes matters when the application
+    // later exits its alternate buffer or executes DECRC.
+    let mut restore = String::from("\x1b[?1049l\x1b[?47l\x1bc");
+    append_grid(&mut restore, &mut primary);
+    restore.push_str("\x1b[?47h");
+    append_grid(&mut restore, &mut alternate);
+    if !screen.alternate_screen() {
+        restore.push_str("\x1b[?47l");
+        restore.push_str(&primary.screen().cursor_state_formatted());
+        restore.push_str(&primary.screen().attributes_formatted());
+    }
+    restore.push_str(&screen.input_mode_formatted());
+    restore
+}
+
+fn append_grid(restore: &mut String, parser: &mut vt100::Parser) {
+    let current = parser.screen().clone();
+    restore.push_str(&current.contents_formatted());
+    parser.process(b"\x1b8");
+    restore.push_str(&parser.screen().cursor_state_formatted());
+    restore.push_str(&parser.screen().attributes_formatted());
+    restore.push_str("\x1b7");
+    *parser.screen_mut() = current;
+    restore.push_str(&parser.screen().cursor_state_formatted());
+    restore.push_str(&parser.screen().attributes_formatted());
 }
 
 /// Only the terminal emulator replies to device status and attributes.
@@ -128,6 +167,14 @@ mod tests {
             viewport.parser.screen().cell(0, 0).unwrap().fgcolor(),
             vt100::Color::Idx(1)
         );
+
+        let mut restored = TerminalScreen::new(80, 24).unwrap();
+        restored.process(alternate.restore.as_bytes());
+        let restored_alt = restored.snapshot(1);
+        assert!(restored_alt.alternate_screen);
+        assert_eq!(restored_alt.text, alternate.text);
+        restored.process(b"\x1b[?1049l");
+        assert_eq!(restored.snapshot(2).text.trim(), "primary");
 
         screen.process(b"\x1b[?1049l");
         let primary = screen.snapshot(2);

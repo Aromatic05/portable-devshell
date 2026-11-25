@@ -15,8 +15,12 @@ pub struct TerminalArgs {
 enum Command {
     /// List all process resources on this machine.
     List,
-    /// Attach to a process by its globally unique ID. Ctrl-] detaches.
-    Attach { id: String },
+    /// Observe a process by ID. --takeover grants exclusive input; Ctrl-] detaches.
+    Attach {
+        id: String,
+        #[arg(long)]
+        takeover: bool,
+    },
 }
 
 pub fn run(args: TerminalArgs) -> Result<String, String> {
@@ -32,13 +36,13 @@ pub fn run(args: TerminalArgs) -> Result<String, String> {
             }
             serde_json::to_string_pretty(&resources).map_err(|error| error.to_string())
         }
-        Command::Attach { id } => {
+        Command::Attach { id, takeover } => {
             for client in clients {
                 if let Some(resource) = list(&client)?
                     .into_iter()
                     .find(|resource| resource["id"] == id)
                 {
-                    attach::run(client, &id, resource["tty"] == true)?;
+                    attach::run(client, &id, resource["tty"] == true, takeover)?;
                     return Ok(String::new());
                 }
             }
