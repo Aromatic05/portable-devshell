@@ -89,6 +89,8 @@ impl ManagedProcess {
             control,
             input: Mutex::new(if keep_stdin { Some(input_tx) } else { None }),
             workspace: spec.workspace,
+            provenance: (!spec.interactive && spec.command.len() <= 16 * 1024)
+                .then(|| (spec.command.to_owned(), spec.cwd.canonical.clone())),
             timed_out: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(State {
                 screen,

@@ -242,6 +242,8 @@ pub(super) fn collect(
         artifact_warnings: (!warnings.is_empty()).then_some(warnings),
         duration_ms: started.elapsed().as_millis(),
         termination,
+        wait_reason: None,
+        wait_ms: None,
         task: Some(TaskDescriptor {
             id: id.into(),
             status,

@@ -237,7 +237,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
     throw new Error("condition was not reached");
 }
 
-test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal instance and context limits", async () => {
+test("WorkerToolCallScheduler admits one urgent process operation beyond normal instance and context limits", async () => {
     const instanceName = asInstanceName("scheduler-urgent");
     const scheduler = new WorkerToolCallScheduler({
         byTool: {},
@@ -270,11 +270,11 @@ test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal ins
                 return await deferred.promise;
             });
 
-    const firstCall = run("normal-1", "tmux_run", first);
-    const secondCall = run("normal-2", "tmux_read", second);
+    const firstCall = run("normal-1", "bash_run", first);
+    const secondCall = run("normal-2", "task_read", second);
     await waitFor(() => started.length === 2);
 
-    const urgentCall = run("urgent", "tmux_input", urgent);
+    const urgentCall = run("urgent", "task_input", urgent);
     await waitFor(() => started.includes("urgent"));
     assert.deepEqual(started, ["normal-1", "normal-2", "urgent"]);
 
@@ -288,7 +288,7 @@ test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal ins
     ]);
 });
 
-test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async () => {
+test("WorkerToolCallScheduler prioritizes queued urgent process operations", async () => {
     const instanceName = asInstanceName("scheduler-priority");
     const scheduler = new WorkerToolCallScheduler({
         byTool: {},
@@ -316,8 +316,8 @@ test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async 
 
     const blockerCall = reserve("blocker", "bash_run", blocker);
     await waitFor(() => started.length === 1);
-    const normalCall = reserve("normal", "tmux_read", normal);
-    const urgentCall = reserve("urgent", "tmux_input", urgent);
+    const normalCall = reserve("normal", "task_read", normal);
+    const urgentCall = reserve("urgent", "task_input", urgent);
     await waitFor(() => started.includes("urgent"));
     assert.deepEqual(started, ["blocker", "urgent"]);
 

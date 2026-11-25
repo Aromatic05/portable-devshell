@@ -185,7 +185,7 @@ fn terminal_max_sequence_cursor_is_empty_and_does_not_wrap() {
 }
 
 #[test]
-fn tmux_output_remains_readable_after_task_pane_is_closed() {
+fn task_output_remains_readable_after_terminal_close() {
     let env = TestEnv::new();
     let instance = "round6-tmux-output-close";
     start(&env, instance);
@@ -193,10 +193,10 @@ fn tmux_output_remains_readable_after_task_pane_is_closed() {
         &env,
         instance,
         "run",
-        "tmux_run",
+        "bash_run",
         json!({
             "command":"printf 'BEFORE-CLOSE\n'; touch close-ready; sleep 20",
-            "wait":"nonblock", "timeMs":0
+            "waitMs":0, "tty":true
         }),
     );
     assert_eq!(run["type"], "reply", "{run}");
@@ -213,30 +213,22 @@ fn tmux_output_remains_readable_after_task_pane_is_closed() {
         &env,
         instance,
         "close",
-        "tmux_manage",
-        json!({"command":"close","task":task,"force":true}),
+        "terminal_manage",
+        json!({"command":"close","id":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");
     let read = call(
         &env,
         instance,
         "read",
-        "tmux_read",
-        json!({"task":task,"line":50,"timeMs":0}),
+        "task_read",
+        json!({"task":task,"cursor":run["message"]["cursor"],"timeMs":3000,"untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert_ne!(read["message"]["task"]["status"], "running", "{read}");
-    // tmux_run can consume the first stdout chunk. tmux_read yields only
-    // unread frames; the union is the transcript visible to the caller.
-    let output = run["message"]["output"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .chain(read["message"]["output"].as_array().into_iter().flatten());
-    assert!(
-        output.into_iter().any(|line| line == "BEFORE-CLOSE"),
-        "task output lost across run+close+read: run={run} read={read}"
-    );
+    let output = format!("{}{}", run["message"]["stdout"].as_str().unwrap(), read["message"]["stdout"].as_str().unwrap());
+    assert!(output.lines().any(|line| line == "BEFORE-CLOSE"), "task output lost: {output:?}");
+
 }
 
 #[test]

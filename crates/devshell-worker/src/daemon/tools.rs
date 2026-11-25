@@ -10,12 +10,11 @@ use crate::tool::file::edit::FileEditTool;
 use crate::tool::file::read::FileReadTool;
 use crate::tool::file::search::glob::FileGlobTool;
 use crate::tool::file::search::grep::FileGrepTool;
-use crate::tool::tmux::register_tools as register_tmux_tools;
 use crate::tool::{ToolCommandEnvironmentProvider, ToolError, ToolRegistry};
 use crate::transport::endpoint::channel::EndpointPaths;
 
 pub fn builtin_registry(
-    instance_paths: &InstancePaths,
+    _instance_paths: &InstancePaths,
     socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
     artifacts: Arc<ArtifactStore>,
@@ -43,15 +42,8 @@ pub fn builtin_registry(
         &mut registry,
         &runtime.instance,
         Arc::clone(&artifacts),
+        Arc::clone(&files),
     )?;
     crate::tool::process::terminal::register_tools(&mut registry, &runtime.instance)?;
-    register_tmux_tools(
-        &mut registry,
-        instance_paths,
-        socket_paths,
-        runtime,
-        model_devshell,
-        files,
-    )?;
     Ok(registry)
 }

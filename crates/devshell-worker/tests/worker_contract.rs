@@ -335,7 +335,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(tools["type"], "reply");
     let catalog = tools["message"]["tools"].as_array().unwrap();
-    let mut expected_tools = vec![
+    let expected_tools = vec![
         "bash_run",
         "file_edit",
         "file_glob",
@@ -346,21 +346,6 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "terminal_inspect",
         "terminal_manage",
     ];
-    if cfg!(windows)
-        || (cfg!(unix)
-            && Command::new("tmux")
-                .arg("-V")
-                .output()
-                .is_ok_and(|output| output.status.success()))
-    {
-        expected_tools.extend([
-            "tmux_input",
-            "tmux_inspect",
-            "tmux_manage",
-            "tmux_read",
-            "tmux_run",
-        ]);
-    }
     assert_eq!(
         catalog
             .iter()
@@ -410,33 +395,12 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         bash_schema["inputSchema"]["properties"]["command"]["minLength"],
         1
     );
-    if let Some(tmux_read_schema) = catalog.iter().find(|tool| tool["name"] == "tmux_read") {
-        assert!(
-            tmux_read_schema["outputSchema"]["properties"]
-                .get("resume")
-                .is_none()
-        );
-        assert!(
-            tmux_read_schema["outputSchema"]["properties"]
-                .get("timeout")
-                .is_none()
-        );
-        let tmux_run_schema = catalog
-            .iter()
-            .find(|tool| tool["name"] == "tmux_run")
-            .unwrap();
-        assert!(
-            tmux_run_schema["inputSchema"]["properties"]
-                .get("resume")
-                .is_none()
-        );
-        assert!(
-            tmux_run_schema["outputSchema"]["properties"]
-                .get("resume")
-                .is_none()
-        );
-        assert!(tmux_run_schema["outputSchema"]["properties"]["timeout"].is_object());
-        assert!(tmux_run_schema["outputSchema"]["properties"]["interrupted"].is_object());
+    let task_read = catalog.iter().find(|tool| tool["name"] == "task_read").unwrap();
+    for field in ["task", "cursor", "timeMs", "untilExit"] {
+        assert!(task_read["inputSchema"]["properties"].get(field).is_some(), "task_read missing {field}");
+    }
+    for field in ["task", "cursor", "waitReason", "stdout", "stderr"] {
+        assert!(task_read["outputSchema"]["properties"].get(field).is_some(), "task_read output missing {field}");
     }
     let file_edit_schema = catalog
         .iter()
@@ -507,110 +471,19 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(catalog.iter().all(|tool| tool["name"] != retired));
     }
 
-    if expected_tools.contains(&"tmux_input") {
-        for name in ["tmux_input", "tmux_inspect", "tmux_manage"] {
-            let tool = catalog.iter().find(|tool| tool["name"] == name).unwrap();
-            assert_eq!(
-                tool["inputSchema"]["type"], "object",
-                "{name}: {}",
-                tool["inputSchema"]
-            );
-            assert!(
-                tool["inputSchema"].get("anyOf").is_none(),
-                "{name}: {}",
-                tool["inputSchema"]
-            );
-            assert!(
-                tool["inputSchema"].get("oneOf").is_none(),
-                "{name}: {}",
-                tool["inputSchema"]
-            );
-        }
-        let tmux_input = catalog
-            .iter()
-            .find(|tool| tool["name"] == "tmux_input")
-            .unwrap();
-        for property in ["task", "pane", "input", "timeMs", "line"] {
-            assert!(
-                tmux_input["inputSchema"]["properties"]
-                    .get(property)
-                    .is_some(),
-                "tmux_input missing {property}: {}",
-                tmux_input["inputSchema"]
-            );
-        }
-        assert_eq!(
-            tmux_input["inputSchema"]["required"],
-            serde_json::json!(["input"])
-        );
-        let tmux_run = catalog
-            .iter()
-            .find(|tool| tool["name"] == "tmux_run")
-            .unwrap();
-        assert!(
-            tmux_run["inputSchema"]["properties"]
-                .get("timeMs")
-                .is_none()
-        );
-        let tmux_run_description = tmux_run["description"].as_str().unwrap();
-        assert!(tmux_run_description.contains("Start long-running or PTY/interactive work"));
-        assert!(tmux_run_description.contains("wait defaults to nonblock"));
-        assert!(tmux_run_description.contains("use block for critical-path tasks"));
-        assert!(tmux_run_description.contains("continue with tmux_read or tmux_input"));
-        assert_eq!(
-            tmux_run["_meta"]["devshell"]["mcp"]["title"],
-            "Run tmux task"
-        );
-        assert_eq!(
-            tmux_run["_meta"]["devshell"]["mcp"]["hiddenInputProperties"],
-            serde_json::json!(["consumeOutput"])
-        );
-        assert_eq!(
-            tmux_run["inputSchema"]["properties"]["wait"]["description"],
-            "Wait strategy. Defaults to nonblock."
-        );
-        assert_eq!(
-            tmux_run["inputSchema"]["properties"]["timeout"]["description"],
-            "Total deadline from task start for wait=block. Reaching it does not stop the task."
-        );
-        let bash_run = catalog
-            .iter()
-            .find(|tool| tool["name"] == "bash_run")
-            .unwrap();
-        let bash_description = bash_run["description"].as_str().unwrap();
-        assert!(bash_description.contains("task_read"));
-        assert!(bash_description.contains("waitMs"));
-        assert!(bash_description.contains("file_read"));
-        assert_eq!(
-            bash_run["_meta"]["devshell"]["mcp"]["title"],
-            "Run shell command"
-        );
-        assert!(
-            !bash_run["inputSchema"]["properties"]["timeoutMs"]["description"]
-                .as_str()
-                .unwrap_or("")
-                .contains("tmux_run")
-        );
-        let tmux_manage = catalog
-            .iter()
-            .find(|tool| tool["name"] == "tmux_manage")
-            .unwrap();
-        assert_eq!(
-            tmux_manage["inputSchema"]["required"],
-            serde_json::json!(["command"])
-        );
-        for property in ["command", "name", "cwd", "task", "pane", "force"] {
-            assert!(
-                tmux_manage["inputSchema"]["properties"]
-                    .get(property)
-                    .is_some(),
-                "tmux_manage missing {property}: {}",
-                tmux_manage["inputSchema"]
-            );
-        }
-        for retired in ["tmux_list", "tmux_create", "tmux_close"] {
-            assert!(catalog.iter().all(|tool| tool["name"] != retired));
-        }
+    let task_input = catalog.iter().find(|tool| tool["name"] == "task_input").unwrap();
+    assert_eq!(task_input["inputSchema"]["required"], serde_json::json!(["task"]));
+    for property in ["input", "eof"] {
+        assert!(task_input["inputSchema"]["properties"].get(property).is_some());
+    }
+    let bash_run = catalog.iter().find(|tool| tool["name"] == "bash_run").unwrap();
+    let description = bash_run["description"].as_str().unwrap();
+    for field in ["task_read", "waitMs", "file_read"] {
+        assert!(description.contains(field));
+    }
+    assert_eq!(bash_run["_meta"]["devshell"]["mcp"]["title"], "Run shell command");
+    for retired in ["tmux_run", "tmux_read", "tmux_input", "tmux_manage", "tmux_inspect"] {
+        assert!(catalog.iter().all(|tool| tool["name"] != retired));
     }
 
     #[cfg(unix)]
@@ -1670,11 +1543,11 @@ fn stateless_tools_still_enforce_workspace_security() {
         ("terminal_inspect", serde_json::json!({"terminal": "denied"})),
         ("terminal_manage", serde_json::json!({"command": "list"})),
         ("terminal_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
-        ("tmux_run", serde_json::json!({"command": "pwd", "cwd": env.home()})),
-        ("tmux_manage", serde_json::json!({"command": "create", "name": "denied", "cwd": env.home()})),
-        ("tmux_read", serde_json::json!({"task": "denied"})),
-        ("tmux_input", serde_json::json!({"task": "denied", "input": "x"})),
-        ("tmux_inspect", serde_json::json!({"panes": "all"})),
+        ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "tty": true})),
+        ("terminal_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
+        ("task_read", serde_json::json!({"task": "denied"})),
+        ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
+        ("terminal_inspect", serde_json::json!({"terminal": "denied"})),
     ] {
         let denied = env.rpc(instance, "tool", &serde_json::json!({
             "protocol": "rpc",

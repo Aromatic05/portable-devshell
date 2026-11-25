@@ -70,7 +70,7 @@ export function createCommonCiSteps(platform = process.platform) {
         },
     ];
     if (platform !== "win32") {
-        steps.push(pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]));
+        steps.push(pnpmStep("Worker process contract tests", ["test:worker:process"]));
     }
     steps.push(
         pnpmStep("Prepare test Worker", ["test:prepare"]),
@@ -94,7 +94,7 @@ export function createPlatformContractCiSteps(platform = process.platform) {
             command: "cargo",
             name: "Rust workspace tests",
         },
-        pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
+        pnpmStep("Worker process contract tests", ["test:worker:process"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         {
             ...pnpmStep("Package tests", ["test:packages"]),

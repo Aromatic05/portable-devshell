@@ -16,7 +16,7 @@ export function installWaitToolCallRewrite(
             rewrites: [
                 {
                     hook: "520-wait-detach",
-                    id: "tmux-wait",
+                    id: "task-wait",
                     rewrite: (input) => rewriteWaitToolCall(input, wait),
                 },
             ],
@@ -45,14 +45,12 @@ export async function rewriteWaitToolCall(
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
     const input = record(value.payload);
     if (input === undefined) return value;
-    if (value.toolName === "tmux_run" && input.wait === "block") {
-        const requested = milliseconds(input.timeMs) ?? milliseconds(input.timeout) ?? WAIT_HANDOFF_MS;
-        return {
-            ...value,
-            payload: { ...input, timeMs: Math.min(requested, WAIT_HANDOFF_MS) },
-        };
+    if (value.toolName === "bash_run") {
+        const requested = milliseconds(input.waitMs);
+        if (requested !== undefined && requested > WAIT_HANDOFF_MS)
+            return { ...value, payload: { ...input, waitMs: WAIT_HANDOFF_MS } };
     }
-    if (value.toolName === "tmux_read") {
+    if (value.toolName === "task_read") {
         const requested = milliseconds(input.timeMs);
         if (requested !== undefined && requested > WAIT_SYNC_MS)
             return { ...value, payload: { ...input, timeMs: WAIT_SYNC_MS } };
@@ -61,39 +59,24 @@ function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
 }
 
 function isHandoff(value: ToolCallHookValue): boolean {
-    if (value.toolName !== "tmux_run" || value.kind !== "result") return false;
     const output = record(value.payload);
-    if (output?.timedOut !== true) return false;
-    const deadline = milliseconds(output.timeout);
-    return deadline === undefined || deadline > WAIT_HANDOFF_MS;
+    return value.toolName === "bash_run" && value.kind === "result" &&
+        output?.termination === "running" && output.waitReason === "timeout" &&
+        (milliseconds(output.waitMs) ?? 0) >= WAIT_HANDOFF_MS;
 }
 
 function presentHandoff(value: ToolCallHookValue): ToolCallHookValue {
-    const output = record(value.payload)!;
-    const { timedOut: _workerTimeout, ...rest } = output;
-    const warnings = Array.isArray(rest.warnings)
-        ? rest.warnings.filter((warning) => record(warning)?.code !== "tmux.blockTimeout")
-        : rest.warnings;
-    return { ...value, payload: { ...rest, ...(warnings === undefined ? {} : { warnings }), detached: true } };
+    return { ...value, payload: { ...record(value.payload)!, detached: true } };
 }
 
 function detachedTarget(value: ToolCallHookValue): string | undefined {
-    const payload = record(value.payload);
-    if (payload === undefined) return undefined;
-    if (value.kind === "result") {
-        const task = record(payload.task);
-        const taskId = typeof task?.id === "string" ? task.id : undefined;
-        if (taskId === undefined) return undefined;
-        if (value.toolName === "tmux_run" && payload.timedOut === true) return taskId;
-        if (value.toolName === "tmux_read" && payload.waitReason === "timeout") return taskId;
-        return undefined;
-    }
-    if (value.kind !== "error" || value.toolName !== "tmux_run") return undefined;
-    const error = record(payload.error);
-    const details = record(error?.details);
-    return error?.code === "tool.cancelled" && typeof details?.task === "string"
-        ? details.task
-        : undefined;
+    if (value.kind !== "result") return undefined;
+    const output = record(value.payload);
+    const task = record(output?.task);
+    if (typeof task?.id !== "string" || output?.termination !== "running") return undefined;
+    if (isHandoff(value)) return task.id;
+    if (value.toolName === "task_read" && output.waitReason === "timeout" && (milliseconds(output.waitMs) ?? 0) > 0) return task.id;
+    return undefined;
 }
 
 function detachInput(

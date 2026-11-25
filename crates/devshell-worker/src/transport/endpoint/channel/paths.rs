@@ -13,8 +13,6 @@ pub struct EndpointPaths {
     pub instance_runtime_dir: PathBuf,
     pub socket_file: PathBuf,
     pub transport_socket_file: PathBuf,
-    #[cfg(unix)]
-    pub tmux_socket_file: PathBuf,
 }
 
 impl EndpointPaths {
@@ -56,8 +54,6 @@ impl EndpointPaths {
         Ok(Self {
             socket_file,
             transport_socket_file,
-            #[cfg(unix)]
-            tmux_socket_file: instance_runtime_dir.join("tmux.sock"),
             instance_runtime_dir,
         })
     }

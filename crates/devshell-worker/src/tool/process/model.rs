@@ -51,6 +51,10 @@ pub struct BashRunOutput {
     pub duration_ms: u128,
     pub termination: BashTermination,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TaskDescriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<TaskCursor>,

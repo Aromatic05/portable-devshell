@@ -18,7 +18,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Overview is read-only and prioritizes alerts, unhealthy instances, recent activity, and Workspace Goals.",
                 "Terminal uses the selected instance; Right/Tab enters it, Ctrl+T switches Instances/Tmux Panes, and Ctrl+] returns to the sidebar. From the sidebar, K confirms and kills the persistent PTY; leaving the page only detaches.",
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
-                "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; Esc closes the current tmux pane view; bracketed paste is preserved.",
+                "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; Ctrl+] detaches the current shared terminal; bracketed paste is preserved.",
                 "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
                 "On an Audit Context, M/m opens the Comment message; expand Write Comment, select Draft, Enter edits, and Enter sends.",
                 "r reloads the current page and / opens search where available.",

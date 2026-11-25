@@ -38,7 +38,7 @@
         "acceptance:tmux-handoff": "node ./acceptance/run-long-tmux-handoff-smoke.mjs",
         "acceptance:web": "node ./acceptance/run-web-browser-smoke.mjs",
         "typecheck:source": "tsc --noEmit -p tsconfig.typecheck.json",
-        "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored",
+        "test:worker:process": "cargo test --locked -p devshell-worker --test process_host_contract -- --test-threads=1",
         "stress:transport": "node ./scripts/stress-transport.mjs",
         "testspace": "node ./scripts/testspace-launcher.mjs"
     },

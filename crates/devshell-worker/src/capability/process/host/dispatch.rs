@@ -108,6 +108,10 @@ impl Host {
                 self.require(&input.id)?.release_control(&input.controller);
                 Ok(json!({"released": true}))
             }
+            "process.v1.provenance" => {
+                let input: Target = parse(request)?;
+                Ok(self.require(&input.id)?.provenance())
+            }
             "process.v1.describe" => {
                 let input: Target = parse(request)?;
                 serialize(self.require(&input.id)?.descriptor())

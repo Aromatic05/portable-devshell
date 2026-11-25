@@ -22,8 +22,11 @@ struct ReadParams {
     #[serde(default)]
     cursor: TaskCursor,
     #[serde(default)]
-    #[schemars(range(min = 0, max = 100000))]
+    #[schemars(range(min = 0, max = 3600000))]
     time_ms: u64,
+    /// Wait for process exit instead of returning on the next output.
+    #[serde(default)]
+    until_exit: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -39,6 +42,8 @@ struct TaskTool {
     name: ToolName,
     instance: InstanceName,
     artifacts: Arc<ArtifactStore>,
+    #[cfg_attr(windows, allow(dead_code))]
+    files: Arc<crate::tool::file::FileToolState>,
 }
 
 impl ToolHandler for TaskTool {
@@ -66,10 +71,10 @@ impl ToolHandler for TaskTool {
             "task_read" => {
                 require_read(&call)?;
                 let params: ReadParams = call.parse_params()?;
-                if params.time_ms > 100000 {
+                if params.time_ms > 3_600_000 {
                     return Err(ToolError::new(
                         "tool.invalidArguments",
-                        "timeMs cannot exceed 100000",
+                        "timeMs cannot exceed 3600000",
                     ));
                 }
                 let client = connect(&self.instance)?;
@@ -82,10 +87,11 @@ impl ToolHandler for TaskTool {
                     descriptor,
                     params.cursor.seq,
                     params.time_ms,
-                    true,
+                    !params.until_exit,
                     false,
                 )?;
-                serialize(collect(
+                let reason = if descriptor["state"] != "running" { "terminal" } else if !params.until_exit && descriptor["latestSeq"].as_u64().unwrap_or(0) > params.cursor.seq { "output" } else { "timeout" };
+                let mut result = collect(
                     &client,
                     &self.artifacts,
                     &params.task,
@@ -94,7 +100,22 @@ impl ToolHandler for TaskTool {
                     DEFAULT_CAPTURE,
                     started,
                     &call,
-                )?)
+                )?;
+                result.wait_reason = Some(reason.into());
+                result.wait_ms = Some(params.time_ms);
+                #[cfg(unix)]
+                if !call.stateless && !result.stdout_truncated && !result.stderr_truncated
+                    && result.stdout_bytes.saturating_add(result.stderr_bytes) <= crate::tool::file::observation::MAX_OUTPUT_BYTES
+                    && !result.stdout.is_empty()
+                {
+                    let source = rpc(&client, "process.v1.provenance", json!({"id": params.task}))?;
+                    if let (Some(command), Some(cwd)) = (source["command"].as_str(), source["cwd"].as_str())
+                        && let Some(plan) = crate::tool::file::observation::CommandReadPlan::analyze(command, std::path::Path::new(cwd))
+                    {
+                        plan.observe(&call, &self.files, &result.stdout);
+                    }
+                }
+                serialize(result)
             }
             "task_input" => {
                 let params: InputParams = call.parse_params()?;
@@ -125,12 +146,14 @@ pub(crate) fn register_tools(
     registry: &mut ToolRegistry,
     instance: &InstanceName,
     artifacts: Arc<ArtifactStore>,
+    files: Arc<crate::tool::file::FileToolState>,
 ) -> Result<(), ToolError> {
     for name in ["task_read", "task_input"] {
         registry.register(Arc::new(TaskTool {
             name: ToolName::parse(name).map_err(error)?,
             instance: instance.clone(),
             artifacts: Arc::clone(&artifacts),
+            files: Arc::clone(&files),
         }))?;
     }
     Ok(())

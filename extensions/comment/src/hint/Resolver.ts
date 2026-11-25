@@ -13,12 +13,7 @@ import {
     fileGrepResultHints,
     fileReadResultHints,
 } from "./tool/worker/File.js";
-import {
-    tmuxErrorHints,
-    tmuxInspectResultHints,
-    tmuxListResultHints,
-    tmuxTaskResultHints,
-} from "./tool/worker/Tmux.js";
+
 
 type ResultResolver = (
     toolName: string,
@@ -36,21 +31,10 @@ const resultResolvers: Record<string, ResultResolver> = {
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
     file_read: (_toolName, result) => fileReadResultHints(result),
-    tmux_input: (toolName, result) => tmuxTaskResultHints(toolName, result),
-    tmux_inspect: (_toolName, result) => tmuxInspectResultHints(result),
-    tmux_manage: (_toolName, result) => tmuxListResultHints(result),
-    tmux_read: (toolName, result) => tmuxTaskResultHints(toolName, result),
-    tmux_run: (toolName, result) => tmuxTaskResultHints(toolName, result),
 };
 
 const fileTools = new Set(["file_read", "file_edit", "file_glob", "file_grep"]);
-const tmuxTools = new Set([
-    "tmux_run",
-    "tmux_input",
-    "tmux_read",
-    "tmux_inspect",
-    "tmux_manage",
-]);
+
 const artifactControlTools = new Set(["artifact_viewImage", "artifact_share"]);
 const instanceTools = new Set([
     "instance_list",
@@ -63,8 +47,6 @@ function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => bashErrorHints(body);
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);
-    if (tmuxTools.has(toolName))
-        return (name, body) => tmuxErrorHints(name, body);
     if (artifactControlTools.has(toolName))
         return (_name, body) => artifactControlErrorHints(body);
     if (instanceTools.has(toolName))

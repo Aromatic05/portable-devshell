@@ -19,7 +19,7 @@ import {
 } from "./app/App.js";
 
 const inlineToolCalls = new Set([
-    "artifact_viewImage", "bash_run", "file_edit", "file_read", "tmux_run",
+    "artifact_viewImage", "bash_run", "file_edit", "file_read",
 ]);
 
 export function createMcpAppMcpExtension(

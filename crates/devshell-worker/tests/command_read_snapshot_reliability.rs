@@ -287,18 +287,22 @@ fn binary_and_oversize_sources_do_not_get_credit() {
 }
 
 #[test]
-fn tmux_task_read_is_credited_to_context_that_consumes_the_output() {
+fn background_task_read_is_credited_to_context_that_consumes_the_output() {
     let env = TestEnv::new();
     let instance = "read-cross-context-tmux";
     fs::write(env.workspace().join("source.txt"), "head\noutcome\n").unwrap();
+    let shim = env.workspace().join("cat");
+    fs::write(&shim, "#!/bin/sh\nsleep 0.3\nexec /bin/cat \"$@\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
     start(&env, instance);
     let started = call(
         &env,
         instance,
         "1",
         "ctx-a",
-        "tmux_run",
-        json!({"command":"cat source.txt", "wait":"nonblock", "consumeOutput":false}),
+        "bash_run",
+        json!({"command":"cat source.txt", "waitMs":0, "env":{"PATH":format!("{}:{}", env.workspace().display(), std::env::var("PATH").unwrap())}}),
     );
     assert_eq!(started["type"], "reply", "{started}");
     let task = started["message"]["task"]["id"].as_str().unwrap();
@@ -307,14 +311,12 @@ fn tmux_task_read_is_credited_to_context_that_consumes_the_output() {
         instance,
         "2",
         "ctx-b",
-        "tmux_read",
-        json!({"task":task, "timeMs":10000, "line":120}),
+        "task_read",
+        json!({"task":task, "timeMs":10000, "untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert!(
-        read["message"]["output"]
-            .as_array()
-            .is_some_and(|lines| lines.iter().any(|line| line.as_str() == Some("outcome"))),
+        read["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "outcome")),
         "{read}"
     );
     let wrong = patch(

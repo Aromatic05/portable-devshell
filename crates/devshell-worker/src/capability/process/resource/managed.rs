@@ -134,12 +134,20 @@ pub(in crate::capability::process) struct ManagedProcess {
     pub(super) control: Control,
     pub(super) input: Mutex<Option<SyncSender<Vec<u8>>>>,
     pub(super) workspace: Option<std::path::PathBuf>,
+    pub(super) provenance: Option<(String, std::path::PathBuf)>,
     pub(super) timed_out: std::sync::atomic::AtomicBool,
     pub(super) state: Mutex<State>,
     pub(super) changed: Condvar,
 }
 
 impl ManagedProcess {
+    pub fn provenance(&self) -> serde_json::Value {
+        match &self.provenance {
+            Some((command, cwd)) => serde_json::json!({"command": command, "cwd": cwd}),
+            None => serde_json::Value::Null,
+        }
+    }
+
     pub fn descriptor(&self) -> Descriptor {
         self.describe(&self.state.lock().expect("process state lock poisoned"))
     }

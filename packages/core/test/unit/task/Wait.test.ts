@@ -17,7 +17,7 @@ import {
 } from "../../../src/task/wait/index.ts";
 import { installWaitToolCallRewrite } from "../../../src/task/wait/Runtime.ts";
 
-test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async () => {
+test("Wait rewrite clamps task run/read and detaches timed-out tasks", async () => {
     const detached: WaitDetachInput[] = [];
     const instanceName = asInstanceName("local");
     const wait = {
@@ -76,11 +76,11 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             value: {
                 context,
                 kind: "call",
-                payload: { timeMs: 250_000, wait: "block" },
-                toolName: "tmux_run",
+                payload: { waitMs: 250_000 },
+                toolName: "bash_run",
             },
         }, runtime);
-        assert.equal((run.payload as Record<string, JsonValue>).timeMs, WAIT_HANDOFF_MS);
+        assert.equal((run.payload as Record<string, JsonValue>).waitMs, WAIT_HANDOFF_MS);
 
         const handedOff = await rewrite({
             callId: "call-run",
@@ -90,16 +90,15 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 kind: "result",
                 payload: {
                     task: { id: "task-1", status: "running" },
-                    timeout: 220_000,
-                    timedOut: true,
-                    warnings: [{ code: "tmux.blockTimeout", message: "internal timeout" }],
+                    termination: "running",
+                    waitReason: "timeout",
+                    waitMs: WAIT_HANDOFF_MS,
                 },
-                toolName: "tmux_run",
+                toolName: "bash_run",
             },
         }, runtime);
         assert.equal((handedOff.payload as Record<string, JsonValue>).detached, true);
         assert.equal((handedOff.payload as Record<string, JsonValue>).timedOut, undefined);
-        assert.deepEqual((handedOff.payload as Record<string, JsonValue>).warnings, []);
         assert.deepEqual(detached, [
             {
                 callId: "call-run",
@@ -107,7 +106,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 instance: instanceName,
                 source: "mcp",
                 targetId: "task-1",
-                toolName: "tmux_run",
+                toolName: "bash_run",
                 workspace: "/repo",
             },
         ]);
@@ -126,10 +125,10 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                         retryable: false,
                     },
                 },
-                toolName: "tmux_run",
+                toolName: "bash_run",
             },
         }, runtime);
-        assert.equal(detached[1]?.targetId, "task-2");
+        assert.equal(detached.length, 1);
 
         const shortDeadline = await rewrite({
             callId: "call-short",
@@ -137,11 +136,11 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             value: {
                 context,
                 kind: "result",
-                payload: { task: { id: "task-short", status: "running" }, timeout: 300, timedOut: true },
-                toolName: "tmux_run",
+                payload: { task: { id: "task-short", status: "running" }, waitMs: 300, waitReason: "timeout", termination: "running" },
+                toolName: "bash_run",
             },
         }, runtime);
-        assert.equal((shortDeadline.payload as Record<string, JsonValue>).timedOut, true);
+        assert.equal((shortDeadline.payload as Record<string, JsonValue>).termination, "running");
         assert.equal((shortDeadline.payload as Record<string, JsonValue>).detached, undefined);
 
         const stateless = await rewrite({
@@ -155,13 +154,13 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                     source: "mcp",
                 },
                 kind: "result",
-                payload: { task: { id: "stateless-task", status: "running" }, timeout: 300, timedOut: true },
-                toolName: "tmux_run",
+                payload: { task: { id: "stateless-task", status: "running" }, waitMs: 300, waitReason: "timeout", termination: "running" },
+                toolName: "bash_run",
             },
         }, runtime);
-        assert.equal((stateless.payload as Record<string, JsonValue>).timedOut, true);
+        assert.equal((stateless.payload as Record<string, JsonValue>).termination, "running");
         assert.equal((stateless.payload as Record<string, JsonValue>).detached, undefined);
-        assert.equal(detached.length, 3);
+        assert.equal(detached.length, 1);
 
         const read = await rewrite({
             callId: "call-read",
@@ -170,7 +169,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 context,
                 kind: "call",
                 payload: { task: "task-3", timeMs: 300_000 },
-                toolName: "tmux_read",
+                toolName: "task_read",
             },
         }, runtime);
         assert.equal((read.payload as Record<string, JsonValue>).timeMs, WAIT_SYNC_MS);
@@ -180,7 +179,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
     }
 });
 
-test("WaitService persists detached task and resolves it through native tmux_read", async () => {
+test("WaitService persists detached task and resolves it through native task_read", async () => {
     const instanceName = asInstanceName("local");
     const root = await createTestTempDirectory("wait-runtime");
     const filePath = join(root, "detached-waits.json");
@@ -216,7 +215,7 @@ test("WaitService persists detached task and resolves it through native tmux_rea
         instance: instanceName,
         source: "mcp",
         targetId: "task-1",
-        toolName: "tmux_run",
+        toolName: "bash_run",
         workspace: "/repo",
     });
 
@@ -228,10 +227,9 @@ test("WaitService persists detached task and resolves it through native tmux_rea
     const [record] = await service.list("ctx-1");
     assert.equal(record?.status, "resolved");
     assert.deepEqual(events, ["wait.detached", "wait.resolved"]);
-    assert.equal(calls[0]?.toolName, "tmux_read");
+    assert.equal(calls[0]?.toolName, "task_read");
     assert.deepEqual(calls[0]?.input, {
-        consumeOutput: false,
-        line: -1,
+        untilExit: true,
         task: "task-1",
         timeMs: WAIT_SYNC_MS,
     });
@@ -273,7 +271,7 @@ test("Wait recovery keeps same-target Contexts isolated and resumes each monitor
     t.after(() => service.close());
     const input = {
         callId: "call-a", ctxId: "ctx-a", instance: asInstanceName("local"),
-        source: "mcp" as const, targetId: "same-task", toolName: "tmux_run", workspace: "/shared",
+        source: "mcp" as const, targetId: "same-task", toolName: "bash_run", workspace: "/shared",
     };
     const first = await service.detach(input);
     const duplicate = await service.detach({ ...input, callId: "call-a-retry" });
@@ -301,9 +299,9 @@ test("Wait recovery keeps same-target Contexts isolated and resumes each monitor
         },
         invoke: {
             async invoke(tool, payload, context) {
-                assert.equal(tool, "tmux_read");
+                assert.equal(tool, "task_read");
                 assert.equal(context.workspace, "/shared");
-                assert.deepEqual(payload, { consumeOutput: false, line: -1, task: "same-task", timeMs: WAIT_SYNC_MS });
+                assert.deepEqual(payload, { untilExit: true, task: "same-task", timeMs: WAIT_SYNC_MS });
                 resumed.push(context.ctxId!);
                 return { waitReason: "terminal", task: { id: "same-task", status: "exited" } };
             },

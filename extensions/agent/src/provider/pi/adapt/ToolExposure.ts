@@ -10,18 +10,17 @@ export interface PiToolExposureDomain {
     readonly gateway: readonly string[];
 }
 
-export const PI_TMUX_TOOL_NAMES = Object.freeze([
-    "tmux_input",
-    "tmux_inspect",
-    "tmux_manage",
-    "tmux_read",
-    "tmux_run",
+export const PI_PROCESS_TOOL_NAMES = Object.freeze([
+    "task_input",
+    "terminal_inspect",
+    "terminal_manage",
+    "task_read",
 ] as const);
 
-export const PI_TMUX_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
-    expanded: PI_TMUX_TOOL_NAMES,
-    expandOnTools: ["tmux_run"],
-    gateway: ["tmux_run"],
+export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
+    expanded: PI_PROCESS_TOOL_NAMES,
+    expandOnTools: ["bash_run"],
+    gateway: ["terminal_manage"],
 });
 
 export class PiToolExposureController {

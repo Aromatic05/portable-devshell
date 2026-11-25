@@ -22,7 +22,7 @@ try {
     const statelessTools = statelessList.body.result?.tools;
     assert.deepEqual(statelessTools?.map(({ name }) => name).sort(), [
         "bash_run", "file_edit", "file_glob", "file_grep", "file_read",
-        "tmux_input", "tmux_inspect", "tmux_manage", "tmux_read", "tmux_run",
+        "task_input", "task_read", "terminal_inspect", "terminal_manage",
     ]);
     for (const tool of statelessTools) {
         assert.equal(Object.hasOwn(tool.inputSchema.properties, "ctxId"), false);
@@ -31,7 +31,6 @@ try {
     }
     const statelessBash = statelessTools.find(({ name }) => name === "bash_run");
     assert.ok(statelessBash.inputSchema.required.includes("cwd"));
-    assert.ok(statelessTools.find(({ name }) => name === "tmux_run").inputSchema.required.includes("cwd"));
 
     const statelessCall = async (id, name, args) => (await postJson(statelessEndpoint, {
         jsonrpc: "2.0", id: `req-stateless-${id}`, method: "tools/call",
@@ -114,10 +113,10 @@ try {
         ["file_glob", { patterns: ["./*.txt"] }],
         ["file_grep", { paths: ["./*.txt"], pattern: "marker" }],
         ["file_grep", { pattern: "marker" }],
-        ["tmux_run", { command: "pwd" }],
-        ["tmux_run", { command: "pwd", cwd: "./" }],
-        ["tmux_manage", { command: "create", name: "invalid", cwd: "./" }],
-        ["tmux_manage", { command: "create", name: "invalid" }],
+        ["bash_run", { command: "pwd", tty: true }],
+        ["bash_run", { command: "pwd", cwd: "./", tty: true }],
+        ["terminal_manage", { command: "create", cwd: "./" }],
+        ["terminal_manage", { command: "create" }],
     ]) {
         const result = await statelessCall(`invalid-${tool}-${JSON.stringify(args)}`, tool, args);
         assert.ok(result.error, JSON.stringify(result));
@@ -128,33 +127,31 @@ try {
         assert.equal(result.error, undefined, JSON.stringify(result));
         return result.result.structuredContent;
     };
-    assert.deepEqual((await mux("inspect-empty", "tmux_inspect", { panes: "all" })).panes, []);
-    const noPane = await statelessCall("input-empty", "tmux_input", { pane: "main", input: "x" });
-    assert.equal(noPane.error?.data?.code, "tmux.paneNotFound", JSON.stringify(noPane));
-    assert.deepEqual((await mux("list-empty", "tmux_manage", { command: "list" })).panes, []);
-    const createdPane = await mux("create-pane", "tmux_manage", {
-        command: "create", name: "stateless-pane", cwd: fixture.workspace,
-    });
-    const pane = createdPane.pane.id;
-    const listed = await mux("list-panes", "tmux_manage", { command: "list", scope: "instance" });
-    assert.ok(listed.panes.some((entry) => entry.id === pane && entry.workspace === undefined));
-    assert.ok((await mux("inspect-pane", "tmux_inspect", { pane })).panes.some((entry) => entry.id === pane));
+    const noTask = await statelessCall("input-empty", "task_input", { task: "missing", input: "x" });
+    assert.ok(noTask.error, JSON.stringify(noTask));
+    const before = await mux("list-before", "terminal_manage", { command: "list" });
+    const created = await mux("create-terminal", "terminal_manage", { command: "create", cwd: fixture.workspace });
+    const terminal = created.id;
+    assert.equal(typeof terminal, "string");
+    const listed = await mux("list-terminals", "terminal_manage", { command: "list" });
+    assert.ok(listed.tasks.some((entry) => entry.id === terminal && entry.workspace == null));
+    await mux("inspect-terminal", "terminal_inspect", { terminal });
     const interactive = process.platform === "win32"
         ? '$value = Read-Host "ready"; Write-Output "received:$value"'
-        : "printf 'ready\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"";
-    const startedTask = await mux("run-task", "tmux_run", {
-        command: interactive, cwd: fixture.workspace, wait: "block", timeout: 1000,
+        : "printf 'ready\n'; IFS= read -r value; printf 'received:%s\n' \"$value\"";
+    const startedTask = await mux("run-task", "bash_run", {
+        command: interactive, cwd: fixture.workspace, waitMs: 1000, tty: true,
     });
-    assert.equal(startedTask.timedOut, true, JSON.stringify(startedTask));
+    assert.equal(startedTask.termination, "running", JSON.stringify(startedTask));
     assert.equal(startedTask.detached, undefined);
     const task = startedTask.task.id;
-    const input = await mux("input-task", "tmux_input", { task, input: "hello^M", timeMs: 3000, line: -80 });
-    const finished = await mux("read-task", "tmux_read", { task, timeMs: 3000, line: -80 });
+    await mux("input-task", "task_input", { task, input: "hello\r" });
+    const finished = await mux("read-task", "task_read", { task, cursor: startedTask.cursor, timeMs: 3000, untilExit: true });
     assert.equal(finished.task.status, "0", JSON.stringify(finished));
-    assert.match([...(input.output ?? []), ...(finished.output ?? [])].join("\n"), /received:hello/u);
-    const closed = await mux("close-pane", "tmux_manage", { command: "close", pane, force: true });
-    assert.equal(closed.closedPaneId, pane);
-    assert.ok(!(await mux("list-closed", "tmux_manage", { command: "list" })).panes.some((entry) => entry.id === pane));
+    assert.match(finished.stdout, /received:hello/u);
+    await mux("close-terminal", "terminal_manage", { command: "close", id: terminal });
+    const closed = await mux("read-closed", "task_read", { task: terminal, untilExit: true, timeMs: 3000 });
+    assert.notEqual(closed.task.status, "running");
     assert.deepEqual(listContexts(), contextsBefore);
 
     const discover = await postJson(endpoint, {
@@ -208,19 +205,19 @@ try {
     const explicitMux = async (id, args) => {
         const result = await postJson(endpoint, {
             jsonrpc: "2.0", id, method: "tools/call",
-            params: { name: "tmux_manage", arguments: { ctxId, ...args } },
+            params: { name: "terminal_manage", arguments: { ctxId, ...args } },
         });
         assert.equal(result.body.error, undefined, JSON.stringify(result.body));
         return result.body.result.structuredContent;
     };
-    const ordinaryPane = (await explicitMux("create-workspace-pane", {
-        command: "create", name: "workspace-pane", cwd: fixture.workspace,
-    })).pane.id;
-    const ordinaryList = await explicitMux("list-workspace-panes", { command: "list", scope: "instance" });
-    assert.ok(ordinaryList.panes.some((entry) => entry.id === ordinaryPane && entry.workspace));
-    assert.ok(ordinaryList.panes.every((entry) => !listed.panes.some((statelessPane) => statelessPane.id === entry.id)));
-    const independentList = await mux("list-independent", "tmux_manage", { command: "list" });
-    assert.ok(independentList.panes.every((entry) => !ordinaryList.panes.some((ordinary) => ordinary.id === entry.id)));
+    const ordinaryTerminal = (await explicitMux("create-workspace-terminal", {
+        command: "create", cwd: fixture.workspace,
+    })).id;
+    const ordinaryList = await explicitMux("list-workspace-terminals", { command: "list" });
+    assert.ok(ordinaryList.tasks.some((entry) => entry.id === ordinaryTerminal && entry.workspace));
+    assert.ok(ordinaryList.tasks.every((entry) => !listed.tasks.some((stateless) => stateless.id === entry.id)));
+    const independentList = await mux("list-independent", "terminal_manage", { command: "list" });
+    assert.ok(independentList.tasks.every((entry) => !ordinaryList.tasks.some((ordinary) => ordinary.id === entry.id)));
 
     const toolCall = await postJson(
         endpoint,

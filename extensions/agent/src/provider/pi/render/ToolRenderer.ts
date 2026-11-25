@@ -40,11 +40,7 @@ import {
     renderBashResult,
     renderBashResultComponent,
 } from "./Shell.js";
-import {
-    formatTmuxCall,
-    renderTerminalResultComponent,
-    renderTmuxResult,
-} from "./Tmux.js";
+
 
 export {
     parseEditChangeSet,
@@ -67,11 +63,10 @@ export const devshellPiRendererToolNames = Object.freeze([
     "file_glob",
     "file_grep",
     "file_read",
-    "tmux_input",
-    "tmux_inspect",
-    "tmux_manage",
-    "tmux_read",
-    "tmux_run",
+    "task_input",
+    "terminal_inspect",
+    "terminal_manage",
+    "task_read",
 ] as const);
 
 const rendererToolNames = new Set<string>(devshellPiRendererToolNames);
@@ -120,17 +115,8 @@ export function renderPiToolResult(
                 context,
             );
         case "bash_run":
+        case "task_read":
             return renderBashResultComponent(result, options, theme, context);
-        case "tmux_run":
-        case "tmux_read":
-        case "tmux_input":
-            return renderTerminalResultComponent(
-                toolName,
-                result,
-                options,
-                theme,
-                context,
-            );
         default:
             return setText(
                 context.lastComponent,
@@ -173,12 +159,6 @@ export function formatPiToolCall(
             return formatGrepCall(record, theme);
         case "file_read":
             return formatReadCall(record, theme);
-        case "tmux_input":
-        case "tmux_inspect":
-        case "tmux_manage":
-        case "tmux_read":
-        case "tmux_run":
-            return formatTmuxCall(toolName, record, theme);
         default:
             return joinCall(
                 style(theme, "toolTitle", toolName, true),
@@ -207,6 +187,7 @@ export function formatPiToolResult(
                 theme,
             );
         case "bash_run":
+        case "task_read":
             return joinStyled(
                 renderBashResult(result.details, expanded),
                 theme,
@@ -222,15 +203,6 @@ export function formatPiToolResult(
             return joinStyled(renderFileGrep(result.details, expanded), theme);
         case "file_read":
             return joinStyled(renderFileRead(result.details, expanded), theme);
-        case "tmux_input":
-        case "tmux_inspect":
-        case "tmux_manage":
-        case "tmux_read":
-        case "tmux_run":
-            return joinStyled(
-                renderTmuxResult(toolName, result.details, expanded),
-                theme,
-            );
         default: {
             let lines = renderStructured(result.details);
             if (lines.length === 0) lines = textContentLines(result);
@@ -257,8 +229,6 @@ function displayToolLabel(toolName: string): string {
         case "file_read":
             return "read";
         default:
-            return toolName.startsWith("tmux_")
-                ? `tmux ${toolName.slice(5)}`
-                : toolName;
+            return toolName;
     }
 }

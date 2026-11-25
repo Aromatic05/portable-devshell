@@ -262,14 +262,7 @@ mod unix {
     }
 
     #[test]
-    fn ordered_environment_hooks_reach_a_managed_tmux_task() {
-        if !Command::new("tmux")
-            .arg("-V")
-            .output()
-            .is_ok_and(|out| out.status.success())
-        {
-            return;
-        }
+    fn ordered_environment_hooks_reach_a_managed_task() {
         let env = TestEnv::new();
         let instance = "execution-tmux-environment";
         let config = json!({ "environment": [
@@ -288,11 +281,11 @@ mod unix {
             "tool",
             &json!({
                 "protocol": "rpc", "type": "request", "id": "execution-tmux-run",
-                "method": "tmux_run",
+                "method": "bash_run",
                 "message": {
                     "input": {
                         "command": "printf '%s|%s\\n' \"$LAYER\" \"${REMOVE_ME-missing}\"",
-                        "wait": "block", "timeMs": 3000, "line": 80
+                        "waitMs": 3000, "tty": true
                     },
                     "context": {
                         "workspace": env.workspace(), "source": "mcp",
@@ -304,25 +297,14 @@ mod unix {
         assert_eq!(run["type"], "reply", "{run}");
         assert_eq!(run["message"]["task"]["status"], "0", "{run}");
         assert!(
-            run["message"]["output"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|line| line == "second|missing"),
+            run["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "second|missing")),
             "{run}"
         );
         env.json_command(&["stop", "--instance", instance]);
     }
 
     #[test]
-    fn exclusive_process_sandbox_wraps_bash_and_managed_tmux_tasks() {
-        if !Command::new("tmux")
-            .arg("-V")
-            .output()
-            .is_ok_and(|out| out.status.success())
-        {
-            return;
-        }
+    fn exclusive_process_sandbox_wraps_bash_and_managed_pty_tasks() {
         if !Command::new("bwrap")
             .args([
                 "--ro-bind",
@@ -361,9 +343,9 @@ mod unix {
         assert_eq!(bash["message"]["stdout"], "sandbox-bash", "{bash}");
         let tmux = env.rpc(instance, "tool", &json!({
             "protocol": "rpc", "type": "request", "id": "sandbox-tmux-run",
-            "method": "tmux_run",
+            "method": "bash_run",
             "message": {
-                "input": { "command": "printf 'sandbox-task\\n'", "wait": "block", "timeMs": 3000, "line": 80 },
+                "input": { "command": "printf 'sandbox-task\\n'", "waitMs": 3000, "tty": true },
                 "context": {
                     "workspace": env.workspace(), "source": "mcp",
                     "ctxId": "ctx-sandbox", "requestId": "sandbox-tmux-run"
@@ -373,11 +355,7 @@ mod unix {
         assert_eq!(tmux["type"], "reply", "{tmux}");
         assert_eq!(tmux["message"]["task"]["status"], "0", "{tmux}");
         assert!(
-            tmux["message"]["output"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|line| line == "sandbox-task"),
+            tmux["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "sandbox-task")),
             "{tmux}"
         );
         env.json_command(&["stop", "--instance", instance]);

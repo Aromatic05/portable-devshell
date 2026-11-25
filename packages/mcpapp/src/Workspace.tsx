@@ -9,22 +9,21 @@ type Activity = McpAppActivity;
 const emptyTerminal = { stdout: "", stderr: "", loaded: false, loading: false };
 const internalActivity = new Set([
     "environ_info", "progress_report", "workspace_goal",
-    "tmux_read", "tmux_input", "tmux_inspect", "tmux_manage",
+    "task_read", "task_input", "terminal_inspect", "terminal_manage",
 ]);
 
 function taskTranscript(item: Activity, reads: readonly Activity[]): unknown {
     const base = record(item.output) ?? {};
-    if (item.name !== "tmux_run" || reads.length === 0) return item.output;
+    if (item.name !== "bash_run" || reads.length === 0) return item.output;
     // Audit is immutable. Build the current terminal from the available
     // recorded output fragments, not from another long-running HTTP watcher.
     const ordered = [item, ...reads].sort((a, b) => a.at.localeCompare(b.at));
-    const lines = ordered.flatMap((entry) => {
-        const output = record(entry.output)?.output;
-        return Array.isArray(output) ? output.filter((part): part is string =>
-            typeof part === "string") : [];
-    }).slice(-100);
     const latest = record(ordered.at(-1)?.output);
-    return { ...base, output: lines, task: record(latest?.task) ?? base.task };
+    const stream = (key: "stdout" | "stderr") => ordered.map((entry) => {
+        const value = record(entry.output)?.[key];
+        return typeof value === "string" ? value : "";
+    }).join("").slice(-12_000);
+    return { ...base, ...latest, stdout: stream("stdout"), stderr: stream("stderr"), task: record(latest?.task) ?? base.task };
 }
 
 /** Context-scoped terminal streams are loaded only when this audit card is opened. */
@@ -89,7 +88,7 @@ function ActivityCard({ item, reads, session }: {
     };
     const failed = item.state === "failed" || item.state === "denied";
     const summary = [item.summary ?? (item.exitCode === undefined
-        ? undefined : "exit " + item.exitCode), item.name === "tmux_run" && reads.length
+        ? undefined : "exit " + item.exitCode), item.name === "bash_run" && reads.length
         ? reads.length + " transcript reads" : undefined].filter(Boolean).join(" · ");
     const output = isShell && session ? {
         ...record(item.output),
@@ -103,7 +102,7 @@ function ActivityCard({ item, reads, session }: {
         ...(imageError ? { activityImageError: imageError } : {}),
     } : taskTranscript(item, reads);
     return <ToolCallCard name={item.name}
-        input={item.input ?? (isShell || item.name === "tmux_run"
+        input={item.input ?? (isShell || item.name === "bash_run"
             ? { command: item.target } : { path: item.target })}
         purpose={item.purpose} summary={summary}
         detail={item.detail} state={item.state}
@@ -169,7 +168,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session, fresh = true
     });
     const pollsByTask = new Map<string, Activity[]>();
     for (const item of history ?? []) {
-        if (item.name !== "tmux_read" || !item.taskId) continue;
+        if (item.name !== "task_read" || !item.taskId) continue;
         pollsByTask.set(item.taskId, [...(pollsByTask.get(item.taskId) ?? []), item]);
     }
     return <div className="dashboard">

@@ -4,7 +4,7 @@ import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 
 import { createDevshellPiExtension, type DevshellPiToolSession, type PiExtensionApiLike } from "../adapt/Bridge.js";
 import {
-    PI_TMUX_TOOL_DOMAIN,
+    PI_PROCESS_TOOL_DOMAIN,
     PiToolExposureController,
 } from "../adapt/ToolExposure.js";
 import type { PiAgentProfile } from "../profile/Profile.js";
@@ -160,7 +160,7 @@ export class PiSubagentRuntime {
         session.setSessionName?.(path);
         this.#gui.attach(session, this.#localCwd);
         const toolExposure = new PiToolExposureController(session, {
-            tmux: PI_TMUX_TOOL_DOMAIN,
+            process: PI_PROCESS_TOOL_DOMAIN,
         });
         const record: PiSubagentRecord = {
             activity: "running",

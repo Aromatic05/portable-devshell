@@ -46,7 +46,7 @@ pub(crate) fn run(
         wait
     };
     let descriptor = wait_for(&client, call, id, descriptor, 0, wait, false, true)?;
-    collect(
+    let mut result = collect(
         &client,
         artifacts,
         id,
@@ -55,5 +55,8 @@ pub(crate) fn run(
         max_capture,
         started,
         call,
-    )
+    )?;
+    result.wait_reason = Some(if result.termination == super::model::BashTermination::Running { "timeout" } else { "terminal" }.into());
+    result.wait_ms = Some(wait);
+    Ok(result)
 }

@@ -4,7 +4,6 @@ pub mod environment;
 pub mod file;
 pub(crate) mod process;
 pub mod registry;
-pub mod tmux;
 
 pub use contract::{
     ToolCall, ToolCancellation, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName,

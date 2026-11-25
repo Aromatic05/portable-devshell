@@ -42,7 +42,7 @@ pub struct EnrollArgs {
     pub device_code: String,
     #[arg(long)]
     pub proxy: Option<String>,
-    /// Allow replacing a running Worker, terminating its managed tmux tasks.
+    /// Allow replacing a running Worker, terminating its managed processes.
     #[arg(long)]
     pub replace_running: bool,
 }

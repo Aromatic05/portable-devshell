@@ -185,10 +185,9 @@ export class WaitService {
             if (record === undefined || record.status !== "detached") return;
             try {
                 const result = await this.#invoke.invoke(
-                    "tmux_read",
+                    "task_read",
                     {
-                        consumeOutput: false,
-                        line: -1,
+                        untilExit: true,
                         task: record.targetId,
                         timeMs: WAIT_SYNC_MS,
                     },
@@ -207,7 +206,7 @@ export class WaitService {
                 return;
             } catch (error) {
                 if (signal.aborted) return;
-                if (toRemoteErrorBody(error)?.code === "tmux.taskExpired") {
+                if (toRemoteErrorBody(error)?.code === "process.notFound") {
                     await this.#settleObserved(waitId, "failed", {
                         error: errorMessage(error),
                     }, signal);
@@ -225,7 +224,7 @@ export class WaitService {
         signal: AbortSignal,
     ): Promise<void> {
         // A terminal observation is a fact. A failed state commit must never
-        // cause another tmux_read that could report taskExpired instead.
+        // cause another task_read that could report a missing task instead.
         while (!signal.aborted) {
             try {
                 await this.#settle(waitId, status, terminal);

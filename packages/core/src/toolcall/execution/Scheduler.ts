@@ -66,7 +66,7 @@ const terminalStates = new Set<ToolSchedulerEntryState>([
     "queueTimeout",
 ]);
 
-const urgentToolNames = new Set(["tmux_input", "tmux_inspect", "tmux_manage"]);
+const urgentToolNames = new Set(["task_input", "terminal_inspect", "terminal_manage"]);
 
 function isUrgentTool(toolName: string): boolean {
     return urgentToolNames.has(toolName);

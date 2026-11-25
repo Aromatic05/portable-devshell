@@ -59,37 +59,6 @@ impl TestEnv {
             .join("worker.sock")
     }
 
-    pub fn tmux_socket_file(&self, instance: &str) -> PathBuf {
-        let instance_root = self.instance_root(instance);
-        let workspace = self.workspace().canonicalize().unwrap();
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(instance_root.as_os_str().as_encoded_bytes());
-        hasher.update(&[0]);
-        hasher.update(workspace.as_os_str().as_encoded_bytes());
-        let hash = hasher.finalize().to_hex();
-        let workspace_key = &hash[..16];
-        let default_runtime_dir = self.runtime_root.join("devshell-worker").join(instance);
-        let instance_runtime_dir = if default_runtime_dir
-            .join("transport.sock")
-            .as_os_str()
-            .as_encoded_bytes()
-            .len()
-            <= 100
-        {
-            default_runtime_dir
-        } else {
-            let identity = format!("{}:{instance}", self.home_root.display());
-            let hash = blake3::hash(identity.as_bytes()).to_hex();
-            PathBuf::from("/tmp").join(format!("devshell-worker-{}", &hash[..16]))
-        };
-        let candidate = instance_runtime_dir.join(format!("tmux-{workspace_key}.sock"));
-        if candidate.as_os_str().as_encoded_bytes().len() <= 100 {
-            candidate
-        } else {
-            PathBuf::from("/tmp").join(format!("devshell-tmux-{workspace_key}.sock"))
-        }
-    }
-
     pub fn fallback_socket_file(&self, instance: &str) -> PathBuf {
         self.home_root
             .join("runtime")
@@ -249,7 +218,7 @@ impl TestEnv {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.join("state/worker.pid").is_file() {
+            if !path.join("state/worker.pid").is_file() && !path.join("state/process-host.lock").exists() {
                 continue;
             }
             let Some(instance) = entry.file_name().to_str().map(ToOwned::to_owned) else {
@@ -266,36 +235,12 @@ impl TestEnv {
         }
     }
 
-    #[cfg(unix)]
-    fn stop_remaining_tmux(&self) {
-        let Ok(entries) = fs::read_dir(&self.home_root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let Some(instance) = entry.file_name().to_str().map(ToOwned::to_owned) else {
-                continue;
-            };
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let socket = self.tmux_socket_file(&instance);
-            if !socket.exists() {
-                continue;
-            }
-            let _ = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(&socket)
-                .arg("kill-server")
-                .output();
-        }
-    }
+
 }
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
         self.stop_remaining_workers();
-        #[cfg(unix)]
-        self.stop_remaining_tmux();
     }
 }
 

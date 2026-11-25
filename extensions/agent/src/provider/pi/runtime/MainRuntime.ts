@@ -4,7 +4,7 @@ import {
     type PiExtensionApiLike,
 } from "../adapt/Bridge.js";
 import {
-    PI_TMUX_TOOL_DOMAIN,
+    PI_PROCESS_TOOL_DOMAIN,
     PiToolExposureController,
     type PiToolExposureSurface,
 } from "../adapt/ToolExposure.js";
@@ -67,7 +67,7 @@ export class PiMainRuntime {
                 expanded: PI_SUBAGENT_TOOL_NAMES,
                 gateway: ["agent_spawn"],
             },
-            tmux: PI_TMUX_TOOL_DOMAIN,
+            process: PI_PROCESS_TOOL_DOMAIN,
         });
     }
 

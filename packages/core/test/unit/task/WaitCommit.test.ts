@@ -15,7 +15,7 @@ const input = {
     instance: asInstanceName("local"),
     source: "mcp" as const,
     targetId: "task-a",
-    toolName: "tmux_run",
+    toolName: "bash_run",
     workspace: "/repo",
 };
 

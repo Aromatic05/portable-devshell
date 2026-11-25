@@ -173,45 +173,16 @@ function warnings(output: Item | undefined): ReactNode {
         {string(item.message) ?? string(item.code) ?? "Terminal warning"}</Notice>);
 }
 
-function TmuxView({ name, input, result }: ToolCallPresentation): ReactNode {
+function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
     const args = record(input);
     const output = record(result?.output);
-    const task = record(output?.task);
-    const pane = record(output?.pane);
-    const panes = entries(output?.panes);
-    const lines = textList(output?.output);
+    const tasks = entries(output?.tasks);
     return <div className="tc-view">
-        <div className="tc-stats">
-            <Stat label="Task" value={string(task?.id)} />
-            <Stat label="Pane" value={string(pane?.name) ?? string(pane?.id)} />
-            {task?.status !== undefined && <TaskState status={task.status} />}
-            {string(output?.waitReason) && <Stat label="Wait" value={string(output?.waitReason)} />}
-        </div>
-        {string(args?.command) && name === "tmux_run" &&
-            <div className="tc-command"><span aria-hidden="true">$</span><code>{string(args?.command)}</code></div>}
-        {name === "tmux_input" && <InfoStrip>Input sent to {string(args?.task) ??
-            string(args?.pane) ?? "terminal"}</InfoStrip>}
-        {output?.detached === true && <Notice>The task is detached; it may still be running.</Notice>}
-        {output?.interrupted === true && <Notice tone="warning">Waiting stopped, not the task.</Notice>}
-        {(output?.timedOut === true || output?.waitReason === "timeout") &&
-            <Notice tone="warning">The wait timed out; the task may still be running.</Notice>}
-        {panes.length ? <div className="tc-pane-list">{panes.map((item, index) =>
-            <section className="tc-pane" key={index}>
-                <div className="tc-file-header"><strong>{string(item.name) ?? "Pane"}</strong>
-                    <TaskState status={item.status} /></div>
-                {string(item.cwd) && <InfoStrip>Directory: {string(item.cwd)}</InfoStrip>}
-                {string(item.command) && <InfoStrip>Command: {string(item.command)}</InfoStrip>}
-                {textList(item.lines).length > 0 &&
-                    <Terminal title={string(item.name) ?? "Pane"} text={textList(item.lines).join("\n")} />}
-            </section>)}</div> : null}
-        {lines.length > 0 && <Terminal title="Task transcript" text={lines.join("\n")} />}
-        {name === "tmux_manage" && string(output?.closedTaskId) &&
-            <Notice>Closed task: {string(output?.closedTaskId)}</Notice>}
-        {name === "tmux_manage" && string(output?.closedPaneId) &&
-            <Notice>Closed pane: {string(output?.closedPaneId)}</Notice>}
+        {name === "task_input" && <InfoStrip>Input sent to {string(args?.task) ?? "task"}</InfoStrip>}
+        {string(output?.text) && <Terminal title="Terminal snapshot" text={string(output?.text)!} />}
+        {tasks.map((task, index) => <InfoStrip key={index}>{string(task.id)} · {string(task.state)}{task.humanControl === true ? " · human control" : ""}</InfoStrip>)}
+        {name === "terminal_manage" && tasks.length === 0 && <ValueRows value={output ?? {}} />}
         {warnings(output)}
-        {!lines.length && !panes.length && name === "tmux_read" &&
-            <Notice>No additional transcript lines were returned.</Notice>}
     </div>;
 }
 
@@ -274,11 +245,10 @@ const renderers: Record<string, Renderer> = {
     file_grep: SearchView,
     file_glob: GlobView,
     file_edit: EditView,
-    tmux_run: TmuxView,
-    tmux_read: TmuxView,
-    tmux_input: TmuxView,
-    tmux_inspect: TmuxView,
-    tmux_manage: TmuxView,
+    task_read: ShellView,
+    task_input: ProcessView,
+    terminal_inspect: ProcessView,
+    terminal_manage: ProcessView,
     progress_report: ReportView,
     artifact_viewImage: ImageView,
     environ_info: EnvironmentView,
@@ -292,7 +262,7 @@ export function ToolCallDetails(view: ToolCallPresentation): ReactNode {
     // Old audit entries may lack typed output. Preserve the recorded text
     // without treating a debugging dump as the primary display for new calls.
     if (view.result?.output === undefined && view.detail) {
-        if (view.name === "bash_run" || view.name.startsWith("tmux_"))
+        if (view.name === "bash_run" || view.name === "task_read")
             return <Terminal text={view.detail} title="Recorded output" />;
         if (view.name === "file_read" || view.name === "file_grep")
             return <CodeLines text={view.detail} />;

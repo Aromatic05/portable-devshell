@@ -78,7 +78,7 @@ test("common CI owns source correctness without rebuilding release assets", () =
         "Build",
         "Typecheck",
         "Rust workspace tests",
-        "Worker tmux contract tests",
+        "Worker process contract tests",
         "Prepare test Worker",
         "Package tests",
     ]);
@@ -108,7 +108,7 @@ test("Windows common CI keeps source correctness and excludes only tmux contract
             "Prepare test Worker",
             "Package tests",
         ]);
-        assert.equal(names.includes("Worker tmux contract tests"), false);
+        assert.equal(names.includes("Worker process contract tests"), false);
     } finally {
         if (previous === undefined) {
             delete process.env.PORTABLE_DEVSHELL_PNPM_CLI;
@@ -149,7 +149,7 @@ test("macOS platform contract retains OS-sensitive package Rust and tmux behavio
     assert.deepEqual(names, [
         "Build",
         "Rust workspace tests",
-        "Worker tmux contract tests",
+        "Worker process contract tests",
         "Prepare test Worker",
         "Package tests",
     ]);

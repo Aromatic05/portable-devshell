@@ -101,28 +101,43 @@ impl ProcessHostClient {
     }
 
     pub fn ensure(instance: &InstanceName) -> Result<Self, String> {
+        Self::ensure_with(instance, &crate::daemon::process::current_security_mode(), |paths, mode| {
+            if crate::capability::execution::ExecutionConfig::from_env()?
+                .as_ref().and_then(|config| config.sandbox.as_ref())
+                .is_some_and(|sandbox| sandbox.phase == "daemon")
+            {
+                return Err("daemon-phase Process Host must be started by the Worker launcher".into());
+            }
+            super::host::launcher::spawn(instance, paths, mode)
+        })
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn ensure_for_daemon(
+        instance: &InstanceName,
+        mode: &crate::instance::sandbox::SecurityMode,
+        command: std::process::Command,
+    ) -> Result<Self, String> {
+        Self::ensure_with(instance, mode, |paths, mode| {
+            super::host::launcher::spawn_command(command, instance, paths, mode)
+        })
+    }
+
+    fn ensure_with(
+        instance: &InstanceName,
+        mode: &crate::instance::sandbox::SecurityMode,
+        launch: impl FnOnce(&InstancePaths, &crate::instance::sandbox::SecurityMode) -> Result<(), String>,
+    ) -> Result<Self, String> {
         let paths = InstancePaths::resolve(instance)?;
         let endpoints = EndpointPaths::resolve(instance)?;
         ensure_dir(&paths.state_dir, 0o700)?;
         let _launch = InstanceLock::acquire_path(&launch_lock(&paths), false)?
             .ok_or_else(|| "failed to acquire Process Host launch lock".to_string())?;
-        let mode = crate::daemon::process::current_security_mode();
-        let identity = super::protocol::execution_identity(&mode)?;
+        let identity = super::protocol::execution_identity(mode)?;
         if let Some(client) = Self::connect(instance, &paths, &endpoints)? {
             return client.check_execution(&identity);
         }
-        // Host inherits the Worker's environment and containment. A daemon
-        // sandbox that dies with the Worker cannot promise persistence.
-        if crate::capability::execution::ExecutionConfig::from_env()?
-            .as_ref()
-            .and_then(|config| config.sandbox.as_ref())
-            .is_some_and(|sandbox| sandbox.phase == "daemon")
-        {
-            return Err(
-                "independent Process Host is not available inside a daemon-phase sandbox".into(),
-            );
-        }
-        super::host::launcher::spawn(instance, &paths, &mode)?;
+        launch(&paths, mode)?;
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match Self::connect(instance, &paths, &endpoints) {

@@ -16,7 +16,7 @@ pub(super) fn rpc(
     method: &str,
     value: Value,
 ) -> Result<Value, ToolError> {
-    client.call(method, value, RPC_TIMEOUT).map_err(error)
+    client.call_rpc(method, value, RPC_TIMEOUT).map_err(|failure| ToolError { code: failure.code, message: failure.message, retryable: failure.retryable, details: failure.details })
 }
 
 pub(super) fn connect(instance: &InstanceName) -> Result<ProcessHostClient, ToolError> {

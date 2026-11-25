@@ -66,11 +66,10 @@ try {
             throw new Error("bash_run is missing from tools.list");
         if (handshake.platform.os === "windows") {
             for (const name of [
-                "tmux_input",
-                "tmux_inspect",
-                "tmux_manage",
-                "tmux_read",
-                "tmux_run",
+                "task_input",
+                "terminal_inspect",
+                "terminal_manage",
+                "task_read",
             ]) {
                 if (!names.includes(name)) {
                     throw new Error(

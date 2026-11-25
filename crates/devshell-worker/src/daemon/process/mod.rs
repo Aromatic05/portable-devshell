@@ -82,31 +82,37 @@ pub fn spawn_executable(
             .try_clone()
             .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
 
-        let mut command = match crate::capability::execution::daemon_sandbox(execution.as_ref())? {
-            Some((driver, args)) => {
-                let mut wrapped = Command::new(driver);
-                wrapped.args(args).arg("--").arg(executable);
-                wrapped
-            }
-            None => Command::new(executable),
+        let sandbox = crate::capability::execution::daemon_sandbox(execution.as_ref())?;
+        let environment = match execution.as_ref() {
+            Some(config) => config.environment_for(&paths.instance_root, "daemon")?,
+            None => Default::default(),
         };
-        if let Some(config) = execution.as_ref() {
-            for (name, value) in config.environment_for(&paths.instance_root, "daemon")? {
+        let prepare = || {
+            let mut command = match &sandbox {
+                Some((driver, args)) => {
+                    let mut wrapped = Command::new(driver);
+                    wrapped.args(args).arg("--").arg(executable);
+                    wrapped
+                }
+                None => Command::new(executable),
+            };
+            for (name, value) in &environment {
                 match value {
-                    Some(value) => {
-                        command.env(name, value);
-                    }
-                    None => {
-                        command.env_remove(name);
-                    }
+                    Some(value) => { command.env(name, value); }
+                    None => { command.env_remove(name); }
                 }
             }
-            // The worker requires the same immutable provider selection when it
-            // subsequently prepares child executions.
             if let Ok(value) = std::env::var(crate::capability::execution::CONFIG_ENV) {
                 command.env(crate::capability::execution::CONFIG_ENV, value);
             }
+            command
+        };
+        if sandbox.is_some() {
+            crate::capability::process::client::ProcessHostClient::ensure_for_daemon(
+                instance, &runtime.security_mode, prepare(),
+            )?;
         }
+        let mut command = prepare();
         command
             .env(INTERNAL_INSTANCE_ENV, instance.as_str())
             .env(

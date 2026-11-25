@@ -19,7 +19,7 @@ pub struct BashRunParams {
     #[schemars(range(min = 1, max = 100000))]
     pub timeout_ms: Option<u64>,
     /// Time to wait for the command before returning a running task ID.
-    #[schemars(range(min = 0, max = 100000))]
+    #[schemars(range(min = 0, max = 3600000))]
     pub wait_ms: Option<u64>,
     /// Allocate a PTY at process creation.
     #[serde(default)]
