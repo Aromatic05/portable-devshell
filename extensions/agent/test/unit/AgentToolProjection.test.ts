@@ -205,3 +205,88 @@ test("Agent bash/task result projection preserves detached, waitMs, and untilExi
     assert.doesNotMatch(normalResult, /detached=/u);
     assert.doesNotMatch(normalResult, /untilExit=/u);
 });
+
+test("Agent clipped task_input output without an artifact directs read-only polling, not input replay", () => {
+    const comment = `The task is still running.\n${"Review note. ".repeat(300)}`;
+    const result = {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: true },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6MTAwMDA6MA",
+        waitReason: "output",
+        stdout: "x".repeat(10_000),
+        stdoutBytes: 10_000,
+        stdoutTruncated: false,
+        stderr: "",
+        stderrBytes: 0,
+        stderrTruncated: false,
+        artifactWarnings: ["stdout artifact could not be persisted: disk full"],
+        comment: [comment],
+    };
+
+    for (const name of ["task_input", "devshell_task_input"]) {
+        const text = projectAgentModelToolResult(name, result);
+        assert.doesNotMatch(text, /rerun with narrower output/u, name);
+        assert.ok(text.startsWith(`comment:\n${comment}\n`), name);
+        assert.match(text, /\[tool result truncated:/u, name);
+        assert.match(text, /^stdoutProjectionClipped=true$/mu, name);
+        assert.match(text, /Do not rerun the command or resend input/u, name);
+        assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u, name);
+        assert.ok(text.includes(`task=${JSON.stringify(result.task)}`), name);
+        assert.ok(text.includes(`cursor=${JSON.stringify(result.cursor)}`), name);
+        assert.match(text, /^waitReason=output$/mu, name);
+        assert.match(text, /^warning=stdout artifact could not be persisted: disk full$/mu, name);
+        assert.ok(text.length <= 12_000, name);
+    }
+});
+
+test("Agent guides observation when worker truncation leaves no inline output or recovery path", () => {
+    const text = projectAgentModelToolResult("task_input", {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: true },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6MTAwMDA6MA",
+        stdout: "",
+        stdoutTruncated: true,
+        stderr: "",
+        stderrTruncated: false,
+        artifactWarnings: ["stdout artifact unavailable: Process Host capture limit reached"],
+    });
+
+    assert.match(text, /^stdoutTruncated=true$/mu);
+    assert.match(text, /Do not rerun the command or resend input/u);
+    assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u);
+    assert.doesNotMatch(text, /stderrTruncated=true/u);
+});
+
+test("Agent keeps artifact recovery available alongside an unrecoverable clipped stream", () => {
+    const text = projectAgentModelToolResult("devshell_bash_run", {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: false },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6NTAwMDo1MDAw",
+        stdout: "x".repeat(5_000),
+        stdoutPath: "/.devshell/tool-results/retained/stdout",
+        stderr: "y".repeat(5_000),
+        artifactWarnings: ["stderr artifact could not be persisted: disk full"],
+    });
+
+    assert.match(text, /^stdoutRecovery=\/\.devshell\/tool-results\/retained\/stdout$/mu);
+    assert.match(text, /^stderrProjectionClipped=true$/mu);
+    assert.doesNotMatch(text, /stdoutProjectionClipped=true|rerun with narrower output/u);
+    assert.match(text, /Do not rerun the command or resend input/u);
+    assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u);
+});
+
+
+test("Agent exposes uncertain durable Wait registration without suggesting replay", () => {
+    const text = projectAgentModelToolResult("bash_run", {
+        termination: "running",
+        task: { id: "task-started", status: "running" },
+        cursor: "tc3_cursor",
+        waitError: {
+            code: "wait.registrationFailed",
+            message: "Durable Wait registration was not confirmed. Continue with task_input using the returned task ID and cursor; do not repeat the original call.",
+        },
+    });
+    assert.match(text, /^waitError=\{"code":"wait.registrationFailed","message":"Durable Wait registration was not confirmed\. Continue with task_input using the returned task ID and cursor; do not repeat the original call\."\}$/mu);
+    assert.match(text, /Continue with task_input/u);
+    assert.doesNotMatch(text, /rerun the original call/u);
+});

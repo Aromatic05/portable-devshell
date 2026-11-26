@@ -111,9 +111,15 @@ export function projectAgentModelToolResult(
     toolName: string,
     value: ExtensionJsonValue,
 ): string {
-    const rendered = renderAgentModelToolResult(toolName, value);
-    if (!isRecord(value) || !AGENT_MODEL_TOOL_PROJECTIONS.has(toolName) ||
-        !Array.isArray(value.comment))
+    const projectionName = toolName.startsWith("devshell_")
+        ? toolName.slice("devshell_".length)
+        : toolName;
+    const rendered = renderAgentModelToolResult(projectionName, value);
+    if (
+        !isRecord(value) ||
+        !AGENT_MODEL_TOOL_PROJECTIONS.has(projectionName) ||
+        !Array.isArray(value.comment)
+    )
         return limitModelToolResult(rendered);
     const comments = value.comment.filter(
         (entry): entry is string => typeof entry === "string" && entry.length > 0,
@@ -325,6 +331,14 @@ function renderBashModelToolResult(
     const streamBudget = Math.floor(
         MAX_SEMANTIC_CONTENT_CHARACTERS / Math.max(streams, 1),
     );
+    const stdoutPreview = previewText(stdout, streamBudget);
+    const stderrPreview = previewText(stderr, streamBudget);
+    const stdoutMissingRecovery =
+        stdoutPath === undefined &&
+        (stdoutPreview.clipped || value.stdoutTruncated === true);
+    const stderrMissingRecovery =
+        stderrPath === undefined &&
+        (stderrPreview.clipped || value.stderrTruncated === true);
     const lines = [
         compactFields([
             field("termination", value.termination),
@@ -337,32 +351,45 @@ function renderBashModelToolResult(
             field("durationMs", value.durationMs),
         ]),
     ];
-    if (stdout.length > 0) {
-        const preview = previewText(stdout, streamBudget);
+    if (stdout.length > 0)
         lines.push(
-            `stdout${streamLabel(value.stdoutBytes, value.stdoutTruncated)}:\n${preview.text}`,
+            `stdout${streamLabel(value.stdoutBytes, value.stdoutTruncated)}:\n${stdoutPreview.text}`,
         );
-        if (preview.clipped && stdoutPath === undefined)
-            lines.push(
-                "stdoutProjectionClipped=true; rerun with narrower output if omitted text is required",
-            );
-    }
-    if (stderr.length > 0) {
-        const preview = previewText(stderr, streamBudget);
+    if (stdoutMissingRecovery)
         lines.push(
-            `stderr${streamLabel(value.stderrBytes, value.stderrTruncated)}:\n${preview.text}`,
+            stdoutPreview.clipped ? "stdoutProjectionClipped=true" : "stdoutTruncated=true",
         );
-        if (preview.clipped && stderrPath === undefined)
-            lines.push(
-                "stderrProjectionClipped=true; rerun with narrower output if omitted text is required",
-            );
-    }
+    if (stderr.length > 0)
+        lines.push(
+            `stderr${streamLabel(value.stderrBytes, value.stderrTruncated)}:\n${stderrPreview.text}`,
+        );
+    if (stderrMissingRecovery)
+        lines.push(
+            stderrPreview.clipped ? "stderrProjectionClipped=true" : "stderrTruncated=true",
+        );
     if (value.task !== undefined) lines.push(`task=${JSON.stringify(value.task)}`);
     if (value.cursor !== undefined) lines.push(`cursor=${JSON.stringify(value.cursor)}`);
     if (value.waitReason !== undefined) lines.push(`waitReason=${String(value.waitReason)}`);
+    if (isRecord(value.waitError))
+        lines.push(`waitError=${JSON.stringify(value.waitError)}`);
     if (stdoutPath !== undefined) lines.push(`stdoutRecovery=${stdoutPath}`);
     if (stderrPath !== undefined) lines.push(`stderrRecovery=${stderrPath}`);
     lines.push(...renderStringWarnings(value.artifactWarnings));
+    if (stdoutMissingRecovery || stderrMissingRecovery) {
+        // Keep this at the tail with the continuation metadata, away from
+        // the middle removed by the final size limit.
+        lines.push(
+            "Output is incomplete. Do not rerun the command or resend input to recover omitted output.",
+        );
+        if (
+            isRecord(value.task) &&
+            typeof value.task.id === "string" &&
+            typeof value.cursor === "string"
+        )
+            lines.push(
+                "Observe the existing task with its returned ID and cursor; omit input to avoid replaying side effects.",
+            );
+    }
     return lines.filter((line) => line.length > 0).join("\n");
 }
 
