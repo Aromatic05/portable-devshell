@@ -1,11 +1,15 @@
+use super::capture::{BashProgress, BashProgressStream};
 use crate::capability::process::client::ProcessHostClient;
 use crate::instance::sandbox::path::FilesystemCapability;
 use crate::instance::{InstanceName, storage::InstancePaths};
 use crate::tool::{ToolCall, ToolError};
 use crate::transport::endpoint::channel::EndpointPaths;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+const PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) fn error(message: impl Into<String>) -> ToolError {
     ToolError::new("process.hostFailed", message)
@@ -83,6 +87,7 @@ pub(super) fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
         .map_err(ToolError::from)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn wait_for(
     client: &ProcessHostClient,
     call: &ToolCall,
@@ -93,10 +98,12 @@ pub(super) fn wait_for(
     until_output: bool,
     kill_on_cancel: bool,
     settle_ms: u64,
+    progress: Option<&Arc<BashProgress>>,
 ) -> Result<Value, ToolError> {
     let deadline = Instant::now() + Duration::from_millis(wait_ms);
     let original_seq = seq;
     let mut settle_deadline: Option<Instant> = None;
+    let mut last_heartbeat = Instant::now();
     loop {
         if call.cancellation.is_cancelled() {
             if kill_on_cancel {
@@ -141,6 +148,24 @@ pub(super) fn wait_for(
             }),
         )?;
         descriptor = output["process"].clone();
+        if let Some(progress) = progress
+            && let Some(frames) = output["frames"].as_array()
+        {
+            for frame in frames {
+                if let Some(data_base64) = frame["dataBase64"].as_str()
+                    && let Ok(bytes) = STANDARD.decode(data_base64)
+                    && !bytes.is_empty()
+                {
+                    let stream = if frame["channel"] == "stderr" {
+                        BashProgressStream::Stderr
+                    } else {
+                        BashProgressStream::Stdout
+                    };
+                    progress.append(stream, &bytes);
+                    last_heartbeat = Instant::now();
+                }
+            }
+        }
         let next_seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
         if next_seq > seq {
             seq = next_seq;
@@ -148,6 +173,11 @@ pub(super) fn wait_for(
                 settle_deadline =
                     Some((Instant::now() + Duration::from_millis(settle_ms)).min(deadline));
             }
+        } else if let Some(progress) = progress
+            && last_heartbeat.elapsed() >= PROGRESS_HEARTBEAT_INTERVAL
+        {
+            progress.emit_heartbeat();
+            last_heartbeat = Instant::now();
         }
     }
 }

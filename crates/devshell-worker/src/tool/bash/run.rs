@@ -50,7 +50,7 @@ impl ToolHandler for BashRunTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
-            "Execute a shell command. waitMs controls how long to wait (default 10000ms); a still-running command returns a task ID and cursor. Set pty=true to allocate a PTY for interactive input. Use task_input to read/poll output or send input, task_inspect to inspect a PTY screen, and task_manage to list or close tasks. Retained output paths can be read with file_read.",
+            "Execute a shell command (non-login shell). waitMs controls how long to wait (default 10000ms); a still-running command returns a task ID and cursor. Do not background long-lived services with '&' (process groups are cleaned up on shell exit); instead run them in the foreground with a short waitMs and stop them via task_manage(command=\"close\"). Set pty=true to allocate a PTY for interactive input. Use task_input to read/poll output or send input, task_inspect to inspect a PTY screen, and task_manage to list, create persistent terminals, or close tasks. Retained output paths can be read with file_read.",
             [ToolCapability::Execute],
             serde_json::json!({
                 "devshell": { "mcp": {
@@ -61,7 +61,7 @@ impl ToolHandler for BashRunTool {
                         "readOnlyHint": false
                     },
                     "inputHints": {
-                        "command": "Shell command. Run devshell help to discover authorized MCP model CLI commands.",
+                        "command": "Shell command. Run in foreground with a short waitMs (not '&') for background services. Run devshell help to discover authorized MCP model CLI commands.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                         "env": "Environment variable overrides; null removes an inherited variable.",
                         "pty": "Allocate a PTY at startup for interactive commands; required to send input via task_input.",

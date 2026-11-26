@@ -252,7 +252,7 @@ impl ManagedProcess {
             } else {
                 RpcError::new(
                     "process.stdinClosed",
-                    "stdin is closed for non-PTY tasks; rerun bash_run with pty=true for interactive input",
+                    "stdin is closed for non-PTY tasks; use task_manage(command=\"close\", task=...) to stop a running task, or rerun bash_run with pty=true for interactive input",
                 )
             }
         };

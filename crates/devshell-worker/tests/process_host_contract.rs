@@ -459,6 +459,11 @@ fn worker_command_and_native_attach_share_one_pty() {
         }),
     );
     assert_eq!(rejected["type"], "error", "{rejected}");
+    let observed_during_takeover = fixture.tool("task_input", json!({"task": task, "waitMs": 0}));
+    assert_eq!(
+        observed_during_takeover["task"]["humanControl"], true,
+        "{observed_during_takeover}"
+    );
     assert!(
         rejected["error"]["message"]
             .as_str()
@@ -510,7 +515,7 @@ fn hosted_pipe_wait_deadline_and_retained_output() {
     assert_eq!(write_denied["error"]["code"], "process.stdinClosed");
     assert_eq!(
         write_denied["error"]["message"],
-        "stdin is closed for non-PTY tasks; rerun bash_run with pty=true for interactive input"
+        "stdin is closed for non-PTY tasks; use task_manage(command=\"close\", task=...) to stop a running task, or rerun bash_run with pty=true for interactive input"
     );
     let result = fixture.wait_task(id, task["cursor"].clone());
     assert_eq!(result["exitCode"], 7);
@@ -562,6 +567,11 @@ fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
         "message": {"input": {"task": id, "input": "unwanted\n"}, "context": {"workspace": fixture.env.protocol_workspace()}}
     }));
     assert_eq!(rejected["type"], "error", "{rejected}");
+    let observed_during_takeover = fixture.tool("task_input", json!({"task": id, "waitMs": 0}));
+    assert_eq!(
+        observed_during_takeover["task"]["humanControl"], true,
+        "{observed_during_takeover}"
+    );
     let resized = call(
         "terminal.resize",
         json!({"terminalId": id, "generation": descriptor["generation"], "version": taken["message"]["session"]["version"], "clientSeq": 1, "controller": token, "cols": 101, "rows": 31}),
@@ -602,6 +612,12 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
             "cols": 90,
             "rows": 30
         }),
+    );
+    assert!(
+        created["cursor"]
+            .as_str()
+            .is_some_and(|cursor| cursor.starts_with("tc1_")),
+        "task_manage(create) must return an initial opaque cursor: {created}"
     );
     let summary = &created["task"];
     assert_eq!(summary["kind"], "terminal", "{created}");
@@ -715,22 +731,55 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
         "{inspected}"
     );
 
+    // untilExit is rejected on persistent interactive terminals (they auto-respawn).
+    let until_exit_denied = fixture.tool_raw(
+        "task_input",
+        json!({
+            "task": id,
+            "untilExit": true,
+            "waitMs": 500
+        }),
+    );
+    assert_eq!(until_exit_denied["type"], "error", "{until_exit_denied}");
+    assert_eq!(
+        until_exit_denied["error"]["code"],
+        "tool.invalidArguments"
+    );
+
+    // Writing input without cursor starts at the current tail, not from byte 0.
+    let tail_only = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf '\\nTAIL-ONLY-MARKER\\n'\n",
+            "waitMs": 2000
+        }),
+    );
+    assert_eq!(tail_only["termination"], "running", "{tail_only}");
+    let tail_stdout = tail_only["stdout"].as_str().unwrap();
+    assert!(tail_stdout.contains("TAIL-ONLY-MARKER"), "{tail_only}");
+    assert!(
+        !tail_stdout.contains(&format!("FIRST-PID:{first_pid}")),
+        "omitting cursor while writing input must not replay earlier transcript: {tail_stdout:?}"
+    );
+    cursor = tail_only["cursor"].as_str().unwrap().to_owned();
+
     // Explicitly close the persistent terminal; it must NOT respawn and must exit cleanly.
     let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
     assert_eq!(closed["closedTask"], id, "{closed}");
     assert_eq!(closed["accepted"], true, "{closed}");
+    assert_eq!(closed["state"], "exited", "{closed}");
 
+    // Wait for the terminal after closing; already-closed persistent terminal allows reading final state.
     let final_state = fixture.tool(
         "task_input",
         json!({
             "task": id,
             "cursor": cursor,
-            "waitMs": 5000,
-            "untilExit": true
+            "waitMs": 1000
         }),
     );
     assert_ne!(final_state["termination"], "running", "{final_state}");
-    assert_eq!(final_state["untilExit"], true, "{final_state}");
 }
 
 #[test]

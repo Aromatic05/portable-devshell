@@ -60,7 +60,7 @@ pub(in crate::capability::process) fn spawn_interactive(
             Some(zdotdir.0.to_string_lossy().into_owned()),
         );
     }
-    let args = if cfg!(test) {
+    let args = if cfg!(test) || !supports_login_flag(&shell) {
         Vec::new()
     } else {
         vec!["-l".into()]
@@ -210,6 +210,29 @@ fn spawn_with(
         reader: Box::new(File::from(reader)),
         writer: Box::new(File::from(writer)),
     })
+}
+
+fn supports_login_flag(shell: &str) -> bool {
+    Path::new(shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                "sh" | "bash"
+                    | "zsh"
+                    | "fish"
+                    | "dash"
+                    | "ash"
+                    | "ksh"
+                    | "ksh93"
+                    | "mksh"
+                    | "csh"
+                    | "tcsh"
+                    | "nu"
+                    | "pwsh"
+            )
+        })
 }
 
 fn prepare_shell_startup(shell: &str) -> Result<Option<PathBuf>, RpcError> {

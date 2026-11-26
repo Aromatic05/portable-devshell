@@ -1,3 +1,4 @@
+use super::capture::BashProgress;
 use super::model::{BashRunOutput, BashTermination, TaskCursor};
 use super::output::collect;
 use super::scope::*;
@@ -68,10 +69,10 @@ impl ToolHandler for TaskInputTool {
                     },
                     "inputHints": {
                         "task": "Task or terminal ID returned by bash_run or task_manage.",
-                        "input": "Raw UTF-8 text to write to a PTY task/terminal (use \\n for Enter, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll without writing.",
-                        "cursor": "Opaque cursor returned by bash_run or a previous task_input call to continue reading new output.",
+                        "input": "Raw UTF-8 text to write to a PTY task/terminal (use \\r for Enter in TUIs/ConPTY or \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll without writing. When writing input without cursor, only output after this input is returned.",
+                        "cursor": "Opaque cursor returned by bash_run, task_manage(create), or a previous task_input call to continue reading new output.",
                         "waitMs": "Milliseconds to wait for output or exit (default 5000, max 3600000).",
-                        "untilExit": "Set true to wait until the task exits rather than returning on the next output."
+                        "untilExit": "Set true to wait until a non-persistent task exits rather than returning on the next output (invalid for persistent terminals)."
                     },
                     "title": "Send input or read task output"
                 }}
@@ -95,34 +96,58 @@ impl ToolHandler for TaskInputTool {
                 "waitMs cannot exceed 3600000",
             ));
         }
-        let cursor = params
+        let explicit_cursor = params
             .cursor
             .as_deref()
             .map(TaskCursor::decode)
-            .transpose()?
-            .unwrap_or_default();
+            .transpose()?;
 
         let input_to_send = params.input.as_deref().filter(|text| !text.is_empty());
         let wrote_input = input_to_send.is_some();
 
-        let (client, descriptor) = if let Some(input) = input_to_send {
+        let (client, descriptor, cursor) = if let Some(input) = input_to_send {
             require_execute(&call)?;
             if input.len() > MAX_INPUT_BYTES {
                 return Err(ToolError::new("tool.invalidArguments", "input too large"));
             }
             let client = connect(&self.instance)?;
             let descriptor = require(&client, &call, &params.task)?;
+            if params.until_exit
+                && descriptor["persistent"] == true
+                && descriptor["state"] == "running"
+            {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "untilExit cannot be used on running persistent interactive terminals because they automatically respawn on shell exit; omit untilExit to poll for output, or use bash_run for commands that exit",
+                ));
+            }
+            // When writing new input without an explicit cursor, anchor at the
+            // current stream tail so the caller sees only output following this
+            // input instead of replaying the entire historical transcript.
+            let cursor = match explicit_cursor {
+                Some(cursor) => cursor,
+                None => current_tail_cursor(&client, &params.task, &descriptor)?,
+            };
             rpc(
                 &client,
                 "process.v1.input",
                 json!({"id": params.task, "dataBase64": STANDARD.encode(input)}),
             )?;
-            (client, descriptor)
+            (client, descriptor, cursor)
         } else {
             require_read(&call)?;
             let client = connect(&self.instance)?;
             let descriptor = require(&client, &call, &params.task)?;
-            (client, descriptor)
+            if params.until_exit
+                && descriptor["persistent"] == true
+                && descriptor["state"] == "running"
+            {
+                return Err(ToolError::new(
+                    "tool.invalidArguments",
+                    "untilExit cannot be used on running persistent interactive terminals because they automatically respawn on shell exit; omit untilExit to poll for output, or use bash_run for commands that exit",
+                ));
+            }
+            (client, descriptor, explicit_cursor.unwrap_or_default())
         };
 
         let started = Instant::now();
@@ -133,11 +158,13 @@ impl ToolHandler for TaskInputTool {
             cursor.seq
         };
         let until_output = !params.until_exit;
-        let settle_ms = if until_output && wrote_input {
+        let settle_ms = if until_output && wait_ms > 0 {
             INPUT_SETTLE_MS
         } else {
             0
         };
+        let progress = Arc::new(BashProgress::new(started, call.progress()));
+        progress.emit_initial();
         let descriptor = wait_for(
             &client,
             &call,
@@ -148,6 +175,7 @@ impl ToolHandler for TaskInputTool {
             until_output,
             false,
             settle_ms,
+            Some(&progress),
         )?;
         let reason = if descriptor["state"] != "running" {
             "terminal"
@@ -164,7 +192,7 @@ impl ToolHandler for TaskInputTool {
             cursor,
             DEFAULT_CAPTURE,
             started,
-            &call,
+            progress,
         )?;
         result.wait_reason = Some(reason.into());
         result.wait_ms = Some(wait_ms);
@@ -193,6 +221,35 @@ impl ToolHandler for TaskInputTool {
         }
         serialize(result)
     }
+}
+
+fn current_tail_cursor(
+    client: &crate::capability::process::client::ProcessHostClient,
+    id: &str,
+    descriptor: &Value,
+) -> Result<TaskCursor, ToolError> {
+    let stdout_meta = rpc(
+        client,
+        "process.v1.capture",
+        json!({"id": id, "channel": "stdout", "offset": 0, "limit": 0}),
+    )?;
+    let stderr_meta = rpc(
+        client,
+        "process.v1.capture",
+        json!({"id": id, "channel": "stderr", "offset": 0, "limit": 0}),
+    )?;
+    let stdout = stdout_meta["storedBytes"].as_u64().unwrap_or(0) as usize;
+    let stderr = stderr_meta["storedBytes"].as_u64().unwrap_or(0) as usize;
+    let stdout_seq = stdout_meta["latestSeq"].as_u64().unwrap_or(0);
+    let stderr_seq = stderr_meta["latestSeq"].as_u64().unwrap_or(0);
+    let seq = stdout_seq
+        .min(stderr_seq)
+        .max(descriptor["latestSeq"].as_u64().unwrap_or(0));
+    Ok(TaskCursor {
+        seq,
+        stdout,
+        stderr,
+    })
 }
 
 pub(crate) fn register_tools(

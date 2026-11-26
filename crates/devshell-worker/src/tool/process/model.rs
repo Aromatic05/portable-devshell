@@ -58,6 +58,8 @@ pub struct TaskDescriptor {
     pub id: String,
     pub status: String,
     pub pty: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub human_control: Option<bool>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

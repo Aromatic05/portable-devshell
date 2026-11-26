@@ -1,3 +1,4 @@
+use super::model::TaskCursor;
 use super::scope::*;
 use crate::capability::process::client::ProcessHostClient;
 use crate::instance::InstanceName;
@@ -11,6 +12,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const DEFAULT_TERMINAL_COLS: u16 = 120;
+const DEFAULT_TERMINAL_ROWS: u16 = 36;
+const MAX_LISTED_COMPLETED_TASKS: usize = 10;
+const CLOSE_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -114,9 +121,13 @@ struct TaskManageOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     task: Option<TaskSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     closed_task: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     accepted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<String>,
 }
 
 struct TerminalTool {
@@ -167,9 +178,9 @@ impl ToolHandler for TerminalTool {
                             "task": "Task or terminal ID to close (required for close; forbidden for list/create).",
                             "name": "Optional name for create (1-64 ASCII alphanumeric or ._-).",
                             "cwd": "Working directory for create; workspace-relative or absolute (required absolute in stateless mode).",
-                            "shell": "Optional shell executable for create; defaults to the user login shell.",
-                            "cols": "Optional terminal width in columns for create (default 80).",
-                            "rows": "Optional terminal height in rows for create (default 24)."
+                            "shell": "Optional shell executable for create; defaults to the user login shell (note: persistent terminals do not inject the model devshell CLI).",
+                            "cols": "Optional terminal width in columns for create (default 120).",
+                            "rows": "Optional terminal height in rows for create (default 36)."
                         },
                         "title": "Manage tasks and interactive terminals"
                     }}
@@ -238,11 +249,14 @@ impl ToolHandler for TerminalTool {
                             return serialize(TaskManageOutput {
                                 tasks: Some(Vec::new()),
                                 task: None,
+                                cursor: None,
                                 closed_task: None,
                                 accepted: None,
+                                state: None,
                             });
                         };
-                        let mut tasks = Vec::new();
+                        let mut active = Vec::new();
+                        let mut completed = Vec::new();
                         for descriptor in client
                             .list()
                             .map_err(error)?
@@ -250,14 +264,31 @@ impl ToolHandler for TerminalTool {
                             .ok_or_else(|| error("invalid resource list"))?
                         {
                             if scoped(&call, descriptor)? {
-                                tasks.push(summarize(descriptor)?);
+                                let summary = summarize(descriptor)?;
+                                if summary.state == "running" || summary.persistent {
+                                    active.push(summary);
+                                } else {
+                                    completed.push(summary);
+                                }
                             }
                         }
+                        active.sort_by(|left, right| {
+                            (right.state == "running")
+                                .cmp(&(left.state == "running"))
+                                .then_with(|| right.persistent.cmp(&left.persistent))
+                                .then_with(|| right.created_at_ms.cmp(&left.created_at_ms))
+                        });
+                        completed.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
+                        completed.truncate(MAX_LISTED_COMPLETED_TASKS);
+                        let mut tasks = active;
+                        tasks.extend(completed);
                         serialize(TaskManageOutput {
                             tasks: Some(tasks),
                             task: None,
+                            cursor: None,
                             closed_task: None,
                             accepted: None,
+                            state: None,
                         })
                     }
                     TaskManageCommand::Create => {
@@ -286,15 +317,23 @@ impl ToolHandler for TerminalTool {
                                 "name": params.name,
                                 "cwd": params.cwd.unwrap_or_else(|| "./".into()),
                                 "workspace": (!call.stateless).then_some(&call.workspace),
-                                "cols": params.cols,
-                                "rows": params.rows,
+                                "cols": params.cols.unwrap_or(DEFAULT_TERMINAL_COLS),
+                                "rows": params.rows.unwrap_or(DEFAULT_TERMINAL_ROWS),
                             }),
                         )?;
+                        let initial_cursor = TaskCursor {
+                            seq: created["latestSeq"].as_u64().unwrap_or(0),
+                            stdout: 0,
+                            stderr: 0,
+                        }
+                        .encode();
                         serialize(TaskManageOutput {
                             tasks: None,
                             task: Some(summarize(&created)?),
+                            cursor: Some(initial_cursor),
                             closed_task: None,
                             accepted: None,
+                            state: None,
                         })
                     }
                     TaskManageCommand::Close => {
@@ -317,13 +356,37 @@ impl ToolHandler for TerminalTool {
                             })?;
                         require_execute(&call)?;
                         let client = connect(&self.instance)?;
-                        require(&client, &call, &id)?;
+                        let mut descriptor = require(&client, &call, &id)?;
                         rpc(&client, "process.v1.kill", json!({"id": id}))?;
+                        let deadline = Instant::now() + CLOSE_WAIT_TIMEOUT;
+                        let mut seq = descriptor["latestSeq"].as_u64().unwrap_or(0);
+                        while descriptor["state"] == "running" && Instant::now() < deadline {
+                            let remaining = deadline
+                                .saturating_duration_since(Instant::now())
+                                .as_millis() as u64;
+                            if remaining == 0 {
+                                break;
+                            }
+                            let output = rpc(
+                                &client,
+                                "process.v1.read",
+                                json!({
+                                    "id": id,
+                                    "fromSeq": seq,
+                                    "waitMs": remaining.min(100),
+                                }),
+                            )?;
+                            descriptor = output["process"].clone();
+                            seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
+                        }
+                        let state = descriptor["state"].as_str().map(str::to_string);
                         serialize(TaskManageOutput {
                             tasks: None,
                             task: None,
+                            cursor: None,
                             closed_task: Some(id),
                             accepted: Some(true),
+                            state,
                         })
                     }
                 }

@@ -2226,7 +2226,9 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         "{call_response}"
     );
 
-    // Cancelling the wait does NOT kill the background process; task_manage(close) terminates it.
+    // Cancelling bash_run before it returns a task ID terminates the running process group.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!marker.exists());
     let listed = env.rpc(
         instance,
         "tool",
@@ -2239,28 +2241,14 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         }),
     );
     assert_eq!(listed["type"], "reply", "{listed}");
-    let running_id = listed["message"]["tasks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["state"] == "running")
-        .expect("cancelled wait must leave process running")["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let closed = env.rpc(
-        instance,
-        "tool",
-        &serde_json::json!({
-            "protocol": "rpc",
-            "type": "request",
-            "id": "close-after-cancel",
-            "method": "task_manage",
-            "message": { "input": { "command": "close", "task": running_id }, "context": { "workspace": env.workspace() } }
-        }),
+    assert!(
+        listed["message"]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["state"] != "running"),
+        "cancelled bash_run must not leave a running process: {listed}"
     );
-    assert_eq!(closed["type"], "reply", "{closed}");
-    assert!(!marker.exists());
 
     drop(stdin);
     bridge.wait().unwrap();

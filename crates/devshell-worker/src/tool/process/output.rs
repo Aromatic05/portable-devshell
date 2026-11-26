@@ -8,7 +8,7 @@ use crate::capability::artifact::{
     result_path::tool_result_path, store::ArtifactStore, types::ArtifactStream,
 };
 use crate::capability::process::client::ProcessHostClient;
-use crate::tool::{ToolCall, ToolError};
+use crate::tool::ToolError;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -138,6 +138,7 @@ fn collect_stream(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn collect(
     client: &ProcessHostClient,
     artifacts: &ArtifactStore,
@@ -146,15 +147,17 @@ pub(super) fn collect(
     cursor: TaskCursor,
     max: usize,
     started: Instant,
-    call: &ToolCall,
+    progress: Arc<BashProgress>,
 ) -> Result<BashRunOutput, ToolError> {
     if descriptor["state"] == "failed" {
+        progress.finish();
         return Err(error(
             descriptor["error"].as_str().unwrap_or("process failed"),
         ));
     }
-    let progress = Arc::new(BashProgress::new(started, call.progress()));
-    progress.emit_initial();
+    if progress.has_output() {
+        progress.finish();
+    }
     let (mut stdout, stdout_bytes, stdout_end, stdout_seq) = collect_stream(
         client,
         artifacts,
@@ -252,6 +255,7 @@ pub(super) fn collect(
             id: id.into(),
             status,
             pty: descriptor["pty"] == true || descriptor["tty"] == true,
+            human_control: (descriptor["humanControl"] == true).then_some(true),
         }),
         cursor: Some(
             TaskCursor {

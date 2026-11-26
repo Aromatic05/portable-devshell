@@ -233,31 +233,6 @@ fn bash_cancel_kills_recorded_child_and_grandchild_pids_and_recovers() {
         .unwrap();
     assert_eq!(running["type"], "error", "{running}");
     assert_eq!(running["error"]["code"], "tool.cancelled", "{running}");
-    let listed = env.rpc(
-        instance,
-        "tool",
-        &tool(&env, instance, "list", "task_manage", json!({ "command": "list" })),
-    );
-    let task_id = listed["message"]["tasks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["state"] == "running")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap();
-    let closed = env.rpc(
-        instance,
-        "tool",
-        &tool(
-            &env,
-            instance,
-            "close",
-            "task_manage",
-            json!({ "command": "close", "task": task_id }),
-        ),
-    );
-    assert_eq!(closed["type"], "reply", "{closed}");
     assert_tree_stopped(&pids);
     drop(writer);
     assert!(bridge.wait().unwrap().success());
@@ -627,31 +602,6 @@ fn bash_cancellation_is_scoped_to_both_context_and_request_id() {
         tool_reply["error"]["code"], "tool.cancelled",
         "{tool_reply}"
     );
-    let listed = env.rpc(
-        instance,
-        "tool",
-        &tool(&env, instance, "list", "task_manage", json!({ "command": "list" })),
-    );
-    let task_id = listed["message"]["tasks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["state"] == "running")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap();
-    let closed = env.rpc(
-        instance,
-        "tool",
-        &tool(
-            &env,
-            instance,
-            "close",
-            "task_manage",
-            json!({ "command": "close", "task": task_id }),
-        ),
-    );
-    assert_eq!(closed["type"], "reply", "{closed}");
     assert_tree_stopped(&pids);
     drop(writer);
     assert!(bridge.wait().unwrap().success());
