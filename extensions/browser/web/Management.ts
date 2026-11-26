@@ -1,4 +1,5 @@
 import type { RemoteBrowser, Target } from "./RemoteBrowser.js";
+import { icon } from "./Icons.js";
 
 export interface Instance { instance: string; ready: boolean; installed: boolean }
 export const get = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -10,7 +11,14 @@ export function options(select: HTMLSelectElement, values: { value: string; labe
 
 export class Management {
     constructor(private api: RemoteBrowser, private selection: () => Target, private refresh: () => Promise<void>, private detach: () => void) {
-        this.bind("settings", async () => { get<HTMLDialogElement>("management").showModal(); await this.load(); });
+        this.bind("settings", async () => {
+            get<HTMLDialogElement>("management").showModal();
+            this.section("credentials-section");
+            await this.load();
+        });
+        for (const button of document.querySelectorAll<HTMLButtonElement>("[data-section]")) {
+            button.addEventListener("click", () => this.section(button.dataset.section!));
+        }
         this.bind("settings-close", async () => get<HTMLDialogElement>("management").close());
         this.bind("runtime-use", async () => {
             const generation = get<HTMLSelectElement>("bundles").value;
@@ -51,19 +59,58 @@ export class Management {
         this.bind("requests", () => this.activity("requests"));
     }
 
+    private section(id: string) {
+        for (const button of document.querySelectorAll<HTMLButtonElement>("[data-section]")) {
+            const selected = button.dataset.section === id;
+            button.classList.toggle("selected", selected);
+            if (selected) button.setAttribute("aria-current", "true");
+            else button.removeAttribute("aria-current");
+        }
+        get(id).scrollIntoView({ block: "start", inline: "nearest" });
+    }
+
+    private empty(id: string, text: string) {
+        const node = document.createElement("div");
+        node.className = "list-empty";
+        node.textContent = text;
+        get(id).replaceChildren(node);
+    }
+
+    private showCredentials(names: string[]) {
+        get("credential-count").textContent = String(names.length);
+        if (!names.length) { this.empty("credentials", "No stored credentials"); return; }
+        get("credentials").replaceChildren(...names.map(name => {
+            const row = document.createElement("div");
+            row.className = "credential-row";
+            const label = document.createElement("code");
+            label.textContent = name;
+            const hidden = document.createElement("span");
+            hidden.className = "credential-hidden";
+            hidden.textContent = "••••••";
+            hidden.title = "Credential value is not displayed";
+            hidden.setAttribute("aria-hidden", "true");
+            row.append(icon("key"), label, hidden);
+            return row;
+        }));
+    }
+
     async load() {
         const target = this.selection();
+        get("managed-target").textContent = target.instance + " / " + target.profile;
         const [instances, bundles, names] = await Promise.all([
             this.api.request<Instance[]>("runtimes"),
             this.api.request<string[]>("bundles"),
             this.api.request<string[]>("credentials", target),
         ]);
         const instance = instances.find(item => item.instance === target.instance);
-        get("runtime-status").textContent = instance?.installed ? "Runtime installed" : "No runtime installed";
+        const runtimeStatus = get("runtime-status");
+        runtimeStatus.textContent = instance?.installed ? "Installed" : "Not installed";
+        runtimeStatus.dataset.installed = String(instance?.installed ?? false);
         options(get<HTMLSelectElement>("bundles"), bundles.map(value => ({ value, label: value.slice(0, 16) })));
-        get("credentials").textContent = names.length ? names.join(", ") : "No stored credentials";
-        get("files").replaceChildren();
-        get("activity").replaceChildren();
+        this.showCredentials(names);
+        this.empty("files", "Refresh to load files.");
+        this.empty("activity", "Choose a log to view recent records.");
+        for (const id of ["actions", "requests"]) get(id).setAttribute("aria-pressed", "false");
     }
 
     private bind(id: string, action: () => Promise<void>) {
@@ -82,7 +129,8 @@ export class Management {
         for (const file of entries) {
             const row = document.createElement("div"); row.className = "file-row";
             const name = document.createElement("span"); name.textContent = file.path + " (" + file.bytes + " bytes)";
-            const download = document.createElement("button"); download.textContent = "Download";
+            const download = document.createElement("button"); download.className = "button";
+            download.append(icon("download"), "Download");
             download.addEventListener("click", () => {
                 void this.api.request<{ url: string; name: string }>("file-share", target, file.path).then(result => {
                     const link = document.createElement("a"); link.href = result.url; link.download = result.name; link.click();
@@ -90,11 +138,12 @@ export class Management {
             });
             row.append(name, download); root.append(row);
         }
-        if (!entries.length) root.textContent = "No browser output files.";
+        if (!entries.length) this.empty("files", "No browser output files.");
     }
 
     private async activity(op: "actions" | "requests") {
         const values = await this.api.request<Record<string, string | number | null>[]>(op, this.selection());
+        for (const id of ["actions", "requests"]) get(id).setAttribute("aria-pressed", String(id === op));
         const root = get("activity"); root.replaceChildren();
         for (const value of values) {
             const row = document.createElement("div"); row.className = "activity-row";
@@ -103,6 +152,6 @@ export class Management {
                 : time + " · " + value.method + " " + value.status + " " + value.url;
             root.append(row);
         }
-        if (!values.length) root.textContent = "No records.";
+        if (!values.length) this.empty("activity", "No records.");
     }
 }
