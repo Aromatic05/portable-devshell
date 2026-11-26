@@ -428,3 +428,74 @@ test("terminal history keeps active sessions and bounds completed sessions newes
     );
     assert.throws(() => service.get("terminal-history-2"), /not found/u);
 });
+
+test("recovered session anchored at snapshot seq serves both resuming clients and fresh observers", async () => {
+    const listeners = new Set<(data: string, sourceSeq?: number) => void>();
+    const process: TerminalProcess = {
+        kill() {},
+        onData(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        onExit() {
+            return () => undefined;
+        },
+        resize() {},
+        write() {},
+    };
+    const emit = (data: string, seq: number) => {
+        for (const listener of listeners) listener(data, seq);
+    };
+    const service = new TerminalSessionService();
+    const [recovered] = await service.recover("alpha", {
+        open: async () => process,
+        recover: async () => [
+            {
+                identity: {
+                    cols: 80,
+                    generation: 1,
+                    recoverable: true,
+                    rows: 24,
+                    terminalId: "recovered-term",
+                    version: 1,
+                },
+                process,
+            },
+        ],
+    });
+    assert.ok(recovered);
+
+    emit("\x1bcseed", 10);
+    const live: Array<{ data: string; seq: number }> = [];
+    const resumed = service.attach({
+        fromSeq: 10,
+        generation: 1,
+        onOutput: (frame) => live.push(frame),
+        terminalId: "recovered-term",
+    });
+    assert.deepEqual(resumed.replay, []);
+
+    const fresh = service.attach({
+        fromSeq: 0,
+        generation: 1,
+        onOutput() {},
+        terminalId: "recovered-term",
+    });
+    assert.deepEqual(fresh.replay, [{ data: "\x1bcseed", seq: 10 }]);
+
+    assert.throws(
+        () =>
+            service.attach({
+                fromSeq: 5,
+                generation: 1,
+                onOutput() {},
+                terminalId: "recovered-term",
+            }),
+        (error: unknown) => (error as { code?: string }).code === "stream.gap",
+    );
+
+    emit("after-restart", 11);
+    assert.deepEqual(live, [{ data: "after-restart", seq: 11 }]);
+    resumed.detach();
+    fresh.detach();
+});

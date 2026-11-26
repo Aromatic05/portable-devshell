@@ -33,6 +33,7 @@ interface TerminalSessionRecord {
     createdAt: string;
     exit?: TerminalProcessExit;
     generation: number;
+    initialSeedSeq?: number;
     instance: string;
     killPending: boolean;
     latestSeq: number;
@@ -159,7 +160,12 @@ export class TerminalSessionService implements TerminalSessionApi {
         assertSequence(request.fromSeq);
         const oldestAvailableSeq =
             session.replay[0]?.seq ?? session.latestSeq + 1;
+        const seededFromStart =
+            request.fromSeq === 0 &&
+            session.initialSeedSeq !== undefined &&
+            oldestAvailableSeq === session.initialSeedSeq;
         if (
+            !seededFromStart &&
             request.fromSeq < oldestAvailableSeq - 1 &&
             !(request.takeover && session.process.acquireControl !== undefined)
         ) {
@@ -426,7 +432,12 @@ export class TerminalSessionService implements TerminalSessionApi {
         if (session.state !== "running") return;
         const nextSeq = sourceSeq ?? session.latestSeq + 1;
         if (nextSeq <= session.latestSeq) return;
-        if (nextSeq !== session.latestSeq + 1) {
+        const initialSeed =
+            session.latestSeq === 0 &&
+            session.replay.length === 0 &&
+            sourceSeq !== undefined &&
+            sourceSeq > 1;
+        if (!initialSeed && nextSeq !== session.latestSeq + 1) {
             this.#failProcess(
                 session,
                 new Error(
@@ -435,6 +446,7 @@ export class TerminalSessionService implements TerminalSessionApi {
             );
             return;
         }
+        if (initialSeed) session.initialSeedSeq = nextSeq;
         session.latestSeq = nextSeq;
         const frame = {
             bytes: Buffer.byteLength(data, "utf8"),
@@ -448,7 +460,10 @@ export class TerminalSessionService implements TerminalSessionApi {
             session.replay.length > 1
         ) {
             const removed = session.replay.shift();
-            if (removed !== undefined) session.replayBytes -= removed.bytes;
+            if (removed !== undefined) {
+                session.replayBytes -= removed.bytes;
+                session.initialSeedSeq = undefined;
+            }
         }
         for (const attachment of [...session.attachments]) {
             if (!attachment.detached)

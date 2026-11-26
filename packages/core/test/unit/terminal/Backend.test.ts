@@ -237,6 +237,51 @@ test("worker terminal backend preserves an exit received before listeners are re
     assert.deepEqual(exits, [{ exitCode: 7, signal: 0 }]);
 });
 
+test("worker terminal backend anchors recovered snapshot seq to preserve continuity across Control restarts", async () => {
+    const worker = new FakeWorkerTerminal();
+    worker.latestSeq = 9;
+    const controllable: WorkerTerminalPort = {
+        open: (input) => worker.open(input),
+        attach: async (input) => {
+            worker.attaches.push(input);
+            return {
+                replay: [],
+                session: worker.descriptor(),
+                snapshot: { data: "\x1bcscreen-at-9", seq: 9 },
+            };
+        },
+        control: async () => ({}),
+        write: (input) => worker.write(input),
+        resize: (input) => worker.resize(input),
+        kill: (input) => worker.kill(input),
+        list: () => worker.list(),
+        onNotification: (listener) => worker.onNotification(listener),
+        onConnected: (listener) => worker.onConnected(listener),
+        onDisconnected: (listener) => worker.onDisconnected(listener),
+    };
+    const backend = new WorkerTerminalBackend({ worker: controllable });
+    const [recovered] = await backend.recover();
+    assert.ok(recovered);
+
+    const frames: Array<{ data: string; seq?: number }> = [];
+    recovered.process.onData((data, seq) => frames.push({ data, seq }));
+    assert.deepEqual(frames, [{ data: "\x1bcscreen-at-9", seq: 10 }]);
+
+    worker.notification?.({
+        method: "terminal.output",
+        params: {
+            dataBase64: Buffer.from("after-restart").toString("base64"),
+            generation: 9,
+            seq: 10,
+            terminalId: "remote-terminal",
+        },
+    });
+    assert.deepEqual(frames, [
+        { data: "\x1bcscreen-at-9", seq: 10 },
+        { data: "after-restart", seq: 11 },
+    ]);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {

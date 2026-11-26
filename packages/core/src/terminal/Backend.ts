@@ -325,10 +325,16 @@ class WorkerTerminalProcess implements TerminalProcess {
         this.#descriptor = attached.session;
         if (attached.snapshot !== undefined) {
             // Reset the decoder as well as the terminal. A snapshot is a
-            // complete state seed at an explicit Host sequence boundary.
+            // complete state seed at an explicit Host sequence boundary; anchor
+            // localSeq at snapshot.seq + 1 so client sequence continuity holds
+            // across Control restarts.
             this.#decoder.end();
             this.#lastSeq = attached.snapshot.seq;
-            this.#emitData(attached.snapshot.data, ++this.#localSeq);
+            this.#localSeq = Math.max(
+                this.#localSeq + 1,
+                attached.snapshot.seq + 1,
+            );
+            this.#emitData(attached.snapshot.data, this.#localSeq);
         }
         for (const frame of attached.replay)
             this.#acceptOutput(frame.seq, frame.dataBase64);
