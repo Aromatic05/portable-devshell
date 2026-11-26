@@ -803,8 +803,8 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
 
     // Explicitly close the persistent terminal; it must NOT respawn and must exit cleanly.
     let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
-    assert_eq!(closed["closedTask"], id, "{closed}");
-    assert_eq!(closed["accepted"], true, "{closed}");
+    assert_eq!(closed["taskId"], id, "{closed}");
+    assert_eq!(closed["killRequested"], true, "{closed}");
     assert_eq!(closed["state"], "exited", "{closed}");
 
     // Wait for the terminal after closing; already-closed persistent terminal allows reading final state.

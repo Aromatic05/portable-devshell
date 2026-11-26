@@ -104,7 +104,9 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
         case "task_manage": {
             const command = string(args?.command);
             const detail = string(args?.name) ?? string(args?.task) ??
-                string(record(output?.task)?.id) ?? string(output?.closedTask);
+                string(record(output?.task)?.id) ?? string(output?.taskId);
+            if (output?.killRequested === true && output.state === "running")
+                return detail ? `Termination requested · ${detail}` : "Termination requested";
             return command && detail ? `${command} · ${detail}` : command ?? detail ?? summary ?? "Terminal resources";
         }
         case "progress_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";

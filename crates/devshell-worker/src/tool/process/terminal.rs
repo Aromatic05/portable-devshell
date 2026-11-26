@@ -123,9 +123,11 @@ struct TaskManageOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    closed_task: Option<String>,
+    task_id: Option<String>,
+    /// Whether the termination request was accepted, not whether the task ended.
     #[serde(skip_serializing_if = "Option::is_none")]
-    accepted: Option<bool>,
+    kill_requested: Option<bool>,
+    /// Observed task state after a brief wait, which may still be running.
     #[serde(skip_serializing_if = "Option::is_none")]
     state: Option<String>,
 }
@@ -163,7 +165,7 @@ impl ToolHandler for TerminalTool {
             ),
             _ => catalog_entry_with_meta::<ManageParams, TaskManageOutput>(
                 &self.name,
-                "List tasks and terminals, create a persistent interactive terminal, or close a running task/terminal in the current execution scope.",
+                "List tasks and terminals, create a persistent interactive terminal, or request termination of a task/terminal in the current execution scope. A successful close request does not guarantee that the task has ended.",
                 [ToolCapability::Execute],
                 json!({
                     "devshell": { "mcp": {
@@ -174,7 +176,7 @@ impl ToolHandler for TerminalTool {
                             "readOnlyHint": false
                         },
                         "inputHints": {
-                            "command": "Operation to perform: list, create, or close.",
+                            "command": "Operation to perform: list, create, or close. Close returns taskId, killRequested, and the observed state. If state is still running, poll with task_manage(command=\"list\") until the task ends.",
                             "task": "Task or terminal ID to close (required for close; forbidden for list/create).",
                             "name": "Optional name for create (1-64 ASCII alphanumeric or ._-).",
                             "cwd": "Working directory for create; workspace-relative or absolute (required absolute in stateless mode).",
@@ -250,8 +252,8 @@ impl ToolHandler for TerminalTool {
                                 tasks: Some(Vec::new()),
                                 task: None,
                                 cursor: None,
-                                closed_task: None,
-                                accepted: None,
+                                task_id: None,
+                                kill_requested: None,
                                 state: None,
                             });
                         };
@@ -286,8 +288,8 @@ impl ToolHandler for TerminalTool {
                             tasks: Some(tasks),
                             task: None,
                             cursor: None,
-                            closed_task: None,
-                            accepted: None,
+                            task_id: None,
+                            kill_requested: None,
                             state: None,
                         })
                     }
@@ -327,8 +329,8 @@ impl ToolHandler for TerminalTool {
                             tasks: None,
                             task: Some(task),
                             cursor: Some(initial_cursor),
-                            closed_task: None,
-                            accepted: None,
+                            task_id: None,
+                            kill_requested: None,
                             state: None,
                         })
                     }
@@ -375,14 +377,17 @@ impl ToolHandler for TerminalTool {
                             descriptor = output["process"].clone();
                             seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
                         }
-                        let state = descriptor["state"].as_str().map(str::to_string);
+                        let state = descriptor["state"]
+                            .as_str()
+                            .ok_or_else(|| ToolError::new("process.internal", "process descriptor missing state"))?
+                            .to_string();
                         serialize(TaskManageOutput {
                             tasks: None,
                             task: None,
                             cursor: None,
-                            closed_task: Some(id),
-                            accepted: Some(true),
-                            state,
+                            task_id: Some(id),
+                            kill_requested: Some(true),
+                            state: Some(state),
                         })
                     }
                 }

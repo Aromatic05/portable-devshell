@@ -111,7 +111,7 @@ function taskId(record: ToolCallRecord): string | undefined {
     if (typeof outTask === "string") return protect(outTask, 160);
     const task = object(outTask);
     if (typeof task?.id === "string") return protect(task.id, 160);
-    return typeof out?.closedTask === "string" ? protect(out.closedTask, 160) : undefined;
+    return typeof out?.taskId === "string" ? protect(out.taskId, 160) : undefined;
 }
 
 function detail(name: string, output: unknown): string | undefined {

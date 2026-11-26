@@ -198,7 +198,8 @@ function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
     const output = record(result?.output);
     const tasks = entries(output?.tasks);
     const createdTask = record(output?.task);
-    const closedTask = string(output?.closedTask);
+    const terminationTask = output?.killRequested === true ? string(output.taskId) : undefined;
+    const state = string(output?.state);
     if (name === "task_inspect") {
         const task = string(output?.task) ?? string(args?.task);
         const rows = number(output?.rows);
@@ -221,8 +222,10 @@ function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
         {Array.isArray(output?.tasks) && tasks.length === 0 && <Notice>No active tasks.</Notice>}
         {createdTask && <InfoStrip>{taskSummaryText(createdTask)}</InfoStrip>}
         {createdTask && <ValueRows value={createdTask} />}
-        {closedTask && <InfoStrip>Closed task {closedTask}{output?.accepted === false ? " (not accepted)" : ""}</InfoStrip>}
-        {name === "task_manage" && !Array.isArray(output?.tasks) && !createdTask && !closedTask &&
+        {terminationTask && <InfoStrip>{state === "exited" || state === "failed"
+            ? `Task ${terminationTask} ended (state: ${state}).`
+            : `Termination requested for task ${terminationTask}${state === "running" ? "; it is still running" : ""}. Poll for the final state.`}</InfoStrip>}
+        {name === "task_manage" && !Array.isArray(output?.tasks) && !createdTask && !terminationTask &&
             <ValueRows value={output ?? {}} />}
         {warnings(output)}
     </div>;

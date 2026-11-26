@@ -454,7 +454,11 @@ import { tmpdir } from "node:os";
                     assert.equal(taskInput.inputSchema.properties?.untilExit?.type, "boolean");
                     assert.equal(taskInput.inputSchema.required?.includes("task"), true);
                     assert.ok((taskInput.inputSchema.properties?.input?.type as string[]).includes("string"));
-                    assert.notEqual(terminalManage.inputSchema.properties?.command, undefined);
+                    assert.match(terminalManage.inputSchema.properties?.command?.description ?? "",
+                        /If state is still running, poll with task_manage\(command="list"\)/u);
+                    const statelessManage = (await listTools("stateless")).find((tool) => tool.name === "task_manage");
+                    assert.equal(statelessManage?.inputSchema.properties?.command?.description,
+                        terminalManage.inputSchema.properties?.command?.description);
                 },
             );
         },
@@ -592,12 +596,27 @@ import { tmpdir } from "node:os";
                         ctxId: renewed, command: "close", task,
                     });
                     assert.equal(closed.error, undefined, JSON.stringify(closed));
-                    const finished = await callTool("terminal-final", "task_input", {
-                        ctxId: renewed, task, waitMs: 10000, untilExit: true,
-                    });
-                    assert.equal(finished.error, undefined, JSON.stringify(finished));
-                    assert.equal(finished.result?.structuredContent?.waitReason, "terminal");
-                    assert.match(finished.result?.structuredContent?.stdout ?? "", /TERMINAL-ALIVE/u);
+                    assert.equal(closed.result?.structuredContent?.taskId, task);
+                    assert.equal(closed.result?.structuredContent?.killRequested, true);
+                    assert.match(closed.result?.structuredContent?.state ?? "", /^(running|exited)$/u);
+                    assert.equal("closedTask" in (closed.result?.structuredContent ?? {}), false);
+                    assert.equal("accepted" in (closed.result?.structuredContent ?? {}), false);
+
+                    let finalStdout = "";
+                    let finalCursor: string | undefined;
+                    let waitReason: string | undefined;
+                    for (let i = 0; i < 10 && waitReason !== "terminal"; i++) {
+                        const page = await callTool("terminal-final", "task_input", {
+                            ctxId: renewed, task, waitMs: 1000,
+                            ...(finalCursor === undefined ? {} : { cursor: finalCursor }),
+                        });
+                        assert.equal(page.error, undefined, JSON.stringify(page));
+                        finalStdout += page.result?.structuredContent?.stdout ?? "";
+                        finalCursor = readString(page.result?.structuredContent?.cursor, "terminal cursor");
+                        waitReason = page.result?.structuredContent?.waitReason;
+                    }
+                    assert.equal(waitReason, "terminal");
+                    assert.match(finalStdout, /TERMINAL-ALIVE/u);
                 },
             );
         },
@@ -660,8 +679,8 @@ import { tmpdir } from "node:os";
 
     interface ToolStructuredContent {
         id?: string;
-        closedTask?: string;
-        accepted?: boolean;
+        taskId?: string;
+        killRequested?: boolean;
         text?: string;
         ctxId?: string;
         state?: string;
@@ -713,7 +732,7 @@ import { tmpdir } from "node:os";
             args: Record<string, JsonValue>,
         ): Promise<ToolResponse>;
         createContext(): Promise<string>;
-        listTools(): Promise<ToolSummary[]>;
+        listTools(mode?: "explicit" | "stateless"): Promise<ToolSummary[]>;
         readToolCalls(): Promise<ToolCallRecord[]>;
     }
 
@@ -809,9 +828,9 @@ import { tmpdir } from "node:os";
                     "environ_info ctxId",
                 );
             };
-            const listTools = async () => {
+            const listTools = async (mode: "explicit" | "stateless" = "explicit") => {
                 const response = await postJson(
-                    endpoint,
+                    `http://127.0.0.1:${port}/${instanceName}/mcp/${mode}`,
                     {
                         id: "list-tools",
                         jsonrpc: "2.0",

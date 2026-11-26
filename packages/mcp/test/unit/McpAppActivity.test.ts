@@ -103,6 +103,15 @@ test("Process transcript polls share Task ID with the original command and stay 
     assert.equal(cards[0]?.name, "task_input");
 });
 
+test("Activity keeps the task ID and observed running state of a close request", () => {
+    const output = { taskId: "task-42", killRequested: true, state: "running" };
+    const [card] = projectMcpAppActivity([
+        call("close", "ctx", "task_manage", 1, { output }),
+    ], "ctx");
+    assert.equal(card?.taskId, "task-42");
+    assert.deepEqual(card?.output, output);
+});
+
 test("Workspace audit projection preserves semantic operations within bounds and never exposes credentials", () => {
     const records = [
         call("edit", "ctx-a", "file_edit", 4, {

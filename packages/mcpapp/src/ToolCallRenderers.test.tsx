@@ -167,6 +167,24 @@ test("bash_run, task_input, task_inspect and task_manage render the unified proc
     expect(view.textContent).toContain("human control");
 });
 
+test("task_manage close renders running as a pending termination request", async () => {
+    const view = await display({ name: "task_manage", isError: false, output: {
+        taskId: "process-17", killRequested: true, state: "running",
+    } });
+    expect(view.querySelector(".toolcall-description")?.textContent).toBe("Termination requested · process-17");
+    expect(view.querySelector(".tc-info")?.textContent).toBe(
+        "Termination requested for task process-17; it is still running. Poll for the final state.");
+    expect(view.textContent).not.toMatch(/Closed task|task process-17 ended/iu);
+});
+
+test("task_manage close reports that the task ended when exit was observed", async () => {
+    const view = await display({ name: "task_manage", isError: false, output: {
+        taskId: "process-17", killRequested: true, state: "exited",
+    } }, { command: "close", task: "process-17" });
+    expect(view.querySelector(".tc-info")?.textContent).toBe("Task process-17 ended (state: exited).");
+    expect(view.textContent).not.toContain("Poll for the final state");
+});
+
 test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {
     const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+uCPEAAAAASUVORK5CYII=";
     const widget = { schema: "portable-devshell.toolcall.v1", toolName: "artifact_viewImage",
