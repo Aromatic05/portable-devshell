@@ -618,6 +618,53 @@ test("tools/list exposes the fixed worker catalog without group or capability fi
     }
 });
 
+test("stateless tools/list preserves bash lifecycle guidance without advertising the model CLI", async () => {
+    const description = "Do not background long-lived services with '&' (process groups are cleaned up on shell exit); instead run them in the foreground with a short waitMs.";
+    const commandHint = "Shell command. Run in foreground with a short waitMs (not '&') for background services.";
+    const toolSource = new TestToolSource();
+    toolSource.register("demo", [{
+        name: "bash_run",
+        group: "bash",
+        description,
+        inputSchema: {
+            type: "object",
+            properties: { command: { type: "string" }, cwd: { type: "string" } },
+            required: ["command"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["execute"],
+        _meta: { devshell: { mcp: { inputHints: {
+            command: commandHint,
+            cwd: "Working directory relative to the workspace.",
+        } } } },
+    }]);
+    const binding = new McpEndpointBinding(createTestMcpEndpoint({
+        contextMode: "stateless",
+        instanceName: "demo",
+        toolSource,
+    }));
+    const server = await createBindingServer(binding);
+
+    try {
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"));
+
+        assert.equal(response.status, 200);
+        const [bash] = response.body.result.tools as Array<{
+            name: string;
+            description: string;
+            inputSchema: { required: string[]; properties: Record<string, { description?: string }> };
+        }>;
+        assert.equal(bash?.name, "bash_run");
+        assert.equal(bash.description, description);
+        assert.equal(bash.inputSchema.properties.command?.description, commandHint);
+        assert.deepEqual(bash.inputSchema.required, ["command", "cwd"]);
+        assert.equal(bash.inputSchema.properties.cwd?.description, "Required absolute working directory on the Worker.");
+        assert.doesNotMatch(JSON.stringify(bash), /devshell help/u);
+    } finally {
+        await server.close();
+    }
+});
+
 test("removed tool recipients are strictly rejected over MCP", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);

@@ -111,7 +111,7 @@ export class McpEndpointCatalog {
     #allowsEntry(entry: McpToolSourceEntry): boolean {
         const name = entry.definition.name;
         if (this.#contextSelector.id === "stateless")
-            return entry.scope === this.#instanceName && Object.hasOwn(statelessToolDescriptions, name);
+            return entry.scope === this.#instanceName && statelessToolNames.has(name);
         return this.#appEnabled() || (!name.startsWith("mcpapp_") && isModelFacingTool(entry.definition));
     }
 
@@ -194,8 +194,12 @@ export class McpEndpointCatalog {
     }
 }
 
+const statelessToolNames = new Set([
+    "bash_run", "task_input", "task_inspect", "task_manage",
+    "file_read", "file_edit", "file_glob", "file_grep",
+]);
+
 const statelessToolDescriptions: Readonly<Record<string, string>> = {
-    bash_run: "Run a shell command in the supplied absolute working directory. waitMs returns a running task without stopping it; pty allocates a PTY. Continue with task_input. Retained output paths can be passed to file_read.",
     task_input: "Send raw UTF-8 input to a stateless PTY task or omit/empty input to read output using an opaque cursor.",
     task_inspect: "Inspect a stateless PTY screen without consuming its output.",
     task_manage: "List, close, or create persistent interactive terminals in stateless mode; creation requires an absolute cwd.",
@@ -206,7 +210,7 @@ const statelessToolDescriptions: Readonly<Record<string, string>> = {
 };
 
 const statelessInputHints: Readonly<Record<string, Record<string, string>>> = {
-    bash_run: { cwd: statelessCwdHint, command: "Shell command." },
+    bash_run: { cwd: statelessCwdHint },
     file_read: { path: "Absolute Worker file path or a retained bash_run output path." },
     file_glob: { patterns: "Absolute Worker paths or globs; required without cursor." },
     file_grep: { paths: "Absolute Worker paths or globs; required without cursor." },

@@ -61,7 +61,7 @@ impl ToolHandler for BashRunTool {
                         "readOnlyHint": false
                     },
                     "inputHints": {
-                        "command": "Shell command. Run in foreground with a short waitMs (not '&') for background services. Run devshell help to discover authorized MCP model CLI commands.",
+                        "command": "Shell command. Run in foreground with a short waitMs (not '&') for background services.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                         "env": "Environment variable overrides; null removes an inherited variable.",
                         "pty": "Allocate a PTY at startup for interactive commands; required to send input via task_input.",
