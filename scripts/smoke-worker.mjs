@@ -67,8 +67,8 @@ try {
         if (handshake.platform.os === "windows") {
             for (const name of [
                 "task_input",
-                "terminal_inspect",
-                "terminal_manage",
+                "task_inspect",
+                "task_manage",
                 "task_read",
             ]) {
                 if (!names.includes(name)) {

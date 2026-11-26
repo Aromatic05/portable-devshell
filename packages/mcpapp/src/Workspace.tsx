@@ -9,7 +9,7 @@ type Activity = McpAppActivity;
 const emptyTerminal = { stdout: "", stderr: "", loaded: false, loading: false };
 const internalActivity = new Set([
     "environ_info", "progress_report", "workspace_goal",
-    "task_read", "task_input", "terminal_inspect", "terminal_manage",
+    "task_read", "task_input", "task_inspect", "task_manage",
 ]);
 
 function taskTranscript(

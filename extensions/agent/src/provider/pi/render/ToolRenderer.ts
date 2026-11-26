@@ -64,8 +64,8 @@ export const devshellPiRendererToolNames = Object.freeze([
     "file_grep",
     "file_read",
     "task_input",
-    "terminal_inspect",
-    "terminal_manage",
+    "task_inspect",
+    "task_manage",
     "task_read",
 ] as const);
 

@@ -32,8 +32,8 @@ class FakeSession implements PiSessionLike {
     #activeTools = [
         "file_read",
         "task_input",
-        "terminal_inspect",
-        "terminal_manage",
+        "task_inspect",
+        "task_manage",
         "task_read",
         "bash_run",
     ];

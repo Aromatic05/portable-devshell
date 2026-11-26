@@ -198,8 +198,8 @@ const statelessToolDescriptions: Readonly<Record<string, string>> = {
     bash_run: "Run a shell command in the supplied absolute working directory. waitMs returns a running task without stopping it; tty allocates a PTY. Continue with task_read/task_input. Retained output paths can be passed to file_read.",
     task_read: "Read a stateless task's output using its task ID and independent cursor.",
     task_input: "Send literal input or pipe EOF to a stateless task.",
-    terminal_inspect: "Inspect a stateless PTY screen without consuming its output.",
-    terminal_manage: "List, create or close stateless process resources; creation requires an absolute cwd.",
+    task_inspect: "Inspect a stateless PTY screen without consuming its output.",
+    task_manage: "List, create or close stateless process resources; creation requires an absolute cwd.",
     file_read: "Read absolute Worker paths or retained bash_run output paths. Use nextSelector to continue a truncated read.",
     file_edit: "Apply one ordered change set using absolute Worker paths. No prior file_read is required; later operations do not execute after a failure.",
     file_glob: "Locate files and directories by absolute Worker paths or globs. Continue a paged traversal with cursor alone.",
@@ -211,7 +211,7 @@ const statelessInputHints: Readonly<Record<string, Record<string, string>>> = {
     file_read: { path: "Absolute Worker file path or a retained bash_run output path." },
     file_glob: { patterns: "Absolute Worker paths or globs; required without cursor." },
     file_grep: { paths: "Absolute Worker paths or globs; required without cursor." },
-    terminal_manage: { cwd: "Required absolute Worker directory for command=create." },
+    task_manage: { cwd: "Required absolute Worker directory for command=create." },
 };
 
 function isBootstrapTool(name: string): boolean {

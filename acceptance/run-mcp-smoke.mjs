@@ -22,7 +22,7 @@ try {
     const statelessTools = statelessList.body.result?.tools;
     assert.deepEqual(statelessTools?.map(({ name }) => name).sort(), [
         "bash_run", "file_edit", "file_glob", "file_grep", "file_read",
-        "task_input", "task_read", "terminal_inspect", "terminal_manage",
+        "task_input", "task_inspect", "task_manage", "task_read",
     ]);
     for (const tool of statelessTools) {
         assert.equal(Object.hasOwn(tool.inputSchema.properties, "ctxId"), false);
@@ -115,8 +115,8 @@ try {
         ["file_grep", { pattern: "marker" }],
         ["bash_run", { command: "pwd", tty: true }],
         ["bash_run", { command: "pwd", cwd: "./", tty: true }],
-        ["terminal_manage", { command: "create", cwd: "./" }],
-        ["terminal_manage", { command: "create" }],
+        ["task_manage", { command: "create", cwd: "./" }],
+        ["task_manage", { command: "create" }],
     ]) {
         const result = await statelessCall(`invalid-${tool}-${JSON.stringify(args)}`, tool, args);
         assert.ok(result.error, JSON.stringify(result));
@@ -129,13 +129,13 @@ try {
     };
     const noTask = await statelessCall("input-empty", "task_input", { task: "missing", input: "x" });
     assert.ok(noTask.error, JSON.stringify(noTask));
-    const before = await processTool("list-before", "terminal_manage", { command: "list" });
-    const created = await processTool("create-terminal", "terminal_manage", { command: "create", cwd: fixture.workspace });
+    const before = await processTool("list-before", "task_manage", { command: "list" });
+    const created = await processTool("create-terminal", "task_manage", { command: "create", cwd: fixture.workspace });
     const terminal = created.id;
     assert.equal(typeof terminal, "string");
-    const listed = await processTool("list-terminals", "terminal_manage", { command: "list" });
+    const listed = await processTool("list-terminals", "task_manage", { command: "list" });
     assert.ok(listed.tasks.some((entry) => entry.id === terminal && entry.workspace == null));
-    await processTool("inspect-terminal", "terminal_inspect", { terminal });
+    await processTool("inspect-terminal", "task_inspect", { terminal });
     const interactive = process.platform === "win32"
         ? '$value = Read-Host "ready"; Write-Output "received:$value"'
         : "printf 'ready\n'; IFS= read -r value; printf 'received:%s\n' \"$value\"";
@@ -149,7 +149,7 @@ try {
     const finished = await processTool("read-task", "task_read", { task, cursor: startedTask.cursor, timeMs: 3000, untilExit: true });
     assert.equal(finished.task.status, "0", JSON.stringify(finished));
     assert.match(finished.stdout, /received:hello/u);
-    await processTool("close-terminal", "terminal_manage", { command: "close", id: terminal });
+    await processTool("close-terminal", "task_manage", { command: "close", id: terminal });
     const closed = await processTool("read-closed", "task_read", { task: terminal, untilExit: true, timeMs: 3000 });
     assert.notEqual(closed.task.status, "running");
     assert.deepEqual(listContexts(), contextsBefore);
@@ -205,7 +205,7 @@ try {
     const explicitTerminal = async (id, args) => {
         const result = await postJson(endpoint, {
             jsonrpc: "2.0", id, method: "tools/call",
-            params: { name: "terminal_manage", arguments: { ctxId, ...args } },
+            params: { name: "task_manage", arguments: { ctxId, ...args } },
         });
         assert.equal(result.body.error, undefined, JSON.stringify(result.body));
         return result.body.result.structuredContent;
@@ -216,7 +216,7 @@ try {
     const ordinaryList = await explicitTerminal("list-workspace-terminals", { command: "list" });
     assert.ok(ordinaryList.tasks.some((entry) => entry.id === ordinaryTerminal && entry.workspace));
     assert.ok(ordinaryList.tasks.every((entry) => !listed.tasks.some((stateless) => stateless.id === entry.id)));
-    const independentList = await processTool("list-independent", "terminal_manage", { command: "list" });
+    const independentList = await processTool("list-independent", "task_manage", { command: "list" });
     assert.ok(independentList.tasks.every((entry) => !ordinaryList.tasks.some((ordinary) => ordinary.id === entry.id)));
 
     const toolCall = await postJson(

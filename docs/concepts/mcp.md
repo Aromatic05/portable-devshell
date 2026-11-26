@@ -97,11 +97,11 @@ MCP 按请求选择两个共享 event bus 的 handler：
 - `/<instance>/mcp` 与 `/<instance>/mcp/openai-session`：OpenAI 会话绑定，保留 MCP App 私有能力；裸 URL 仍使用原 OAuth resource。
 - `/<instance>/mcp/agy-session`：agy 对话绑定。只提供会话绑定，不承诺客户端自动唤醒或续跑。
 - `/<instance>/mcp/explicit`：Gemini Web / 通用客户端，显式传递 `ctxId`。
-- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 9 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`task_read`、`task_input`、`terminal_inspect`、`terminal_manage`。
+- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 9 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`task_read`、`task_input`、`task_inspect`、`task_manage`。
 
 `tools/list`、`tools/call` 和资源使用同一入口契约，不按 metadata 切换。OAuth audience 按完整 URL 校验。完整模型见 [Context](context.md)。
 
-`stateless` 由 URL 选定，不需要新 TOML 字段。文件参数必须使用 Worker 上的绝对路径，`bash_run` 及 `terminal_manage` 的 create 操作必须显式提供绝对 `cwd`。搜索 cursor 可以跨调用继续，不建立 Context 读取快照。Stateless Process Host 资源使用 Instance 下独立于 Workspace 的作用域，按 task/terminal ID 访问；list 仅列出该命名空间，等待超时后由调用者继续读取任务，不创建 Context Wait。`file_edit` 不要求先读，但不改变 Worker 的权限；`security.mode = "workspace"` 仍拒绝绝对文件访问和绝对 `cwd`。`bash_run` 返回的 `stdoutPath` / `stderrPath` 可原样交给后续 `file_read`；调用者不需要原会话或 Context。
+`stateless` 由 URL 选定，不需要新 TOML 字段。文件参数必须使用 Worker 上的绝对路径，`bash_run` 及 `task_manage` 的 create 操作必须显式提供绝对 `cwd`。搜索 cursor 可以跨调用继续，不建立 Context 读取快照。Stateless Process Host 资源使用 Instance 下独立于 Workspace 的作用域，按 task/terminal ID 访问；list 仅列出该命名空间，等待超时后由调用者继续读取任务，不创建 Context Wait。`file_edit` 不要求先读，但不改变 Worker 的权限；`security.mode = "workspace"` 仍拒绝绝对文件访问和绝对 `cwd`。`bash_run` 返回的 `stdoutPath` / `stderrPath` 可原样交给后续 `file_read`；调用者不需要原会话或 Context。
 
 ## 认证
 
@@ -130,7 +130,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Environment       | `environ_info`、`environ_remote`                                                               |
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
-| Task / Terminal   | `task_input`、`task_read`、`terminal_inspect`、`terminal_manage`                           |
+| Task / Terminal   | `task_input`、`task_read`、`task_inspect`、`task_manage`                           |
 | Goal              | `workspace_goal`（最终目标管理）                                                      |
 | Comment           | Comment `mcp.tools` 提供 `progress_report`（面向用户的进度报告）                        |
 | Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |

@@ -319,7 +319,7 @@ impl Drop for ControlCallPermit {
 }
 
 fn is_urgent_tool(method: &str) -> bool {
-    matches!(method, "task_input" | "terminal_inspect" | "terminal_manage")
+    matches!(method, "task_input" | "task_inspect" | "task_manage")
 }
 
 fn is_task_wait_observation(request: &RpcRequest) -> bool {
@@ -376,7 +376,7 @@ mod tests {
         let urgent_one = registry
             .acquire(&RpcRequest::request(
                 "3",
-                "terminal_manage",
+                "task_manage",
                 serde_json::json!({}),
             ))
             .unwrap();
@@ -391,7 +391,7 @@ mod tests {
             registry
                 .acquire(&RpcRequest::request(
                     "5",
-                    "terminal_inspect",
+                    "task_inspect",
                     serde_json::json!({})
                 ))
                 .is_err()
@@ -452,7 +452,7 @@ mod tests {
         let urgent_one = registry
             .acquire(&RpcRequest::request(
                 "urgent-with-observation-1",
-                "terminal_manage",
+                "task_manage",
                 serde_json::json!({}),
             ))
             .unwrap();

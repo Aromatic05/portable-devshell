@@ -21,7 +21,7 @@ fn restart(fixture: &WorkerFixture, instance: &str) {
 fn wait_screen(fixture: &WorkerFixture, id: &str, marker: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let page = fixture.tool("terminal_inspect", json!({"terminal": id}));
+        let page = fixture.tool("task_inspect", json!({"terminal": id}));
         if page["text"].as_str().unwrap().contains(marker) {
             return;
         }
@@ -38,7 +38,7 @@ fn persistent_conpty_terminal_survives_worker_restart() {
     let instance = "windows-process-terminal";
     let fixture = WorkerFixture::start(instance);
     let created = fixture.tool(
-        "terminal_manage",
+        "task_manage",
         json!({
             "command": "create", "shell": "pwsh.exe -NoLogo -NoProfile",
         }),
@@ -53,7 +53,7 @@ fn persistent_conpty_terminal_survives_worker_restart() {
     );
     wait_screen(&fixture, id, "WINDOWS-TERMINAL-中文");
     restart(&fixture, instance);
-    let listed = fixture.tool("terminal_manage", json!({"command": "list"}));
+    let listed = fixture.tool("task_manage", json!({"command": "list"}));
     assert!(
         listed["tasks"]
             .as_array()
@@ -69,7 +69,7 @@ fn persistent_conpty_terminal_survives_worker_restart() {
         }),
     );
     wait_screen(&fixture, id, "AFTER-RESTART");
-    fixture.tool("terminal_manage", json!({"command": "close", "id": id}));
+    fixture.tool("task_manage", json!({"command": "close", "id": id}));
     let ended = fixture.wait_task(id, json!({}));
     assert_ne!(ended["termination"], "running");
     assert!(ended["stdout"].as_str().unwrap().contains("AFTER-RESTART"));

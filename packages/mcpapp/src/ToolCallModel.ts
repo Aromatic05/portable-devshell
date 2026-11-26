@@ -59,8 +59,8 @@ export const toolTitles: Record<string, string> = {
     file_edit: "Edit files",
     task_read: "Read task output",
     task_input: "Send terminal input",
-    terminal_inspect: "Inspect terminal",
-    terminal_manage: "Manage terminals",
+    task_inspect: "Inspect terminal",
+    task_manage: "Manage terminals",
     progress_report: "Progress report",
     environ_info: "Workspace environment",
     environ_remote: "Remote environment",
@@ -102,8 +102,8 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
         }
         case "task_read": return string(args?.task) ?? summary ?? "Task transcript";
         case "task_input": return string(args?.task) ?? summary ?? "Terminal input";
-        case "terminal_inspect": return string(args?.terminal) ?? summary ?? "Terminal snapshot";
-        case "terminal_manage": return string(args?.command) ?? summary ?? "Terminal resources";
+        case "task_inspect": return string(args?.terminal) ?? summary ?? "Terminal snapshot";
+        case "task_manage": return string(args?.command) ?? summary ?? "Terminal resources";
         case "progress_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";
         case "artifact_viewImage": return string(output?.name) ?? string(args?.path) ??
             string(args?.handle) ?? summary ?? "Image";

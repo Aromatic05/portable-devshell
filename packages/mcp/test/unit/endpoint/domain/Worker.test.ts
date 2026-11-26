@@ -162,7 +162,7 @@ test("routing fields are injected into strict worker schema union branches", () 
     const unionTool: ToolDefinition = {
         requiredCapabilities: ["execute"],
         description: "Union tool",
-        group: "terminal",
+        group: "task",
         inputSchema: {
             $defs: {
                 Create: {
@@ -180,7 +180,7 @@ test("routing fields are injected into strict worker schema union branches", () 
             },
             anyOf: [{ $ref: "#/$defs/Create" }, { $ref: "#/$defs/Close" }],
         },
-        name: "terminal_manage",
+        name: "task_manage",
         outputSchema: { type: "object" },
     };
     const schema = withMcpInstanceTarget(withMcpContextId(unionTool))

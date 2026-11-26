@@ -46,7 +46,7 @@ const instanceTools = new Set([
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => [...bashErrorHints(body), ...processErrorHints(body)];
-    if (["task_read", "task_input", "terminal_inspect", "terminal_manage"].includes(toolName))
+    if (["task_read", "task_input", "task_inspect", "task_manage"].includes(toolName))
         return (_name, body) => processErrorHints(body);
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);

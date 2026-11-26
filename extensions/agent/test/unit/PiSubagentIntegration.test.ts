@@ -164,8 +164,8 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
         ["bash_run", { type: "object", properties: { command: { type: "string" }, waitMs: { type: "number" }, tty: { type: "boolean" } }, required: ["command"] }],
         ["task_read", { type: "object", properties: { task: { type: "string" } }, required: ["task"] }],
         ["task_input", { type: "object", properties: { task: { type: "string" }, input: { type: "string" }, eof: { type: "boolean" } }, required: ["task"] }],
-        ["terminal_inspect", { type: "object", properties: { terminal: { type: "string" } }, required: ["terminal"] }],
-        ["terminal_manage", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
+        ["task_inspect", { type: "object", properties: { terminal: { type: "string" } }, required: ["terminal"] }],
+        ["task_manage", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
     ] as const;
     const modelTools = definitions.map(([name, inputSchema]) => ({
         description: `${name} test tool`,
@@ -189,7 +189,7 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
                     ],
                 };
             }
-            if (name === "terminal_manage" && record(input)?.command === "list") {
+            if (name === "task_manage" && record(input)?.command === "list") {
                 return {
                     tasks: [{ id: "task-integration", state: "running", tty: true }],
                 };
@@ -420,7 +420,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
-                assert.equal(names.has("terminal_manage"), true);
+                assert.equal(names.has("task_manage"), true);
                 return fauxModule.fauxAssistantMessage("CHILD_PROCESS_DONE");
             },
         ]);
@@ -586,14 +586,14 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
-                assert.equal(names.has("terminal_manage"), true);
+                assert.equal(names.has("task_manage"), true);
                 return fauxModule.fauxAssistantMessage("MAIN_PROCESS_DONE");
             },
         ]);
         await main.prompt("exercise process exposure");
         assert.equal(toolCalls.some((call) => call.name === "bash_run"), true);
         assert.equal(main.getActiveToolNames().includes("task_read"), true);
-        assert.equal(main.getActiveToolNames().includes("terminal_manage"), true);
+        assert.equal(main.getActiveToolNames().includes("task_manage"), true);
 
         await assert.rejects(
             toolByName(subagents, "agent_spawn").execute("spawn-fork", {

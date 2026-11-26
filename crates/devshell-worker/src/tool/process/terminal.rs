@@ -42,7 +42,7 @@ impl ToolHandler for TerminalTool {
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
         match self.name.as_str().as_str() {
-            "terminal_inspect" => catalog_entry::<InspectParams, Value>(
+            "task_inspect" => catalog_entry::<InspectParams, Value>(
                 &self.name,
                 "Inspect the current terminal screen without consuming task output.",
                 [ToolCapability::Read],
@@ -57,7 +57,7 @@ impl ToolHandler for TerminalTool {
     fn call(&self, call: ToolCall) -> Result<Value, ToolError> {
         call.check_cancelled()?;
         match self.name.as_str().as_str() {
-            "terminal_inspect" => {
+            "task_inspect" => {
                 require_read(&call)?;
                 let params: InspectParams = call.parse_params()?;
                 let client = connect(&self.instance)?;
@@ -134,7 +134,7 @@ pub(crate) fn register_tools(
     registry: &mut ToolRegistry,
     instance: &InstanceName,
 ) -> Result<(), ToolError> {
-    for name in ["terminal_inspect", "terminal_manage"] {
+    for name in ["task_inspect", "task_manage"] {
         registry.register(Arc::new(TerminalTool {
             name: ToolName::parse(name).map_err(error)?,
             instance: instance.clone(),

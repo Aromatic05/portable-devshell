@@ -125,7 +125,7 @@ test("file_edit failure in operation 41 survives server preview and UI truncatio
     expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(25);
 });
 
-test("bash_run and terminal_inspect render the shared process result contract", async () => {
+test("bash_run and task_inspect render the shared process result contract", async () => {
     let view = await display({ name: "bash_run", isError: false, output: {
         task: { id: "process-17", status: "running" },
         stdout: "building...\n", stderr: "",
@@ -136,7 +136,7 @@ test("bash_run and terminal_inspect render the shared process result contract", 
     expect(view.textContent).toContain("running");
     await act(async () => { root?.unmount(); root = undefined; });
     container?.remove();
-    view = await display({ name: "terminal_inspect", isError: false, output: {
+    view = await display({ name: "task_inspect", isError: false, output: {
         text: "$ vim main.rs\n-- INSERT --", cols: 80, rows: 24,
     } }, { terminal: "process-17" });
     expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("INSERT");

@@ -29,13 +29,13 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 
 ## 持久终端
 
-`terminal_manage` 支持：
+`task_manage` 支持：
 
 - `{"command":"list"}`：列出当前执行作用域内的进程资源。
 - `{"command":"create","cwd":"./"}`：创建持久交互终端，可选 shell。
 - `{"command":"close","id":"process-…"}`：终止资源，已保留的输出仍可读取。
 
-`terminal_inspect` 接收 `{"terminal":"process-…"}`，读取终端当前状态，不消费任务输出。
+`task_inspect` 接收 `{"terminal":"process-…"}`，读取终端当前状态，不消费任务输出。
 
 ## 人机协同
 

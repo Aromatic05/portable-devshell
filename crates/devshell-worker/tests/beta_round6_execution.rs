@@ -213,7 +213,7 @@ fn task_output_remains_readable_after_terminal_close() {
         &env,
         instance,
         "close",
-        "terminal_manage",
+        "task_manage",
         json!({"command":"close","id":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");

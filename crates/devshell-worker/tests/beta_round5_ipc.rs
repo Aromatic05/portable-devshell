@@ -205,7 +205,7 @@ fn terminal_close_preserves_terminated_status_for_later_read() {
         &env,
         instance,
         "close",
-        "terminal_manage",
+        "task_manage",
         json!({"command":"close","id":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");

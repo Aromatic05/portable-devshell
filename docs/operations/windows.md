@@ -33,7 +33,7 @@ Windows worker 使用普通 detached 用户进程，不安装 Windows Service，
 bash_run
 file 工具组
 task_read / task_input
-terminal_inspect / terminal_manage
+task_inspect / task_manage
 artifact 工具组
 reverse connection
 \`\`\`

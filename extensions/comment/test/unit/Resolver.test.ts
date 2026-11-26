@@ -379,7 +379,7 @@ test("Process Host errors have task-specific recovery guidance", () => {
         ["process.notFound"],
     );
     assert.deepEqual(
-        codes(resolveErrorHints("terminal_manage", body("process.resourceLimit"))),
+        codes(resolveErrorHints("task_manage", body("process.resourceLimit"))),
         ["process.resourceLimit"],
     );
 });

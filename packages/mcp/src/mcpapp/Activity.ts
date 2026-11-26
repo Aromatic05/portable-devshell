@@ -103,7 +103,7 @@ function target(record: ToolCallRecord): string | undefined {
 }
 
 function taskId(record: ToolCallRecord): string | undefined {
-    if (!["bash_run", "task_read", "task_input", "terminal_inspect", "terminal_manage"].includes(record.toolName)) return undefined;
+    if (!["bash_run", "task_read", "task_input", "task_inspect", "task_manage"].includes(record.toolName)) return undefined;
     const requested = object(record.input)?.task;
     if (typeof requested === "string") return protect(requested, 160);
     const task = object(object(record.output)?.task);

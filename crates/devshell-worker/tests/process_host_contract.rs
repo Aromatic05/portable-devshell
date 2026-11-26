@@ -470,7 +470,7 @@ fn worker_command_and_native_attach_share_one_pty() {
     // which cannot be reconstructed from the visible screen.
     attach.expect("\x1b]2;raw-title\x07");
     attach.detach();
-    let inspected = fixture.tool("terminal_inspect", json!({"terminal": task}));
+    let inspected = fixture.tool("task_inspect", json!({"terminal": task}));
     assert!(
         inspected["text"]
             .as_str()

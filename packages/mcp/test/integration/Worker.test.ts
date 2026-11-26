@@ -204,7 +204,7 @@ import { tmpdir } from "node:os";
                 );
                 assert.equal((bash?.inputSchema.required as string[]).includes("ctxId"), true);
                 for (const name of [
-                    "task_read", "task_input", "terminal_inspect", "terminal_manage",
+                    "task_read", "task_input", "task_inspect", "task_manage",
                     "file_glob", "file_grep",
                 ]) {
                     const tool = tools.find((entry) => entry.name === name);
@@ -431,7 +431,7 @@ import { tmpdir } from "node:os";
                     const names = new Set(tools.map((tool) => tool.name));
                     for (const name of [
                         "bash_run", "task_read", "task_input",
-                        "terminal_inspect", "terminal_manage",
+                        "task_inspect", "task_manage",
                     ]) assert.equal(names.has(name), true, name);
                     for (const name of [
                         "tmux_run", "tmux_read", "tmux_input",
@@ -441,7 +441,7 @@ import { tmpdir } from "node:os";
                     const bash = tools.find((tool) => tool.name === "bash_run");
                     const taskRead = tools.find((tool) => tool.name === "task_read");
                     const taskInput = tools.find((tool) => tool.name === "task_input");
-                    const terminalManage = tools.find((tool) => tool.name === "terminal_manage");
+                    const terminalManage = tools.find((tool) => tool.name === "task_manage");
                     assert.ok(bash);
                     assert.ok(taskRead);
                     assert.ok(taskInput);
@@ -479,13 +479,13 @@ import { tmpdir } from "node:os";
                     const task = readString(started.result?.structuredContent?.task?.id, "task id");
                     assert.equal(started.result?.structuredContent?.termination, "running");
 
-                    const listed = await callTool("reused-process-call", "terminal_manage", {
+                    const listed = await callTool("reused-process-call", "task_manage", {
                         command: "list", ctxId,
                     });
                     assert.equal(listed.error, undefined, JSON.stringify(listed));
                     assert.ok(listed.result?.structuredContent?.tasks?.some((entry) => entry.id === task));
 
-                    const inspected = await callTool("reused-process-call", "terminal_inspect", {
+                    const inspected = await callTool("reused-process-call", "task_inspect", {
                         ctxId, terminal: task,
                     });
                     assert.equal(inspected.error, undefined, JSON.stringify(inspected));
@@ -560,7 +560,7 @@ import { tmpdir } from "node:os";
                 "aromatic-mcp-process-terminal",
                 async ({ callTool, createContext }) => {
                     const ctxId = await createContext();
-                    const created = await callTool("terminal-create", "terminal_manage", {
+                    const created = await callTool("terminal-create", "task_manage", {
                         ctxId, command: "create",
                         shell: process.platform === "win32"
                             ? "powershell.exe -NoLogo -NoProfile"
@@ -587,12 +587,12 @@ import { tmpdir } from "node:os";
                         cursor = page.result?.structuredContent?.cursor ?? cursor;
                     }
                     assert.match(stdout, /TERMINAL-ALIVE/u);
-                    const inspected = await callTool("terminal-screen", "terminal_inspect", {
+                    const inspected = await callTool("terminal-screen", "task_inspect", {
                         ctxId: renewed, terminal: task,
                     });
                     assert.equal(inspected.error, undefined, JSON.stringify(inspected));
                     assert.match(inspected.result?.structuredContent?.text ?? "", /TERMINAL-ALIVE/u);
-                    const closed = await callTool("terminal-close", "terminal_manage", {
+                    const closed = await callTool("terminal-close", "task_manage", {
                         ctxId: renewed, command: "close", id: task,
                     });
                     assert.equal(closed.error, undefined, JSON.stringify(closed));

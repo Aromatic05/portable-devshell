@@ -342,9 +342,9 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "file_grep",
         "file_read",
         "task_input",
+        "task_inspect",
+        "task_manage",
         "task_read",
-        "terminal_inspect",
-        "terminal_manage",
     ];
     assert_eq!(
         catalog
@@ -1540,14 +1540,14 @@ fn stateless_tools_still_enforce_workspace_security() {
         ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "waitMs": 0})),
         ("task_read", serde_json::json!({"task": "denied"})),
         ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
-        ("terminal_inspect", serde_json::json!({"terminal": "denied"})),
-        ("terminal_manage", serde_json::json!({"command": "list"})),
-        ("terminal_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
+        ("task_inspect", serde_json::json!({"terminal": "denied"})),
+        ("task_manage", serde_json::json!({"command": "list"})),
+        ("task_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
         ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "tty": true})),
-        ("terminal_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
+        ("task_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
         ("task_read", serde_json::json!({"task": "denied"})),
         ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
-        ("terminal_inspect", serde_json::json!({"terminal": "denied"})),
+        ("task_inspect", serde_json::json!({"terminal": "denied"})),
     ] {
         let denied = env.rpc(instance, "tool", &serde_json::json!({
             "protocol": "rpc",

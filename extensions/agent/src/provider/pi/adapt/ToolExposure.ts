@@ -12,15 +12,15 @@ export interface PiToolExposureDomain {
 
 export const PI_PROCESS_TOOL_NAMES = Object.freeze([
     "task_input",
-    "terminal_inspect",
-    "terminal_manage",
+    "task_inspect",
+    "task_manage",
     "task_read",
 ] as const);
 
 export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
     expanded: PI_PROCESS_TOOL_NAMES,
     expandOnTools: ["bash_run"],
-    gateway: ["terminal_manage"],
+    gateway: ["task_manage"],
 });
 
 export class PiToolExposureController {

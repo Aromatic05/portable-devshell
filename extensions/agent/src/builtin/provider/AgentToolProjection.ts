@@ -63,8 +63,8 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
     ],
     ["task_read", { projectResult: renderBashModelToolResult }],
     ["task_input", { projectResult: renderProcessModelToolResult }],
-    ["terminal_inspect", { projectResult: renderProcessModelToolResult }],
-    ["terminal_manage", { projectResult: renderProcessModelToolResult }],
+    ["task_inspect", { projectResult: renderProcessModelToolResult }],
+    ["task_manage", { projectResult: renderProcessModelToolResult }],
 ]);
 
 const AGENT_MODEL_TOOL_NAMES = new Set(AGENT_MODEL_TOOL_PROJECTIONS.keys());

@@ -233,7 +233,7 @@ test("the production Endpoint exposes a reachable fullscreen Workspace with Inli
 test("Inline opt-in still excludes frequent background and reporting tools", async () => {
     const f = fixture(undefined, true);
     for (const name of ["progress_report", "environ_info", "task_read", "task_input",
-        "terminal_manage", "file_grep", "file_glob", "workspace_goal"]) {
+        "task_manage", "file_grep", "file_glob", "workspace_goal"]) {
         const presented = await f.endpoint.present(name, { ok: true }, f.request);
         assert.ok(presented instanceof McpNativeToolResult);
         assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);

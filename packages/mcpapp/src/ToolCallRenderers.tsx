@@ -181,7 +181,7 @@ function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
         {name === "task_input" && <InfoStrip>Input sent to {string(args?.task) ?? "task"}</InfoStrip>}
         {string(output?.text) && <Terminal title="Terminal snapshot" text={string(output?.text)!} />}
         {tasks.map((task, index) => <InfoStrip key={index}>{string(task.id)} · {string(task.state)}{task.humanControl === true ? " · human control" : ""}</InfoStrip>)}
-        {name === "terminal_manage" && tasks.length === 0 && <ValueRows value={output ?? {}} />}
+        {name === "task_manage" && tasks.length === 0 && <ValueRows value={output ?? {}} />}
         {warnings(output)}
     </div>;
 }
@@ -247,8 +247,8 @@ const renderers: Record<string, Renderer> = {
     file_edit: EditView,
     task_read: ShellView,
     task_input: ProcessView,
-    terminal_inspect: ProcessView,
-    terminal_manage: ProcessView,
+    task_inspect: ProcessView,
+    task_manage: ProcessView,
     progress_report: ReportView,
     artifact_viewImage: ImageView,
     environ_info: EnvironmentView,
