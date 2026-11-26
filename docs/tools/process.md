@@ -29,9 +29,10 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 
 - 省略 `input` 或传入 `""` 时只轮询/等待新输出而不写入输入；此时可用于 Pipe 命令或 PTY 命令。
 - 传入非空 `input` 时向任务写入原始字符串（TUI/ConPTY 回车推荐 `\r`，普通行 shell 可用 `\n`，Ctrl+C 为 `\u0003`，Ctrl+D 为 `\u0004`）；要求目标为 `pty: true` 启动的 PTY 任务或 `task_manage` 创建的持久终端，非 PTY 的 Pipe 命令会拒绝非空输入。
-- `cursor` 为绑定到单个任务的不透明字符串，只能和返回它的任务 ID 一起使用（来自 `bash_run`、`task_manage(command="create")` 或上一次 `task_input`）。写入非空 `input` 但省略 `cursor` 时，默认从当前输出尾部开始采集，避免重放整个终端历史；纯读省略 `cursor` 时从头读取。
-- `waitMs` 控制等待时长，默认 `5000`（5 秒）；未指定 `untilExit: true` 时在收到新输出后会短暂聚合（150ms）以减少流式输出轮询风暴。
+- `cursor` 为绑定到单个任务的不透明字符串，只能和返回它的任务 ID 一起使用（来自 `bash_run`、`task_manage(command="create")` 或上一次 `task_input`）。写入非空 `input` 但省略 `cursor` 时，默认从当前输出尾部开始采集，避免重放整个终端历史；纯读省略 `cursor` 时会从第 0 字节重放全部历史，因此轮询时应始终传回上次返回的 `cursor`。
+- `waitMs` 控制等待时长，默认 `5000`（5 秒）；未指定 `untilExit: true` 时在收到新输出后会短暂聚合（150ms，且总聚合延长不超过 600ms 防止持续日志流拖满 `waitMs`）以减少流式输出轮询风暴。
 - `untilExit: true` 等待非持久任务退出（不可用于持久交互终端，因为持久终端退出会自动重启）；否则在新输出可用或达到 `waitMs` 时返回。
+- 若向已退出的 PTY 任务写入非空 `input`，会返回 `process.exited`（仍可省略 `input` 读取已保留输出）。
 - 原 `eof` 与 `timeMs` 参数已移除，返回结构同为 `BashRunOutput`。
 
 ## 终端快照：`task_inspect`

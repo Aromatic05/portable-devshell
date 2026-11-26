@@ -50,7 +50,7 @@ impl ToolHandler for BashRunTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
-            "Execute a shell command (non-login shell). waitMs controls how long to wait (default 10000ms); a still-running command returns a task ID and cursor. Do not background long-lived services with '&' (process groups are cleaned up on shell exit); instead run them in the foreground with a short waitMs and stop them via task_manage(command=\"close\"). Set pty=true to allocate a PTY for interactive input. Use task_input to read/poll output or send input, task_inspect to inspect a PTY screen, and task_manage to list, create persistent terminals, or close tasks. Retained output paths can be read with file_read.",
+            "Execute a shell command (non-login shell). Prefer bash_run for one-shot commands, exit codes, background services, or devshell CLI commands. waitMs controls how long to wait synchronously (default 10000ms; context-bound waits >= 180000ms hand off to a background durable Wait); a still-running command returns a task ID and cursor without stopping it. Do not background long-lived services with '&' (process groups are cleaned up on shell exit); instead run them in the foreground with a short waitMs and stop them via task_manage(command=\"close\"). Set pty=true to allocate a PTY for interactive input. Use task_input (omit input to poll any pipe or PTY task, or send input to a PTY), task_inspect (PTY screen only), and task_manage to list, create persistent shells, or close tasks. Retained output paths can be read with file_read.",
             [ToolCapability::Execute],
             serde_json::json!({
                 "devshell": { "mcp": {
@@ -64,8 +64,8 @@ impl ToolHandler for BashRunTool {
                         "command": "Shell command. Run in foreground with a short waitMs (not '&') for background services.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
                         "env": "Environment variable overrides; null removes an inherited variable.",
-                        "pty": "Allocate a PTY at startup for interactive commands; required to send input via task_input.",
-                        "waitMs": "Milliseconds to wait before returning a running task ID (default 10000, max 3600000); does not stop the process."
+                        "pty": "Allocate a PTY at startup (120x36) for interactive commands; required to send input via task_input.",
+                        "waitMs": "Milliseconds to wait before returning a running task ID (default 10000, max 3600000; does not stop the process; context-bound waits >= 180000ms detach to durable Wait)."
                     },
                     "title": "Run shell command"
                 }}

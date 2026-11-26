@@ -83,11 +83,11 @@ struct ManageParams {
     #[serde(default)]
     #[schemars(length(min = 1))]
     shell: Option<String>,
-    /// Optional initial terminal columns for create (default 80).
+    /// Optional initial terminal columns for create (default 120).
     #[serde(default)]
     #[schemars(range(min = 1, max = 1000))]
     cols: Option<u16>,
-    /// Optional initial terminal rows for create (default 24).
+    /// Optional initial terminal rows for create (default 36).
     #[serde(default)]
     #[schemars(range(min = 1, max = 1000))]
     rows: Option<u16>,
@@ -146,7 +146,7 @@ impl ToolHandler for TerminalTool {
         match self.name.as_str().as_str() {
             "task_inspect" => catalog_entry_with_meta::<InspectParams, TaskInspectOutput>(
                 &self.name,
-                "Inspect the current visible terminal screen of a PTY task or interactive terminal without advancing cursors.",
+                "PTY-only: inspect the current visible terminal screen of a PTY task or persistent terminal without advancing cursors. For non-PTY command output, use task_input without input instead.",
                 [ToolCapability::Read],
                 json!({
                     "devshell": { "mcp": {
@@ -157,7 +157,7 @@ impl ToolHandler for TerminalTool {
                             "readOnlyHint": true
                         },
                         "inputHints": {
-                            "task": "Task or terminal ID to inspect; must be a PTY task or interactive terminal."
+                            "task": "PTY task or persistent terminal ID to inspect (fails on non-PTY pipe tasks; use task_input without input for pipe output)."
                         },
                         "title": "Inspect terminal screen"
                     }}
@@ -165,7 +165,7 @@ impl ToolHandler for TerminalTool {
             ),
             _ => catalog_entry_with_meta::<ManageParams, TaskManageOutput>(
                 &self.name,
-                "List tasks and terminals, create a persistent interactive terminal, or request termination of a task/terminal in the current execution scope. A successful close request does not guarantee that the task has ended.",
+                "Manage tasks and persistent interactive terminals in the current execution scope. Allowed fields per command: list -> {}; create -> {name?, cwd?, shell?, cols?, rows?}; close -> {task}. Use create only when you need a persistent login shell or human terminal attach (it auto-respawns on shell exit and does not inject the model devshell CLI; prefer bash_run for one-shot commands or background services). A successful close request does not guarantee that the task has ended.",
                 [ToolCapability::Execute],
                 json!({
                     "devshell": { "mcp": {
@@ -176,13 +176,13 @@ impl ToolHandler for TerminalTool {
                             "readOnlyHint": false
                         },
                         "inputHints": {
-                            "command": "Operation to perform: list, create, or close. Close returns taskId, killRequested, and the observed state. If state is still running, poll with task_manage(command=\"list\") until the task ends.",
+                            "command": "Operation: \"list\" (no extra fields), \"create\" (optional name/cwd/shell/cols/rows), or \"close\" (requires task). Close returns taskId, killRequested, and observed state. If state is still running, poll with task_manage(command=\"list\") until it leaves running.",
                             "task": "Task or terminal ID to close (required for close; forbidden for list/create).",
-                            "name": "Optional name for create (1-64 ASCII alphanumeric or ._-).",
-                            "cwd": "Working directory for create; workspace-relative or absolute (required absolute in stateless mode).",
-                            "shell": "Optional shell executable for create; defaults to the user login shell (note: persistent terminals do not inject the model devshell CLI).",
-                            "cols": "Optional terminal width in columns for create (default 120).",
-                            "rows": "Optional terminal height in rows for create (default 36)."
+                            "name": "Optional name for create only (1-64 ASCII alphanumeric or ._-; must start with alphanumeric).",
+                            "cwd": "Working directory for create only; workspace-relative or absolute (required absolute in stateless mode; forbidden for list/close).",
+                            "shell": "Optional shell executable for create only; defaults to user login shell (note: persistent terminals do not inject the model devshell CLI).",
+                            "cols": "Optional terminal width in columns for create only (default 120, range 1-1000).",
+                            "rows": "Optional terminal height in rows for create only (default 36, range 1-1000)."
                         },
                         "title": "Manage tasks and interactive terminals"
                     }}
@@ -300,12 +300,44 @@ impl ToolHandler for TerminalTool {
                                 "create does not accept task",
                             ));
                         }
-                        require_execute(&call)?;
-                        if call.stateless && params.cwd.is_none() {
+                        if let Some(name) = params.name.as_deref() {
+                            validate_terminal_name(name)?;
+                        }
+                        if let Some(cols) = params.cols
+                            && (cols == 0 || cols > 1000)
+                        {
                             return Err(ToolError::new(
                                 "tool.invalidArguments",
-                                "absolute cwd is required in stateless mode",
+                                "cols must be between 1 and 1000",
                             ));
+                        }
+                        if let Some(rows) = params.rows
+                            && (rows == 0 || rows > 1000)
+                        {
+                            return Err(ToolError::new(
+                                "tool.invalidArguments",
+                                "rows must be between 1 and 1000",
+                            ));
+                        }
+                        if let Some(cwd) = params.cwd.as_deref()
+                            && cwd.trim().is_empty()
+                        {
+                            return Err(ToolError::new(
+                                "tool.invalidArguments",
+                                "cwd cannot be empty",
+                            ));
+                        }
+                        require_execute(&call)?;
+                        if call.stateless {
+                            match params.cwd.as_deref() {
+                                Some(cwd) if std::path::Path::new(cwd).is_absolute() => {}
+                                _ => {
+                                    return Err(ToolError::new(
+                                        "tool.invalidArguments",
+                                        "absolute cwd is required in stateless mode",
+                                    ));
+                                }
+                            }
                         }
                         let client = ProcessHostClient::ensure(&self.instance).map_err(error)?;
                         let created = rpc(
@@ -394,6 +426,23 @@ impl ToolHandler for TerminalTool {
             }
         }
     }
+}
+
+fn validate_terminal_name(name: &str) -> Result<(), ToolError> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 64
+        || !bytes[0].is_ascii_alphanumeric()
+        || !bytes[1..]
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(ToolError::new(
+            "tool.invalidArguments",
+            "name must be 1-64 ASCII alphanumeric or ._- characters starting with alphanumeric",
+        ));
+    }
+    Ok(())
 }
 
 fn summarize(descriptor: &Value) -> Result<TaskSummary, ToolError> {

@@ -24,19 +24,20 @@ const INPUT_SETTLE_MS: u64 = 150;
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskInputParams {
+    /// Task or persistent terminal ID returned by bash_run or task_manage.
     #[schemars(length(min = 1))]
     task: String,
-    /// Raw UTF-8 text to write to a PTY task/terminal. Omit or pass "" to read/poll without writing.
+    /// Raw UTF-8 text to write to a running PTY task/terminal (\r for Enter in TUIs/ConPTY, \n in line shells, \u0003 for Ctrl+C, \u0004 for Ctrl+D). Omit or pass "" to read/poll any pipe or PTY task without writing.
     #[serde(default)]
     input: Option<String>,
-    /// Opaque cursor returned for this same task.
+    /// Opaque cursor returned for this same task. Always pass cursor when polling; omitting it on a read-only poll replays from byte 0 (omitting it when writing input anchors at the current tail).
     #[serde(default)]
     cursor: Option<String>,
-    /// Time in milliseconds to wait for output or exit (default 5000, max 3600000).
+    /// Milliseconds to wait for output or exit (default 5000, max 3600000; context-bound waits cap at 120000ms synchronously, and untilExit waits >= 120000ms detach to durable Wait).
     #[serde(default)]
     #[schemars(range(min = 0, max = 3600000))]
     wait_ms: Option<u64>,
-    /// Wait for process exit instead of returning on new output.
+    /// Wait for a non-persistent task to exit instead of returning on new output (invalid for running persistent terminals).
     #[serde(default)]
     until_exit: bool,
 }
@@ -57,7 +58,7 @@ impl ToolHandler for TaskInputTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         catalog_entry_with_meta::<TaskInputParams, BashRunOutput>(
             &self.name,
-            "Send raw UTF-8 input to a PTY task or terminal and wait for output, or omit input to read/poll output from an opaque cursor.",
+            "Read/poll output from any pipe or PTY task (omit or pass empty input), or send raw UTF-8 input to a running PTY task/terminal and wait for output. Always pass the returned cursor when polling to avoid replaying output from byte 0.",
             [ToolCapability::Execute],
             json!({
                 "devshell": { "mcp": {
@@ -68,11 +69,11 @@ impl ToolHandler for TaskInputTool {
                         "readOnlyHint": false
                     },
                     "inputHints": {
-                        "task": "Task or terminal ID returned by bash_run or task_manage.",
-                        "input": "Raw UTF-8 text to write to a PTY task/terminal (use \\r for Enter in TUIs/ConPTY or \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll without writing. When writing input without cursor, only output after this input is returned.",
-                        "cursor": "Use the opaque cursor returned for this same task by bash_run, task_manage(create), or a previous task_input call.",
-                        "waitMs": "Milliseconds to wait for output or exit (default 5000, max 3600000).",
-                        "untilExit": "Set true to wait until a non-persistent task exits rather than returning on the next output (invalid for persistent terminals)."
+                        "task": "Task or persistent terminal ID returned by bash_run or task_manage.",
+                        "input": "Raw UTF-8 text to write to a running PTY task/terminal (use \\r for Enter in TUIs/ConPTY or \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll output from any pipe or PTY task without writing. When writing input without cursor, only output after this input is returned.",
+                        "cursor": "Opaque cursor returned for this same task by bash_run, task_manage(create), or a previous task_input call. Always pass cursor when polling; omitting cursor on a read-only poll replays all retained output from byte 0.",
+                        "waitMs": "Milliseconds to wait for output or exit (default 5000, max 3600000; context-bound waits cap at 120000ms synchronously, and untilExit waits >= 120000ms detach to durable Wait).",
+                        "untilExit": "Set true to wait until a non-persistent task exits rather than returning on new output (invalid for running persistent terminals)."
                     },
                     "title": "Send input or read task output"
                 }}
@@ -208,9 +209,9 @@ impl ToolHandler for TaskInputTool {
                 <= crate::tool::file::observation::MAX_OUTPUT_BYTES
             && !result.stdout.is_empty()
         {
-            let source = rpc(&client, "process.v1.provenance", json!({"id": params.task}))?;
-            if let (Some(command), Some(cwd)) =
-                (source["command"].as_str(), source["cwd"].as_str())
+            if let Ok(source) = rpc(&client, "process.v1.provenance", json!({"id": params.task}))
+                && let (Some(command), Some(cwd)) =
+                    (source["command"].as_str(), source["cwd"].as_str())
                 && let Some(plan) = crate::tool::file::observation::CommandReadPlan::analyze(
                     command,
                     std::path::Path::new(cwd),
