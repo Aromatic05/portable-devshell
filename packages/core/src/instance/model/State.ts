@@ -72,6 +72,7 @@ export class InstanceState {
     readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
     readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
     readonly #toolCallUnregister: readonly (() => void)[];
+    #terminalNotificationUnregister?: () => void;
     #toolCallEndpoint?: Endpoint;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
@@ -126,6 +127,45 @@ export class InstanceState {
                 });
             },
         });
+        if (typeof dependencies.terminal?.onNotification === "function") {
+            this.#terminalNotificationUnregister =
+                dependencies.terminal.onNotification((notification) => {
+                    if (
+                        this.#retiring ||
+                        notification.method !== "terminal.control" ||
+                        notification.params.humanControl !== false
+                    ) {
+                        return;
+                    }
+                    const registered = this.terminal.sessions.api
+                        .list(instanceName)
+                        .some(
+                            (session) =>
+                                session.terminalId ===
+                                notification.params.terminalId,
+                        );
+                    if (registered) return;
+                    const {
+                        cols,
+                        cwd,
+                        generation,
+                        name,
+                        rows,
+                        terminalId,
+                        workspace,
+                    } = notification.params;
+                    void appendEvent("terminal.controlReleased", {
+                        ...(cols === undefined ? {} : { cols }),
+                        ...(cwd === undefined ? {} : { cwd }),
+                        generation,
+                        ...(name === undefined ? {} : { name }),
+                        releasedAt: new Date().toISOString(),
+                        ...(rows === undefined ? {} : { rows }),
+                        terminalId,
+                        ...(workspace === undefined ? {} : { workspace }),
+                    }).catch(() => undefined);
+                });
+        }
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
             [workspaceGoalDefinition(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],
@@ -259,6 +299,10 @@ export class InstanceState {
             await close(() => unregister());
         await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
+        await close(() => {
+            this.#terminalNotificationUnregister?.();
+            this.#terminalNotificationUnregister = undefined;
+        });
         await close(() => this.terminal.sessions.close());
         await close(() => this.#workerToolRegistration.dispose());
         await close(() => this.#domainToolRegistration.dispose());

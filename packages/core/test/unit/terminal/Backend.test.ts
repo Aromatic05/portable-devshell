@@ -359,6 +359,75 @@ test("worker terminal backend resyncs mid-session stream.gap via restore snapsho
     assert.deepEqual(frames[2], { data: "after-resync", seq: 3 });
 });
 
+test("worker terminal backend syncs post-release session metadata and version so subsequent kill uses bumped version", async () => {
+    const worker = new FakeWorkerTerminal();
+    worker.latestSeq = 0;
+    const controllable: WorkerTerminalPort = {
+        open: (input) => worker.open(input),
+        attach: (input) => worker.attach(input),
+        control: async (input) => {
+            if (input.controller === undefined) {
+                worker.version = 2;
+                return {
+                    controller: "ctrl-1",
+                    session: {
+                        ...worker.descriptor(),
+                        cols: 60,
+                        humanControl: true,
+                        rows: 20,
+                        version: 2,
+                    },
+                    snapshot: { data: "screen", seq: 0 },
+                };
+            }
+            worker.version = 3;
+            return {
+                released: true,
+                session: {
+                    ...worker.descriptor(),
+                    cols: 120,
+                    humanControl: false,
+                    rows: 36,
+                    version: 3,
+                },
+            };
+        },
+        write: (input) => worker.write(input),
+        resize: (input) => worker.resize(input),
+        kill: (input) => worker.kill(input),
+        list: () => worker.list(),
+        onNotification: (listener) => worker.onNotification(listener),
+        onConnected: (listener) => worker.onConnected(listener),
+        onDisconnected: (listener) => worker.onDisconnected(listener),
+    };
+    const backend = new WorkerTerminalBackend({ worker: controllable });
+    const opened = await backend.open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const process = "process" in opened ? opened.process : opened;
+    const metadataUpdates: Array<{
+        cols?: number;
+        humanControl?: boolean;
+        rows?: number;
+        version?: number;
+    }> = [];
+    process.onMetadataChange?.((update) => metadataUpdates.push(update));
+
+    await process.acquireControl?.();
+    await process.releaseControl?.();
+
+    const lastUpdate = metadataUpdates.at(-1);
+    assert.equal(lastUpdate?.cols, 120);
+    assert.equal(lastUpdate?.rows, 36);
+    assert.equal(lastUpdate?.version, 3);
+    assert.equal(lastUpdate?.humanControl, false);
+
+    await process.kill();
+    assert.equal(worker.kills[0]?.version, 3);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {

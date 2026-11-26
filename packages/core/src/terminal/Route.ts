@@ -183,23 +183,48 @@ export function createTerminalRouteModule(
                             identity.terminalId,
                         );
                         const takeover = payload.takeover === true;
-                        const snapshot = takeover
-                            ? await attachment.takeControl()
-                            : (await attachment.releaseControl(), undefined);
-                        if (snapshot !== undefined) {
-                            lastAckedSeq = Math.max(lastAckedSeq, snapshot.seq);
+                        try {
+                            const snapshot = takeover
+                                ? await attachment.takeControl()
+                                : (await attachment.releaseControl(), undefined);
+                            if (snapshot !== undefined) {
+                                lastAckedSeq = Math.max(
+                                    lastAckedSeq,
+                                    snapshot.seq,
+                                );
+                            }
+                            await stream.send({
+                                name: "controlChanged",
+                                payload: {
+                                    clientSeq: identity.clientSeq,
+                                    humanControl: takeover,
+                                    session: options.sessions.get(
+                                        identity.terminalId,
+                                    ),
+                                    ...(snapshot === undefined
+                                        ? {}
+                                        : { snapshot }),
+                                } as unknown as JsonValue,
+                            });
+                        } catch (error) {
+                            const currentSession = options.sessions.get(
+                                identity.terminalId,
+                            );
+                            await stream.send({
+                                name: "controlChanged",
+                                payload: {
+                                    clientSeq: identity.clientSeq,
+                                    error:
+                                        error instanceof Error
+                                            ? error.message
+                                            : String(error),
+                                    humanControl: takeover
+                                        ? false
+                                        : currentSession.humanControl === true,
+                                    session: currentSession,
+                                } as unknown as JsonValue,
+                            });
                         }
-                        await stream.send({
-                            name: "controlChanged",
-                            payload: {
-                                clientSeq: identity.clientSeq,
-                                humanControl: takeover,
-                                session: options.sessions.get(
-                                    identity.terminalId,
-                                ),
-                                ...(snapshot === undefined ? {} : { snapshot }),
-                            } as unknown as JsonValue,
-                        });
                         return;
                     }
                     options.sessions.assertVersion(

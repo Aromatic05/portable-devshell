@@ -248,15 +248,20 @@ class WorkerTerminalProcess implements TerminalProcess {
         const controller = this.#controller;
         if (controller === undefined || this.#worker.control === undefined)
             return;
-        await this.#worker.control({
+        const result = await this.#worker.control({
             terminalId: this.#descriptor.terminalId,
             generation: this.#descriptor.generation,
             controller,
         });
         if (this.#controller === controller) {
             this.#controller = undefined;
-            this.#descriptor = { ...this.#descriptor, humanControl: false };
-            this.#emitMetadata({ humanControl: false });
+            if (result?.session !== undefined) {
+                this.#descriptor = { ...result.session, humanControl: false };
+                this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+            } else {
+                this.#descriptor = { ...this.#descriptor, humanControl: false };
+                this.#emitMetadata({ humanControl: false });
+            }
         }
     }
 
