@@ -152,6 +152,7 @@ impl ManagedProcess {
                 version: 1,
                 created_at_ms: crate::tool::unix_time_millis(),
                 controller: None,
+                control_seq: 0,
                 completion: None,
             }),
             changed: Condvar::new(),

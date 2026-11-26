@@ -62,6 +62,7 @@ pub(super) fn serve(
         process: Arc::clone(&process),
         controller,
     };
+    let mut control_seq = process.control_seq().map_err(|error| error.message)?;
     codec::write_response(
         &mut channel,
         &RpcResponse::success(
@@ -79,15 +80,17 @@ pub(super) fn serve(
         {
             return Ok(());
         }
-        let page = match process.read(cursor, Duration::from_secs(1)) {
-            Ok(value) => value,
-            Err(error) => {
-                return codec::write_response(
-                    &mut channel,
-                    &RpcResponse::failure(id.to_owned(), error),
-                );
-            }
-        };
+        let (page, next_control_seq) =
+            match process.read_stream(cursor, control_seq, Duration::from_secs(1)) {
+                Ok(value) => value,
+                Err(error) => {
+                    return codec::write_response(
+                        &mut channel,
+                        &RpcResponse::failure(id.to_owned(), error),
+                    );
+                }
+            };
+        control_seq = next_control_seq;
         if page.output.gap {
             return codec::write_response(
                 &mut channel,

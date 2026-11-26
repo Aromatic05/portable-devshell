@@ -105,8 +105,12 @@ impl Host {
             }
             "process.v1.releaseControl" => {
                 let input: ReleaseInput = parse(request)?;
-                self.require(&input.id)?.release_control(&input.controller);
-                Ok(json!({"released": true}))
+                let process = self.require(&input.id)?;
+                process.release_control(&input.controller);
+                Ok(json!({
+                    "released": true,
+                    "session": process.descriptor().terminal,
+                }))
             }
             "process.v1.provenance" => {
                 let input: Target = parse(request)?;

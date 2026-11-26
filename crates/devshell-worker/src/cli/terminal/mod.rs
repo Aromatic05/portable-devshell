@@ -430,10 +430,14 @@ fn resolve_create_paths(
         ));
     }
 
-    let raw_cwd = match cwd {
-        Some(path) if path.is_absolute() => path.to_path_buf(),
-        Some(path) => canonical_workspace.join(path),
-        None => canonical_workspace.clone(),
+    let raw_cwd = if workspace.is_some() {
+        match cwd {
+            Some(path) if path.is_absolute() => path.to_path_buf(),
+            Some(path) => canonical_workspace.join(path),
+            None => canonical_workspace.clone(),
+        }
+    } else {
+        canonical_workspace.clone()
     };
     let canonical_cwd = raw_cwd
         .canonicalize()
@@ -1058,5 +1062,34 @@ mod tests {
         assert!(all.contains("11111111"));
         assert!(all.contains("aaaaaaaa"));
         assert!(all.contains("exited(0)"));
+    }
+
+    #[test]
+    fn resolve_create_paths_handles_relative_cwd_without_double_join() {
+        let root = tempfile::tempdir().unwrap();
+        let subdir = root.path().join("subdir");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let canonical_root = root.path().canonicalize().unwrap();
+        let canonical_subdir = subdir.canonicalize().unwrap();
+
+        let (ws, cwd) =
+            resolve_create_paths(root.path(), None, Some(Path::new("subdir")), false).unwrap();
+        assert_eq!(ws, Some(canonical_subdir.clone()));
+        assert_eq!(cwd, canonical_subdir);
+
+        let (ws, cwd) = resolve_create_paths(
+            root.path(),
+            Some(Path::new(".")),
+            Some(Path::new("subdir")),
+            false,
+        )
+        .unwrap();
+        assert_eq!(ws, Some(canonical_root));
+        assert_eq!(cwd, canonical_subdir);
+
+        let (ws, cwd) =
+            resolve_create_paths(root.path(), None, Some(Path::new("subdir")), true).unwrap();
+        assert_eq!(ws, None);
+        assert_eq!(cwd, canonical_subdir);
     }
 }

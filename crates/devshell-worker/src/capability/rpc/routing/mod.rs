@@ -60,6 +60,7 @@ impl RpcRouter {
             Arc::clone(&policy),
             Arc::clone(&notifications),
         );
+        terminals.spawn_control_watcher(Arc::clone(&shutdown_requested));
         let alerts = Arc::new(AlertService::new());
         let mut control_handlers = HashMap::new();
         register_control_handlers(
@@ -220,5 +221,11 @@ impl RpcRouter {
             Ok(result) => RpcResponse::success(id, result),
             Err(error) => RpcResponse::failure(id, error),
         }
+    }
+}
+
+impl Drop for RpcRouter {
+    fn drop(&mut self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
     }
 }

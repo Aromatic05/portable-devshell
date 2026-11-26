@@ -1272,11 +1272,41 @@ fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size()
     assert_eq!(descriptor["cols"], 120, "{descriptor}");
     assert_eq!(descriptor["rows"], 36, "{descriptor}");
 
-    let inspected = call(
-        "terminal.inspect",
-        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    let written = call(
+        "terminal.write",
+        json!({
+            "terminalId": id,
+            "generation": descriptor["generation"],
+            "version": descriptor["version"],
+            "clientSeq": 1,
+            "data": STANDARD.encode("echo INSPECT_MARKER_42\r")
+        }),
     );
-    assert_eq!(inspected["type"], "reply", "{inspected}");
+    assert_eq!(written["type"], "reply", "{written}");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let inspected = loop {
+        let inspected = call(
+            "terminal.inspect",
+            json!({"terminalId": id, "generation": descriptor["generation"]}),
+        );
+        assert_eq!(inspected["type"], "reply", "{inspected}");
+        if inspected["message"]["lines"]
+            .as_array()
+            .is_some_and(|lines| {
+                lines
+                    .iter()
+                    .any(|line| line.as_str().is_some_and(|s| s.contains("INSPECT_MARKER_42")))
+            })
+        {
+            break inspected;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "terminal.inspect did not observe INSPECT_MARKER_42: {inspected}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    };
     assert_eq!(inspected["message"]["cols"], 120, "{inspected}");
     assert_eq!(inspected["message"]["rows"], 36, "{inspected}");
     assert_eq!(
@@ -1284,6 +1314,16 @@ fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size()
         "human-shell",
         "{inspected}"
     );
+    let lines = inspected["message"]["lines"].as_array().unwrap();
+    assert!(!lines.is_empty(), "{inspected}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.as_str().is_some_and(|s| s.contains("INSPECT_MARKER_42"))),
+        "{inspected}"
+    );
+    assert!(inspected["message"]["cursor"]["row"].is_u64(), "{inspected}");
+    assert!(inspected["message"]["cursor"]["col"].is_u64(), "{inspected}");
 
     let control = call(
         "terminal.control",
@@ -1303,7 +1343,7 @@ fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size()
             "terminalId": id,
             "generation": descriptor["generation"],
             "version": control["message"]["session"]["version"],
-            "clientSeq": 1,
+            "clientSeq": 2,
             "controller": controller,
             "cols": 60,
             "rows": 20
@@ -1327,6 +1367,21 @@ fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size()
         }),
     );
     assert_eq!(released["type"], "reply", "{released}");
+    assert_eq!(released["message"]["released"], true, "{released}");
+    assert_eq!(released["message"]["session"]["cols"], 120, "{released}");
+    assert_eq!(released["message"]["session"]["rows"], 36, "{released}");
+    assert_eq!(
+        released["message"]["session"]["humanControl"],
+        false,
+        "{released}"
+    );
+    assert!(
+        released["message"]["session"]["version"]
+            .as_u64()
+            .unwrap()
+            > resized["message"]["version"].as_u64().unwrap(),
+        "{released}"
+    );
 
     // Releasing control after a human resize restores pre-takeover dimensions (120x36).
     let after = call(

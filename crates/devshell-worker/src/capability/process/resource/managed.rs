@@ -119,6 +119,7 @@ pub(super) struct State {
     pub(super) captures: Captures,
     pub(super) screen: Option<TerminalScreen>,
     pub(super) controller: Option<ControlOwner>,
+    pub(super) control_seq: u64,
     pub(super) version: u64,
     pub(super) created_at_ms: u128,
     pub(super) completion: Option<Result<Exit, ProcessFailure>>,
@@ -245,6 +246,34 @@ impl ManagedProcess {
         })
     }
 
+    pub fn control_seq(&self) -> Result<u64, RpcError> {
+        Ok(self.state.lock().map_err(lock_error)?.control_seq)
+    }
+
+    pub fn read_stream(
+        &self,
+        from_seq: u64,
+        control_seq: u64,
+        wait: Duration,
+    ) -> Result<(ReadResult, u64), RpcError> {
+        let state = self.state.lock().map_err(lock_error)?;
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, wait, |state| {
+                state.completion.is_none()
+                    && state.output.latest_seq() <= from_seq
+                    && state.control_seq == control_seq
+            })
+            .map_err(lock_error)?;
+        Ok((
+            ReadResult {
+                process: self.describe(&state),
+                output: state.output.read_after(from_seq),
+            },
+            state.control_seq,
+        ))
+    }
+
     pub fn capture(
         &self,
         channel: OutputChannel,
@@ -342,6 +371,8 @@ impl ManagedProcess {
                 saved_size: Some(screen.size()),
                 resized: false,
             });
+            state.control_seq += 1;
+            self.changed.notify_all();
             Some(id)
         } else {
             None
@@ -382,6 +413,7 @@ impl ManagedProcess {
                 .is_some_and(|owner| owner.token == controller)
             && let Some(owner) = state.controller.take()
         {
+            state.control_seq += 1;
             if owner.resized
                 && state.completion.is_none()
                 && let Some((cols, rows)) = owner.saved_size

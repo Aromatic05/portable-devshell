@@ -12,7 +12,7 @@ use crate::transport::endpoint::channel::LocalIpcStream;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const DETACH: u8 = 0x1d;
-const CHORD_TIMEOUT: Duration = Duration::from_millis(300);
+const CHORD_TIMEOUT: Duration = Duration::from_millis(800);
 const POLL_SLICE: Duration = Duration::from_millis(50);
 const OBSERVE_HINT_COOLDOWN: Duration = Duration::from_secs(2);
 const MAX_GAP_RECONNECTS: u32 = 5;
@@ -100,7 +100,9 @@ impl ActiveSubscription {
             .ok_or("missing terminal restore state")?;
         let mut stdout = io::stdout();
         stdout.write_all(restore.as_bytes()).map_err(io_error)?;
-        if let Some(ctrl) = controller.as_deref() {
+        if let Some(ctrl) = controller.as_deref()
+            && first["process"]["state"].as_str() == Some("running")
+        {
             resize(client, id, local_size, ctrl)?;
             pty_size = local_size;
         }
@@ -394,6 +396,14 @@ fn handle_input_bytes(
                     if sub.controller.is_some() {
                         forward.push(DETACH);
                     }
+                    let _ = write_status_title(
+                        stdout,
+                        label,
+                        sub.controller.is_some(),
+                        sub.pty_size,
+                        None,
+                    );
+                    let _ = stdout.flush();
                 }
                 _ => {
                     let _ = write_status_title(
@@ -412,6 +422,14 @@ fn handle_input_bytes(
         if byte == DETACH {
             flush_forward(&mut forward)?;
             *pending_escape = Some(Instant::now());
+            let _ = write_status_title(
+                stdout,
+                label,
+                sub.controller.is_some(),
+                sub.pty_size,
+                Some("Ctrl+] waiting: d detach · t toggle · ] send ^]"),
+            );
+            let _ = stdout.flush();
             continue;
         }
 

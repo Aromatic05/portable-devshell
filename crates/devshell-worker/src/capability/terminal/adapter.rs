@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -34,6 +36,61 @@ impl TerminalManager {
             policy,
             bridge: TerminalBridge::new(notifications),
         }
+    }
+
+    pub(crate) fn spawn_control_watcher(&self, shutdown: Arc<AtomicBool>) {
+        let manager = self.clone();
+        std::thread::spawn(move || {
+            let mut tracked: HashMap<String, bool> = HashMap::new();
+            while !shutdown.load(Ordering::Acquire) {
+                match manager.connect() {
+                    Ok(Some(client)) => {
+                        if let Ok(resources) = client.call_rpc(
+                            "process.v1.list",
+                            json!({}),
+                            Duration::from_secs(2),
+                        ) && let Some(resources) = resources.as_array()
+                        {
+                            let mut next = HashMap::new();
+                            for resource in resources {
+                                let Some(terminal) = resource
+                                    .get("terminal")
+                                    .filter(|terminal| !terminal.is_null())
+                                else {
+                                    continue;
+                                };
+                                let Ok(descriptor) =
+                                    decode::<TerminalDescriptor>(terminal.clone())
+                                else {
+                                    continue;
+                                };
+                                if descriptor.state != "running" {
+                                    continue;
+                                }
+                                let was_human = tracked.get(&descriptor.terminal_id).copied();
+                                if was_human == Some(true)
+                                    && !descriptor.human_control
+                                    && !manager.bridge.is_subscribed(&descriptor.terminal_id)
+                                {
+                                    let _ =
+                                        manager.bridge.push_control_notification(&descriptor);
+                                }
+                                next.insert(descriptor.terminal_id, descriptor.human_control);
+                            }
+                            tracked = next;
+                        }
+                    }
+                    Ok(None) => tracked.clear(),
+                    Err(_) => {}
+                }
+                for _ in 0..10 {
+                    if shutdown.load(Ordering::Acquire) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        });
     }
 
     fn connect(&self) -> Result<Option<ProcessHostClient>, RpcError> {
@@ -103,20 +160,20 @@ impl TerminalManager {
             .and_then(|value| u16::try_from(value).ok())
             .unwrap_or(session.rows);
         let seq = screen["seq"].as_u64().unwrap_or(session.latest_seq);
-        let lines = screen["lines"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|line| line.as_str().map(str::to_owned))
-                    .collect()
-            })
+        let lines = screen["text"]
+            .as_str()
+            .filter(|text| !text.is_empty())
+            .map(|text| text.split('\n').map(str::to_owned).collect())
             .unwrap_or_default();
+        let cursor = json!({
+            "row": screen["cursorRow"].as_u64().unwrap_or(0),
+            "col": screen["cursorCol"].as_u64().unwrap_or(0),
+        });
         Ok(TerminalInspectResult {
             session,
             cols,
             rows,
-            cursor: screen["cursor"].clone(),
+            cursor,
             lines,
             seq,
         })

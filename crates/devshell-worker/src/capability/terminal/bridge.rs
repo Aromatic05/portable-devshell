@@ -24,6 +24,40 @@ impl TerminalBridge {
         }
     }
 
+    pub fn is_subscribed(&self, terminal_id: &str) -> bool {
+        self.subscriptions
+            .lock()
+            .is_ok_and(|subscriptions| subscriptions.contains(terminal_id))
+    }
+
+    pub(super) fn push_control_notification(
+        &self,
+        descriptor: &TerminalDescriptor,
+    ) -> Result<(), String> {
+        let mut params = json!({
+            "terminalId": descriptor.terminal_id,
+            "generation": descriptor.generation,
+            "humanControl": descriptor.human_control,
+            "version": descriptor.version,
+            "cols": descriptor.cols,
+            "rows": descriptor.rows,
+        });
+        if let Some(name) = descriptor.name.as_deref() {
+            params["name"] = json!(name);
+        }
+        if let Some(cwd) = descriptor.cwd.as_deref() {
+            params["cwd"] = json!(cwd);
+        }
+        if let Some(workspace) = descriptor.workspace.as_deref() {
+            params["workspace"] = json!(workspace);
+        }
+        self.notifications.push_json(&json!({
+            "type": "notification",
+            "method": "terminal.control",
+            "params": params,
+        }))
+    }
+
     pub fn subscribe(
         &self,
         client: &ProcessHostClient,
@@ -146,28 +180,10 @@ impl TerminalBridge {
                 let changed_from = last_human_control;
                 last_human_control = Some(human_control);
                 if changed_from.is_some() {
-                    let mut params = json!({
-                        "terminalId": descriptor.terminal_id,
-                        "generation": descriptor.generation,
-                        "humanControl": human_control,
-                        "version": process["terminal"]["version"],
-                        "cols": process["terminal"]["cols"],
-                        "rows": process["terminal"]["rows"],
-                    });
-                    if let Some(name) = process["name"].as_str() {
-                        params["name"] = json!(name);
-                    }
-                    if let Some(cwd) = process["cwd"].as_str() {
-                        params["cwd"] = json!(cwd);
-                    }
-                    if let Some(workspace) = process["workspace"].as_str() {
-                        params["workspace"] = json!(workspace);
-                    }
-                    self.notifications.push_json(&json!({
-                        "type": "notification",
-                        "method": "terminal.control",
-                        "params": params,
-                    }))?;
+                    let latest: TerminalDescriptor =
+                        serde_json::from_value(process["terminal"].clone())
+                            .map_err(|error| error.to_string())?;
+                    self.push_control_notification(&latest)?;
                 }
             }
             if process["state"] != "running" {
