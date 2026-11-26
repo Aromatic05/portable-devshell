@@ -61,8 +61,7 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
             projectResult: renderFileReadModelToolResult,
         },
     ],
-    ["task_read", { projectResult: renderBashModelToolResult }],
-    ["task_input", { projectResult: renderProcessModelToolResult }],
+    ["task_input", { projectResult: renderBashModelToolResult }],
     ["task_inspect", { projectResult: renderProcessModelToolResult }],
     ["task_manage", { projectResult: renderProcessModelToolResult }],
 ]);
@@ -162,7 +161,7 @@ function renderAgentModelToolResult(
 ): string {
     if (!isRecord(value)) return renderToolResult(value);
     // Structured tool failures need their own path: a success projector such
-    // as bash_run or task_read otherwise renders this error as empty output.
+    // as bash_run or task_input otherwise renders this error as empty output.
     if (isRecord(value.error)) return `error=${renderToolResult(value.error)}`;
     return (
         AGENT_MODEL_TOOL_PROJECTIONS.get(toolName)?.projectResult(value) ??

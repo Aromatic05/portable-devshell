@@ -344,7 +344,7 @@ test("bash_run soft wait returns a running task without treating it as failure",
         task: { id: "t1", status: "running" },
     });
     assert.deepEqual(codes(hints), ["bash.taskRunning"]);
-    assert.match(hints[0]?.text ?? "", /task_read/u);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
 });
 
 test("bash_run durable handoff directs the model to the independent task cursor", () => {
@@ -352,21 +352,21 @@ test("bash_run durable handoff directs the model to the independent task cursor"
         detached: true,
         termination: "running",
         task: { id: "t1", status: "running" },
-        cursor: { seq: 4, stdout: 12, stderr: 0 },
+        cursor: "4",
     });
     assert.deepEqual(codes(hints), ["bash.waitDetached"]);
-    assert.match(hints[0]?.text ?? "", /task_read/u);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
     assert.match(hints[0]?.text ?? "", /cursor/u);
 });
 
-test("task_read running result uses the same task continuation guidance", () => {
-    const hints = resolveResultHints("task_read", {
+test("task_input running result uses the same task continuation guidance", () => {
+    const hints = resolveResultHints("task_input", {
         termination: "running",
         waitReason: "timeout",
         task: { id: "t1", status: "running" },
     });
     assert.deepEqual(codes(hints), ["bash.taskRunning"]);
-    assert.match(hints[0]?.text ?? "", /task_read/u);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
 });
 
 test("Process Host errors have task-specific recovery guidance", () => {
@@ -375,18 +375,28 @@ test("Process Host errors have task-specific recovery guidance", () => {
         ["process.controlOwned"],
     );
     assert.deepEqual(
-        codes(resolveErrorHints("task_read", body("process.notFound"))),
+        codes(resolveErrorHints("task_input", body("process.notFound"))),
         ["process.notFound"],
     );
     assert.deepEqual(
         codes(resolveErrorHints("task_manage", body("process.resourceLimit"))),
         ["process.resourceLimit"],
     );
+    const notTerminal = resolveErrorHints("task_input", body("process.notTerminal"));
+    assert.deepEqual(codes(notTerminal), ["process.notTerminal"]);
+    assert.match(notTerminal[0]?.text ?? "", /task_input without input/u);
+    const stdinClosed = resolveErrorHints("task_input", body("process.stdinClosed"));
+    assert.deepEqual(codes(stdinClosed), ["process.stdinClosed"]);
+    assert.match(stdinClosed[0]?.text ?? "", /pty: true/u);
+    assert.deepEqual(
+        codes(resolveErrorHints("task_input", body("process.notPipe"))),
+        ["process.notPipe"],
+    );
 });
 
-test("task_read uses the shared Bash result status for successful and failed tasks", () => {
+test("task_input uses the shared Bash result status for successful and failed tasks", () => {
     assert.deepEqual(
-        resolveResultHints("task_read", {
+        resolveResultHints("task_input", {
             task: { status: "0" },
             exitCode: 0,
             termination: "exited",
@@ -395,7 +405,7 @@ test("task_read uses the shared Bash result status for successful and failed tas
         }),
         [],
     );
-    const failed = resolveResultHints("task_read", {
+    const failed = resolveResultHints("task_input", {
         task: { status: "3" },
         exitCode: 3,
         termination: "exited",

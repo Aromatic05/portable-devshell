@@ -26,17 +26,17 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     if (asBoolean(record.detached) === true) {
         hints.push(diagnosticHint(
             "bash.waitDetached",
-            "The synchronous wait window ended. The process is still running; continue with task_read using the returned task ID and cursor.",
+            "The synchronous wait window ended. The process is still running; continue with task_input (omit input to poll) using the returned task ID and cursor.",
         ));
     } else if (termination === "timeout" || asBoolean(record.timedOut) === true) {
         hints.push(
             errorHint(
                 "bash.timeout",
-                "The execution deadline terminated the command. Use waitMs to return while a long task keeps running.",
+                "The command timed out. Use waitMs to return while a long task keeps running, then continue with task_input.",
             ),
         );
     } else if (termination === "running") {
-        hints.push(diagnosticHint("bash.taskRunning", "Continue with task_read using the returned task ID and cursor; the process is still running."));
+        hints.push(diagnosticHint("bash.taskRunning", "Continue with task_input (omit input to poll) using the returned task ID and cursor; the process is still running."));
     } else if (termination === "signaled") {
         hints.push(
             errorHint(

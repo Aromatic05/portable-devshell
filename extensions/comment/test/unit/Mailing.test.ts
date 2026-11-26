@@ -268,7 +268,7 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
     }
     await hook({ ...call("task_input"), value: {
         ...call("task_input").value,
-        payload: { pane: "persistent-pane", input: "devshell memory init explicit-pane\n" },
+        payload: { task: "persistent-terminal", input: "devshell memory init explicit-pane\n" },
     } } as never, invocation);
     assert.deepEqual(await mailing.status(target), {});
     await Promise.all(Array.from({ length: 8 }, () => hook(call("file_read") as never, invocation)));

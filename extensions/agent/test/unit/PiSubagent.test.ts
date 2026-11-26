@@ -34,7 +34,6 @@ class FakeSession implements PiSessionLike {
         "task_input",
         "task_inspect",
         "task_manage",
-        "task_read",
         "bash_run",
     ];
     #streaming = false;

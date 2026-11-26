@@ -4,8 +4,9 @@ import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 const processErrors: Readonly<Record<string, string>> = {
     "process.hostFailed": "The Process Host is unavailable. Inspect the Worker and retry after it is ready.",
     "process.notFound": "The task does not exist in this execution scope. Check its task ID and workspace.",
-    "process.notTerminal": "This resource has no PTY. Use task_read for Pipe output.",
-    "process.stdinClosed": "The process input stream is closed. Start a new command instead of retrying input.",
+    "process.notTerminal": "This resource has no PTY. Use task_input without input to read non-PTY output.",
+    "process.notPipe": "This resource is a PTY, not a pipe. Send terminal input via task_input.",
+    "process.stdinClosed": "The process input stream is closed. Start a new command with pty: true if interactive input is required.",
     "process.inputBusy": "The input queue is full. Wait for the process to consume input before retrying.",
     "process.captureFailed": "Process output capture failed. Inspect the process and Worker storage state.",
     "process.resourceLimit": "The Process Host has no free resource slots. Finish or close an existing process before starting another.",

@@ -14,7 +14,6 @@ export const PI_PROCESS_TOOL_NAMES = Object.freeze([
     "task_input",
     "task_inspect",
     "task_manage",
-    "task_read",
 ] as const);
 
 export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({

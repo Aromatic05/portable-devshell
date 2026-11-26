@@ -161,11 +161,10 @@ async function pollToolUntilIdle(
 function createToolSession(callLog: Array<{ name: string; input: unknown }>): DevshellPiToolSession {
     const definitions = [
         ["file_read", { type: "object", properties: { files: { type: "array" } }, required: ["files"] }],
-        ["bash_run", { type: "object", properties: { command: { type: "string" }, waitMs: { type: "number" }, tty: { type: "boolean" } }, required: ["command"] }],
-        ["task_read", { type: "object", properties: { task: { type: "string" } }, required: ["task"] }],
-        ["task_input", { type: "object", properties: { task: { type: "string" }, input: { type: "string" }, eof: { type: "boolean" } }, required: ["task"] }],
-        ["task_inspect", { type: "object", properties: { terminal: { type: "string" } }, required: ["terminal"] }],
-        ["task_manage", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
+        ["bash_run", { type: "object", properties: { command: { type: "string" }, waitMs: { type: "number" }, pty: { type: "boolean" } }, required: ["command"] }],
+        ["task_input", { type: "object", properties: { task: { type: "string" }, input: { type: "string" }, cursor: { type: "string" }, waitMs: { type: "number" }, untilExit: { type: "boolean" } }, required: ["task"] }],
+        ["task_inspect", { type: "object", properties: { task: { type: "string" } }, required: ["task"] }],
+        ["task_manage", { type: "object", properties: { command: { type: "string" }, task: { type: "string" }, name: { type: "string" }, cwd: { type: "string" }, shell: { type: "string" }, cols: { type: "number" }, rows: { type: "number" } }, required: ["command"] }],
     ] as const;
     const modelTools = definitions.map(([name, inputSchema]) => ({
         description: `${name} test tool`,
@@ -191,14 +190,14 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
             }
             if (name === "task_manage" && record(input)?.command === "list") {
                 return {
-                    tasks: [{ id: "task-integration", state: "running", tty: true }],
+                    tasks: [{ id: "task-integration", kind: "task", persistent: false, pty: true, state: "running" }],
                 };
             }
             if (name === "bash_run") {
                 return {
                     stdout: "started", stderr: "",
                     termination: "running", waitReason: "timeout",
-                    cursor: { seq: 1, stdout: 7, stderr: 0 },
+                    cursor: "1",
                     task: { id: "task-integration", status: "running" },
                 };
             }
@@ -330,14 +329,14 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         assert.equal(initial.has("agent_spawn"), true);
         assert.equal(initial.has("agent_poll"), false);
         assert.equal(initial.has("bash_run"), true);
-        assert.equal(initial.has("task_read"), false);
+        assert.equal(initial.has("task_input"), false);
 
         faux.setResponses([
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("agent_spawn"), false);
                 assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_read"), false);
+                assert.equal(names.has("task_input"), false);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("file_read", {
                         files: [{ path: "./marker.txt", view: "content" }],
@@ -410,7 +409,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_read"), false);
+                assert.equal(names.has("task_input"), false);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("bash_run", { command: "child-task", waitMs: 0 }),
                     { stopReason: "toolUse" },
@@ -418,8 +417,8 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             },
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("task_inspect"), true);
                 assert.equal(names.has("task_manage"), true);
                 return fauxModule.fauxAssistantMessage("CHILD_PROCESS_DONE");
             },
@@ -576,7 +575,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_read"), false);
+                assert.equal(names.has("task_input"), false);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("bash_run", { command: "sleep 1", waitMs: 0 }),
                     { stopReason: "toolUse" },
@@ -584,15 +583,16 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             },
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("task_inspect"), true);
                 assert.equal(names.has("task_manage"), true);
                 return fauxModule.fauxAssistantMessage("MAIN_PROCESS_DONE");
             },
         ]);
         await main.prompt("exercise process exposure");
         assert.equal(toolCalls.some((call) => call.name === "bash_run"), true);
-        assert.equal(main.getActiveToolNames().includes("task_read"), true);
+        assert.equal(main.getActiveToolNames().includes("task_input"), true);
+        assert.equal(main.getActiveToolNames().includes("task_inspect"), true);
         assert.equal(main.getActiveToolNames().includes("task_manage"), true);
 
         await assert.rejects(

@@ -27,7 +27,7 @@ type ErrorResolver = (
 
 const resultResolvers: Record<string, ResultResolver> = {
     bash_run: (_toolName, result) => bashResultHints(result),
-    task_read: (_toolName, result) => bashResultHints(result),
+    task_input: (_toolName, result) => bashResultHints(result),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
@@ -46,7 +46,7 @@ const instanceTools = new Set([
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => [...bashErrorHints(body), ...processErrorHints(body)];
-    if (["task_read", "task_input", "task_inspect", "task_manage"].includes(toolName))
+    if (["task_input", "task_inspect", "task_manage"].includes(toolName))
         return (_name, body) => processErrorHints(body);
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);

@@ -33,9 +33,10 @@ export function formatShellCall(
         stringField(record, "cwd") === undefined
             ? undefined
             : `in ${stringField(record, "cwd")}`,
-        numberField(record, "timeoutMs") === undefined
+        record.pty === true ? "pty" : undefined,
+        numberField(record, "waitMs") === undefined
             ? undefined
-            : `timeout ${formatDuration(numberField(record, "timeoutMs")!)}`,
+            : `wait ${formatDuration(numberField(record, "waitMs")!)}`,
     ]
         .filter((value): value is string => value !== undefined)
         .join(" · ");

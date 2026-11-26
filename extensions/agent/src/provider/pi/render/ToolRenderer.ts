@@ -66,7 +66,6 @@ export const devshellPiRendererToolNames = Object.freeze([
     "task_input",
     "task_inspect",
     "task_manage",
-    "task_read",
 ] as const);
 
 const rendererToolNames = new Set<string>(devshellPiRendererToolNames);
@@ -115,7 +114,7 @@ export function renderPiToolResult(
                 context,
             );
         case "bash_run":
-        case "task_read":
+        case "task_input":
             return renderBashResultComponent(result, options, theme, context);
         default:
             return setText(
@@ -187,7 +186,7 @@ export function formatPiToolResult(
                 theme,
             );
         case "bash_run":
-        case "task_read":
+        case "task_input":
             return joinStyled(
                 renderBashResult(result.details, expanded),
                 theme,
