@@ -38,7 +38,13 @@ export class WorkerTerminalBackend implements TerminalBackend {
             this.options.worker,
             descriptor,
         );
-        await process.initialize();
+        try {
+            await process.initialize();
+        } catch (error) {
+            process.dispose();
+            await process.kill().catch(() => undefined);
+            throw error;
+        }
         return {
             identity: remoteIdentity(descriptor),
             process,

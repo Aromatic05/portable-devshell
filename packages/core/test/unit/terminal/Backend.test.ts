@@ -14,11 +14,8 @@ import type {
 } from "../../../src/terminal/Api.ts";
 
 class FakeWorkerTerminal implements WorkerTerminalPort {
-    readonly attaches: Array<{
-        fromSeq: number;
-        generation: number;
-        terminalId: string;
-    }> = [];
+    readonly attaches: Array<Parameters<WorkerTerminalPort["attach"]>[0]> = [];
+    readonly attachErrors: Error[] = [];
     readonly writes: Array<WorkerTerminalIdentity & { data: string }> = [];
     readonly resizes: Array<
         WorkerTerminalIdentity & { cols: number; rows: number }
@@ -28,6 +25,7 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
     connected?: () => void;
     disconnected?: (error: Error) => void;
     attachExit?: { exitCode: number; signal: number };
+    killError: Error | undefined;
     version = 1;
     latestSeq = 1;
     resizeGate?: Promise<void>;
@@ -50,12 +48,12 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         return this.descriptor();
     }
 
-    async attach(input: {
-        fromSeq: number;
-        generation: number;
-        terminalId: string;
-    }): Promise<WorkerTerminalAttachResult> {
+    async attach(
+        input: Parameters<WorkerTerminalPort["attach"]>[0],
+    ): Promise<WorkerTerminalAttachResult> {
         this.attaches.push(input);
+        const error = this.attachErrors.shift();
+        if (error !== undefined) throw error;
         const replay =
             input.fromSeq < this.latestSeq
                 ? [
@@ -98,6 +96,7 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         input: WorkerTerminalIdentity,
     ): Promise<WorkerTerminalDescriptor> {
         this.kills.push(input);
+        if (this.killError !== undefined) throw this.killError;
         return {
             ...this.descriptor(),
             state: "exited",
@@ -131,6 +130,59 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
             this.disconnected = undefined;
         };
     }
+}
+
+const openAttachInput = {
+    fromSeq: 0,
+    generation: 9,
+    terminalId: "remote-terminal",
+};
+const openAttachError = new Error("attach failed");
+
+for (const { name, attachErrors, expectedAttaches, killError } of [
+    {
+        name: "the first attach fails",
+        attachErrors: [openAttachError],
+        expectedAttaches: [openAttachInput],
+    },
+    {
+        name: "the snapshot retry fails",
+        attachErrors: [
+            Object.assign(new Error("stream gap"), { code: "stream.gap" }),
+            openAttachError,
+        ],
+        expectedAttaches: [openAttachInput, { ...openAttachInput, restore: true }],
+    },
+    {
+        name: "kill fails after attach fails",
+        attachErrors: [openAttachError],
+        expectedAttaches: [openAttachInput],
+        killError: new Error("kill failed"),
+    },
+]) {
+    test(`worker terminal backend cleans up failed open when ${name}`, async () => {
+        const worker = new FakeWorkerTerminal();
+        worker.attachErrors.push(...attachErrors);
+        worker.killError = killError;
+        const backend = new WorkerTerminalBackend({ worker });
+
+        await assert.rejects(
+            backend.open({ cols: 80, rows: 24, workspace: "/workspace" }),
+            (error) => error === openAttachError,
+        );
+        assert.deepEqual(worker.attaches, expectedAttaches);
+        assert.deepEqual(worker.kills, [
+            {
+                clientSeq: 1,
+                generation: 9,
+                terminalId: "remote-terminal",
+                version: 1,
+            },
+        ]);
+        assert.equal(worker.notification, undefined);
+        assert.equal(worker.connected, undefined);
+        assert.equal(worker.disconnected, undefined);
+    });
 }
 
 test("worker terminal backend replays, fences async operations, and resumes after reconnect", async () => {
