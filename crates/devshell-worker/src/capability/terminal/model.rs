@@ -8,6 +8,10 @@ pub struct TerminalOpenInput {
     pub cwd: Option<String>,
     pub command: Option<String>,
     pub workspace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistent: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -59,6 +63,36 @@ pub struct TerminalDescriptor {
     pub latest_seq: u64,
     pub state: String,
     pub created_at_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub persistent: bool,
+    #[serde(default)]
+    pub human_control: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalInspectInput {
+    pub terminal_id: String,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalInspectResult {
+    pub session: TerminalDescriptor,
+    pub cols: u16,
+    pub rows: u16,
+    pub cursor: serde_json::Value,
+    pub lines: Vec<String>,
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

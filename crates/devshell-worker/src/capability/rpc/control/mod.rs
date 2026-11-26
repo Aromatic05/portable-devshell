@@ -163,6 +163,10 @@ pub fn register_control_handlers(
         "terminal.control".to_string(),
         terminal::control(terminals.clone()),
     );
+    handlers.insert(
+        "terminal.inspect".to_string(),
+        terminal::inspect(terminals.clone()),
+    );
     handlers.insert("terminal.list".to_string(), terminal::list(terminals));
     handlers.insert(
         "worker.handshake".to_string(),

@@ -1234,3 +1234,114 @@ fn native_attach_supports_live_takeover_toggle_and_name_lookup() {
     let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
     assert_eq!(closed["state"], "exited", "{closed}");
 }
+
+#[test]
+fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size() {
+    let instance = "terminal-meta-resize-restore";
+    let fixture = WorkerFixture::start(instance);
+    let call = |method: &str, message: Value| {
+        fixture.env.rpc(
+            instance,
+            "terminal",
+            &json!({
+                "protocol": "rpc",
+                "type": "request",
+                "id": method,
+                "method": method,
+                "message": message
+            }),
+        )
+    };
+    let opened = call(
+        "terminal.open",
+        json!({
+            "cols": 120,
+            "rows": 36,
+            "cwd": "./",
+            "workspace": fixture.env.protocol_workspace(),
+            "name": "human-shell",
+            "persistent": true
+        }),
+    );
+    assert_eq!(opened["type"], "reply", "{opened}");
+    let descriptor = &opened["message"];
+    let id = descriptor["terminalId"].as_str().unwrap().to_owned();
+    assert_eq!(descriptor["name"], "human-shell", "{descriptor}");
+    assert_eq!(descriptor["persistent"], true, "{descriptor}");
+    assert_eq!(descriptor["humanControl"], false, "{descriptor}");
+    assert_eq!(descriptor["cols"], 120, "{descriptor}");
+    assert_eq!(descriptor["rows"], 36, "{descriptor}");
+
+    let inspected = call(
+        "terminal.inspect",
+        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    );
+    assert_eq!(inspected["type"], "reply", "{inspected}");
+    assert_eq!(inspected["message"]["cols"], 120, "{inspected}");
+    assert_eq!(inspected["message"]["rows"], 36, "{inspected}");
+    assert_eq!(
+        inspected["message"]["session"]["name"],
+        "human-shell",
+        "{inspected}"
+    );
+
+    let control = call(
+        "terminal.control",
+        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    );
+    assert_eq!(control["type"], "reply", "{control}");
+    let controller = control["message"]["controller"].as_str().unwrap().to_owned();
+    assert_eq!(
+        control["message"]["session"]["humanControl"],
+        true,
+        "{control}"
+    );
+
+    let resized = call(
+        "terminal.resize",
+        json!({
+            "terminalId": id,
+            "generation": descriptor["generation"],
+            "version": control["message"]["session"]["version"],
+            "clientSeq": 1,
+            "controller": controller,
+            "cols": 60,
+            "rows": 20
+        }),
+    );
+    assert_eq!(resized["type"], "reply", "{resized}");
+
+    let during = call(
+        "terminal.inspect",
+        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    );
+    assert_eq!(during["message"]["cols"], 60, "{during}");
+    assert_eq!(during["message"]["rows"], 20, "{during}");
+
+    let released = call(
+        "terminal.control",
+        json!({
+            "terminalId": id,
+            "generation": descriptor["generation"],
+            "controller": controller
+        }),
+    );
+    assert_eq!(released["type"], "reply", "{released}");
+
+    // Releasing control after a human resize restores pre-takeover dimensions (120x36).
+    let after = call(
+        "terminal.inspect",
+        json!({"terminalId": id, "generation": descriptor["generation"]}),
+    );
+    assert_eq!(after["type"], "reply", "{after}");
+    assert_eq!(after["message"]["cols"], 120, "{after}");
+    assert_eq!(after["message"]["rows"], 36, "{after}");
+    assert_eq!(
+        after["message"]["session"]["humanControl"],
+        false,
+        "{after}"
+    );
+
+    let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
+    assert_eq!(closed["state"], "exited", "{closed}");
+}

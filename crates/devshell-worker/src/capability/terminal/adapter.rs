@@ -55,19 +55,71 @@ impl TerminalManager {
             input.cwd.as_deref(),
         )?;
         let client = ProcessHostClient::ensure(&self.instance).map_err(host_error)?;
-        let created = client.call_rpc("process.v1.spawn", json!({
+        let mut spawn_params = json!({
             "command": "",
             "interactive": true,
+            "persistent": input.persistent.unwrap_or(false),
             "cwd": input.cwd.unwrap_or_else(|| "./".into()),
             "workspace": input.workspace,
             "tty": true,
             "cols": input.cols,
             "rows": input.rows,
             "stdin": input.command.filter(|command| !command.is_empty()).map(|command| format!("{command}\r")),
-        }), TIMEOUT)?;
+        });
+        if let Some(name) = input.name.filter(|name| !name.is_empty()) {
+            spawn_params["name"] = json!(name);
+        }
+        let created = client.call_rpc("process.v1.spawn", spawn_params, TIMEOUT)?;
         let descriptor: TerminalDescriptor = decode(created["terminal"].clone())?;
         self.bridge.subscribe(&client, &descriptor, 0)?;
         Ok(descriptor)
+    }
+
+    pub fn inspect(&self, input: TerminalInspectInput) -> Result<TerminalInspectResult, RpcError> {
+        let client = self.require()?;
+        if input.generation != 1 {
+            return Err(RpcError::new(
+                "instance.conflict",
+                "Terminal generation changed.",
+            ));
+        }
+        let described = client.call_rpc(
+            "process.v1.describe",
+            json!({"id": input.terminal_id}),
+            TIMEOUT,
+        )?;
+        let session: TerminalDescriptor = decode(described["terminal"].clone())?;
+        let screen = client.call_rpc(
+            "process.v1.inspect",
+            json!({"id": input.terminal_id}),
+            TIMEOUT,
+        )?;
+        let cols = screen["cols"]
+            .as_u64()
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(session.cols);
+        let rows = screen["rows"]
+            .as_u64()
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(session.rows);
+        let seq = screen["seq"].as_u64().unwrap_or(session.latest_seq);
+        let lines = screen["lines"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|line| line.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(TerminalInspectResult {
+            session,
+            cols,
+            rows,
+            cursor: screen["cursor"].clone(),
+            lines,
+            seq,
+        })
     }
 
     pub fn attach(&self, input: TerminalAttachInput) -> Result<TerminalAttachResult, RpcError> {

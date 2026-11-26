@@ -148,6 +148,8 @@ impl ProcessFailure {
 pub(super) struct ControlOwner {
     token: String,
     deadline: Option<Instant>,
+    saved_size: Option<(u16, u16)>,
+    resized: bool,
 }
 
 const REMOTE_CONTROL_LEASE: Duration = Duration::from_secs(30);
@@ -337,6 +339,8 @@ impl ManagedProcess {
             state.controller = Some(ControlOwner {
                 token: id.clone(),
                 deadline: remote.then(|| Instant::now() + REMOTE_CONTROL_LEASE),
+                saved_size: Some(screen.size()),
+                resized: false,
             });
             Some(id)
         } else {
@@ -362,11 +366,34 @@ impl ManagedProcess {
         Ok(())
     }
 
+    pub(super) fn mark_controller_resized(state: &mut State, controller: Option<&str>) {
+        if let (Some(token), Some(owner)) = (controller, state.controller.as_mut())
+            && owner.token == token
+        {
+            owner.resized = true;
+        }
+    }
+
     pub fn release_control(&self, controller: &str) {
-        if let Ok(mut state) = self.state.lock() {
-            if state.active_controller() == Some(controller) {
-                state.controller = None;
+        if let Ok(mut state) = self.state.lock()
+            && state
+                .controller
+                .as_ref()
+                .is_some_and(|owner| owner.token == controller)
+            && let Some(owner) = state.controller.take()
+        {
+            if owner.resized
+                && state.completion.is_none()
+                && let Some((cols, rows)) = owner.saved_size
+                && let Some(screen) = state.screen.as_mut()
+                && screen.size() != (cols, rows)
+                && let Ok(control) = self.control.lock().map(|guard| guard.clone())
+                && control.resize(cols, rows).is_ok()
+                && screen.resize(cols, rows).is_ok()
+            {
+                state.version += 1;
             }
+            self.changed.notify_all();
         }
     }
 
@@ -403,6 +430,7 @@ impl ManagedProcess {
             .resize(cols, rows)
             .map_err(|error| RpcError::new("process.resizeFailed", error))?;
         screen.resize(cols, rows)?;
+        Self::mark_controller_resized(&mut state, controller);
         state.version += 1;
         self.changed.notify_all();
         Ok(())

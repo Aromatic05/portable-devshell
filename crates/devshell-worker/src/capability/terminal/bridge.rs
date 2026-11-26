@@ -117,6 +117,10 @@ impl TerminalBridge {
                 .error
                 .map_or_else(|| "terminal stream rejected".into(), |error| error.message));
         }
+        let mut last_human_control = first
+            .result
+            .as_ref()
+            .and_then(|result| result["process"]["humanControl"].as_bool());
         while let Some(response) = codec::read_response(&mut channel)? {
             if !response.ok {
                 return Err(response
@@ -137,6 +141,35 @@ impl TerminalBridge {
                 }))?;
             }
             let process = &page["process"];
+            let human_control = process["humanControl"].as_bool().unwrap_or(false);
+            if last_human_control != Some(human_control) {
+                let changed_from = last_human_control;
+                last_human_control = Some(human_control);
+                if changed_from.is_some() {
+                    let mut params = json!({
+                        "terminalId": descriptor.terminal_id,
+                        "generation": descriptor.generation,
+                        "humanControl": human_control,
+                        "version": process["terminal"]["version"],
+                        "cols": process["terminal"]["cols"],
+                        "rows": process["terminal"]["rows"],
+                    });
+                    if let Some(name) = process["name"].as_str() {
+                        params["name"] = json!(name);
+                    }
+                    if let Some(cwd) = process["cwd"].as_str() {
+                        params["cwd"] = json!(cwd);
+                    }
+                    if let Some(workspace) = process["workspace"].as_str() {
+                        params["workspace"] = json!(workspace);
+                    }
+                    self.notifications.push_json(&json!({
+                        "type": "notification",
+                        "method": "terminal.control",
+                        "params": params,
+                    }))?;
+                }
+            }
             if process["state"] != "running" {
                 let latest = page["latestSeq"]
                     .as_u64()

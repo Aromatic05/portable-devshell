@@ -25,6 +25,15 @@ impl ManagedProcess {
             }
             .into(),
             created_at_ms: state.created_at_ms,
+            name: self.name.clone(),
+            cwd: self.cwd.clone(),
+            workspace: self
+                .workspace
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            command: self.command.clone(),
+            persistent: self.persistent,
+            human_control: state.active_controller().is_some(),
         })
     }
 
@@ -134,6 +143,7 @@ impl ManagedProcess {
             .as_mut()
             .ok_or_else(not_terminal)?
             .resize(cols, rows)?;
+        Self::mark_controller_resized(&mut state, input.controller.as_deref());
         state.version += 1;
         Ok(accepted(&input, state.version))
     }
