@@ -56,6 +56,14 @@ test("TerminalHandoffWatcher queues handoff comments only for active contexts ma
             },
             {
                 createdAt: "2026-11-26T00:00:00.000Z",
+                ctxId: "ctx-recent",
+                environments: [{ instance: "alpha", workspace: "/ws/a" }],
+                expiresAt: "2026-11-27T00:00:00.000Z",
+                lastAccessedAt: "2026-11-26T00:02:00.000Z",
+                status: "active",
+            },
+            {
+                createdAt: "2026-11-26T00:00:00.000Z",
                 ctxId: "ctx-other-ws",
                 environments: [{ instance: "alpha", workspace: "/ws/b" }],
                 expiresAt: "2026-11-27T00:00:00.000Z",
@@ -111,7 +119,7 @@ test("TerminalHandoffWatcher queues handoff comments only for active contexts ma
 
     assert.deepEqual(
         queued.map((item) => item.ctxId),
-        ["ctx-match"],
+        ["ctx-recent"],
     );
     assert.match(
         queued[0]!.text,
@@ -133,7 +141,7 @@ test("TerminalHandoffWatcher queues handoff comments only for active contexts ma
     });
     assert.deepEqual(
         queued.map((item) => item.ctxId),
-        ["ctx-match", "ctx-stateless"],
+        ["ctx-recent", "ctx-stateless"],
     );
 
     watcher.close();

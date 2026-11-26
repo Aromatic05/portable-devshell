@@ -1,5 +1,8 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
-import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
+import type {
+    ExtensionContextObserveCapability,
+    ExtensionContextRecord,
+} from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceEvent,
     ExtensionInstanceObserveCapability,
@@ -141,14 +144,13 @@ export class TerminalHandoffWatcher {
                     normalizeWorkspace(env.workspace) === targetWorkspace,
             ),
         );
-        if (matching.length === 0) return;
+        const recipient = selectHandoffRecipient(matching);
+        if (recipient === undefined) return;
         const text = formatHandoffComment(payload);
-        for (const ctx of matching) {
-            try {
-                await this.#options.queue(instance, ctx.ctxId, text);
-            } catch (error) {
-                this.#options.onError?.(instance, error);
-            }
+        try {
+            await this.#options.queue(instance, recipient.ctxId, text);
+        } catch (error) {
+            this.#options.onError?.(instance, error);
         }
     }
 
@@ -208,6 +210,16 @@ function parseReleasePayload(
             ? { workspace: data.workspace }
             : {}),
     };
+}
+
+function selectHandoffRecipient(
+    contexts: readonly ExtensionContextRecord[],
+): ExtensionContextRecord | undefined {
+    return [...contexts].sort((left, right) =>
+        right.lastAccessedAt.localeCompare(left.lastAccessedAt) ||
+        right.createdAt.localeCompare(left.createdAt) ||
+        left.ctxId.localeCompare(right.ctxId),
+    )[0];
 }
 
 function formatHandoffComment(payload: ControlReleasedPayload): string {
