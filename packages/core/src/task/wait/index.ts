@@ -16,6 +16,12 @@ import {
 export const WAIT_SYNC_MS = 120_000;
 export const WAIT_HANDOFF_MS = 180_000;
 const WAIT_TERMINAL_RETENTION = 128;
+const TERMINAL_WAIT_ERROR_CODES = new Set([
+    "process.notFound",
+    "process.taskFailed",
+    "process.ioFailed",
+    "tool.invalidArguments",
+]);
 
 export interface WaitInvokePort {
     invoke(
@@ -179,34 +185,61 @@ export class WaitService {
     }
 
     async #monitor(waitId: string, signal: AbortSignal): Promise<void> {
+        let cursor: string | undefined;
         for (;;) {
             if (signal.aborted) return;
             const record = this.#records.get(waitId);
             if (record === undefined || record.status !== "detached") return;
+            const context: ToolCallContext = {
+                ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
+                source: record.source,
+                ...(record.workspace === undefined
+                    ? {}
+                    : { workspace: record.workspace }),
+            };
             try {
+                const usedCursor = cursor;
                 const result = await this.#invoke.invoke(
                     "task_input",
                     {
                         untilExit: true,
                         task: record.targetId,
                         waitMs: WAIT_SYNC_MS,
+                        ...(usedCursor === undefined ? {} : { cursor: usedCursor }),
                     },
-                    {
-                        ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
-                        source: record.source,
-                        ...(record.workspace === undefined
-                            ? {}
-                            : { workspace: record.workspace }),
-                    },
+                    context,
                     signal,
                 );
                 if (signal.aborted) return;
-                if (readString(result, "waitReason") !== "terminal") continue;
-                await this.#settleObserved(waitId, "resolved", { result }, signal);
+                if (readString(result, "waitReason") !== "terminal") {
+                    const nextCursor = readString(result, "cursor");
+                    if (nextCursor !== undefined) cursor = nextCursor;
+                    continue;
+                }
+                let terminalResult = result;
+                if (usedCursor !== undefined) {
+                    try {
+                        terminalResult = await this.#invoke.invoke(
+                            "task_input",
+                            {
+                                task: record.targetId,
+                                waitMs: 0,
+                            },
+                            context,
+                            signal,
+                        );
+                        if (signal.aborted) return;
+                    } catch {
+                        if (signal.aborted) return;
+                        terminalResult = result;
+                    }
+                }
+                await this.#settleObserved(waitId, "resolved", { result: terminalResult }, signal);
                 return;
             } catch (error) {
                 if (signal.aborted) return;
-                if (toRemoteErrorBody(error)?.code === "process.notFound") {
+                const code = toRemoteErrorBody(error)?.code;
+                if (code !== undefined && TERMINAL_WAIT_ERROR_CODES.has(code)) {
                     await this.#settleObserved(waitId, "failed", {
                         error: errorMessage(error),
                     }, signal);

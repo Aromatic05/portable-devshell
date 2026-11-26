@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
-import { WorkerToolCallScheduler } from "../../../../src/toolcall/execution/Scheduler.ts";
+import { asInstanceName, runtimeErrorCodes, type JsonValue } from "@portable-devshell/shared";
+import { classifyToolCall } from "../../../../src/toolcall/execution/ExecutionTarget.ts";
+import {
+    DEFAULT_MAX_OBSERVATIONS,
+    WorkerToolCallScheduler,
+} from "../../../../src/toolcall/execution/Scheduler.ts";
 
 test("WorkerToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
     const instanceName = asInstanceName("scheduler-test");
@@ -330,4 +334,195 @@ test("WorkerToolCallScheduler prioritizes queued urgent process operations", asy
         "normal",
         "urgent",
     ]);
+});
+
+test("classifyToolCall isolates long-running task_input reads as observations", () => {
+    assert.equal(classifyToolCall("bash_run", { command: "sleep 1" }), "standard");
+    assert.equal(classifyToolCall("task_manage", { task: "t-1", action: "close" }), "urgent");
+    assert.equal(classifyToolCall("task_inspect", { task: "t-1" }), "urgent");
+
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", untilExit: true, waitMs: 120_000 }),
+        "observation",
+    );
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", untilExit: true, input: "" }),
+        "observation",
+    );
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", input: null, waitMs: 30_000 }),
+        "observation",
+    );
+
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", input: "hello\n", untilExit: true, waitMs: 60_000 }),
+        "urgent",
+    );
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", untilExit: true, waitMs: 0 }),
+        "urgent",
+    );
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1", waitMs: 5_000 }),
+        "urgent",
+    );
+    assert.equal(
+        classifyToolCall("task_input", { task: "t-1" }),
+        "urgent",
+    );
+});
+
+test("WorkerToolCallScheduler observation polls do not starve task_manage(close) or task_input(input)", async () => {
+    const instanceName = asInstanceName("scheduler-observation");
+    const scheduler = new WorkerToolCallScheduler({
+        byTool: {},
+        maxRunning: 4,
+        maxRunningPerSession: 2,
+        queueDepth: 16,
+        queueDepthPerSession: 4,
+        queueTimeoutMs: 1_000,
+    });
+    const bash1 = createDeferred<string>();
+    const bash2 = createDeferred<string>();
+    const obs1 = createDeferred<string>();
+    const obs2 = createDeferred<string>();
+    const closeTask = createDeferred<string>();
+    const writeInput = createDeferred<string>();
+    const started: string[] = [];
+
+    const launch = (
+        callId: string,
+        toolName: string,
+        input: Record<string, JsonValue>,
+        deferred: ReturnType<typeof createDeferred<string>>,
+    ) =>
+        scheduler
+            .reserve({
+                callId,
+                instanceName,
+                ctxId: "context-1",
+                source: "mcp",
+                toolName,
+                toolCallClass: classifyToolCall(toolName, input),
+            })
+            .run(async () => {
+                started.push(callId);
+                return await deferred.promise;
+            });
+
+    const pBash1 = launch("bash-1", "bash_run", { command: "a" }, bash1);
+    const pBash2 = launch("bash-2", "bash_run", { command: "b" }, bash2);
+    const pObs1 = launch("obs-1", "task_input", { task: "t-1", untilExit: true, waitMs: 120_000 }, obs1);
+    const pObs2 = launch("obs-2", "task_input", { task: "t-2", waitMs: 60_000 }, obs2);
+    await waitFor(() => started.length === 4);
+
+    // Even with 2 bash_run + 2 long-poll observations running in the same session,
+    // urgent task_manage(close) starts immediately without waiting in queue.
+    const pClose = launch("close-1", "task_manage", { task: "t-1", action: "close" }, closeTask);
+    await waitFor(() => started.includes("close-1"));
+    closeTask.resolve("closed");
+    assert.equal(await pClose, "closed");
+
+    // Interactive task_input(input) also starts immediately while observations remain active.
+    const pWrite = launch("write-1", "task_input", { task: "t-2", input: "exit\n", waitMs: 60_000 }, writeInput);
+    await waitFor(() => started.includes("write-1"));
+    writeInput.resolve("written");
+    assert.equal(await pWrite, "written");
+
+    obs1.resolve("obs1-done");
+    obs2.resolve("obs2-done");
+    bash1.resolve("bash1-done");
+    bash2.resolve("bash2-done");
+    assert.deepEqual(await Promise.all([pBash1, pBash2, pObs1, pObs2]), [
+        "bash1-done",
+        "bash2-done",
+        "obs1-done",
+        "obs2-done",
+    ]);
+});
+
+test("WorkerToolCallScheduler caps observation calls separately from standard and urgent limits", async () => {
+    const instanceName = asInstanceName("scheduler-observation-cap");
+    const scheduler = new WorkerToolCallScheduler();
+    const obsDeferreds = Array.from({ length: DEFAULT_MAX_OBSERVATIONS }, () =>
+        createDeferred<string>(),
+    );
+    const started: string[] = [];
+
+    const obsCalls = obsDeferreds.map((deferred, index) =>
+        scheduler
+            .reserve({
+                callId: `obs-${index}`,
+                instanceName,
+                ctxId: "context-1",
+                source: "mcp",
+                toolName: "task_input",
+                toolCallClass: "observation",
+            })
+            .run(async () => {
+                started.push(`obs-${index}`);
+                return await deferred.promise;
+            }),
+    );
+    await waitFor(() => started.length === DEFAULT_MAX_OBSERVATIONS);
+
+    assert.throws(
+        () =>
+            scheduler.reserve({
+                callId: "obs-overflow",
+                instanceName,
+                ctxId: "context-1",
+                source: "mcp",
+                toolName: "task_input",
+                toolCallClass: "observation",
+            }),
+        (error: unknown) => {
+            assert.equal(
+                (error as { code?: string }).code,
+                runtimeErrorCodes.toolSchedulerFull,
+            );
+            assert.deepEqual(
+                (error as { details?: { fullReasons?: string[] } }).details?.fullReasons,
+                ["observation"],
+            );
+            return true;
+        },
+    );
+
+    const normal = createDeferred<string>();
+    const urgent = createDeferred<string>();
+    const pNormal = scheduler
+        .reserve({
+            callId: "normal-1",
+            instanceName,
+            ctxId: "context-1",
+            source: "mcp",
+            toolName: "bash_run",
+            toolCallClass: "standard",
+        })
+        .run(async () => {
+            started.push("normal-1");
+            return await normal.promise;
+        });
+    const pUrgent = scheduler
+        .reserve({
+            callId: "urgent-1",
+            instanceName,
+            ctxId: "context-1",
+            source: "mcp",
+            toolName: "task_manage",
+            toolCallClass: "urgent",
+        })
+        .run(async () => {
+            started.push("urgent-1");
+            return await urgent.promise;
+        });
+    await waitFor(() => started.includes("normal-1") && started.includes("urgent-1"));
+
+    normal.resolve("ok-normal");
+    urgent.resolve("ok-urgent");
+    for (const d of obsDeferreds) d.resolve("ok-obs");
+    assert.equal(await pNormal, "ok-normal");
+    assert.equal(await pUrgent, "ok-urgent");
+    await Promise.all(obsCalls);
 });

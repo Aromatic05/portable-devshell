@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
     asInstanceName,
+    createRemoteError,
     type JsonValue,
     type WaitDetachInput,
 } from "@portable-devshell/shared";
@@ -162,6 +163,35 @@ test("Wait rewrite clamps bash_run/task_input and detaches timed-out tasks", asy
         assert.equal((stateless.payload as Record<string, JsonValue>).detached, undefined);
         assert.equal(detached.length, 1);
 
+        const statelessContext = {
+            instance: instanceName,
+            contextMode: "stateless" as const,
+            ctxId: "57a7e1e5-5000-8000-8000-000000000000",
+            source: "mcp" as const,
+        };
+        const statelessRunInbound = await rewrite({
+            callId: "call-stateless-run-inbound",
+            direction: "inbound",
+            value: {
+                context: statelessContext,
+                kind: "call",
+                payload: { waitMs: 250_000 },
+                toolName: "bash_run",
+            },
+        }, runtime);
+        assert.equal((statelessRunInbound.payload as Record<string, JsonValue>).waitMs, 250_000);
+        const statelessInputInbound = await rewrite({
+            callId: "call-stateless-input-inbound",
+            direction: "inbound",
+            value: {
+                context: statelessContext,
+                kind: "call",
+                payload: { task: "stateless-task", untilExit: true, waitMs: 300_000 },
+                toolName: "task_input",
+            },
+        }, runtime);
+        assert.equal((statelessInputInbound.payload as Record<string, JsonValue>).waitMs, 300_000);
+
         const read = await rewrite({
             callId: "call-read",
             direction: "inbound",
@@ -310,10 +340,16 @@ test("WaitService persists detached task and resolves it through native task_inp
     await restored.close();
 });
 
-test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until terminal", async (t) => {
+test("WaitService.#monitor advances cursor across timeout polls and performs one final full read on terminal", async (t) => {
     const root = await createTestTempDirectory("wait-cursor");
     const filePath = join(root, "waits.json");
     const calls: Array<{ toolName: string; input: JsonValue }> = [];
+    const fullTerminalResult: JsonValue = {
+        task: { id: "task-cursor", status: "exited", pty: false },
+        stdout: "full output from offset 0",
+        waitReason: "terminal",
+        termination: "exited",
+    };
     const responses: JsonValue[] = [
         {
             task: { id: "task-cursor", status: "running", pty: false },
@@ -335,6 +371,7 @@ test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until 
             waitReason: "terminal",
             termination: "exited",
         },
+        fullTerminalResult,
     ];
     let resolved!: () => void;
     const done = new Promise<void>((resolve) => { resolved = resolve; });
@@ -364,7 +401,7 @@ test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until 
     });
     await done;
 
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
     assert.deepEqual(calls, [
         {
             toolName: "task_input",
@@ -380,6 +417,7 @@ test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until 
                 untilExit: true,
                 task: "task-cursor",
                 waitMs: WAIT_SYNC_MS,
+                cursor: "tc1_step1",
             },
         },
         {
@@ -388,11 +426,129 @@ test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until 
                 untilExit: true,
                 task: "task-cursor",
                 waitMs: WAIT_SYNC_MS,
+                cursor: "tc1_step2",
+            },
+        },
+        {
+            toolName: "task_input",
+            input: {
+                task: "task-cursor",
+                waitMs: 0,
             },
         },
     ]);
-    assert.equal((await service.list("ctx-cursor"))[0]?.status, "resolved");
+    const [record] = await service.list("ctx-cursor");
+    assert.equal(record?.status, "resolved");
+    assert.deepEqual(record?.result, fullTerminalResult);
 });
+
+test("WaitService.#monitor falls back to incremental terminal result if final full read fails", async (t) => {
+    const root = await createTestTempDirectory("wait-cursor-fallback");
+    const filePath = join(root, "waits.json");
+    const incrementalTerminal: JsonValue = {
+        task: { id: "task-fallback", status: "exited", pty: false },
+        stdout: "tail chunk",
+        cursor: "tc1_done",
+        waitReason: "terminal",
+        termination: "exited",
+    };
+    let callCount = 0;
+    let resolved!: () => void;
+    const done = new Promise<void>((resolve) => { resolved = resolve; });
+    const service = new WaitService({
+        appendEvent: async (type) => {
+            if (type === "wait.resolved") resolved();
+        },
+        filePath,
+        invoke: {
+            async invoke() {
+                callCount += 1;
+                if (callCount === 1) {
+                    return {
+                        task: { id: "task-fallback", status: "running", pty: false },
+                        cursor: "tc1_step1",
+                        waitReason: "timeout",
+                        waitMs: WAIT_SYNC_MS,
+                        termination: "running",
+                    };
+                }
+                if (callCount === 2) {
+                    return incrementalTerminal;
+                }
+                throw createRemoteError({
+                    code: "process.notFound",
+                    message: "already reaped",
+                    retryable: false,
+                });
+            },
+        },
+        waitId: () => "wait-fallback",
+    });
+    t.after(() => service.close());
+
+    await service.detach({
+        callId: "call-fallback",
+        ctxId: "ctx-fallback",
+        instance: asInstanceName("local"),
+        source: "mcp",
+        targetId: "task-fallback",
+        toolName: "bash_run",
+    });
+    await done;
+
+    assert.equal(callCount, 3);
+    const [record] = await service.list("ctx-fallback");
+    assert.equal(record?.status, "resolved");
+    assert.deepEqual(record?.result, incrementalTerminal);
+});
+
+for (const terminalCode of [
+    "process.notFound",
+    "process.taskFailed",
+    "process.ioFailed",
+    "tool.invalidArguments",
+] as const) {
+    test(`WaitService.#monitor settles failed immediately on ${terminalCode}`, async (t) => {
+        const root = await createTestTempDirectory(`wait-fail-${terminalCode}`);
+        const filePath = join(root, "waits.json");
+        let calls = 0;
+        let failed!: () => void;
+        const done = new Promise<void>((resolve) => { failed = resolve; });
+        const service = new WaitService({
+            appendEvent: async (type) => {
+                if (type === "wait.failed") failed();
+            },
+            filePath,
+            invoke: {
+                async invoke() {
+                    calls += 1;
+                    throw createRemoteError({
+                        code: terminalCode,
+                        message: `failed with ${terminalCode}`,
+                        retryable: false,
+                    });
+                },
+            },
+            waitId: () => `wait-${terminalCode}`,
+        });
+        t.after(() => service.close());
+
+        await service.detach({
+            callId: `call-${terminalCode}`,
+            ctxId: `ctx-${terminalCode}`,
+            instance: asInstanceName("local"),
+            source: "mcp",
+            targetId: `task-${terminalCode}`,
+            toolName: "bash_run",
+        });
+        await done;
+
+        assert.equal(calls, 1);
+        const [record] = await service.list(`ctx-${terminalCode}`);
+        assert.equal(record?.status, "failed");
+        assert.match(record?.error ?? "", new RegExp(terminalCode));
+    });
+}
 
 test("Wait recovery keeps same-target Contexts isolated and resumes each monitor once", { timeout: 5_000 }, async (t) => {
     const root = await createTestTempDirectory("wait-context-recovery");

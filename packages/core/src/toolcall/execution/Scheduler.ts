@@ -13,12 +13,17 @@ export interface WorkerToolSchedulerToolLimit {
     queueDepth?: number;
 }
 
+export type WorkerToolSchedulerCallClass = "standard" | "urgent" | "observation";
+
+export const DEFAULT_MAX_OBSERVATIONS = 16;
+
 export interface WorkerToolSchedulerLimits {
     maxRunning: number;
     queueDepth: number;
     queueTimeoutMs: number;
     maxRunningPerSession: number;
     queueDepthPerSession: number;
+    maxObservations?: number;
     byTool: Record<string, WorkerToolSchedulerToolLimit>;
 }
 
@@ -28,6 +33,7 @@ export interface WorkerToolSchedulerRequest {
     ctxId?: string;
     source: ToolCallContext["source"];
     toolName: string;
+    toolCallClass?: WorkerToolSchedulerCallClass;
 }
 
 export interface WorkerToolSchedulerReservation {
@@ -68,8 +74,17 @@ const terminalStates = new Set<ToolSchedulerEntryState>([
 
 const urgentToolNames = new Set(["task_input", "task_inspect", "task_manage"]);
 
-function isUrgentTool(toolName: string): boolean {
+export function isUrgentTool(toolName: string): boolean {
     return urgentToolNames.has(toolName);
+}
+
+function resolveCallClass(
+    request: WorkerToolSchedulerRequest,
+): WorkerToolSchedulerCallClass {
+    if (request.toolCallClass !== undefined) {
+        return request.toolCallClass;
+    }
+    return isUrgentTool(request.toolName) ? "urgent" : "standard";
 }
 
 export const defaultWorkerToolSchedulerLimits: WorkerToolSchedulerLimits = {
@@ -79,6 +94,7 @@ export const defaultWorkerToolSchedulerLimits: WorkerToolSchedulerLimits = {
             queueDepth: 16,
         },
     },
+    maxObservations: DEFAULT_MAX_OBSERVATIONS,
     maxRunning: 4,
     maxRunningPerSession: 2,
     queueDepth: 16,
@@ -180,12 +196,46 @@ export class WorkerToolCallScheduler {
 
     readonly #closeWaiters: Array<() => void> = [];
 
+    get #maxObservations(): number {
+        return this.#limits.maxObservations ?? DEFAULT_MAX_OBSERVATIONS;
+    }
+
     #assertCapacity(request: WorkerToolSchedulerRequest): void {
         const snapshot = this.#snapshot(request);
         const toolLimit = this.#toolLimit(request.toolName);
-        const fullReasons: string[] = [];
+        const callClass = resolveCallClass(request);
 
-        const urgentAllowance = isUrgentTool(request.toolName) ? 1 : 0;
+        if (callClass === "observation") {
+            if (snapshot.observationsAccepted < this.#maxObservations) {
+                return;
+            }
+            throw new WorkerToolSchedulerFullError({
+                fullReasons: ["observation"],
+                instance: request.instanceName,
+                maxObservations: this.#maxObservations,
+                maxRunning: this.#limits.maxRunning,
+                maxRunningPerSession: this.#limits.maxRunningPerSession,
+                observationsAccepted: snapshot.observationsAccepted,
+                observationsRunning: snapshot.observationsRunning,
+                queueDepth: this.#limits.queueDepth,
+                queueDepthPerSession: this.#limits.queueDepthPerSession,
+                queued: snapshot.queued,
+                running: snapshot.running,
+                contextAccepted: snapshot.contextAccepted,
+                ctxId: request.ctxId,
+                contextQueued: snapshot.contextQueued,
+                contextRunning: snapshot.contextRunning,
+                toolAccepted: snapshot.toolAccepted,
+                toolName: request.toolName,
+                toolQueueDepth: toolLimit.queueDepth,
+                toolQueued: snapshot.toolQueued,
+                toolMaxRunning: toolLimit.maxRunning,
+                toolRunning: snapshot.toolRunning,
+            });
+        }
+
+        const fullReasons: string[] = [];
+        const urgentAllowance = callClass === "urgent" ? 1 : 0;
         if (
             snapshot.accepted >=
             this.#limits.maxRunning + this.#limits.queueDepth + urgentAllowance
@@ -285,7 +335,7 @@ export class WorkerToolCallScheduler {
             let index = this.#waiting.findIndex(
                 (entry) =>
                     entry.state === "queued" &&
-                    isUrgentTool(entry.request.toolName) &&
+                    resolveCallClass(entry.request) !== "standard" &&
                     this.#canRun(entry.request),
             );
             if (index === -1) {
@@ -419,8 +469,12 @@ export class WorkerToolCallScheduler {
 
     #canRun(request: WorkerToolSchedulerRequest): boolean {
         const snapshot = this.#snapshot(request);
+        const callClass = resolveCallClass(request);
+        if (callClass === "observation") {
+            return snapshot.observationsRunning < this.#maxObservations;
+        }
         const toolLimit = this.#toolLimit(request.toolName);
-        const urgentAllowance = isUrgentTool(request.toolName) ? 1 : 0;
+        const urgentAllowance = callClass === "urgent" ? 1 : 0;
         if (snapshot.running >= this.#limits.maxRunning + urgentAllowance) {
             return false;
         }
@@ -447,9 +501,17 @@ export class WorkerToolCallScheduler {
         toolAccepted: number;
         toolQueued: number;
         toolRunning: number;
+        observationsAccepted: number;
+        observationsRunning: number;
     } {
-        const entries = [...this.#entries.values()].filter(
+        const activeEntries = [...this.#entries.values()].filter(
             (entry) => !terminalStates.has(entry.state),
+        );
+        const observationEntries = activeEntries.filter(
+            (entry) => resolveCallClass(entry.request) === "observation",
+        );
+        const entries = activeEntries.filter(
+            (entry) => resolveCallClass(entry.request) !== "observation",
         );
         const queuedEntries = entries.filter(
             (entry) =>
@@ -497,6 +559,10 @@ export class WorkerToolCallScheduler {
             toolAccepted: toolEntries.length,
             toolQueued: toolQueuedEntries.length,
             toolRunning: toolRunningEntries.length,
+            observationsAccepted: observationEntries.length,
+            observationsRunning: observationEntries.filter(
+                (entry) => entry.state === "running",
+            ).length,
         };
     }
 
@@ -517,6 +583,9 @@ export function resolveWorkerToolSchedulerLimits(
             ...defaultWorkerToolSchedulerLimits.byTool,
             ...(input?.byTool ?? {}),
         },
+        maxObservations:
+            input?.maxObservations ??
+            defaultWorkerToolSchedulerLimits.maxObservations,
         maxRunning:
             input?.maxRunning ?? defaultWorkerToolSchedulerLimits.maxRunning,
         maxRunningPerSession:

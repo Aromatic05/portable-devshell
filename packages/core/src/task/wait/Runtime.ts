@@ -30,7 +30,7 @@ export async function rewriteWaitToolCall(
     wait: WaitApi,
 ): Promise<ToolCallHookValue> {
     const { value } = input;
-    if (input.direction === "inbound" && value.kind === "call")
+    if (input.direction === "inbound" && value.kind === "call" && value.context.contextMode !== "stateless")
         return rewriteInbound(value);
     if (input.direction === "outbound" && value.context.contextMode !== "stateless") {
         const targetId = detachedTarget(value);

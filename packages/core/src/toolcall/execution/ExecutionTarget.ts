@@ -14,9 +14,11 @@ import {
 
 import type { WorkerToolInvoker } from "../worker/Invoker.js";
 import type { ToolCallPresentedResult } from "../Api.js";
-import type {
-    WorkerToolCallScheduler,
-    WorkerToolSchedulerReservation,
+import {
+    isUrgentTool,
+    type WorkerToolCallScheduler,
+    type WorkerToolSchedulerCallClass,
+    type WorkerToolSchedulerReservation,
 } from "./Scheduler.js";
 import type {
     ToolCallDispatchRequest,
@@ -155,6 +157,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     ctxId: hookValue.context.ctxId,
                     source: hookValue.context.source,
                     toolName: hookValue.toolName,
+                    toolCallClass: classifyToolCall(hookValue.toolName, innerInput),
                 },
                 signal,
             );
@@ -693,4 +696,40 @@ function outboundHookFailure(executionCompleted: boolean, callId: string): Error
             : "ToolCall outbound hook failed before execution completed.",
         retryable: false,
     });
+}
+
+const DEFAULT_TASK_INPUT_WAIT_MS = 5_000;
+
+function isTaskWaitObservation(toolName: string, input: JsonValue): boolean {
+    if (toolName !== "task_input") return false;
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+        return false;
+    }
+    const textInput = input.input;
+    const noInput =
+        textInput === undefined ||
+        textInput === null ||
+        (typeof textInput === "string" && textInput.length === 0);
+    if (!noInput) return false;
+
+    const untilExit = input.untilExit === true;
+    const rawWaitMs = input.waitMs;
+    const effectiveWaitMs =
+        rawWaitMs === undefined || rawWaitMs === null
+            ? DEFAULT_TASK_INPUT_WAIT_MS
+            : typeof rawWaitMs === "number" &&
+                Number.isSafeInteger(rawWaitMs) &&
+                rawWaitMs >= 0
+              ? rawWaitMs
+              : 0;
+    return (untilExit && effectiveWaitMs > 0) || effectiveWaitMs > DEFAULT_TASK_INPUT_WAIT_MS;
+}
+
+/** Classify a tool call for WorkerToolCallScheduler capacity accounting. */
+export function classifyToolCall(
+    toolName: string,
+    input: JsonValue,
+): WorkerToolSchedulerCallClass {
+    if (isTaskWaitObservation(toolName, input)) return "observation";
+    return isUrgentTool(toolName) ? "urgent" : "standard";
 }
