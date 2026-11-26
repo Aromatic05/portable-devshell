@@ -61,6 +61,7 @@ import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
 import { createMailingService, registerMailing, type MailingRuntime } from "./mailing/index.js";
 import type { MailingNotificationIdentity } from "./mailing/Service.js";
+import { TerminalHandoffWatcher } from "./handoff/Watcher.js";
 
 export type CommentControlDecision =
     | { readonly kind: "allow" }
@@ -397,8 +398,10 @@ export class CommentExtension {
 
 interface BuiltinCommentRuntime {
     readonly comment: CommentExtension;
+    readonly handoff: TerminalHandoffWatcher;
     readonly mailing: MailingRuntime;
     readonly source: BuiltinCommentInstanceSource;
+    readonly unsubscribeHandoff: () => void;
 }
 
 let builtinRuntime: BuiltinCommentRuntime | undefined;
@@ -439,6 +442,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const mailing = createMailingService(context, {
         queue: async (instance, ctxId, text, identity) => await comment.comment.queue(instance, ctxId, text, identity),
     });
+    const handoff = new TerminalHandoffWatcher({
+        contextObserve: context.capabilities.contextObserve,
+        instanceObserve,
+        onError: (instance, error) =>
+            context.logger.warn("Terminal handoff watcher error", {
+                instance,
+                message: error instanceof Error ? error.message : String(error),
+            }),
+        queue: async (instance, ctxId, text) =>
+            await comment.comment.queue(instance, ctxId, text),
+    });
+    handoff.sync(source.list());
+    const unsubscribeHandoff = source.onChange(() => handoff.sync(source.list()));
     const gate = createCommentToolCallGate(comment.comment);
     const delivery = createCommentDelivery(comment.comment);
     const advice = createCommentAdvice();
@@ -464,7 +480,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         "progress_report",
         createProgressReportTool(source, comment.comment),
     );
-    builtinRuntime = { comment, mailing, source };
+    builtinRuntime = { comment, handoff, mailing, source, unsubscribeHandoff };
     // Resume pre-existing Context workspaces immediately; periodic polling
     // will also recover from temporarily unavailable Workers.
     void mailing.poll().catch((error) =>
@@ -479,6 +495,7 @@ export async function instanceGenerationRetired(
 ): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
+    runtime.handoff.retireInstance(event.instance);
     await runtime.mailing.retireInstance(event.instance);
     await runtime.comment.retireInstance(
         event.instance,
@@ -509,6 +526,8 @@ export async function contextEnvironmentRetired(
 export async function deactivate(): Promise<void> {
     const runtime = builtinRuntime;
     builtinRuntime = undefined;
+    runtime?.unsubscribeHandoff();
+    runtime?.handoff.close();
     await runtime?.mailing.close();
     await runtime?.comment.close();
 }
