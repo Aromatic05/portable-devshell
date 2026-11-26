@@ -59,7 +59,12 @@ impl ManagedProcess {
             return Err(RpcError::new(
                 "stream.gap",
                 "Requested terminal output is no longer retained.",
-            ));
+            )
+            .with_details(json!({
+                "requestedFromSeq": input.from_seq,
+                "oldestAvailableSeq": output.oldest_seq,
+                "latestSeq": output.latest_seq,
+            })));
         }
         let exit = state.completion.as_ref().map(|result| match result {
             Ok(exit) => TerminalExit {

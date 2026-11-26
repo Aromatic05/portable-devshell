@@ -96,7 +96,12 @@ pub(super) fn serve(
                     RpcError::new(
                         "stream.gap",
                         "terminal output overran the subscriber; reattach to restore state",
-                    ),
+                    )
+                    .with_details(json!({
+                        "requestedFromSeq": cursor,
+                        "oldestAvailableSeq": page.output.oldest_seq,
+                        "latestSeq": page.output.latest_seq,
+                    })),
                 ),
             );
         }
