@@ -92,9 +92,11 @@ pub(super) fn wait_for(
     wait_ms: u64,
     until_output: bool,
     kill_on_cancel: bool,
+    settle_ms: u64,
 ) -> Result<Value, ToolError> {
     let deadline = Instant::now() + Duration::from_millis(wait_ms);
     let original_seq = seq;
+    let mut settle_deadline: Option<Instant> = None;
     loop {
         if call.cancellation.is_cancelled() {
             if kill_on_cancel {
@@ -102,23 +104,50 @@ pub(super) fn wait_for(
             }
             return call.check_cancelled().map(|_| descriptor);
         }
-        if descriptor["state"] != "running" || Instant::now() >= deadline {
+        let now = Instant::now();
+        if descriptor["state"] != "running" || now >= deadline {
             return Ok(descriptor);
         }
-        if until_output && descriptor["latestSeq"].as_u64().unwrap_or(0) > original_seq {
+        let current_seq = descriptor["latestSeq"].as_u64().unwrap_or(0);
+        if until_output && current_seq > original_seq {
+            if settle_ms == 0 {
+                return Ok(descriptor);
+            }
+            match settle_deadline {
+                None => {
+                    settle_deadline = Some((now + Duration::from_millis(settle_ms)).min(deadline));
+                }
+                Some(settle_at) if now >= settle_at => {
+                    return Ok(descriptor);
+                }
+                Some(_) => {}
+            }
+        }
+        let target_deadline = settle_deadline.map_or(deadline, |settle_at| settle_at.min(deadline));
+        let remaining = target_deadline.saturating_duration_since(now).as_millis() as u64;
+        if remaining == 0 {
             return Ok(descriptor);
         }
-        let remaining = deadline
-            .saturating_duration_since(Instant::now())
-            .as_millis() as u64;
+        let slice = if settle_deadline.is_some() {
+            remaining.min(50)
+        } else {
+            remaining.min(250)
+        };
         let output = rpc(
             client,
             "process.v1.read",
             json!({
-                "id": id, "fromSeq": seq, "waitMs": remaining.min(250)
+                "id": id, "fromSeq": seq, "waitMs": slice
             }),
         )?;
         descriptor = output["process"].clone();
-        seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
+        let next_seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
+        if next_seq > seq {
+            seq = next_seq;
+            if until_output && settle_ms > 0 && seq > original_seq {
+                settle_deadline =
+                    Some((Instant::now() + Duration::from_millis(settle_ms)).min(deadline));
+            }
+        }
     }
 }

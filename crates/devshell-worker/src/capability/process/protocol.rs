@@ -65,6 +65,9 @@ pub(super) struct SpawnInput {
     pub tty: bool,
     #[serde(default)]
     pub interactive: bool,
+    #[serde(default)]
+    pub persistent: bool,
+    pub name: Option<String>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
     #[serde(default)]

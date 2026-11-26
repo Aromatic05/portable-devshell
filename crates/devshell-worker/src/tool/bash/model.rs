@@ -13,26 +13,14 @@ pub struct BashRunParams {
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     #[serde(default)]
-    /// Standard input text. Omit to close stdin immediately and deliver EOF.
-    pub stdin: Option<String>,
-    /// Optional hard execution deadline in milliseconds.
-    #[schemars(range(min = 1, max = 100000))]
-    pub timeout_ms: Option<u64>,
-    /// Time to wait for the command before returning a running task ID.
+    pub env: BTreeMap<String, Option<String>>,
+    /// Allocate a PTY at process creation for interactive input.
+    #[serde(default)]
+    pub pty: bool,
+    /// Time in milliseconds to wait for the command before returning a running task ID (default 10000).
+    #[serde(default)]
     #[schemars(range(min = 0, max = 3600000))]
     pub wait_ms: Option<u64>,
-    /// Allocate a PTY at process creation.
-    #[serde(default)]
-    pub tty: bool,
-    /// Keep pipe stdin open for later task_input.
-    #[serde(default)]
-    pub keep_stdin: bool,
-    #[serde(default)]
-    /// Maximum captured bytes per output stream. Defaults to 4194304.
-    #[schemars(range(min = 1, max = 16777216))]
-    pub max_capture_bytes: Option<usize>,
-    #[serde(default)]
-    pub env: BTreeMap<String, Option<String>>,
 }
 
 pub use crate::tool::process::model::{BashRunOutput, BashTermination};

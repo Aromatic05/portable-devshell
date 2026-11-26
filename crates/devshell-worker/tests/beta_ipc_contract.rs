@@ -104,7 +104,7 @@ fn assert_bash_recovers(env: &TestEnv, instance: &str) {
             instance,
             "recovery",
             "bash_run",
-            json!({ "command": "printf recovered", "timeoutMs": 5000 }),
+            json!({ "command": "printf recovered", "waitMs": 5000 }),
         ),
     );
     assert_eq!(response["type"], "reply", "{response}");
@@ -126,12 +126,31 @@ fn bash_timeout_kills_recorded_child_and_grandchild_pids_and_recovers() {
             instance,
             "timeout",
             "bash_run",
-            json!({ "command": command, "timeoutMs": 1500 }),
+            json!({ "command": command, "waitMs": 1500 }),
         ),
     );
     assert_eq!(response["type"], "reply", "{response}");
-    assert_eq!(response["message"]["termination"], "timeout", "{response}");
-    assert_tree_stopped(&tree_pids(&env));
+    assert_eq!(response["message"]["termination"], "running", "{response}");
+    let task_id = response["message"]["task"]["id"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let ready = env.workspace().join("descendants.pid");
+    while !ready.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let pids = tree_pids(&env);
+    let closed = env.rpc(
+        instance,
+        "tool",
+        &tool(
+            &env,
+            instance,
+            "close",
+            "task_manage",
+            json!({ "command": "close", "task": task_id }),
+        ),
+    );
+    assert_eq!(closed["type"], "reply", "{closed}");
+    assert_tree_stopped(&pids);
     assert_bash_recovers(&env, instance);
 }
 
@@ -167,7 +186,7 @@ fn bash_cancel_kills_recorded_child_and_grandchild_pids_and_recovers() {
                 instance,
                 "running",
                 "bash_run",
-                json!({ "command": command, "timeoutMs": 15000 }),
+                json!({ "command": command, "waitMs": 15000 }),
             ),
         )
         .unwrap();
@@ -214,6 +233,31 @@ fn bash_cancel_kills_recorded_child_and_grandchild_pids_and_recovers() {
         .unwrap();
     assert_eq!(running["type"], "error", "{running}");
     assert_eq!(running["error"]["code"], "tool.cancelled", "{running}");
+    let listed = env.rpc(
+        instance,
+        "tool",
+        &tool(&env, instance, "list", "task_manage", json!({ "command": "list" })),
+    );
+    let task_id = listed["message"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["state"] == "running")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let closed = env.rpc(
+        instance,
+        "tool",
+        &tool(
+            &env,
+            instance,
+            "close",
+            "task_manage",
+            json!({ "command": "close", "task": task_id }),
+        ),
+    );
+    assert_eq!(closed["type"], "reply", "{closed}");
     assert_tree_stopped(&pids);
     drop(writer);
     assert!(bridge.wait().unwrap().success());
@@ -432,7 +476,7 @@ fn bash_call_environment_overrides_and_unsets_are_applied_in_order() {
             "bash_run",
             json!({
                 "command": "printf '%s|%s' \"$BETA_MATRIX_VALUE\" \"${BETA_MATRIX_REMOVE-unset}\"",
-                "timeoutMs": 5000,
+                "waitMs": 5000,
                 "env": { "BETA_MATRIX_VALUE": "request-value", "BETA_MATRIX_REMOVE": null }
             }),
         ),
@@ -458,7 +502,7 @@ fn bash_nonzero_exit_preserves_both_streams_and_exit_status() {
             "nonzero",
             "bash_run",
             json!({
-                "command": "printf out; printf err >&2; exit 37", "timeoutMs": 5000
+                "command": "printf out; printf err >&2; exit 37", "waitMs": 5000
             }),
         ),
     );
@@ -485,7 +529,7 @@ fn bash_invalid_zero_timeout_is_rejected_before_process_launch() {
             "invalid",
             "bash_run",
             json!({
-                "command": format!("touch {}", marker.display()), "timeoutMs": 0
+                "command": format!("touch {}", marker.display()), "waitMs": 3_600_001
             }),
         ),
     );
@@ -530,7 +574,7 @@ fn bash_cancellation_is_scoped_to_both_context_and_request_id() {
                 "target-ctx",
                 "same-id",
                 "bash_run",
-                json!({ "command": command, "timeoutMs": 15000 }),
+                json!({ "command": command, "waitMs": 15000 }),
             ),
         )
         .unwrap();
@@ -583,6 +627,31 @@ fn bash_cancellation_is_scoped_to_both_context_and_request_id() {
         tool_reply["error"]["code"], "tool.cancelled",
         "{tool_reply}"
     );
+    let listed = env.rpc(
+        instance,
+        "tool",
+        &tool(&env, instance, "list", "task_manage", json!({ "command": "list" })),
+    );
+    let task_id = listed["message"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["state"] == "running")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let closed = env.rpc(
+        instance,
+        "tool",
+        &tool(
+            &env,
+            instance,
+            "close",
+            "task_manage",
+            json!({ "command": "close", "task": task_id }),
+        ),
+    );
+    assert_eq!(closed["type"], "reply", "{closed}");
     assert_tree_stopped(&pids);
     drop(writer);
     assert!(bridge.wait().unwrap().success());

@@ -143,7 +143,7 @@ fn task_read_reports_exit_status_after_pty_exits() {
         "run",
         "bash_run",
         json!({
-            "command":"printf 'PANE-CLOSED\\n'; sleep 0.2; exit 23", "waitMs":0, "tty":true
+            "command":"printf 'PANE-CLOSED\\n'; sleep 0.2; exit 23", "waitMs":0, "pty":true
         }),
     );
     assert_eq!(run["type"], "reply", "{run}");
@@ -152,8 +152,8 @@ fn task_read_reports_exit_status_after_pty_exits() {
     let mut cursor = run["message"]["cursor"].clone();
     let deadline = Instant::now() + Duration::from_secs(4);
     let read = loop {
-        let read = call(&env, instance, "read", "task_read",
-            json!({"task":task, "cursor":cursor, "timeMs":100}));
+        let read = call(&env, instance, "read", "task_input",
+            json!({"task":task, "cursor":cursor, "waitMs":100}));
         assert_eq!(read["type"], "reply", "{read}");
         output.push_str(read["message"]["stdout"].as_str().unwrap());
         cursor = read["message"]["cursor"].clone();
@@ -176,7 +176,7 @@ fn bash_wait_returns_completed_pty_output_and_status() {
         "block",
         "bash_run",
         json!({
-            "command":"sleep 0.1; printf 'BLOCK-RESULT\\n'; exit 0", "waitMs":3000, "tty":true
+            "command":"sleep 0.1; printf 'BLOCK-RESULT\\n'; exit 0", "waitMs":3000, "pty":true
         }),
     );
     assert_eq!(result["type"], "reply", "{result}");
@@ -197,7 +197,7 @@ fn terminal_close_preserves_terminated_status_for_later_read() {
         instance,
         "run",
         "bash_run",
-        json!({"command":"sleep 20","waitMs":0,"tty":true}),
+        json!({"command":"sleep 20","waitMs":0,"pty":true}),
     );
     assert_eq!(started["type"], "reply", "{started}");
     let task = started["message"]["task"]["id"].as_str().unwrap();
@@ -206,15 +206,15 @@ fn terminal_close_preserves_terminated_status_for_later_read() {
         instance,
         "close",
         "task_manage",
-        json!({"command":"close","id":task}),
+        json!({"command":"close","task":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");
     let read = call(
         &env,
         instance,
         "later-read",
-        "task_read",
-        json!({"task":task,"timeMs":3000,"untilExit":true}),
+        "task_input",
+        json!({"task":task,"waitMs":3000,"untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert_ne!(read["message"]["task"]["status"], "running", "{read}");
@@ -248,14 +248,14 @@ fn bash_cancellation_isolated_from_concurrent_request() {
         instance,
         "long",
         "bash_run",
-        json!({"command":"sleep 20","timeoutMs":25000}),
+        json!({"command":"sleep 20","waitMs":25000}),
     );
     let short = request(
         &env,
         instance,
         "short",
         "bash_run",
-        json!({"command":"printf survives","timeoutMs":5000}),
+        json!({"command":"printf survives","waitMs":5000}),
     );
     writer.send("tool", &long).unwrap();
     writer.send("tool", &short).unwrap();

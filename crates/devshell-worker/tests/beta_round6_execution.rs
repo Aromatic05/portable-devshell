@@ -196,7 +196,7 @@ fn task_output_remains_readable_after_terminal_close() {
         "bash_run",
         json!({
             "command":"printf 'BEFORE-CLOSE\n'; touch close-ready; sleep 20",
-            "waitMs":0, "tty":true
+            "waitMs":0, "pty":true
         }),
     );
     assert_eq!(run["type"], "reply", "{run}");
@@ -214,15 +214,15 @@ fn task_output_remains_readable_after_terminal_close() {
         instance,
         "close",
         "task_manage",
-        json!({"command":"close","id":task}),
+        json!({"command":"close","task":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");
     let read = call(
         &env,
         instance,
         "read",
-        "task_read",
-        json!({"task":task,"cursor":run["message"]["cursor"],"timeMs":3000,"untilExit":true}),
+        "task_input",
+        json!({"task":task,"cursor":run["message"]["cursor"],"waitMs":3000,"untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert_ne!(read["message"]["task"]["status"], "running", "{read}");
@@ -362,7 +362,7 @@ fn daemon_stop_start_reopens_ipc_and_keeps_workspace_files() {
         instance,
         "before",
         "bash_run",
-        json!({"command":"printf before","timeoutMs":3000}),
+        json!({"command":"printf before","waitMs":3000}),
     );
     assert_eq!(before["type"], "reply", "{before}");
     assert_eq!(before["message"]["stdout"], "before", "{before}");
@@ -380,7 +380,7 @@ fn daemon_stop_start_reopens_ipc_and_keeps_workspace_files() {
         instance,
         "after",
         "bash_run",
-        json!({"command":"cat survivor.txt","timeoutMs":3000}),
+        json!({"command":"cat survivor.txt","waitMs":3000}),
     );
     assert_eq!(after["type"], "reply", "{after}");
     assert_eq!(after["message"]["stdout"], "persisted\n", "{after}");
@@ -398,7 +398,7 @@ fn concurrent_real_ipc_tool_calls_complete_with_distinct_responses() {
                 instance,
                 "tool-a",
                 "bash_run",
-                json!({"command":"sleep 0.15; printf alpha","timeoutMs":3000}),
+                json!({"command":"sleep 0.15; printf alpha","waitMs":3000}),
             )
         });
         let second = scope.spawn(|| {
@@ -407,7 +407,7 @@ fn concurrent_real_ipc_tool_calls_complete_with_distinct_responses() {
                 instance,
                 "tool-b",
                 "bash_run",
-                json!({"command":"printf beta","timeoutMs":3000}),
+                json!({"command":"printf beta","waitMs":3000}),
             )
         });
         let first = first.join().unwrap();
@@ -450,7 +450,7 @@ fn cancellation_settles_within_bound_and_next_call_remains_usable() {
                 instance,
                 "cancelled",
                 "bash_run",
-                json!({"command":"sleep 30","timeoutMs":35000}),
+                json!({"command":"sleep 30","waitMs":35000}),
             ),
         )
         .unwrap();
@@ -495,7 +495,7 @@ fn cancellation_settles_within_bound_and_next_call_remains_usable() {
         instance,
         "recovered",
         "bash_run",
-        json!({"command":"printf recovered","timeoutMs":3000}),
+        json!({"command":"printf recovered","waitMs":3000}),
     );
     assert_eq!(recovered["type"], "reply", "{recovered}");
     assert_eq!(recovered["message"]["stdout"], "recovered", "{recovered}");

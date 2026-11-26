@@ -244,15 +244,19 @@ pub(super) fn collect(
         termination,
         wait_reason: None,
         wait_ms: None,
+        until_exit: None,
         task: Some(TaskDescriptor {
             id: id.into(),
             status,
-            tty: descriptor["tty"] == true,
+            pty: descriptor["pty"] == true || descriptor["tty"] == true,
         }),
-        cursor: Some(TaskCursor {
-            seq: descriptor["latestSeq"].as_u64().unwrap_or(0),
-            stdout: stdout_end,
-            stderr: stderr_end,
-        }),
+        cursor: Some(
+            TaskCursor {
+                seq: descriptor["latestSeq"].as_u64().unwrap_or(0),
+                stdout: stdout_end,
+                stderr: stderr_end,
+            }
+            .encode(),
+        ),
     })
 }

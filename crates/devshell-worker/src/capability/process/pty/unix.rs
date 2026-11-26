@@ -23,21 +23,30 @@ use crate::capability::process::child::{ExitLatch, reap, wait_until_exit};
 
 static SHELL_STARTUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(in crate::capability::process) fn spawn_interactive(
-    cwd: &ResolvedPath,
-    env: &std::collections::BTreeMap<String, Option<String>>,
-    execution: Option<&crate::capability::execution::ExecutionConfig>,
-    cols: u16,
-    rows: u16,
-) -> Result<SpawnedTerminal, RpcError> {
-    let shell = if cfg!(test) {
+pub(in crate::capability::process) fn default_interactive_shell() -> String {
+    if cfg!(test) {
         "/bin/sh".to_string()
     } else {
         std::env::var("SHELL")
             .ok()
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "/bin/sh".to_string())
-    };
+    }
+}
+
+pub(in crate::capability::process) fn spawn_interactive(
+    cwd: &ResolvedPath,
+    env: &std::collections::BTreeMap<String, Option<String>>,
+    execution: Option<&crate::capability::execution::ExecutionConfig>,
+    shell: Option<&str>,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnedTerminal, RpcError> {
+    let shell = shell
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_interactive_shell);
     let startup = if cfg!(test) {
         None
     } else {

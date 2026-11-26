@@ -11,18 +11,37 @@ use crate::instance::sandbox::path::ResolvedPath;
 
 use crate::capability::process::child::ExitLatch;
 
+pub(in crate::capability::process) fn default_interactive_shell() -> String {
+    "powershell.exe".to_string()
+}
+
 pub(in crate::capability::process) fn spawn_interactive(
     cwd: &ResolvedPath,
     env: &std::collections::BTreeMap<String, Option<String>>,
     execution: Option<&crate::capability::execution::ExecutionConfig>,
+    shell: Option<&str>,
     cols: u16,
     rows: u16,
 ) -> Result<SpawnedTerminal, RpcError> {
-    let command = ShellCommand::prepare_program(
-        "powershell.exe".into(),
+    let program = shell
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_interactive_shell);
+    let is_powershell = std::path::Path::new(&program)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("powershell") || stem.eq_ignore_ascii_case("pwsh"));
+    let args = if is_powershell {
         ["-NoLogo", "-NoProfile", "-NoExit"]
             .map(std::ffi::OsString::from)
-            .to_vec(),
+            .to_vec()
+    } else {
+        Vec::new()
+    };
+    let command = ShellCommand::prepare_program(
+        program.into(),
+        args,
         env,
         execution,
         true,

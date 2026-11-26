@@ -28,6 +28,9 @@ impl Host {
         if input.command.trim().is_empty() && !input.interactive {
             return Err(invalid("command is required"));
         }
+        if let Some(name) = input.name.as_deref() {
+            validate_name(name)?;
+        }
         if input
             .stdin
             .as_ref()
@@ -71,6 +74,9 @@ impl Host {
         if input.interactive && !input.tty {
             return Err(invalid("interactive shell requires tty"));
         }
+        if input.persistent && !input.interactive {
+            return Err(invalid("persistent process requires interactive shell"));
+        }
         let dimensions = if input.tty {
             let cols = input.cols.unwrap_or(80);
             let rows = input.rows.unwrap_or(24);
@@ -100,11 +106,10 @@ impl Host {
             ));
         }
         while registry.processes.len() >= MAX_RESOURCES {
-            let Some(index) = registry
-                .order
-                .iter()
-                .position(|id| registry.processes[id].descriptor().state != "running")
-            else {
+            let Some(index) = registry.order.iter().position(|id| {
+                let process = &registry.processes[id];
+                !process.is_persistent() && process.descriptor().state != "running"
+            }) else {
                 return Err(RpcError::new(
                     "process.resourceLimit",
                     "all process slots are active",
@@ -141,6 +146,8 @@ impl Host {
                 execution: self.execution.as_ref(),
                 dimensions,
                 interactive: input.interactive,
+                persistent: input.persistent,
+                name: input.name,
                 stdin: input.stdin,
                 keep_stdin: input.keep_stdin,
                 workspace: input.workspace.map(|_| workspace),
@@ -193,4 +200,21 @@ pub(super) fn lock_error<T>(_: std::sync::PoisonError<T>) -> RpcError {
 
 pub(super) fn io_error(error: std::io::Error) -> RpcError {
     RpcError::new("process.ioFailed", error.to_string())
+}
+
+fn validate_name(name: &str) -> Result<(), RpcError> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 64 {
+        return Err(invalid("invalid process name"));
+    }
+    if !bytes[0].is_ascii_alphanumeric() {
+        return Err(invalid("invalid process name"));
+    }
+    if !bytes[1..]
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(invalid("invalid process name"));
+    }
+    Ok(())
 }

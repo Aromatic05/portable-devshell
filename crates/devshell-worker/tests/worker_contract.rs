@@ -344,7 +344,6 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "task_input",
         "task_inspect",
         "task_manage",
-        "task_read",
     ];
     assert_eq!(
         catalog
@@ -382,25 +381,49 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         .find(|tool| tool["name"] == "bash_run")
         .unwrap();
     assert_eq!(
-        bash_schema["inputSchema"]["properties"]["timeoutMs"]["maximum"],
-        100_000
+        bash_schema["inputSchema"]["properties"]["waitMs"]["maximum"],
+        3_600_000
     );
+    assert!(bash_schema["inputSchema"]["properties"].get("pty").is_some());
+    for removed in ["timeoutMs", "maxCaptureBytes", "stdin", "keepStdin", "tty"] {
+        assert!(
+            bash_schema["inputSchema"]["properties"].get(removed).is_none(),
+            "bash_run should not expose {removed}"
+        );
+    }
     assert!(
         bash_schema["inputSchema"]["required"]
             .as_array()
             .is_some_and(|required| required.iter().any(|field| field == "command")
-                && !required.iter().any(|field| field == "timeoutMs"))
+                && !required.iter().any(|field| field == "waitMs"))
     );
     assert_eq!(
         bash_schema["inputSchema"]["properties"]["command"]["minLength"],
         1
     );
-    let task_read = catalog.iter().find(|tool| tool["name"] == "task_read").unwrap();
-    for field in ["task", "cursor", "timeMs", "untilExit"] {
-        assert!(task_read["inputSchema"]["properties"].get(field).is_some(), "task_read missing {field}");
+    assert!(catalog.iter().all(|tool| tool["name"] != "task_read"));
+    let task_input = catalog.iter().find(|tool| tool["name"] == "task_input").unwrap();
+    assert_eq!(task_input["inputSchema"]["required"], serde_json::json!(["task"]));
+    for field in ["task", "input", "cursor", "waitMs", "untilExit"] {
+        assert!(task_input["inputSchema"]["properties"].get(field).is_some(), "task_input missing {field}");
     }
-    for field in ["task", "cursor", "waitReason", "stdout", "stderr"] {
-        assert!(task_read["outputSchema"]["properties"].get(field).is_some(), "task_read output missing {field}");
+    assert!(task_input["inputSchema"]["properties"].get("eof").is_none());
+    for field in ["task", "cursor", "waitReason", "stdout", "stderr", "untilExit"] {
+        assert!(task_input["outputSchema"]["properties"].get(field).is_some(), "task_input output missing {field}");
+    }
+    let task_inspect = catalog.iter().find(|tool| tool["name"] == "task_inspect").unwrap();
+    assert_eq!(task_inspect["inputSchema"]["required"], serde_json::json!(["task"]));
+    assert!(task_inspect["inputSchema"]["properties"].get("terminal").is_none());
+    for field in ["task", "state", "humanControl", "seq", "rows", "cols", "cursorRow", "cursorCol", "alternateScreen", "text"] {
+        assert!(task_inspect["outputSchema"]["properties"].get(field).is_some(), "task_inspect output missing {field}");
+    }
+    for omitted in ["formatted", "restore"] {
+        assert!(task_inspect["outputSchema"]["properties"].get(omitted).is_none(), "task_inspect should omit {omitted}");
+    }
+    let task_manage = catalog.iter().find(|tool| tool["name"] == "task_manage").unwrap();
+    assert_eq!(task_manage["inputSchema"]["required"], serde_json::json!(["command"]));
+    for field in ["command", "task", "name", "cwd", "shell", "cols", "rows"] {
+        assert!(task_manage["inputSchema"]["properties"].get(field).is_some(), "task_manage missing {field}");
     }
     let file_edit_schema = catalog
         .iter()
@@ -471,18 +494,13 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         assert!(catalog.iter().all(|tool| tool["name"] != retired));
     }
 
-    let task_input = catalog.iter().find(|tool| tool["name"] == "task_input").unwrap();
-    assert_eq!(task_input["inputSchema"]["required"], serde_json::json!(["task"]));
-    for property in ["input", "eof"] {
-        assert!(task_input["inputSchema"]["properties"].get(property).is_some());
-    }
     let bash_run = catalog.iter().find(|tool| tool["name"] == "bash_run").unwrap();
     let description = bash_run["description"].as_str().unwrap();
-    for field in ["task_read", "waitMs", "file_read"] {
+    for field in ["task_input", "waitMs", "file_read"] {
         assert!(description.contains(field));
     }
     assert_eq!(bash_run["_meta"]["devshell"]["mcp"]["title"], "Run shell command");
-    for retired in ["tmux_run", "tmux_read", "tmux_input", "tmux_manage", "tmux_inspect"] {
+    for retired in ["tmux_run", "tmux_read", "tmux_input", "tmux_manage", "tmux_inspect", "task_read"] {
         assert!(catalog.iter().all(|tool| tool["name"] != retired));
     }
 
@@ -499,7 +517,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "type": "request",
             "id": "missing-workspace",
             "method": "bash_run",
-            "message": { "input": { "command": command, "timeoutMs": 30_000 }, "context": { "ctxId": "ctx-explicit", "source": "mcp" } }
+            "message": { "input": { "command": command }, "context": { "ctxId": "ctx-explicit", "source": "mcp" } }
         }),
     );
     assert_eq!(missing_workspace["type"], "error", "{missing_workspace}");
@@ -514,8 +532,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "id": "3",
             "method": "bash_run",
             "message": { "input": {
-                "command": command,
-                "timeoutMs": 30_000
+                "command": command
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -616,8 +633,7 @@ fn bash_run_accepts_bare_workspace_relative_cwd() {
             "method": "bash_run",
             "message": { "input": {
                 "command": command,
-                "cwd": "extensions/stats",
-                "timeoutMs": 30_000
+                "cwd": "extensions/stats"
             }, "context": {
                 "ctxId": "ctx-bare-cwd",
                 "source": "mcp",
@@ -645,8 +661,7 @@ fn bash_run_accepts_bare_workspace_relative_cwd() {
             "method": "bash_run",
             "message": { "input": {
                 "command": root_command,
-                "cwd": ".",
-                "timeoutMs": 30_000
+                "cwd": "."
             }, "context": {
                 "ctxId": "ctx-dot-cwd",
                 "source": "mcp",
@@ -667,8 +682,7 @@ fn bash_run_accepts_bare_workspace_relative_cwd() {
             "method": "bash_run",
             "message": { "input": {
                 "command": command,
-                "cwd": "~/extensions/stats",
-                "timeoutMs": 30_000
+                "cwd": "~/extensions/stats"
             }, "context": {
                 "ctxId": "ctx-home-cwd",
                 "source": "mcp",
@@ -859,7 +873,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(missing_timeout["message"]["exitCode"], 0);
     assert_eq!(missing_timeout["message"]["termination"], "exited");
 
-    let timed_out = env.rpc(
+    let wait_expired = env.rpc(
         instance,
         "tool",
         &serde_json::json!({
@@ -869,19 +883,28 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "method": "bash_run",
             "message": { "input": {
                 "command": timeout_command,
-                "timeoutMs": 10
+                "waitMs": 10
             }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(timed_out["type"], "reply");
-    assert_eq!(timed_out["message"]["termination"], "timeout");
-    assert_eq!(timed_out["message"]["timedOut"], true);
-    assert!(timed_out["message"].get("exitCode").is_none());
-    #[cfg(unix)]
-    assert!(timed_out["message"]["termSignal"].as_i64().is_some());
-    #[cfg(windows)]
-    assert!(timed_out["message"].get("termSignal").is_none());
-    assert!(timed_out["message"].get("artifactWarnings").is_none());
+    assert_eq!(wait_expired["type"], "reply", "{wait_expired}");
+    assert_eq!(wait_expired["message"]["termination"], "running");
+    assert_eq!(wait_expired["message"]["waitReason"], "timeout");
+    assert!(wait_expired["message"].get("exitCode").is_none());
+    assert!(wait_expired["message"]["cursor"].as_str().is_some_and(|c| c.starts_with("tc1_")));
+    let running_id = wait_expired["message"]["task"]["id"].as_str().unwrap();
+    let closed = env.rpc(
+        instance,
+        "tool",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "5-close",
+            "method": "task_manage",
+            "message": { "input": { "command": "close", "task": running_id }, "context": { "workspace": env.workspace() } }
+        }),
+    );
+    assert_eq!(closed["type"], "reply", "{closed}");
 
     let too_long = env.rpc(
         instance,
@@ -893,7 +916,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "true",
-                "timeoutMs": 100001
+                "waitMs": 3_600_001
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -903,13 +926,13 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         too_long["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("100000")
+            .contains("3600000")
     );
 
     #[cfg(unix)]
-    let output_command = "awk 'BEGIN { for (i = 0; i < 2000; i++) printf \"x\" }'";
+    let output_command = "head -c 5242880 /dev/zero | tr '\\000' x";
     #[cfg(windows)]
-    let output_command = "[Console]::Out.Write([string]::new([char]'x', 2000))";
+    let output_command = "[Console]::Out.Write([string]::new([char]'x', 5242880))";
 
     let output_limited = env.rpc(
         instance,
@@ -921,8 +944,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "method": "bash_run",
             "message": { "input": {
                 "command": output_command,
-                "timeoutMs": 30_000,
-                "maxCaptureBytes": 128
+                "waitMs": 30_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -954,8 +976,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "method": "bash_run",
             "message": { "input": {
                 "command": exact_output_command,
-                "timeoutMs": 30_000,
-                "maxCaptureBytes": 128
+                "waitMs": 30_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -979,11 +1000,11 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     );
     assert_eq!(
         output_limited["message"]["stdoutArtifact"]["sourceBytes"],
-        2000
+        5_242_880
     );
     assert_eq!(
         output_limited["message"]["stdoutArtifact"]["storedBytes"],
-        2000
+        5_242_880
     );
     assert_eq!(
         output_limited["message"]["stdoutArtifact"]["artifactTruncated"],
@@ -994,28 +1015,6 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         .expect("truncated stdout must expose a file_read recovery path");
     assert!(truncated_path.starts_with("/.devshell/tool-results/"));
     assert!(truncated_path.ends_with("/stdout"));
-    let recovered = env.rpc(
-        instance,
-        "tool",
-        &serde_json::json!({
-            "protocol": "rpc",
-            "type": "request",
-            "id": "6-recover",
-            "method": "file_read",
-            "message": { "input": {
-                "files": [{
-                    "path": truncated_path,
-                    "view": "content",
-                    "selector": "1-1:raw"
-                }]
-            }, "context": { "workspace": env.workspace() } }
-        }),
-    );
-    assert_eq!(recovered["type"], "reply", "{recovered}");
-    assert_eq!(
-        recovered["message"]["files"][0]["content"],
-        format!("1:{}", "x".repeat(2000))
-    );
 
     // The MCP model projection trims well below the older 24 KiB threshold.
     // Medium-sized streams must already have a recovery artifact at the
@@ -1032,7 +1031,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "protocol": "rpc", "type": "request", "id": "6-medium",
             "method": "bash_run",
             "message": { "input": {
-                "command": medium_command, "timeoutMs": 30_000
+                "command": medium_command, "waitMs": 30_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1067,7 +1066,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "type": "request",
             "id": "7-recovery",
             "method": "bash_run",
-            "message": { "input": { "command": recovery_command, "timeoutMs": 30_000 }, "context": { "workspace": env.workspace() } }
+            "message": { "input": { "command": recovery_command, "waitMs": 30_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
     assert_eq!(recovery["type"], "reply", "{recovery}");
@@ -1111,7 +1110,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
             "type": "request",
             "id": "9",
             "method": "bash_run",
-            "message": { "input": { "command": compact_command, "timeoutMs": 30_000 }, "context": { "workspace": env.workspace() } }
+            "message": { "input": { "command": compact_command, "waitMs": 30_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
     assert_eq!(compact["type"], "reply", "{compact}");
@@ -1145,18 +1144,17 @@ fn bash_run_closes_omitted_stdin_and_handles_bidirectional_pipe_pressure() {
             "type": "request",
             "id": "stdin-eof",
             "method": "bash_run",
-            "message": { "input": { "command": eof_command, "timeoutMs": 2_000 }, "context": { "workspace": env.workspace() } }
+            "message": { "input": { "command": eof_command, "waitMs": 2_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
     assert_eq!(eof["type"], "reply", "{eof}");
     assert_eq!(eof["message"]["termination"], "exited", "{eof}");
     assert_eq!(eof["message"]["stdout"], "done", "{eof}");
 
-    let stdin = "i".repeat(512 * 1024);
     #[cfg(unix)]
-    let pressure_command = "head -c 524288 /dev/zero | tr '\\0' o; cat >/dev/null; printf done >&2";
+    let pressure_command = "head -c 524288 /dev/zero | tr '\\0' o; printf done >&2";
     #[cfg(windows)]
-    let pressure_command = "[Console]::Out.Write('o' * 524288); $null = [Console]::In.ReadToEnd(); [Console]::Error.Write('done')";
+    let pressure_command = "[Console]::Out.Write('o' * 524288); [Console]::Error.Write('done')";
     let pressure = env.rpc(
         instance,
         "tool",
@@ -1167,9 +1165,7 @@ fn bash_run_closes_omitted_stdin_and_handles_bidirectional_pipe_pressure() {
             "method": "bash_run",
             "message": { "input": {
                 "command": pressure_command,
-                "stdin": stdin,
-                "timeoutMs": 5_000,
-                "maxCaptureBytes": 1024
+                "waitMs": 5_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1212,7 +1208,7 @@ fn bash_run_does_not_load_login_or_interactive_shell_profiles() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "printf '%s/%s' \"${DEVSHELL_PROFILE_MARKER:-unset}\" \"${DEVSHELL_RC_MARKER:-unset}\"",
-                "timeoutMs": 2_000
+                "waitMs": 2_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1244,7 +1240,7 @@ fn bash_run_ignores_inherited_bash_env_but_allows_an_explicit_override() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
-                "timeoutMs": 2_000
+                "waitMs": 2_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1262,7 +1258,7 @@ fn bash_run_ignores_inherited_bash_env_but_allows_an_explicit_override() {
             "message": { "input": {
                 "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
                 "env": { "BASH_ENV": bash_env },
-                "timeoutMs": 2_000
+                "waitMs": 2_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1293,7 +1289,7 @@ fn bash_run_cleans_background_processes_after_the_shell_exits() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "sleep 2 & printf done",
-                "timeoutMs": 500
+                "waitMs": 500
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1329,8 +1325,7 @@ fn bash_run_keeps_legal_large_capture_within_the_rpc_frame() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "head -c 7340032 /dev/zero | tr '\\0' x",
-                "timeoutMs": 30_000,
-                "maxCaptureBytes": 16_777_216
+                "waitMs": 30_000
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1340,7 +1335,7 @@ fn bash_run_keeps_legal_large_capture_within_the_rpc_frame() {
     assert_eq!(response["message"]["stdoutBytes"], 7_340_032, "{response}");
     assert_eq!(response["message"]["stdoutTruncated"], true, "{response}");
     assert!(
-        response["message"]["stdout"].as_str().unwrap().len() <= 512 * 1024,
+        response["message"]["stdout"].as_str().unwrap().len() <= 4 * 1024 * 1024 + 64,
         "{response}"
     );
     assert_eq!(
@@ -1502,8 +1497,7 @@ fn workspace_security_mode_rejects_absolute_bash_cwd() {
             "method": "bash_run",
             "message": { "input": {
                 "command": "pwd",
-                "cwd": outside.to_string_lossy(),
-                "timeoutMs": 30_000
+                "cwd": outside.to_string_lossy()
             }, "context": { "workspace": env.workspace() } }
         }),
     );
@@ -1527,7 +1521,7 @@ fn stateless_tools_still_enforce_workspace_security() {
 
     for (method, input) in [
         ("bash_run", serde_json::json!({
-            "command": "pwd", "cwd": env.home(), "timeoutMs": 30_000
+            "command": "pwd", "cwd": env.home()
         })),
         ("file_read", serde_json::json!({
             "files": [{"path": outside, "view": "content"}]
@@ -1538,16 +1532,13 @@ fn stateless_tools_still_enforce_workspace_security() {
         ("file_glob", serde_json::json!({"patterns": [outside]})),
         ("file_grep", serde_json::json!({"paths": [outside], "pattern": "original"})),
         ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "waitMs": 0})),
-        ("task_read", serde_json::json!({"task": "denied"})),
+        ("task_input", serde_json::json!({"task": "denied"})),
         ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
-        ("task_inspect", serde_json::json!({"terminal": "denied"})),
+        ("task_inspect", serde_json::json!({"task": "denied"})),
         ("task_manage", serde_json::json!({"command": "list"})),
         ("task_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
-        ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "tty": true})),
-        ("task_manage", serde_json::json!({"command": "create", "cwd": env.home()})),
-        ("task_read", serde_json::json!({"task": "denied"})),
-        ("task_input", serde_json::json!({"task": "denied", "input": "x"})),
-        ("task_inspect", serde_json::json!({"terminal": "denied"})),
+        ("bash_run", serde_json::json!({"command": "pwd", "cwd": env.home(), "pty": true})),
+        ("task_manage", serde_json::json!({"command": "close", "task": "denied"})),
     ] {
         let denied = env.rpc(instance, "tool", &serde_json::json!({
             "protocol": "rpc",
@@ -1967,7 +1958,7 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
             "message": {
                 "input": {
                     "command": long_command,
-                    "timeoutMs": 5000
+                    "waitMs": 5000
                 },
                 "context": { "workspace": env.workspace() }
             }
@@ -2184,7 +2175,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
             "message": {
                 "input": {
                     "command": cancel_command,
-                    "timeoutMs": 10000
+                    "waitMs": 10000
                 },
                 "context": {
                     "ctxId": "ctx-cancel",
@@ -2234,6 +2225,41 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         call_response["error"]["code"], "tool.cancelled",
         "{call_response}"
     );
+
+    // Cancelling the wait does NOT kill the background process; task_manage(close) terminates it.
+    let listed = env.rpc(
+        instance,
+        "tool",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "list-after-cancel",
+            "method": "task_manage",
+            "message": { "input": { "command": "list" }, "context": { "workspace": env.workspace() } }
+        }),
+    );
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let running_id = listed["message"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["state"] == "running")
+        .expect("cancelled wait must leave process running")["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let closed = env.rpc(
+        instance,
+        "tool",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "close-after-cancel",
+            "method": "task_manage",
+            "message": { "input": { "command": "close", "task": running_id }, "context": { "workspace": env.workspace() } }
+        }),
+    );
+    assert_eq!(closed["type"], "reply", "{closed}");
     assert!(!marker.exists());
 
     drop(stdin);

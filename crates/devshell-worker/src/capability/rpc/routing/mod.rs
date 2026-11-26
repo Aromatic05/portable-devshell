@@ -175,7 +175,7 @@ impl RpcRouter {
             }
             if !matches!(request.method.as_str(),
                 "bash_run" | "file_read" | "file_edit" | "file_glob" | "file_grep"
-                | "task_read" | "task_input" | "task_inspect" | "task_manage") {
+                | "task_input" | "task_inspect" | "task_manage") {
                 return Err(RpcError::new("rpc.methodNotFound", "Tool is not available in stateless mode."));
             }
             // The tools still share a Worker call type. The instance root is

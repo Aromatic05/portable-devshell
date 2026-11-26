@@ -15,7 +15,7 @@ fn call(env: &TestEnv, id: usize, command: &str) -> Value {
         &json!({
             "protocol": "rpc", "type": "request", "id": format!("bench-{id}"), "method": "bash_run",
             "message": {
-                "input": { "command": command, "timeoutMs": 8000 },
+                "input": { "command": command, "waitMs": 8000 },
                 "context": { "ctxId": "bench", "source": "mcp", "workspace": env.workspace() }
             }
         }),

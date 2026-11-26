@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -25,6 +26,8 @@ pub(in crate::capability::process) struct SpawnSpec<'a> {
     pub execution: Option<&'a ExecutionConfig>,
     pub dimensions: Option<(u16, u16)>,
     pub interactive: bool,
+    pub persistent: bool,
+    pub name: Option<String>,
     pub stdin: Option<String>,
     pub keep_stdin: bool,
     pub workspace: Option<std::path::PathBuf>,
@@ -45,6 +48,16 @@ pub(in crate::capability::process) struct Exit {
 pub(in crate::capability::process) struct Descriptor {
     pub id: String,
     pub tty: bool,
+    pub pty: bool,
+    pub interactive: bool,
+    pub persistent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    pub created_at_ms: u128,
     pub state: &'static str,
     pub latest_seq: u64,
     pub workspace: Option<std::path::PathBuf>,
@@ -131,20 +144,30 @@ impl State {
 pub(in crate::capability::process) struct ManagedProcess {
     pub(super) id: String,
     pub(super) tty: bool,
-    pub(super) control: Control,
+    pub(super) interactive: bool,
+    pub(super) persistent: bool,
+    pub(super) name: Option<String>,
+    pub(super) cwd: Option<String>,
+    pub(super) command: Option<String>,
+    pub(super) closed: AtomicBool,
+    pub(super) control: Mutex<Arc<Control>>,
     pub(super) input: Mutex<Option<SyncSender<Vec<u8>>>>,
     pub(super) workspace: Option<std::path::PathBuf>,
     pub(super) provenance: Option<(String, std::path::PathBuf)>,
-    pub(super) timed_out: std::sync::atomic::AtomicBool,
+    pub(super) timed_out: AtomicBool,
     pub(super) state: Mutex<State>,
     pub(super) changed: Condvar,
 }
 
 impl ManagedProcess {
+    pub fn is_persistent(&self) -> bool {
+        self.persistent
+    }
+
     pub fn provenance(&self) -> serde_json::Value {
         match &self.provenance {
             Some((command, cwd)) => serde_json::json!({"command": command, "cwd": cwd}),
-            None => serde_json::Value::Null,
+            None => serde_json::json!({}),
         }
     }
 
@@ -161,10 +184,17 @@ impl ManagedProcess {
         Descriptor {
             id: self.id.clone(),
             tty: self.tty,
+            pty: self.tty,
+            interactive: self.interactive,
+            persistent: self.persistent,
+            name: self.name.clone(),
+            cwd: self.cwd.clone(),
+            command: self.command.clone(),
+            created_at_ms: state.created_at_ms,
             state: status,
             latest_seq: state.output.latest_seq(),
             workspace: self.workspace.clone(),
-            timed_out: self.timed_out.load(std::sync::atomic::Ordering::Acquire),
+            timed_out: self.timed_out.load(Ordering::Acquire),
             human_control: state.active_controller().is_some(),
             terminal: self.terminal_descriptor(state),
             exit,
@@ -218,17 +248,23 @@ impl ManagedProcess {
     }
 
     pub(super) fn enqueue(&self, data: &[u8]) -> Result<(), RpcError> {
+        let stdin_closed = || {
+            if self.tty {
+                RpcError::new("process.stdinClosed", "stdin is closed")
+            } else {
+                RpcError::new(
+                    "process.stdinClosed",
+                    "stdin is closed for non-PTY tasks; rerun bash_run with pty=true for interactive input",
+                )
+            }
+        };
         let input = self.input.lock().map_err(lock_error)?;
-        let input = input
-            .as_ref()
-            .ok_or_else(|| RpcError::new("process.stdinClosed", "stdin is closed"))?;
+        let input = input.as_ref().ok_or_else(stdin_closed)?;
         input.try_send(data.to_vec()).map_err(|error| match error {
             TrySendError::Full(_) => {
                 RpcError::new("process.inputBusy", "terminal input queue is full")
             }
-            TrySendError::Disconnected(_) => {
-                RpcError::new("process.stdinClosed", "stdin is closed")
-            }
+            TrySendError::Disconnected(_) => stdin_closed(),
         })
     }
 
@@ -328,7 +364,8 @@ impl ManagedProcess {
             .as_mut()
             .ok_or_else(|| RpcError::new("process.notTerminal", "process has no PTY"))?;
         // Keep the output reader at the same size boundary as the native PTY.
-        self.control
+        let control = self.control.lock().map_err(lock_error)?.clone();
+        control
             .resize(cols, rows)
             .map_err(|error| RpcError::new("process.resizeFailed", error))?;
         screen.resize(cols, rows)?;
@@ -338,7 +375,9 @@ impl ManagedProcess {
     }
 
     pub fn kill(&self) -> Result<(), RpcError> {
-        self.control
+        self.closed.store(true, Ordering::Release);
+        let control = self.control.lock().map_err(lock_error)?.clone();
+        control
             .kill()
             .map_err(|error| RpcError::new("process.killFailed", error))
     }

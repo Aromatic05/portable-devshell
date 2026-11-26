@@ -15,9 +15,7 @@ use crate::tool::{
 };
 
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_TIMEOUT_MS: u64 = 100_000;
-const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
+const MAX_WAIT_MS: u64 = 3_600_000;
 // Model-facing MCP projections are smaller than the Worker capture budget.
 // Retain the original streams before any protocol-side presentation trimming.
 
@@ -52,7 +50,7 @@ impl ToolHandler for BashRunTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
-            "Execute a shell command. waitMs controls how long to wait; a running command returns a task ID. timeoutMs is an optional hard execution deadline. tty allocates a PTY at startup. Use task_read and task_input to continue. Retained output paths can be read with file_read.",
+            "Execute a shell command. waitMs controls how long to wait (default 10000ms); a still-running command returns a task ID and cursor. Set pty=true to allocate a PTY for interactive input. Use task_input to read/poll output or send input, task_inspect to inspect a PTY screen, and task_manage to list or close tasks. Retained output paths can be read with file_read.",
             [ToolCapability::Execute],
             serde_json::json!({
                 "devshell": { "mcp": {
@@ -65,8 +63,9 @@ impl ToolHandler for BashRunTool {
                     "inputHints": {
                         "command": "Shell command. Run devshell help to discover authorized MCP model CLI commands.",
                         "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
-                        "stdin": "Omit to send EOF.",
-                        "timeoutMs": "Optional hard execution deadline.", "waitMs": "Wait before returning a running task ID; does not stop the process.", "tty": "Allocate a PTY at startup."
+                        "env": "Environment variable overrides; null removes an inherited variable.",
+                        "pty": "Allocate a PTY at startup for interactive commands; required to send input via task_input.",
+                        "waitMs": "Milliseconds to wait before returning a running task ID (default 10000, max 3600000); does not stop the process."
                     },
                     "title": "Run shell command"
                 }}
@@ -82,42 +81,10 @@ impl ToolHandler for BashRunTool {
                 "command cannot be empty",
             ));
         }
-        let timeout_ms = params.timeout_ms.unwrap_or(MAX_TIMEOUT_MS);
-        if params.wait_ms.is_some_and(|wait| wait > 3_600_000) {
+        if params.wait_ms.is_some_and(|wait| wait > MAX_WAIT_MS) {
             return Err(ToolError::new(
                 "tool.invalidArguments",
                 "waitMs cannot exceed 3600000",
-            ));
-        }
-        let max_capture = params
-            .max_capture_bytes
-            .unwrap_or(DEFAULT_MAX_CAPTURE_BYTES);
-        if timeout_ms == 0 || max_capture == 0 {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "timeoutMs and maxCaptureBytes must be positive",
-            ));
-        }
-        if timeout_ms > MAX_TIMEOUT_MS {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "timeoutMs cannot exceed 100000",
-            ));
-        }
-        if max_capture > MAX_CAPTURE_BYTES {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "maxCaptureBytes exceeds the worker limit",
-            ));
-        }
-        if params
-            .stdin
-            .as_ref()
-            .is_some_and(|stdin| stdin.len() > MAX_STDIN_BYTES)
-        {
-            return Err(ToolError::new(
-                "tool.invalidArguments",
-                "stdin exceeds the worker limit",
             ));
         }
         call.policy
@@ -155,7 +122,12 @@ impl ToolHandler for BashRunTool {
             environment.inject(&mut params.env);
         }
         let result = crate::tool::process::run::run(
-            &self.instance, &self.artifacts, &call, params, &task_id, max_capture,
+            &self.instance,
+            &self.artifacts,
+            &call,
+            params,
+            &task_id,
+            DEFAULT_MAX_CAPTURE_BYTES,
         )?;
         #[cfg(unix)]
         if result.termination == BashTermination::Exited

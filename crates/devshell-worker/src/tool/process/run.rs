@@ -31,21 +31,14 @@ pub(crate) fn run(
             "workspace": (!call.stateless).then_some(&call.workspace),
             "env": params.env,
             "preparedEnv": true,
-            "tty": params.tty,
-            "keepStdin": params.keep_stdin,
-            "stdin": params.stdin,
-            "timeoutMs": params.timeout_ms,
+            "tty": params.pty,
+            "keepStdin": params.pty,
+            "persistent": false,
+            "interactive": false,
         }),
     )?;
-    let wait = params
-        .wait_ms
-        .unwrap_or_else(|| params.timeout_ms.unwrap_or(DEFAULT_WAIT_MS));
-    let wait = if params.wait_ms.is_none() && params.timeout_ms.is_some() {
-        wait.saturating_add(1500)
-    } else {
-        wait
-    };
-    let descriptor = wait_for(&client, call, id, descriptor, 0, wait, false, true)?;
+    let wait = params.wait_ms.unwrap_or(DEFAULT_WAIT_MS);
+    let descriptor = wait_for(&client, call, id, descriptor, 0, wait, false, false, 0)?;
     let mut result = collect(
         &client,
         artifacts,
@@ -56,7 +49,14 @@ pub(crate) fn run(
         started,
         call,
     )?;
-    result.wait_reason = Some(if result.termination == super::model::BashTermination::Running { "timeout" } else { "terminal" }.into());
+    result.wait_reason = Some(
+        if result.termination == super::model::BashTermination::Running {
+            "timeout"
+        } else {
+            "terminal"
+        }
+        .into(),
+    );
     result.wait_ms = Some(wait);
     Ok(result)
 }

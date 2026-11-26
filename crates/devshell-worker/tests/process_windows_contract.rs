@@ -21,7 +21,7 @@ fn restart(fixture: &WorkerFixture, instance: &str) {
 fn wait_screen(fixture: &WorkerFixture, id: &str, marker: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let page = fixture.tool("task_inspect", json!({"terminal": id}));
+        let page = fixture.tool("task_inspect", json!({"task": id}));
         if page["text"].as_str().unwrap().contains(marker) {
             return;
         }
@@ -40,11 +40,11 @@ fn persistent_conpty_terminal_survives_worker_restart() {
     let created = fixture.tool(
         "task_manage",
         json!({
-            "command": "create", "shell": "pwsh.exe -NoLogo -NoProfile",
+            "command": "create", "shell": "powershell.exe",
         }),
     );
-    assert_eq!(created["state"], "running");
-    let id = created["id"].as_str().unwrap();
+    assert_eq!(created["task"]["state"], "running");
+    let id = created["task"]["id"].as_str().unwrap();
     fixture.tool(
         "task_input",
         json!({
@@ -69,8 +69,8 @@ fn persistent_conpty_terminal_survives_worker_restart() {
         }),
     );
     wait_screen(&fixture, id, "AFTER-RESTART");
-    fixture.tool("task_manage", json!({"command": "close", "id": id}));
-    let ended = fixture.wait_task(id, json!({}));
+    fixture.tool("task_manage", json!({"command": "close", "task": id}));
+    let ended = fixture.wait_task(id, Value::Null);
     assert_ne!(ended["termination"], "running");
     assert!(ended["stdout"].as_str().unwrap().contains("AFTER-RESTART"));
 }
@@ -80,17 +80,13 @@ fn managed_powershell_pipe_retains_unicode_output_across_restart() {
     let instance = "windows-process-pipe";
     let fixture = WorkerFixture::start(instance);
     let run = fixture.tool("bash_run", json!({
-        "command": "[Console]::WriteLine('WINDOWS_TASK_FIRST_中文'); $value = [Console]::ReadLine(); [Console]::WriteLine(('WINDOWS_TASK_SECOND:' + $value)); [Console]::Error.WriteLine('WINDOWS_STDERR'); exit 7",
-        "waitMs": 0, "keepStdin": true,
+        "command": "Start-Sleep -Milliseconds 300; [Console]::WriteLine('WINDOWS_TASK_FIRST_中文'); [Console]::Error.WriteLine('WINDOWS_STDERR'); exit 7",
+        "waitMs": 0,
     }));
     assert_eq!(run["termination"], "running");
     let id = run["task"]["id"].as_str().unwrap();
     restart(&fixture, instance);
-    fixture.tool(
-        "task_input",
-        json!({"task": id, "input": "hello-windows\n"}),
-    );
-    let result = fixture.wait_task(id, json!({}));
+    let result = fixture.wait_task(id, Value::Null);
     assert_eq!(result["exitCode"], 7);
     assert!(
         result["stdout"]
@@ -99,18 +95,12 @@ fn managed_powershell_pipe_retains_unicode_output_across_restart() {
             .contains("WINDOWS_TASK_FIRST_中文")
     );
     assert!(
-        result["stdout"]
-            .as_str()
-            .unwrap()
-            .contains("WINDOWS_TASK_SECOND:hello-windows")
-    );
-    assert!(
         result["stderr"]
             .as_str()
             .unwrap()
             .contains("WINDOWS_STDERR")
     );
-    let replay = fixture.tool("task_read", json!({"task": id}));
+    let replay = fixture.tool("task_input", json!({"task": id, "waitMs": 0}));
     assert_eq!(replay["stdout"], result["stdout"]);
     assert_eq!(replay["stderr"], result["stderr"]);
 }
@@ -121,7 +111,7 @@ fn native_conpty_shares_model_task_and_remote_control() {
     let fixture = WorkerFixture::start(instance);
     let started = fixture.tool("bash_run", json!({
         "command": "[Console]::WriteLine(('PTY-'+'READY')); $human = [Console]::ReadLine(); [Console]::WriteLine(('human:'+$human)); $model = [Console]::ReadLine(); [Console]::WriteLine(('model:'+$model))",
-        "tty": true, "waitMs": 0,
+        "pty": true, "waitMs": 0,
     }));
     let id = started["task"]["id"].as_str().unwrap();
     wait_screen(&fixture, id, "PTY-READY");
@@ -171,7 +161,7 @@ fn native_conpty_shares_model_task_and_remote_control() {
         json!({"terminalId": id, "generation": generation, "controller": controller}),
     );
     fixture.tool("task_input", json!({"task": id, "input": "agent\r"}));
-    let ended = fixture.wait_task(id, json!({}));
+    let ended = fixture.wait_task(id, Value::Null);
     assert_eq!(ended["exitCode"], 0, "{ended}");
     let stdout = ended["stdout"].as_str().unwrap();
     assert!(stdout.contains("human:operator"), "{stdout}");

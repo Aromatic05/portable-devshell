@@ -60,7 +60,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s|%s|%s|%s' \"$DAEMON_STAGE\" \"$PROCESS_STAGE\" \"$OVERWRITE\" \"${REMOVE_ME-absent}\" \"${DEVSHELL_WORKER_EXECUTION_CONFIG-absent}\"",
-                "timeoutMs": 10000,
+                "waitMs": 10000,
                 "env": { "OVERWRITE": "explicit-value" }
             }),
         );
@@ -113,7 +113,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s' \"$EXECUTION_DIRENV_PROBE\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -147,7 +147,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s' \"$GENERIC_DRIVER_PROBE\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -190,7 +190,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_LAYER\" \"$EXECUTION_OBSERVED\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -221,7 +221,7 @@ mod unix {
         let failed = bash_call(
             &env,
             instance,
-            json!({ "command": "printf ran > command-ran", "timeoutMs": 10000 }),
+            json!({ "command": "printf ran > command-ran", "waitMs": 10000 }),
         );
         assert_eq!(failed["type"], "error", "{failed}");
         assert_eq!(failed["error"]["code"], "execution.providerFailed", "{failed}");
@@ -238,7 +238,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"$EXECUTION_TRANSIENT\"",
-                "timeoutMs": 10000,
+                "waitMs": 10000,
                 "env": { "EXECUTION_TRANSIENT": "request-value" }
             }),
         );
@@ -252,7 +252,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"${EXECUTION_TRANSIENT-absent}\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(isolated["type"], "reply", "{isolated}");
@@ -285,7 +285,7 @@ mod unix {
                 "message": {
                     "input": {
                         "command": "printf '%s|%s\\n' \"$LAYER\" \"${REMOVE_ME-missing}\"",
-                        "waitMs": 3000, "tty": true
+                        "waitMs": 3000, "pty": true
                     },
                     "context": {
                         "workspace": env.workspace(), "source": "mcp",
@@ -337,7 +337,7 @@ mod unix {
             &env,
             instance,
             json!({
-                "command": "printf sandbox-bash", "timeoutMs": 10000
+                "command": "printf sandbox-bash", "waitMs": 10000
             }),
         );
         assert_eq!(bash["message"]["stdout"], "sandbox-bash", "{bash}");
@@ -345,7 +345,7 @@ mod unix {
             "protocol": "rpc", "type": "request", "id": "sandbox-pty-run",
             "method": "bash_run",
             "message": {
-                "input": { "command": "printf 'sandbox-task\\n'", "waitMs": 3000, "tty": true },
+                "input": { "command": "printf 'sandbox-task\\n'", "waitMs": 3000, "pty": true },
                 "context": {
                     "workspace": env.workspace(), "source": "mcp",
                     "ctxId": "ctx-sandbox", "requestId": "sandbox-pty-run"

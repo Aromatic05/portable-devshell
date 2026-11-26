@@ -37,18 +37,36 @@ impl WorkerFixture {
         result["message"].clone()
     }
 
+    pub fn tool_raw(&self, method: &str, input: Value) -> Value {
+        self.env.rpc(
+            self.instance,
+            "tool",
+            &json!({
+                "protocol": "rpc",
+                "type": "request",
+                "id": uuid::Uuid::new_v4().to_string(),
+                "method": method,
+                "message": {
+                    "input": input,
+                    "context": {"workspace": self.env.protocol_workspace()}
+                }
+            }),
+        )
+    }
+
     pub fn wait_task(&self, task: &str, cursor: Value) -> Value {
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut cursor = cursor;
+        let mut cursor = cursor.as_str().map(str::to_owned);
         let mut stdout = String::new();
         let mut stderr = String::new();
         loop {
-            let mut result = self.tool(
-                "task_read",
-                json!({
-                    "task": task, "cursor": cursor, "timeMs": 500,
-                }),
-            );
+            let mut input = json!({
+                "task": task, "waitMs": 500,
+            });
+            if let Some(ref c) = cursor {
+                input["cursor"] = json!(c);
+            }
+            let mut result = self.tool("task_input", input);
             stdout.push_str(result["stdout"].as_str().unwrap());
             stderr.push_str(result["stderr"].as_str().unwrap());
             if result["termination"] != "running" {
@@ -56,7 +74,7 @@ impl WorkerFixture {
                 result["stderr"] = json!(stderr);
                 return result;
             }
-            cursor = result["cursor"].clone();
+            cursor = result["cursor"].as_str().map(str::to_owned);
             assert!(Instant::now() < deadline, "task did not exit: {result}");
         }
     }

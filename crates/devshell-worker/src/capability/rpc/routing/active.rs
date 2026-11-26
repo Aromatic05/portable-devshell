@@ -323,7 +323,13 @@ fn is_urgent_tool(method: &str) -> bool {
 }
 
 fn is_task_wait_observation(request: &RpcRequest) -> bool {
-    request.method == "task_read"
+    let no_input = match request.params.get("input") {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::String(value)) => value.is_empty(),
+        Some(_) => false,
+    };
+    request.method == "task_input"
+        && no_input
         && request
             .params
             .get("untilExit")
@@ -331,9 +337,9 @@ fn is_task_wait_observation(request: &RpcRequest) -> bool {
             == Some(true)
         && request
             .params
-            .get("timeMs")
+            .get("waitMs")
             .and_then(serde_json::Value::as_u64)
-            .is_some_and(|time_ms| time_ms > 0)
+            .is_some_and(|wait_ms| wait_ms > 0)
 }
 
 fn tool_call_class(request: &RpcRequest) -> ToolCallClass {
@@ -409,16 +415,25 @@ mod tests {
         let registry = Arc::new(ActiveToolCallRegistry::new());
         let observations = (0..16)
             .map(|index| {
+                let params = if index % 2 == 0 {
+                    serde_json::json!({
+                        "untilExit": true,
+                        "task": format!("task-{index}"),
+                        "waitMs": 60_000,
+                    })
+                } else {
+                    serde_json::json!({
+                        "untilExit": true,
+                        "input": "",
+                        "task": format!("task-{index}"),
+                        "waitMs": 60_000,
+                    })
+                };
                 registry
                     .acquire(&RpcRequest::request(
                         format!("observation-{index}"),
-                        "task_read",
-                        serde_json::json!({
-                            "untilExit": true,
-                            "line": -1,
-                            "task": format!("task-{index}"),
-                            "timeMs": 60_000,
-                        }),
+                        "task_input",
+                        params,
                     ))
                     .unwrap()
             })
@@ -427,12 +442,11 @@ mod tests {
             registry
                 .acquire(&RpcRequest::request(
                     "observation-over-capacity",
-                    "task_read",
+                    "task_input",
                     serde_json::json!({
                         "untilExit": true,
-                        "line": -1,
                         "task": "task-over-capacity",
-                        "timeMs": 60_000,
+                        "waitMs": 60_000,
                     }),
                 ))
                 .is_err()
@@ -460,9 +474,23 @@ mod tests {
             .acquire(&RpcRequest::request(
                 "urgent-with-observation-2",
                 "task_input",
-                serde_json::json!({}),
+                serde_json::json!({
+                    "task": "task-write",
+                    "input": "hello\n",
+                    "untilExit": true,
+                    "waitMs": 60_000,
+                }),
             ))
             .unwrap();
+        assert!(
+            registry
+                .acquire(&RpcRequest::request(
+                    "urgent-over-capacity",
+                    "task_inspect",
+                    serde_json::json!({}),
+                ))
+                .is_err()
+        );
 
         drop((observations, standard, urgent_one, urgent_two));
         assert!(registry.wait_idle(Duration::from_millis(10)).is_ok());

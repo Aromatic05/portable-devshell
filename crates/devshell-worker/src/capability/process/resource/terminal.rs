@@ -125,7 +125,8 @@ impl ManagedProcess {
     ) -> Result<Value, RpcError> {
         let mut state = self.state.lock().map_err(lock_error)?;
         self.validate_terminal(&state, &input)?;
-        self.control
+        let control = self.control.lock().map_err(lock_error)?.clone();
+        control
             .resize(cols, rows)
             .map_err(|error| RpcError::new("terminal.resizeFailed", error))?;
         state
@@ -143,7 +144,10 @@ impl ManagedProcess {
     ) -> Result<TerminalDescriptor, RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         self.validate_terminal(&state, &input)?;
-        self.control
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        let control = self.control.lock().map_err(lock_error)?.clone();
+        control
             .kill()
             .map_err(|error| RpcError::new("terminal.killFailed", error))?;
         self.terminal_descriptor(&state).ok_or_else(not_terminal)

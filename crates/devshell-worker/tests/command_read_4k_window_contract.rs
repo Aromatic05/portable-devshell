@@ -41,7 +41,7 @@ fn visible_ten_kilobyte_shell_read_should_establish_coverage() {
         "1",
         "bash_run",
         json!({
-            "command": "cat window.txt", "timeoutMs": 5000
+            "command": "cat window.txt", "waitMs": 5000
         }),
     );
     assert_eq!(read["type"], "reply", "{read}");
@@ -92,7 +92,7 @@ fn visible_ten_kilobyte_grep_result_should_credit_numbered_lines() {
         "1",
         "bash_run",
         json!({
-            "command": "rg -n 'key_' numbered.txt", "timeoutMs": 5000
+            "command": "rg -n 'key_' numbered.txt", "waitMs": 5000
         }),
     );
     assert_eq!(read["type"], "reply", "{read}");
@@ -143,7 +143,7 @@ fn sequential_four_k_window_reads_merge_without_crediting_unseen_lines() {
         "1",
         "bash_run",
         json!({
-            "command": "sed -n '1,150p' paged.txt", "timeoutMs": 5000
+            "command": "sed -n '1,150p' paged.txt", "waitMs": 5000
         }),
     );
     assert_eq!(first["type"], "reply", "{first}");
@@ -166,7 +166,7 @@ fn sequential_four_k_window_reads_merge_without_crediting_unseen_lines() {
         "3",
         "bash_run",
         json!({
-            "command": "sed -n '151,300p' paged.txt", "timeoutMs": 5000
+            "command": "sed -n '151,300p' paged.txt", "waitMs": 5000
         }),
     );
     assert_eq!(second["type"], "reply", "{second}");
@@ -217,7 +217,7 @@ fn over_four_k_output_budget_does_not_credit_full_unseen_source() {
         "1",
         "bash_run",
         json!({
-            "command": "cat oversized.txt", "timeoutMs": 5000
+            "command": "cat oversized.txt", "waitMs": 5000
         }),
     );
     assert_eq!(read["type"], "reply", "{read}");

@@ -4,9 +4,13 @@ mod unix;
 mod windows;
 
 #[cfg(unix)]
+pub(super) use unix::default_interactive_shell;
+#[cfg(unix)]
 pub(super) use unix::spawn_interactive;
 #[cfg(unix)]
 pub(super) use unix::spawn_managed;
+#[cfg(windows)]
+pub(super) use windows::default_interactive_shell;
 #[cfg(windows)]
 pub(super) use windows::spawn_interactive;
 #[cfg(windows)]

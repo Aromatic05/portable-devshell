@@ -47,7 +47,7 @@ impl ToolRegistry {
     }
 }
 
-fn normalize_schema(value: &mut serde_json::Value) {
+pub(crate) fn normalize_schema(value: &mut serde_json::Value) {
     flatten_root_object_union(value);
     normalize_schema_node(value);
 }

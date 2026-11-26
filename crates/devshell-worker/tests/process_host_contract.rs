@@ -433,9 +433,10 @@ fn worker_command_and_native_attach_share_one_pty() {
     assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
     let started = fixture.tool("bash_run", json!({
         "command": "stty -echo; printf 'attach-ready\\n'; IFS= read -r human; printf 'human:%s\\n' \"$human\"; printf '\\033]2;raw-title\\007'; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
-        "tty": true, "waitMs": 20,
+        "pty": true, "waitMs": 20,
     }));
     assert_eq!(started["termination"], "running");
+    assert_eq!(started["task"]["pty"], true);
     let task = started["task"]["id"].as_str().unwrap().to_owned();
     let listed = fixture.env.json_command(&["terminal", "list"]);
     assert!(
@@ -470,7 +471,12 @@ fn worker_command_and_native_attach_share_one_pty() {
     // which cannot be reconstructed from the visible screen.
     attach.expect("\x1b]2;raw-title\x07");
     attach.detach();
-    let inspected = fixture.tool("task_inspect", json!({"terminal": task}));
+    let inspected = fixture.tool("task_inspect", json!({"task": task}));
+    assert_eq!(inspected["task"], task);
+    assert_eq!(inspected["state"], "running");
+    assert_eq!(inspected["humanControl"], false);
+    assert!(inspected.get("formatted").is_none(), "{inspected}");
+    assert!(inspected.get("restore").is_none(), "{inspected}");
     assert!(
         inspected["text"]
             .as_str()
@@ -478,7 +484,7 @@ fn worker_command_and_native_attach_share_one_pty() {
             .contains("human:operator")
     );
     fixture.tool("task_input", json!({"task": task, "input": "agent\n"}));
-    let finished = fixture.wait_task(&task, json!({}));
+    let finished = fixture.wait_task(&task, Value::Null);
     assert_eq!(finished["exitCode"], 0);
     assert!(
         finished["stdout"]
@@ -493,30 +499,29 @@ fn worker_command_and_native_attach_share_one_pty() {
 fn hosted_pipe_wait_deadline_and_retained_output() {
     let fixture = WorkerFixture::start(INSTANCE);
     let task = fixture.tool("bash_run", json!({
-        "command": "IFS= read -r data; printf 'out:%s\\n' \"$data\"; printf 'error\\n' >&2; exit 7",
-        "waitMs": 0, "keepStdin": true,
+        "command": "sleep 0.1; printf 'out:pipe\\n'; printf 'error\\n' >&2; exit 7",
+        "waitMs": 0,
     }));
     assert_eq!(task["termination"], "running");
+    assert_eq!(task["task"]["pty"], false);
     let id = task["task"]["id"].as_str().unwrap();
-    fixture.tool("task_input", json!({"task": id, "input": "pipe\n"}));
+    let write_denied = fixture.tool_raw("task_input", json!({"task": id, "input": "pipe\n"}));
+    assert_eq!(write_denied["type"], "error", "{write_denied}");
+    assert_eq!(write_denied["error"]["code"], "process.stdinClosed");
+    assert_eq!(
+        write_denied["error"]["message"],
+        "stdin is closed for non-PTY tasks; rerun bash_run with pty=true for interactive input"
+    );
     let result = fixture.wait_task(id, task["cursor"].clone());
     assert_eq!(result["exitCode"], 7);
     assert_eq!(result["stdout"], "out:pipe\n");
     assert_eq!(result["stderr"], "error\n");
-    let timeout = fixture.tool(
-        "bash_run",
-        json!({
-            "command": "sleep 30", "waitMs": 0, "timeoutMs": 100,
-        }),
-    );
-    let result = fixture.wait_task(timeout["task"]["id"].as_str().unwrap(), json!({}));
-    assert_eq!(result["termination"], "timeout");
-    assert_eq!(result["timedOut"], true);
+
     let large = fixture.tool(
         "bash_run",
         json!({
             "command": "head -c 6291456 /dev/zero | tr '\\000' x",
-            "waitMs": 10000, "maxCaptureBytes": 1024,
+            "waitMs": 10000,
         }),
     );
     assert_eq!(large["exitCode"], 0, "{large}");
@@ -530,7 +535,7 @@ fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
     let fixture = WorkerFixture::start(INSTANCE);
     let started = fixture.tool("bash_run", json!({
         "command": "stty -echo; printf 'ready\\n'; IFS= read -r human; printf 'remote:%s\\n' \"$human\"; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
-        "tty": true, "waitMs": 20,
+        "pty": true, "waitMs": 20,
     }));
     let id = started["task"]["id"].as_str().unwrap();
     let call = |method: &str, message: Value| {
@@ -573,7 +578,7 @@ fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
     );
     assert_eq!(released["type"], "reply", "{released}");
     fixture.tool("task_input", json!({"task": id, "input": "agent\n"}));
-    let result = fixture.wait_task(id, json!({}));
+    let result = fixture.wait_task(id, Value::Null);
     assert_eq!(result["exitCode"], 0, "{result}");
     assert!(
         result["stdout"]
@@ -582,4 +587,191 @@ fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
             .contains("remote:operator")
     );
     assert!(result["stdout"].as_str().unwrap().contains("model:agent"));
+}
+
+#[test]
+fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
+    let fixture = WorkerFixture::start("process-persistent");
+    let created = fixture.tool(
+        "task_manage",
+        json!({
+            "command": "create",
+            "name": "dev-shell",
+            "cwd": "./",
+            "shell": "/bin/sh",
+            "cols": 90,
+            "rows": 30
+        }),
+    );
+    let summary = &created["task"];
+    assert_eq!(summary["kind"], "terminal", "{created}");
+    assert_eq!(summary["persistent"], true, "{created}");
+    assert_eq!(summary["pty"], true, "{created}");
+    assert_eq!(summary["state"], "running", "{created}");
+    assert_eq!(summary["name"], "dev-shell", "{created}");
+    assert_eq!(summary["command"], "/bin/sh", "{created}");
+    assert!(summary["cwd"].as_str().is_some(), "{created}");
+    assert!(summary["createdAtMs"].as_u64().unwrap_or(0) > 0, "{created}");
+    let id = summary["id"].as_str().unwrap().to_owned();
+
+    // Also start a non-persistent task to verify task_manage(list) distinguishes both kinds.
+    let job = fixture.tool("bash_run", json!({"command": "printf listed-job"}));
+    let job_id = job["task"]["id"].as_str().unwrap().to_owned();
+
+    let listed = fixture.tool("task_manage", json!({"command": "list"}));
+    let tasks = listed["tasks"].as_array().unwrap();
+    let term_entry = tasks.iter().find(|entry| entry["id"] == id).expect("terminal in list");
+    assert_eq!(term_entry["kind"], "terminal");
+    assert_eq!(term_entry["persistent"], true);
+    assert_eq!(term_entry["name"], "dev-shell");
+    assert_eq!(term_entry["command"], "/bin/sh");
+    assert!(term_entry["cwd"].as_str().is_some());
+    let job_entry = tasks.iter().find(|entry| entry["id"] == job_id).expect("task in list");
+    assert_eq!(job_entry["kind"], "task");
+    assert_eq!(job_entry["persistent"], false);
+    assert_eq!(job_entry["command"], "printf listed-job");
+    assert!(job_entry["cwd"].as_str().is_some());
+
+    // Write a command and verify PTY echo settle captures both echo and command output.
+    let extract_pid = |text: &str, marker: &str| -> Option<String> {
+        text.split(marker).skip(1).find_map(|rest| {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            (!digits.is_empty()).then_some(digits)
+        })
+    };
+    let first = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf '\\nFIRST-PID:%s\\n' \"$$\"\n",
+            "waitMs": 5000
+        }),
+    );
+    assert_eq!(first["termination"], "running", "{first}");
+    let first_stdout = first["stdout"].as_str().unwrap();
+    let first_pid = extract_pid(first_stdout, "FIRST-PID:")
+        .unwrap_or_else(|| panic!("missing FIRST-PID in {first_stdout:?}"));
+    let cursor = first["cursor"].as_str().unwrap().to_owned();
+    assert!(cursor.starts_with("tc1_"), "{cursor}");
+
+    // Exit the interactive shell; persistent terminal must automatically respawn a fresh shell.
+    let after_exit = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "exit\n",
+            "cursor": cursor,
+            "waitMs": 1000
+        }),
+    );
+    assert_eq!(after_exit["termination"], "running", "{after_exit}");
+    let mut cursor = after_exit["cursor"].as_str().unwrap().to_owned();
+
+    // Send a command to the respawned shell (retry briefly if shell is still initializing).
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let second_pid = loop {
+        let reply = fixture.tool_raw(
+            "task_input",
+            json!({
+                "task": id,
+                "input": "printf '\\nSECOND-PID:%s\\n' \"$$\"\n",
+                "cursor": cursor,
+                "waitMs": 2000
+            }),
+        );
+        if reply["type"] == "reply" {
+            let msg = &reply["message"];
+            assert_eq!(msg["termination"], "running", "{msg}");
+            cursor = msg["cursor"].as_str().unwrap().to_owned();
+            if let Some(pid) = extract_pid(msg["stdout"].as_str().unwrap(), "SECOND-PID:") {
+                break pid;
+            }
+        }
+        assert!(Instant::now() < deadline, "respawned shell did not respond: {reply}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_ne!(first_pid, second_pid, "respawned shell must have a new PID");
+
+    let inspected = fixture.tool("task_inspect", json!({"task": id}));
+    assert_eq!(inspected["task"], id);
+    assert_eq!(inspected["state"], "running");
+    assert_eq!(inspected["cols"], 90);
+    assert_eq!(inspected["rows"], 30);
+    assert!(inspected.get("formatted").is_none(), "{inspected}");
+    assert!(inspected.get("restore").is_none(), "{inspected}");
+    assert!(
+        inspected["text"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("SECOND-PID:{second_pid}")),
+        "{inspected}"
+    );
+
+    // Explicitly close the persistent terminal; it must NOT respawn and must exit cleanly.
+    let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
+    assert_eq!(closed["closedTask"], id, "{closed}");
+    assert_eq!(closed["accepted"], true, "{closed}");
+
+    let final_state = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "cursor": cursor,
+            "waitMs": 5000,
+            "untilExit": true
+        }),
+    );
+    assert_ne!(final_state["termination"], "running", "{final_state}");
+    assert_eq!(final_state["untilExit"], true, "{final_state}");
+}
+
+#[test]
+fn task_input_opaque_cursor_and_manage_validation() {
+    let fixture = WorkerFixture::start("process-cursor-validation");
+    let started = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "printf 'line-1\\n'; sleep 0.15; printf 'line-2\\n'",
+            "waitMs": 0
+        }),
+    );
+    let id = started["task"]["id"].as_str().unwrap().to_owned();
+    let cursor1 = started["cursor"].as_str().unwrap().to_owned();
+    assert!(cursor1.starts_with("tc1_"), "{started}");
+
+    // Invalid cursor must fail with tool.invalidArguments.
+    let bad_cursor = fixture.tool_raw(
+        "task_input",
+        json!({"task": id, "cursor": "not-a-cursor", "waitMs": 100}),
+    );
+    assert_eq!(bad_cursor["type"], "error", "{bad_cursor}");
+    assert_eq!(bad_cursor["error"]["code"], "tool.invalidArguments");
+    assert_eq!(bad_cursor["error"]["message"], "invalid task cursor");
+
+    // Incremental polling via opaque cursor collects remaining output without duplication.
+    let mut combined = started["stdout"].as_str().unwrap().to_owned();
+    let rest = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "cursor": cursor1,
+            "waitMs": 5000,
+            "untilExit": true
+        }),
+    );
+    assert_eq!(rest["termination"], "exited", "{rest}");
+    assert_eq!(rest["untilExit"], true, "{rest}");
+    combined.push_str(rest["stdout"].as_str().unwrap());
+    assert_eq!(combined, "line-1\nline-2\n");
+
+    // task_manage validation checks.
+    for invalid in [
+        json!({"command": "list", "task": id}),
+        json!({"command": "close"}),
+        json!({"command": "create", "task": id}),
+        json!({"command": "create", "name": "-invalid-start"}),
+    ] {
+        let response = fixture.tool_raw("task_manage", invalid.clone());
+        assert_eq!(response["type"], "error", "{invalid}: {response}");
+    }
 }
