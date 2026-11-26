@@ -57,10 +57,10 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 
 ```bash
 devshell terminal list <instance> [--all]                        # 列出终端与任务（全局支持 --json）
-devshell terminal create <instance> --workspace . --name dev     # 创建持久终端并立即接管（支持 --detach / --ephemeral / --cwd / --command / --cols / --rows）
-devshell terminal attach <instance> [name|short-id] [--takeover] # 观察模式或 --takeover 接管（仅 1 个活跃 PTY 时可省略目标）
+devshell terminal create <instance> --workspace . --name dev     # 创建持久终端并立即接管（支持 --detach / --ephemeral / --cwd / --shell / --command / --cols / --rows）
+devshell terminal attach <instance> [name|short-id] [--takeover] # 观察模式或 --takeover 接管（仅 1 个活跃 PTY 时可省略目标；支持只读观察 [pipe] 非 PTY 后台任务）
 devshell terminal inspect <instance> [name|short-id]             # 不进入交互模式查看当前 PTY 可见屏幕（全局支持 --json）
-devshell terminal close <instance> [name|short-id]               # 终止任务或持久终端（全局支持 --json）
+devshell terminal close <instance> [name|short-id]               # 终止任务或持久终端（全局支持 --json，同样支持 [pipe] 任务）
 ```
 
 - **同机 Worker binary（直接连接本机实例）**：
@@ -86,7 +86,8 @@ Attach 会话快捷键与行为：
   - `Ctrl+] t`：在会话内实时切换 **观察（OBSERVE）↔ 接管（CONTROL）**，终端标题栏（OSC 0）实时提示当前模式；接管期间模型 `task_input` 写入被拒绝，释放后可立即继续输入。
   - `Ctrl+] ]`：在接管模式下向远端 PTY 发送字面 `Ctrl+]`（`0x1d`）。
 - 遇到输出突增触发 `stream.gap` 时自动重连并恢复屏幕快照。
-- TUI `Sessions` 面板通过 Terminal Stream 使用同一 PTY，常用快捷键：`Enter` 进入接管控制、`o` 进入只读观察、`t` 在观察模式内接管控制、`n` 新建持久终端、`x` 关闭任务/终端、`r` 刷新列表。原始 PTY 字节流在连接时的状态恢复之后继续传输。
+- `devshell terminal` 与 TUI `Sessions` 同样展示非 PTY（`[pipe]`）后台任务，并支持只读观察实时输出与关闭终止（不支持接管输入与屏幕快照）。
+- TUI `Sessions` 面板通过 Terminal Stream 使用同一 PTY，常用快捷键：`Enter` 进入接管控制、`o` 进入只读观察、`t` 在观察模式内接管控制、`Alt+o` 在 `[CONTROL]` 模式下就地释放控制权退回 `[OBSERVE]`、`n` 打开名称输入提示并创建持久终端、`x` 关闭任务/终端、`r` 刷新列表。原始 PTY 字节流在连接时的状态恢复之后继续传输。
 
 ## 生命周期与作用域
 
