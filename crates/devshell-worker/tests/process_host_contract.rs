@@ -616,7 +616,7 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
     assert!(
         created["cursor"]
             .as_str()
-            .is_some_and(|cursor| cursor.starts_with("tc1_")),
+            .is_some_and(|cursor| cursor.starts_with("tc2_")),
         "task_manage(create) must return an initial opaque cursor: {created}"
     );
     let summary = &created["task"];
@@ -668,7 +668,7 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
     let first_pid = extract_pid(first_stdout, "FIRST-PID:")
         .unwrap_or_else(|| panic!("missing FIRST-PID in {first_stdout:?}"));
     let cursor = first["cursor"].as_str().unwrap().to_owned();
-    assert!(cursor.starts_with("tc1_"), "{cursor}");
+    assert!(cursor.starts_with("tc2_"), "{cursor}");
 
     // Exit the interactive shell; persistent terminal must automatically respawn a fresh shell.
     let after_exit = fixture.tool(
@@ -794,7 +794,7 @@ fn task_input_opaque_cursor_and_manage_validation() {
     );
     let id = started["task"]["id"].as_str().unwrap().to_owned();
     let cursor1 = started["cursor"].as_str().unwrap().to_owned();
-    assert!(cursor1.starts_with("tc1_"), "{started}");
+    assert!(cursor1.starts_with("tc2_"), "{started}");
 
     // Invalid cursor must fail with tool.invalidArguments.
     let bad_cursor = fixture.tool_raw(
@@ -820,6 +820,15 @@ fn task_input_opaque_cursor_and_manage_validation() {
     assert_eq!(rest["untilExit"], true, "{rest}");
     combined.push_str(rest["stdout"].as_str().unwrap());
     assert_eq!(combined, "line-1\nline-2\n");
+
+    let other = fixture.tool("bash_run", json!({"command": "printf 12345678901234567890"}));
+    let mixed = fixture.tool_raw(
+        "task_input",
+        json!({"task": other["task"]["id"], "cursor": rest["cursor"], "waitMs": 0}),
+    );
+    assert_eq!(mixed["type"], "error", "{mixed}");
+    assert_eq!(mixed["error"]["code"], "tool.invalidArguments", "{mixed}");
+    assert_eq!(mixed["error"]["message"], "task cursor does not belong to task", "{mixed}");
 
     // task_manage validation checks.
     for invalid in [

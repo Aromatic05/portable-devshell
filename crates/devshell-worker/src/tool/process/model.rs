@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::capability::artifact::types::ArtifactReference;
 use crate::tool::ToolError;
 
-const CURSOR_PREFIX: &str = "tc1_";
+const CURSOR_PREFIX: &str = "tc2_";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct TaskCursor {
@@ -15,17 +15,18 @@ pub(crate) struct TaskCursor {
 }
 
 impl TaskCursor {
-    pub(crate) fn encode(&self) -> String {
-        let payload = format!("{}:{}:{}", self.seq, self.stdout, self.stderr);
+    pub(crate) fn encode(&self, task: &str) -> String {
+        let payload = format!("{task}:{}:{}:{}", self.seq, self.stdout, self.stderr);
         format!("{CURSOR_PREFIX}{}", URL_SAFE_NO_PAD.encode(payload))
     }
 
-    pub(crate) fn decode(raw: &str) -> Result<Self, ToolError> {
+    pub(crate) fn decode_for(raw: &str, expected_task: &str) -> Result<Self, ToolError> {
         let invalid = || ToolError::new("tool.invalidArguments", "invalid task cursor");
         let encoded = raw.strip_prefix(CURSOR_PREFIX).ok_or_else(invalid)?;
         let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| invalid())?;
         let text = std::str::from_utf8(&bytes).map_err(|_| invalid())?;
         let mut parts = text.split(':');
+        let task = parts.next().filter(|task| !task.is_empty()).ok_or_else(invalid)?;
         let seq = parts
             .next()
             .ok_or_else(invalid)?
@@ -44,11 +45,13 @@ impl TaskCursor {
         if parts.next().is_some() {
             return Err(invalid());
         }
-        Ok(Self {
-            seq,
-            stdout,
-            stderr,
-        })
+        if task != expected_task {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "task cursor does not belong to task",
+            ));
+        }
+        Ok(Self { seq, stdout, stderr })
     }
 }
 
@@ -118,17 +121,18 @@ mod tests {
 
     #[test]
     fn opaque_cursor_round_trips_and_rejects_malformed_values() {
+        let task = "process-example";
         let cursor = TaskCursor {
             seq: 42,
             stdout: 1024,
             stderr: 256,
         };
-        let encoded = cursor.encode();
-        assert!(encoded.starts_with("tc1_"));
-        assert_eq!(TaskCursor::decode(&encoded).unwrap(), cursor);
+        let encoded = cursor.encode(task);
+        assert!(encoded.starts_with("tc2_"));
+        assert_eq!(TaskCursor::decode_for(&encoded, task).unwrap(), cursor);
 
-        for invalid in ["", "tc1_", "tc2_MToyOjM", "tc1_!!!", "tc1_MTox", "tc1_MToxOjI6Mw"] {
-            let err = TaskCursor::decode(invalid).unwrap_err();
+        for invalid in ["", "tc2_", "tc1_MjoxOjI6Mw", "tc2_!!!", "tc2_cHJvY2Vzcy1leGFtcGxlOjE", "tc2_cHJvY2Vzcy1leGFtcGxlOjE6MjozOjQ"] {
+            let err = TaskCursor::decode_for(invalid, task).unwrap_err();
             assert_eq!(err.code, "tool.invalidArguments");
             assert_eq!(err.message, "invalid task cursor");
         }

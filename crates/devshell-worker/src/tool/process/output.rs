@@ -276,7 +276,7 @@ pub(super) fn collect(
                 stdout: stdout_end,
                 stderr: stderr_end,
             }
-            .encode(),
+            .encode(id),
         ),
     })
 }

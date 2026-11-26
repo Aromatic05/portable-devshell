@@ -321,15 +321,16 @@ impl ToolHandler for TerminalTool {
                                 "rows": params.rows.unwrap_or(DEFAULT_TERMINAL_ROWS),
                             }),
                         )?;
+                        let task = summarize(&created)?;
                         let initial_cursor = TaskCursor {
                             seq: created["latestSeq"].as_u64().unwrap_or(0),
                             stdout: 0,
                             stderr: 0,
                         }
-                        .encode();
+                        .encode(&task.id);
                         serialize(TaskManageOutput {
                             tasks: None,
-                            task: Some(summarize(&created)?),
+                            task: Some(task),
                             cursor: Some(initial_cursor),
                             closed_task: None,
                             accepted: None,

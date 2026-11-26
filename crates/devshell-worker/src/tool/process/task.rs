@@ -29,7 +29,7 @@ struct TaskInputParams {
     /// Raw UTF-8 text to write to a PTY task/terminal. Omit or pass "" to read/poll without writing.
     #[serde(default)]
     input: Option<String>,
-    /// Opaque cursor returned by bash_run or a previous task_input call.
+    /// Opaque cursor returned for this same task.
     #[serde(default)]
     cursor: Option<String>,
     /// Time in milliseconds to wait for output or exit (default 5000, max 3600000).
@@ -70,7 +70,7 @@ impl ToolHandler for TaskInputTool {
                     "inputHints": {
                         "task": "Task or terminal ID returned by bash_run or task_manage.",
                         "input": "Raw UTF-8 text to write to a PTY task/terminal (use \\r for Enter in TUIs/ConPTY or \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll without writing. When writing input without cursor, only output after this input is returned.",
-                        "cursor": "Opaque cursor returned by bash_run, task_manage(create), or a previous task_input call to continue reading new output.",
+                        "cursor": "Use the opaque cursor returned for this same task by bash_run, task_manage(create), or a previous task_input call.",
                         "waitMs": "Milliseconds to wait for output or exit (default 5000, max 3600000).",
                         "untilExit": "Set true to wait until a non-persistent task exits rather than returning on the next output (invalid for persistent terminals)."
                     },
@@ -99,7 +99,7 @@ impl ToolHandler for TaskInputTool {
         let explicit_cursor = params
             .cursor
             .as_deref()
-            .map(TaskCursor::decode)
+            .map(|cursor| TaskCursor::decode_for(cursor, &params.task))
             .transpose()?;
 
         let input_to_send = params.input.as_deref().filter(|text| !text.is_empty());
