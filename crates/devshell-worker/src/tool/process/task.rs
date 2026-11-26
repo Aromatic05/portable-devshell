@@ -1,6 +1,6 @@
 use super::capture::BashProgress;
 use super::model::{BashRunOutput, BashTermination, TaskCursor};
-use super::output::collect;
+use super::output::{OutputBoundary, collect};
 use super::scope::*;
 use crate::capability::artifact::store::ArtifactStore;
 use crate::instance::InstanceName;
@@ -126,7 +126,7 @@ impl ToolHandler for TaskInputTool {
             // input instead of replaying the entire historical transcript.
             let cursor = match explicit_cursor {
                 Some(cursor) => cursor,
-                None => current_tail_cursor(&client, &params.task, &descriptor)?,
+                None => OutputBoundary::from_descriptor(&descriptor)?.cursor(),
             };
             rpc(
                 &client,
@@ -221,35 +221,6 @@ impl ToolHandler for TaskInputTool {
         }
         serialize(result)
     }
-}
-
-fn current_tail_cursor(
-    client: &crate::capability::process::client::ProcessHostClient,
-    id: &str,
-    descriptor: &Value,
-) -> Result<TaskCursor, ToolError> {
-    let stdout_meta = rpc(
-        client,
-        "process.v1.capture",
-        json!({"id": id, "channel": "stdout", "offset": 0, "limit": 0}),
-    )?;
-    let stderr_meta = rpc(
-        client,
-        "process.v1.capture",
-        json!({"id": id, "channel": "stderr", "offset": 0, "limit": 0}),
-    )?;
-    let stdout = stdout_meta["storedBytes"].as_u64().unwrap_or(0) as usize;
-    let stderr = stderr_meta["storedBytes"].as_u64().unwrap_or(0) as usize;
-    let stdout_seq = stdout_meta["latestSeq"].as_u64().unwrap_or(0);
-    let stderr_seq = stderr_meta["latestSeq"].as_u64().unwrap_or(0);
-    let seq = stdout_seq
-        .min(stderr_seq)
-        .max(descriptor["latestSeq"].as_u64().unwrap_or(0));
-    Ok(TaskCursor {
-        seq,
-        stdout,
-        stderr,
-    })
 }
 
 pub(crate) fn register_tools(

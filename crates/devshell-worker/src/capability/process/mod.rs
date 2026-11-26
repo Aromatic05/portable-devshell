@@ -8,3 +8,5 @@ pub mod pty;
 mod resource;
 mod screen;
 pub mod shell;
+
+pub(crate) use output::{CaptureBounds, CaptureSnapshot};

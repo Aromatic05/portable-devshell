@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::journal::OutputChannel;
 
@@ -44,14 +44,24 @@ struct Capture {
     truncated: bool,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CaptureBounds {
+    pub source_bytes: usize,
+    pub stored_bytes: usize,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct CaptureSnapshot {
+    pub stdout: CaptureBounds,
+    pub stderr: CaptureBounds,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::capability::process) struct CapturePage {
-    pub(in crate::capability::process) source_bytes: usize,
-    pub(in crate::capability::process) stored_bytes: usize,
-    pub(in crate::capability::process) truncated: bool,
     pub(in crate::capability::process) data_base64: String,
-    pub(in crate::capability::process) latest_seq: u64,
 }
 
 impl Capture {
@@ -87,6 +97,14 @@ impl Capture {
         }
     }
 
+    fn bounds(&self) -> CaptureBounds {
+        CaptureBounds {
+            source_bytes: self.source,
+            stored_bytes: self.stored,
+            truncated: self.truncated,
+        }
+    }
+
     fn read(&mut self, offset: usize, limit: usize) -> std::io::Result<CapturePage> {
         let count = self
             .stored
@@ -99,11 +117,7 @@ impl Capture {
             self.file.read_exact(&mut bytes)?;
         }
         Ok(CapturePage {
-            source_bytes: self.source,
-            stored_bytes: self.stored,
-            truncated: self.truncated,
             data_base64: STANDARD.encode(bytes),
-            latest_seq: 0,
         })
     }
 }
@@ -131,6 +145,13 @@ impl Captures {
         match channel {
             OutputChannel::Stdout | OutputChannel::Terminal => self.stdout.append(bytes),
             OutputChannel::Stderr => self.stderr.append(bytes),
+        }
+    }
+
+    pub fn snapshot(&self) -> CaptureSnapshot {
+        CaptureSnapshot {
+            stdout: self.stdout.bounds(),
+            stderr: self.stderr.bounds(),
         }
     }
 

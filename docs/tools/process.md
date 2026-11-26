@@ -62,6 +62,8 @@ devshell-worker terminal attach <id> --takeover
 
 普通 Worker stop/restart 不关闭 Process Host；Instance retire 回收它。旧版本 tmux 会话不转换为新资源，升级前应使用旧版本完成或退出这些会话。
 
+升级到 Process Host 协议 v2 前，先用旧版本结束现有任务并停止旧 Process Host；只重启 Worker 不会替换 Host。v2 的输出边界和 cursor 不与 v1 混用。
+
 MCP Context 结束不会自动关闭进程。普通调用按 Workspace 作用域访问资源；Stateless 使用独立的无 Workspace 作用域并要求在 `bash_run` 与 `task_manage(command="create")` 中提供绝对 `cwd`。Stateless 不创建 Context 或 durable Wait。
 
 当普通 Context 的 `bash_run` 同步等待达到 180 秒（`WAIT_HANDOFF_MS = 180000`）而任务仍未结束时，Control 创建 durable Wait（`detached: true`）继续观察，底层 task 继续运行；`task_input` 的同步等待窗口为 120 秒。停止等待与终止进程是两个不同操作。

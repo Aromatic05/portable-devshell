@@ -8,6 +8,7 @@ use crate::capability::artifact::{
     result_path::tool_result_path, store::ArtifactStore, types::ArtifactStream,
 };
 use crate::capability::process::client::ProcessHostClient;
+use crate::capability::process::{CaptureBounds, CaptureSnapshot};
 use crate::tool::ToolError;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
@@ -20,12 +21,29 @@ use std::time::Instant;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CapturePage {
-    source_bytes: usize,
-    stored_bytes: usize,
-    truncated: bool,
     data_base64: String,
-    #[serde(default)]
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct OutputBoundary {
     latest_seq: u64,
+    capture: CaptureSnapshot,
+}
+
+impl OutputBoundary {
+    pub(super) fn from_descriptor(descriptor: &Value) -> Result<Self, ToolError> {
+        Self::deserialize(descriptor)
+            .map_err(|error| ToolError::new("process.internal", error.to_string()))
+    }
+
+    pub(super) fn cursor(&self) -> TaskCursor {
+        TaskCursor {
+            seq: self.latest_seq,
+            stdout: self.capture.stdout.stored_bytes,
+            stderr: self.capture.stderr.stored_bytes,
+        }
+    }
 }
 
 struct CaptureReader {
@@ -88,18 +106,19 @@ fn capture(
     .map_err(|error_value| ToolError::new("process.captureFailed", error_value.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_stream(
     client: &ProcessHostClient,
     artifacts: &ArtifactStore,
     id: &str,
     channel: &'static str,
+    metadata: &CaptureBounds,
     offset: usize,
     max: usize,
     progress: Arc<BashProgress>,
     stream: ArtifactStream,
     progress_stream: BashProgressStream,
-) -> Result<(StreamOutput, usize, usize, u64), ToolError> {
-    let metadata = capture(client, id, channel, offset, 0)?;
+) -> Result<(StreamOutput, usize), ToolError> {
     if offset > metadata.stored_bytes {
         return Err(ToolError::new(
             "process.captureFailed",
@@ -136,8 +155,6 @@ fn collect_stream(
     Ok((
         output,
         metadata.source_bytes.saturating_sub(offset),
-        metadata.stored_bytes,
-        metadata.latest_seq,
     ))
 }
 
@@ -165,22 +182,27 @@ pub(super) fn collect(
     if progress.has_output() {
         progress.finish();
     }
-    let (mut stdout, stdout_bytes, stdout_end, stdout_seq) = collect_stream(
+    // Both stream bounds and latestSeq come from one host state lock. Only read
+    // up to those bounds, even if more bytes arrive during capture paging.
+    let boundary = OutputBoundary::from_descriptor(&descriptor)?;
+    let (mut stdout, stdout_bytes) = collect_stream(
         client,
         artifacts,
         id,
         "stdout",
+        &boundary.capture.stdout,
         cursor.stdout,
         max,
         Arc::clone(&progress),
         ArtifactStream::Stdout,
         BashProgressStream::Stdout,
     )?;
-    let (mut stderr, stderr_bytes, stderr_end, stderr_seq) = collect_stream(
+    let (mut stderr, stderr_bytes) = collect_stream(
         client,
         artifacts,
         id,
         "stderr",
+        &boundary.capture.stderr,
         cursor.stderr,
         max,
         Arc::clone(&progress),
@@ -264,19 +286,6 @@ pub(super) fn collect(
             pty: descriptor["pty"] == true || descriptor["tty"] == true,
             human_control: (descriptor["humanControl"] == true).then_some(true),
         }),
-        cursor: Some(
-            TaskCursor {
-                // Advance seq to the latest sequence covered by both stream
-                // captures so output already included here does not trigger a
-                // spurious empty wakeup on the next poll, while never skipping
-                // stdout emitted between the stdout and stderr capture calls.
-                seq: stdout_seq
-                    .min(stderr_seq)
-                    .max(descriptor["latestSeq"].as_u64().unwrap_or(0)),
-                stdout: stdout_end,
-                stderr: stderr_end,
-            }
-            .encode(id),
-        ),
+        cursor: Some(boundary.cursor().encode(id)),
     })
 }

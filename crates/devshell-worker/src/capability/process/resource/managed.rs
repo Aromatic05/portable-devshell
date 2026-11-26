@@ -12,7 +12,7 @@ use crate::capability::rpc::error::RpcError;
 use crate::instance::sandbox::path::ResolvedPath;
 
 use super::super::child::ExitLatch;
-use super::super::output::{CaptureBudget, CapturePage, Captures};
+use super::super::output::{CaptureBudget, CapturePage, CaptureSnapshot, Captures};
 use super::super::output::{OutputChannel, OutputJournal, OutputPage};
 use super::super::pty::TerminalChild;
 use super::super::screen::{ScreenSnapshot, TerminalScreen};
@@ -60,6 +60,7 @@ pub(in crate::capability::process) struct Descriptor {
     pub created_at_ms: u128,
     pub state: &'static str,
     pub latest_seq: u64,
+    capture: CaptureSnapshot,
     pub workspace: Option<std::path::PathBuf>,
     pub timed_out: bool,
     pub human_control: bool,
@@ -217,6 +218,7 @@ impl ManagedProcess {
             created_at_ms: state.created_at_ms,
             state: status,
             latest_seq: state.output.latest_seq(),
+            capture: state.captures.snapshot(),
             workspace: self.workspace.clone(),
             timed_out: self.timed_out.load(Ordering::Acquire),
             human_control: state.active_controller().is_some(),
@@ -247,14 +249,10 @@ impl ManagedProcess {
         offset: usize,
         limit: usize,
     ) -> Result<CapturePage, RpcError> {
-        let mut state = self.state.lock().map_err(lock_error)?;
-        let latest_seq = state.output.latest_seq();
-        let mut page = state
+        self.state.lock().map_err(lock_error)?
             .captures
             .read(channel, offset, limit)
-            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))?;
-        page.latest_seq = latest_seq;
-        Ok(page)
+            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))
     }
 
     pub fn wait_done(&self, timeout: Duration) -> Result<bool, RpcError> {

@@ -322,12 +322,7 @@ impl ToolHandler for TerminalTool {
                             }),
                         )?;
                         let task = summarize(&created)?;
-                        let initial_cursor = TaskCursor {
-                            seq: created["latestSeq"].as_u64().unwrap_or(0),
-                            stdout: 0,
-                            stderr: 0,
-                        }
-                        .encode(&task.id);
+                        let initial_cursor = TaskCursor::default().encode(&task.id);
                         serialize(TaskManageOutput {
                             tasks: None,
                             task: Some(task),

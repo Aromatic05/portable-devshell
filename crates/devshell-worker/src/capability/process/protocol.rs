@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::instance::sandbox::SecurityMode;
 use crate::instance::storage::InstancePaths;
 
-pub(super) const PROTOCOL_VERSION: u32 = 1;
+pub(super) const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -187,6 +187,43 @@ fn finish(fixture: &Fixture, id: &str) -> Value {
 }
 
 #[test]
+fn dual_stream_capture_pages_use_one_journal_boundary() {
+    let fixture = Fixture::start();
+    let id = fixture.spawn(
+        "printf 'old-out'; printf 'old-err' >&2; IFS= read -r gate; printf 'new-out'; printf 'new-err' >&2; IFS= read -r gate",
+        false, None, true,
+    );
+    wait_for_output(&fixture, &id, "stdout", "old-out");
+    wait_for_output(&fixture, &id, "stderr", "old-err");
+    let boundary = fixture.read(&id, 0, 0)["process"].clone();
+    let seq = boundary["latestSeq"].as_u64().unwrap();
+
+    let capture = |channel, limit: Value| {
+        let page = fixture.call("process.v1.capture", json!({
+            "id": id, "channel": channel, "offset": 0, "limit": limit,
+        }));
+        STANDARD.decode(page["dataBase64"].as_str().unwrap()).unwrap()
+    };
+    let stdout = capture("stdout", boundary["capture"]["stdout"]["storedBytes"].clone());
+    // Publish both streams after stdout was read, but before stderr is paged.
+    fixture.input(&id, b"next\n");
+    wait_for_output(&fixture, &id, "stdout", "new-out");
+    wait_for_output(&fixture, &id, "stderr", "new-err");
+    let stderr = capture("stderr", boundary["capture"]["stderr"]["storedBytes"].clone());
+    assert_eq!(stdout, b"old-out");
+    assert_eq!(stderr, b"old-err");
+
+    let next = fixture.read(&id, seq, 0);
+    assert_eq!(output(&next, "stdout"), "new-out");
+    assert_eq!(output(&next, "stderr"), "new-err");
+    assert_eq!(next["process"]["capture"]["stdout"]["storedBytes"], 14);
+    assert_eq!(next["process"]["capture"]["stderr"]["storedBytes"], 14);
+    let quiet = fixture.read(&id, next["latestSeq"].as_u64().unwrap(), 0);
+    assert_eq!(quiet["process"]["state"], "running");
+    assert_eq!(quiet["frames"], json!([]));
+}
+
+#[test]
 fn independent_host_owns_pipe_and_pty_across_request_disconnects() {
     let fixture = Fixture::start();
     let pid = fixture.call("process.handshake", json!({}))["pid"]
@@ -266,7 +303,7 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
     let fixture = Fixture::start();
     let before = fixture.call("process.handshake", json!({}));
     assert_eq!(before["instance"], INSTANCE);
-    assert_eq!(before["version"], 1);
+    assert_eq!(before["version"], 2);
     let task = fixture.spawn(
         "printf 'ready\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"",
         false,
