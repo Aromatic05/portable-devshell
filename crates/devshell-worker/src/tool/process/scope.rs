@@ -2,13 +2,14 @@ use super::capture::{BashProgress, BashProgressStream};
 use crate::capability::process::client::ProcessHostClient;
 use crate::instance::sandbox::path::FilesystemCapability;
 use crate::instance::{InstanceName, storage::InstancePaths};
-use crate::tool::{ToolCall, ToolError};
+use crate::tool::{ToolCall, ToolCancellation, ToolError};
 use crate::transport::endpoint::channel::EndpointPaths;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+const TERMINATION_WAIT: Duration = Duration::from_secs(1);
 const PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) fn error(message: impl Into<String>) -> ToolError {
@@ -87,40 +88,128 @@ pub(super) fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
         .map_err(ToolError::from)
 }
 
+pub(super) fn spawn(
+    client: &ProcessHostClient,
+    call: &ToolCall,
+    id: &str,
+    payload: Value,
+) -> Result<Value, ToolError> {
+    call.check_cancelled()?;
+    match rpc(client, "process.v1.spawn", payload) {
+        // A transport failure does not tell us whether the Host created the task.
+        Err(failure) if failure.code == "process.hostFailed" => {
+            check_spawn_cancelled(client, call, id, &Value::Null)?;
+            Err(failure.with_details(json!({"taskId": id})))
+        }
+        result => result,
+    }
+}
+
+pub(super) fn check_spawn_cancelled(
+    client: &ProcessHostClient,
+    call: &ToolCall,
+    id: &str,
+    descriptor: &Value,
+) -> Result<(), ToolError> {
+    let Err(cancelled) = call.check_cancelled() else {
+        return Ok(());
+    };
+    // A creating call owns cleanup until it returns the first task handle.
+    let details = match descriptor["state"].as_str() {
+        Some("exited" | "failed") => json!({"taskId": id, "state": descriptor["state"]}),
+        _ => match terminate(client, id, descriptor.clone(), None) {
+            Ok(details) => details,
+            Err(failure) => return Err(cancellation_with_cleanup_error(cancelled, failure)),
+        },
+    };
+    Err(cancelled.with_details(details))
+}
+
+pub(super) fn terminate(
+    client: &ProcessHostClient,
+    id: &str,
+    mut descriptor: Value,
+    cancellation: Option<&ToolCancellation>,
+) -> Result<Value, ToolError> {
+    let check_cancelled = || cancellation.map_or(Ok(()), ToolCancellation::check);
+    let mut accepted = false;
+    let result = (|| {
+        check_cancelled()?;
+        if rpc(client, "process.v1.kill", json!({"id": id}))?["accepted"] != true {
+            return Err(ToolError::new("process.killFailed", "Process Host did not accept termination"));
+        }
+        accepted = true;
+        let deadline = Instant::now() + TERMINATION_WAIT;
+        while (descriptor.is_null() || descriptor["state"] == "running") && check_cancelled().is_ok() {
+            let remaining = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+            if remaining == 0 {
+                break;
+            }
+            let output = rpc(client, "process.v1.read", json!({
+                "id": id, "fromSeq": descriptor["latestSeq"].as_u64().unwrap_or(0),
+                "waitMs": remaining.min(100),
+            }))?;
+            if !output["process"]["state"].is_string() {
+                return Err(ToolError::new("process.internal", "process descriptor missing state"));
+            }
+            descriptor = output["process"].clone();
+        }
+        if !descriptor["state"].is_string() {
+            return Err(ToolError::new("process.internal", "process descriptor missing state"));
+        }
+        Ok(())
+    })();
+    // A kill acknowledgement is not an observation that the process exited.
+    let mut details = json!({"taskId": id});
+    if accepted {
+        details["killRequested"] = json!(true);
+    }
+    if let Some(state) = descriptor["state"].as_str() {
+        details["state"] = json!(state);
+    }
+    match (check_cancelled(), result) {
+        (Ok(()), Ok(())) => Ok(details),
+        (Err(cancelled), Err(failure)) if failure.code != "tool.cancelled" => {
+            Err(cancellation_with_cleanup_error(cancelled, failure.with_details(details)))
+        }
+        (Err(failure), _) | (_, Err(failure)) => Err(failure.with_details(details)),
+    }
+}
+
+fn cancellation_with_cleanup_error(cancelled: ToolError, failure: ToolError) -> ToolError {
+    let mut details = failure.details.expect("termination errors include the task handle");
+    details["cleanupError"] = json!({"code": failure.code, "message": failure.message});
+    cancelled.with_details(details)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn wait_for(
     client: &ProcessHostClient,
     call: &ToolCall,
     id: &str,
-    mut descriptor: Value,
+    descriptor: &mut Value,
     mut seq: u64,
     shell_generation: Option<u64>,
     wait_ms: u64,
     until_output: bool,
-    kill_on_cancel: bool,
     settle_ms: u64,
     progress: Option<&Arc<BashProgress>>,
-) -> Result<Value, ToolError> {
+) -> Result<(), ToolError> {
     let deadline = Instant::now() + Duration::from_millis(wait_ms);
     let original_seq = seq;
     let mut settle_deadline: Option<Instant> = None;
     let mut max_settle_deadline: Option<Instant> = None;
     let mut last_heartbeat = Instant::now();
     loop {
-        if call.cancellation.is_cancelled() {
-            if kill_on_cancel {
-                rpc(client, "process.v1.kill", json!({"id": id}))?;
-            }
-            return call.check_cancelled().map(|_| descriptor);
-        }
+        call.check_cancelled()?;
         let now = Instant::now();
         if descriptor["state"] != "running" || now >= deadline {
-            return Ok(descriptor);
+            return Ok(());
         }
         let current_seq = descriptor["latestSeq"].as_u64().unwrap_or(0);
         if until_output && current_seq > original_seq {
             if settle_ms == 0 {
-                return Ok(descriptor);
+                return Ok(());
             }
             let cap = *max_settle_deadline.get_or_insert_with(|| {
                 (now + Duration::from_millis(settle_ms.saturating_mul(4))).min(deadline)
@@ -130,7 +219,7 @@ pub(super) fn wait_for(
                     settle_deadline = Some((now + Duration::from_millis(settle_ms)).min(cap));
                 }
                 Some(settle_at) if now >= settle_at => {
-                    return Ok(descriptor);
+                    return Ok(());
                 }
                 Some(_) => {}
             }
@@ -138,7 +227,7 @@ pub(super) fn wait_for(
         let target_deadline = settle_deadline.map_or(deadline, |settle_at| settle_at.min(deadline));
         let remaining = target_deadline.saturating_duration_since(now).as_millis() as u64;
         if remaining == 0 {
-            return Ok(descriptor);
+            return Ok(());
         }
         let slice = if settle_deadline.is_some() {
             remaining.min(50)
@@ -155,7 +244,7 @@ pub(super) fn wait_for(
                 "waitMs": slice
             }),
         )?;
-        descriptor = output["process"].clone();
+        *descriptor = output["process"].clone();
         if let Some(progress) = progress
             && let Some(frames) = output["frames"].as_array()
         {

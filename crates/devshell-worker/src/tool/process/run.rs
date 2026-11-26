@@ -1,7 +1,7 @@
 use super::capture::BashProgress;
 use super::model::{BashRunOutput, TaskCursor};
 use super::output::collect;
-use super::scope::{error, rpc, wait_for};
+use super::scope::{check_spawn_cancelled, error, spawn, wait_for};
 use crate::capability::artifact::store::ArtifactStore;
 use crate::capability::process::client::ProcessHostClient;
 use crate::instance::InstanceName;
@@ -42,33 +42,36 @@ pub(crate) fn run(
         object.insert("cols".into(), json!(DEFAULT_PTY_COLS));
         object.insert("rows".into(), json!(DEFAULT_PTY_ROWS));
     }
-    let descriptor = rpc(&client, "process.v1.spawn", spawn_payload)?;
+    let mut descriptor = spawn(&client, call, id, spawn_payload)?;
     let wait = params.wait_ms.unwrap_or(DEFAULT_WAIT_MS);
     let progress = Arc::new(BashProgress::new(started, call.progress()));
     progress.emit_initial();
-    let descriptor = wait_for(
+    let waited = wait_for(
         &client,
         call,
         id,
-        descriptor,
+        &mut descriptor,
         0,
         None,
         wait,
         false,
-        true,
         0,
         Some(&progress),
-    )?;
-    let mut result = collect(
+    );
+    check_spawn_cancelled(&client, call, id, &descriptor)?;
+    waited?;
+    let collected = collect(
         &client,
         artifacts,
         id,
-        descriptor,
+        descriptor.clone(),
         TaskCursor::default(),
         max_capture,
         started,
         progress,
-    )?;
+    );
+    check_spawn_cancelled(&client, call, id, &descriptor)?;
+    let mut result = collected?;
     result.wait_reason = Some(
         if result.termination == super::model::BashTermination::Running {
             "timeout"

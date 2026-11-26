@@ -12,12 +12,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 const DEFAULT_TERMINAL_COLS: u16 = 120;
 const DEFAULT_TERMINAL_ROWS: u16 = 36;
 const MAX_LISTED_COMPLETED_TASKS: usize = 10;
-const CLOSE_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -340,10 +338,13 @@ impl ToolHandler for TerminalTool {
                             }
                         }
                         let client = ProcessHostClient::ensure(&self.instance).map_err(error)?;
-                        let created = rpc(
+                        let id = format!("process-{}", uuid::Uuid::new_v4());
+                        let created = spawn(
                             &client,
-                            "process.v1.spawn",
+                            &call,
+                            &id,
                             json!({
+                                "id": id,
                                 "command": params.shell.unwrap_or_default(),
                                 "interactive": true,
                                 "persistent": true,
@@ -355,20 +356,23 @@ impl ToolHandler for TerminalTool {
                                 "rows": params.rows.unwrap_or(DEFAULT_TERMINAL_ROWS),
                             }),
                         )?;
-                        let task = summarize(&created)?;
-                        let initial_cursor = TaskCursor {
-                            generation: created["shellGeneration"].as_u64(),
-                            ..TaskCursor::default()
-                        }
-                        .encode(&task.id);
-                        serialize(TaskManageOutput {
-                            tasks: None,
-                            task: Some(task),
-                            cursor: Some(initial_cursor),
-                            task_id: None,
-                            kill_requested: None,
-                            state: None,
-                        })
+                        let result = summarize(&created).and_then(|task| {
+                            let initial_cursor = TaskCursor {
+                                generation: created["shellGeneration"].as_u64(),
+                                ..TaskCursor::default()
+                            }
+                            .encode(&task.id);
+                            serialize(TaskManageOutput {
+                                tasks: None,
+                                task: Some(task),
+                                cursor: Some(initial_cursor),
+                                task_id: None,
+                                kill_requested: None,
+                                state: None,
+                            })
+                        });
+                        check_spawn_cancelled(&client, &call, &id, &created)?;
+                        result
                     }
                     TaskManageCommand::Close => {
                         if params.name.is_some()
@@ -390,41 +394,8 @@ impl ToolHandler for TerminalTool {
                             })?;
                         require_execute(&call)?;
                         let client = connect(&self.instance)?;
-                        let mut descriptor = require(&client, &call, &id)?;
-                        rpc(&client, "process.v1.kill", json!({"id": id}))?;
-                        let deadline = Instant::now() + CLOSE_WAIT_TIMEOUT;
-                        let mut seq = descriptor["latestSeq"].as_u64().unwrap_or(0);
-                        while descriptor["state"] == "running" && Instant::now() < deadline {
-                            let remaining = deadline
-                                .saturating_duration_since(Instant::now())
-                                .as_millis() as u64;
-                            if remaining == 0 {
-                                break;
-                            }
-                            let output = rpc(
-                                &client,
-                                "process.v1.read",
-                                json!({
-                                    "id": id,
-                                    "fromSeq": seq,
-                                    "waitMs": remaining.min(100),
-                                }),
-                            )?;
-                            descriptor = output["process"].clone();
-                            seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
-                        }
-                        let state = descriptor["state"]
-                            .as_str()
-                            .ok_or_else(|| ToolError::new("process.internal", "process descriptor missing state"))?
-                            .to_string();
-                        serialize(TaskManageOutput {
-                            tasks: None,
-                            task: None,
-                            cursor: None,
-                            task_id: Some(id),
-                            kill_requested: Some(true),
-                            state: Some(state),
-                        })
+                        let descriptor = require(&client, &call, &id)?;
+                        terminate(&client, &id, descriptor, Some(&call.cancellation))
                     }
                 }
             }

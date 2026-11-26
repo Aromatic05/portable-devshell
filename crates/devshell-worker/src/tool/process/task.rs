@@ -82,7 +82,6 @@ impl ToolHandler for TaskInputTool {
     }
 
     fn call(&self, call: ToolCall) -> Result<Value, ToolError> {
-        call.check_cancelled()?;
         let params: TaskInputParams = call.parse_params()?;
         if params.task.trim().is_empty() {
             return Err(ToolError::new(
@@ -102,12 +101,13 @@ impl ToolHandler for TaskInputTool {
             .as_deref()
             .map(|cursor| TaskCursor::decode_for(cursor, &params.task))
             .transpose()?;
+        check_observation_cancelled(&call, &params.task, explicit_cursor.unwrap_or_default())?;
 
         let input_to_send = params.input.as_deref().filter(|text| !text.is_empty());
         let wrote_input = input_to_send.is_some();
         let input_generation = explicit_cursor.and_then(|cursor| cursor.generation);
 
-        let (client, descriptor, cursor) = if let Some(input) = input_to_send {
+        let (client, mut descriptor, cursor) = if let Some(input) = input_to_send {
             require_execute(&call)?;
             if input.len() > MAX_INPUT_BYTES {
                 return Err(ToolError::new("tool.invalidArguments", "input too large"));
@@ -134,7 +134,9 @@ impl ToolHandler for TaskInputTool {
                     cursor
                 }
             };
-            rpc(
+            let resume = resume_cursor(cursor, &descriptor);
+            check_observation_cancelled(&call, &params.task, resume)?;
+            let written = rpc(
                 &client,
                 "process.v1.input",
                 json!({
@@ -142,7 +144,9 @@ impl ToolHandler for TaskInputTool {
                     "dataBase64": STANDARD.encode(input),
                     "shellGeneration": input_generation,
                 }),
-            )?;
+            );
+            check_observation_cancelled(&call, &params.task, resume)?;
+            written?;
             (client, descriptor, cursor)
         } else {
             require_read(&call)?;
@@ -186,19 +190,21 @@ impl ToolHandler for TaskInputTool {
             .flatten();
         let progress = Arc::new(BashProgress::new(started, call.progress()));
         progress.emit_initial();
-        let descriptor = wait_for(
+        let resume = resume_cursor(cursor, &descriptor);
+        let waited = wait_for(
             &client,
             &call,
             &params.task,
-            descriptor,
+            &mut descriptor,
             wait_from_seq,
             observation_generation,
             wait_ms,
             until_output,
-            false,
             settle_ms,
             Some(&progress),
-        )?;
+        );
+        check_observation_cancelled(&call, &params.task, resume)?;
+        waited?;
         let reason = if descriptor["state"] != "running" {
             "terminal"
         } else if until_output && descriptor["latestSeq"].as_u64().unwrap_or(0) > wait_from_seq {
@@ -206,7 +212,7 @@ impl ToolHandler for TaskInputTool {
         } else {
             "timeout"
         };
-        let mut result = collect(
+        let collected = collect(
             &client,
             &self.artifacts,
             &params.task,
@@ -218,7 +224,9 @@ impl ToolHandler for TaskInputTool {
             DEFAULT_CAPTURE,
             started,
             progress,
-        )?;
+        );
+        check_observation_cancelled(&call, &params.task, resume)?;
+        let mut result = collected?;
         result.wait_reason = Some(reason.into());
         result.wait_ms = Some(wait_ms);
         result.until_exit = params.until_exit.then_some(true);
@@ -246,6 +254,24 @@ impl ToolHandler for TaskInputTool {
         }
         serialize(result)
     }
+}
+
+// Resume at the read boundary from before this call consumed any output.
+fn resume_cursor(cursor: TaskCursor, descriptor: &Value) -> TaskCursor {
+    TaskCursor {
+        generation: cursor.generation.or_else(|| descriptor["shellGeneration"].as_u64()),
+        ..cursor
+    }
+}
+
+fn check_observation_cancelled(call: &ToolCall, task: &str, cursor: TaskCursor) -> Result<(), ToolError> {
+    call.check_cancelled().map_err(|cancelled| {
+        let mut details = json!({"taskId": task});
+        if cursor.generation.is_some() {
+            details["cursor"] = json!(cursor.encode(task));
+        }
+        cancelled.with_details(details)
+    })
 }
 
 pub(crate) fn register_tools(
