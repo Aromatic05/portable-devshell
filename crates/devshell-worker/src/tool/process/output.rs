@@ -14,6 +14,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, Read};
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
@@ -42,8 +43,8 @@ impl OutputBoundary {
         TaskCursor {
             generation: Some(self.shell_generation),
             seq: self.latest_seq,
-            stdout: self.capture.stdout.stored_bytes,
-            stderr: self.capture.stderr.stored_bytes,
+            stdout: self.capture.stdout.source_bytes,
+            stderr: self.capture.stderr.source_bytes,
         }
     }
 }
@@ -113,34 +114,27 @@ fn capture(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn collect_stream(
-    client: &ProcessHostClient,
+fn collect_stream<R: Read + Send + 'static>(
     artifacts: &ArtifactStore,
-    id: &str,
-    channel: &'static str,
     metadata: &CaptureBounds,
     offset: usize,
     max: usize,
     progress: Arc<BashProgress>,
     stream: ArtifactStream,
     progress_stream: BashProgressStream,
-    shell_generation: Option<u64>,
+    open_reader: impl FnOnce(Range<usize>) -> R,
 ) -> Result<(StreamOutput, usize), ToolError> {
-    if offset > metadata.stored_bytes {
+    if offset > metadata.source_bytes {
         return Err(ToolError::new(
             "process.captureFailed",
-            "output cursor exceeds retained capture",
+            "output cursor exceeds source bytes",
         ));
     }
-    let reader = CaptureReader {
-        client: client.clone(),
-        id: id.into(),
-        channel,
-        offset,
-        end: metadata.stored_bytes,
-        pending: std::io::Cursor::new(Vec::new()),
-        shell_generation,
-    };
+    // A cursor accounts for omitted source bytes, but only the retained prefix is readable.
+    let source_delta = metadata.source_bytes - offset;
+    let retained = offset.min(metadata.stored_bytes)..metadata.stored_bytes;
+    let tail_truncated = metadata.truncated && source_delta > retained.len();
+    let reader = open_reader(retained);
     let bytes = Arc::new(AtomicUsize::new(0));
     let (draft, warning) = begin_artifact(artifacts, stream);
     let mut output = spawn_reader(
@@ -154,16 +148,13 @@ fn collect_stream(
     )
     .join()
     .map_err(|_| ToolError::new("process.ioFailed", "capture reader panicked"))??;
-    if metadata.truncated {
+    if tail_truncated {
         output.tail_truncated = true;
         output.artifact_draft = None;
         output.artifact_warning = Some("Process Host capture limit reached".into());
     }
     enforce_inline_rpc_budget(&mut output);
-    Ok((
-        output,
-        metadata.source_bytes.saturating_sub(offset),
-    ))
+    Ok((output, source_delta))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -176,6 +167,29 @@ pub(super) fn collect(
     max: usize,
     started: Instant,
     progress: Arc<BashProgress>,
+) -> Result<BashRunOutput, ToolError> {
+    let open_reader = |channel, range: Range<usize>| CaptureReader {
+        client: client.clone(),
+        id: id.into(),
+        channel,
+        offset: range.start,
+        end: range.end,
+        pending: io::Cursor::new(Vec::new()),
+        shell_generation: cursor.generation,
+    };
+    collect_with_reader(artifacts, id, descriptor, cursor, max, started, progress, open_reader)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_with_reader<R: Read + Send + 'static>(
+    artifacts: &ArtifactStore,
+    id: &str,
+    descriptor: Value,
+    cursor: TaskCursor,
+    max: usize,
+    started: Instant,
+    progress: Arc<BashProgress>,
+    open_reader: impl Fn(&'static str, Range<usize>) -> R,
 ) -> Result<BashRunOutput, ToolError> {
     if descriptor["state"] == "failed" {
         progress.finish();
@@ -203,30 +217,24 @@ pub(super) fn collect(
         ));
     }
     let (mut stdout, stdout_bytes) = collect_stream(
-        client,
         artifacts,
-        id,
-        "stdout",
         &boundary.capture.stdout,
         cursor.stdout,
         max,
         Arc::clone(&progress),
         ArtifactStream::Stdout,
         BashProgressStream::Stdout,
-        cursor.generation,
+        |range| open_reader("stdout", range),
     )?;
     let (mut stderr, stderr_bytes) = collect_stream(
-        client,
         artifacts,
-        id,
-        "stderr",
         &boundary.capture.stderr,
         cursor.stderr,
         max,
         Arc::clone(&progress),
         ArtifactStream::Stderr,
         BashProgressStream::Stderr,
-        cursor.generation,
+        |range| open_reader("stderr", range),
     )?;
     progress.finish();
     let retain = stdout.is_truncated()
@@ -308,4 +316,70 @@ pub(super) fn collect(
         }),
         cursor: Some(boundary.cursor().encode(id)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::ToolProgressEmitter;
+
+    #[test]
+    fn polling_truncated_capture_counts_only_new_source_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let task = "proc-1";
+        let boundary = |seq, source_bytes| {
+            json!({
+                "state": "running", "latestSeq": seq, "shellGeneration": 1,
+                "capture": {
+                    "stdout": {"sourceBytes": source_bytes, "storedBytes": 2, "truncated": true},
+                    "stderr": {"sourceBytes": 3, "storedBytes": 2, "truncated": true},
+                },
+            })
+        };
+        let open_reader = |channel, range: Range<usize>| {
+            let retained = match channel {
+                "stdout" => b"ab",
+                "stderr" => b"xy",
+                _ => panic!("unexpected channel: {channel}"),
+            };
+            &retained[range]
+        };
+        let poll = |descriptor, cursor| {
+            let started = Instant::now();
+            let progress = Arc::new(BashProgress::new(started, ToolProgressEmitter::new(|_| {})));
+            collect_with_reader(&artifacts, task, descriptor, cursor, 64, started, progress, open_reader)
+        };
+
+        let first = poll(boundary(2, 3), TaskCursor::default()).unwrap();
+        assert_eq!((first.stdout_bytes, first.stderr_bytes), (3, 3));
+        assert!(first.stdout.starts_with("ab\n"));
+        assert!(first.stderr.starts_with("xy\n"));
+        assert!(first.stdout_truncated);
+        assert!(first.stderr_truncated);
+        let cursor = TaskCursor::decode_for(first.cursor.as_deref().unwrap(), task).unwrap();
+        let repeated = poll(boundary(2, 3), cursor).unwrap();
+        assert_eq!((repeated.stdout_bytes, repeated.stderr_bytes), (0, 0));
+        assert_eq!((cursor.seq, cursor.stdout, cursor.stderr), (2, 3, 3));
+        assert_eq!(repeated.cursor, first.cursor);
+        assert!(repeated.stdout.is_empty());
+        assert!(repeated.stderr.is_empty());
+        assert!(!repeated.stdout_truncated);
+        assert!(!repeated.stderr_truncated);
+        assert!(repeated.artifact_warnings.is_none());
+
+        let next = poll(boundary(3, 4), cursor).unwrap();
+        assert_eq!((next.stdout_bytes, next.stderr_bytes), (1, 0));
+        assert!(next.stdout.is_empty());
+        assert!(next.stdout_truncated);
+        assert!(!next.stderr_truncated);
+        assert_eq!(next.artifact_warnings.unwrap(), [
+            "stdout artifact unavailable: Process Host capture limit reached",
+        ]);
+        let cursor = TaskCursor::decode_for(next.cursor.as_deref().unwrap(), task).unwrap();
+        assert_eq!((cursor.seq, cursor.stdout, cursor.stderr), (3, 4, 3));
+
+        let error = poll(boundary(3, 4), TaskCursor { stdout: 5, ..cursor }).unwrap_err();
+        assert_eq!(error.code, "process.captureFailed");
+    }
 }
