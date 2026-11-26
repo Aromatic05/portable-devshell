@@ -46,6 +46,8 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 - `{"command":"create","name":"…","cwd":"./"}`：创建一个持久人机协同交互终端（可选 `name`、`cwd`、`shell`、`cols` 默认 `120`、`rows` 默认 `36`），同时返回初始 `cursor`。持久终端在运行期间不会被自动回收，shell 退出后会自动重启（带退避与瞬崩熔断），并与 `devshell-worker terminal` 协同工作。
 - `{"command":"close","task":"process-…"}`：请求终止对应任务或持久终端，返回 `taskId`、`killRequested: true` 和本次观察到的 `state`；如果 `state` 仍为 `running`，表示终止请求已接受但尚未观察到退出，应使用 `task_manage(command="list")` 轮询状态，而不是将其视为已关闭。已保留的输出仍可读。
 
+`task_input` 的纯轮询和 `task_manage(command="list")` 都不写入进程。MCP annotations 只能标注整个工具，因此这两个工具仍按可能写入或终止进程来标注；客户端可能对只读调用也要求审批。`task_inspect` 本身标注为只读，但只返回 PTY 屏幕。
+
 ## 人机协同
 
 同一台 Worker 主机上，通过实例共用的 Worker binary 直接使用：
