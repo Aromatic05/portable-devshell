@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter, once } from "node:events";
 import { rm } from "node:fs/promises";
 import test from "node:test";
 
@@ -15,6 +16,7 @@ import { InstanceState } from "../../../src/instance/model/State.ts";
 import type {
     TerminalProcess,
     TerminalProcessExit,
+    TerminalProcessMetadataUpdate,
     WorkerTerminalNotification,
     WorkerTerminalPort,
 } from "../../../src/terminal/Api.ts";
@@ -29,8 +31,11 @@ class StreamHarness {
     #onClose?: () => void;
     #onCancel?: () => void;
 
+    constructor(private readonly onSend?: () => void) {}
+
     async send(message: ControlStreamMessage): Promise<void> {
         this.sent.push(message);
+        this.onSend?.();
     }
 
     async close(): Promise<void> {
@@ -399,11 +404,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     }
 }
 
-test("terminal route takeover snapshot prunes pendingBytes so subsequent output within window does not trigger stream.gap", async () => {
+test("terminal route accepts in-flight output ACKs covered by a takeover snapshot", async (t) => {
     const dataListeners = new Set<(data: string, sourceSeq?: number) => void>();
+    const metadataListeners = new Set<
+        (update: TerminalProcessMetadataUpdate) => void
+    >();
     const process: TerminalProcess = {
         async acquireControl() {
-            return { data: "snap", seq: 2 };
+            for (const listener of metadataListeners) {
+                listener({ humanControl: true, version: 2 });
+            }
+            return { data: "snap", seq: 3 };
         },
         async releaseControl() {},
         kill() {},
@@ -413,6 +424,10 @@ test("terminal route takeover snapshot prunes pendingBytes so subsequent output 
         },
         onExit() {
             return () => undefined;
+        },
+        onMetadataChange(listener) {
+            metadataListeners.add(listener);
+            return () => metadataListeners.delete(listener);
         },
         resize() {},
         write() {},
@@ -441,56 +456,96 @@ test("terminal route takeover snapshot prunes pendingBytes so subsequent output 
     const attach = route.streams?.find((entry) => entry.name === "attach");
     assert.ok(attach);
 
-    const stream = new StreamHarness();
+    const events = new EventEmitter();
+    const stream = new StreamHarness(() => events.emit("send"));
+    const identity = {
+        generation: opened.generation,
+        terminalId: opened.terminalId,
+        version: opened.version,
+    };
+    const ack = (
+        throughSeq: number,
+        overrides: Partial<typeof identity> = {},
+    ) => ({
+        name: "ack",
+        payload: { ...identity, ...overrides, throughSeq },
+    });
+
+    emitOutput("already seen");
+    const seedSent = once(events, "send");
     const done = attach.handle(
         stream as never,
         {
             id: "attach-prune",
             name: "attach",
             payload: {
-                fromSeq: 0,
+                fromSeq: 1,
                 generation: opened.generation,
                 terminalId: opened.terminalId,
             },
         },
         attachContext("attach-prune"),
     );
+    t.after(async () => {
+        await stream.close();
+        await done;
+    });
 
-    await waitFor(() => stream.sent.some((msg) => msg.name === "seed"));
+    await seedSent;
+    assert.equal(stream.sent[0]?.name, "seed");
+    const sendOutput = async (data: string, seq: number) => {
+        const sent = once(events, "send");
+        emitOutput(data);
+        await sent;
+        assert.deepEqual(stream.sent.at(-1), {
+            name: "output",
+            payload: { data, seq },
+            seq,
+        });
+    };
+    await sendOutput("1234567890", 2);
+    const delayedAck = ack(2);
+    await sendOutput("abcdefghij", 3);
 
-    // Fill the 20-byte unacked window without sending ack frames.
-    emitOutput("1234567890");
-    emitOutput("abcdefghij");
-    await waitFor(
-        () =>
-            stream.sent.filter((msg) => msg.name === "output").length === 2,
-    );
-
-    // Take control; snapshot seq=2 should prune frames 1 and 2 from pendingBytes.
+    // The takeover arrives before the ACK for the already-sent frame 2.
     await stream.deliver({
         name: "control",
-        payload: {
-            clientSeq: 1,
-            generation: opened.generation,
-            takeover: true,
-            terminalId: opened.terminalId,
-            version: opened.version,
-        },
+        payload: { ...identity, clientSeq: 1, takeover: true },
     });
-    await waitFor(() =>
-        stream.sent.some((msg) => msg.name === "controlChanged"),
+    const reply = stream.sent.at(-1);
+    assert.equal(reply?.name, "controlChanged");
+    const payload = reply?.payload as Record<string, JsonValue>;
+    assert.deepEqual(payload.snapshot, { data: "snap", seq: 3 });
+    assert.equal((payload.session as { version: number }).version, 2);
+
+    await stream.deliver(delayedAck);
+    await stream.deliver(delayedAck);
+
+    const invalidSequence = {
+        code: "control.invalidTarget",
+        message: "Terminal acknowledgement sequence is invalid.",
+    };
+    await assert.rejects(stream.deliver(ack(0)), invalidSequence);
+    await assert.rejects(stream.deliver(ack(4)), invalidSequence);
+    await assert.rejects(
+        stream.deliver(ack(2, { terminalId: "other-terminal" })),
+        {
+            code: "control.invalidTarget",
+            message: "Terminal stream identity does not match the attachment.",
+        },
+    );
+    await assert.rejects(
+        stream.deliver(ack(2, { generation: opened.generation + 1 })),
+        { code: "instance.conflict", message: "Terminal generation is stale." },
     );
 
-    // Emitting 15 more bytes must succeed instead of cancelling with stream.gap.
-    emitOutput("123456789012345");
-    await waitFor(
-        () =>
-            stream.sent.filter((msg) => msg.name === "output").length === 3,
-    );
+    // The snapshot cleared the full window; a new ACK can clear it again.
+    await sendOutput("12345678901234567890", 4);
+    await stream.deliver(ack(4, { version: 2 }));
+    await assert.rejects(stream.deliver(delayedAck), invalidSequence);
+    await sendOutput("12345678901234567890", 5);
     assert.equal(stream.cancelled, false);
-
-    await stream.close();
-    await done;
+    assert.equal(stream.closed, false);
 });
 
 test("terminal route ignores controlChanged send when stream has already closed", async () => {

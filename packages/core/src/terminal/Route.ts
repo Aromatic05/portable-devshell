@@ -129,6 +129,8 @@ export function createTerminalRouteModule(
                 let terminal = false;
                 let endedFlag = false;
                 let pendingBytes = 0;
+                // A takeover snapshot can prune output before its in-flight ACKs arrive.
+                let minAckSeq = input.fromSeq;
                 let lastAckedSeq = input.fromSeq;
                 const pendingFrames = new Map<number, number>();
                 const prunePendingThrough = (seq: number) => {
@@ -179,14 +181,16 @@ export function createTerminalRouteModule(
                             identity.terminalId,
                         );
                         if (
-                            identity.throughSeq < lastAckedSeq ||
+                            identity.throughSeq < minAckSeq ||
                             identity.throughSeq > acknowledged.latestSeq
                         )
                             throw invalidInput(
                                 "Terminal acknowledgement sequence is invalid.",
                             );
-                        lastAckedSeq = identity.throughSeq;
-                        prunePendingThrough(identity.throughSeq);
+                        minAckSeq = identity.throughSeq;
+                        if (minAckSeq <= lastAckedSeq) return;
+                        lastAckedSeq = minAckSeq;
+                        prunePendingThrough(lastAckedSeq);
                         return;
                     }
 
@@ -417,8 +421,11 @@ export function createTerminalRouteModule(
                                 "Terminal output exceeded the attach buffer while restoring state.",
                             retryable: true,
                         });
-                    if (snapshot !== undefined)
+                    if (snapshot !== undefined) {
                         lastAckedSeq = Math.max(lastAckedSeq, snapshot.seq);
+                        // No output has been sent before the initial seed.
+                        minAckSeq = lastAckedSeq;
+                    }
                     await stream.send({
                         name: "seed",
                         payload: {
