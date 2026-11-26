@@ -115,7 +115,7 @@ test("TerminalHandoffWatcher queues handoff comments only for active contexts ma
         seq: 11,
         type: "terminal.controlReleased",
     };
-    await watch.onEvent(event);
+    await Promise.all([watch.onEvent(event), watch.onEvent(event)]);
 
     assert.deepEqual(
         queued.map((item) => item.ctxId),
@@ -123,7 +123,7 @@ test("TerminalHandoffWatcher queues handoff comments only for active contexts ma
     );
     assert.match(
         queued[0]!.text,
-        /\[Terminal handoff\].*"dev-server" \(process-1111\).*120x36.*task_inspect.*omit any pre-handoff cursor/u,
+        /\[Terminal handoff\].*"dev-server" \(process-1111\).*120x36.*belongs to your current task.*task_inspect before resuming.*omit any pre-handoff cursor/u,
     );
 
     // Stateless release (workspace: undefined) notifies only stateless contexts.

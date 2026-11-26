@@ -31,8 +31,8 @@ interface InstanceWatchState {
 
 /**
  * Watches `terminal.controlReleased` Instance events and queues a concise
- * handoff Comment to active Contexts sharing that Instance/workspace so the
- * model is proactively informed when a human finishes and hands control back.
+ * handoff Comment to one active Context sharing that Instance/workspace so
+ * the same release does not ask multiple models to resume the terminal.
  */
 export class TerminalHandoffWatcher {
     readonly #options: TerminalHandoffWatcherOptions;
@@ -98,10 +98,8 @@ export class TerminalHandoffWatcher {
                     eventTypes: [TERMINAL_CONTROL_RELEASED_EVENT],
                     fromSeq,
                     onEvent: async (event) => {
-                        state.lastSeq = Math.max(
-                            state.lastSeq ?? 0,
-                            event.seq,
-                        );
+                        if (event.seq <= (state.lastSeq ?? 0)) return;
+                        state.lastSeq = event.seq;
                         await this.#handleEvent(instance, event);
                     },
                     onGap: (gap) => {
@@ -235,7 +233,7 @@ function formatHandoffComment(payload: ControlReleasedPayload): string {
         details.push(`cwd: ${payload.cwd}`);
     }
     const suffix = details.length > 0 ? ` [${details.join(", ")}]` : "";
-    return `[Terminal handoff] Human released control of terminal ${label}${suffix}. Inspect the current screen with task_inspect, or send input with task_input (omit any pre-handoff cursor to anchor at the latest output).`;
+    return `[Terminal handoff] Human released control of terminal ${label}${suffix}. If this terminal belongs to your current task, inspect its screen with task_inspect before resuming. Only send input if your task needs it; when using task_input, omit any pre-handoff cursor to anchor at the latest output.`;
 }
 
 function normalizeWorkspace(
