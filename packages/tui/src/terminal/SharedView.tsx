@@ -50,10 +50,14 @@ export function TuiComponentSharedTerminals(props: {
         const mode = state.mode ?? "control";
         const modeBadge = mode === "observe" ? "[OBSERVE]" : "[CONTROL]";
         const headerTitle = `session · ${props.instance ?? "no instance"} · ${sessionLabel(state.active)} ${modeBadge}`;
-        const headerControls =
+        const baseControls =
             mode === "observe"
                 ? "read-only · t take control · q/Esc back · Ctrl+] sidebar"
                 : "Ctrl+] release & sidebar";
+        const headerControls =
+            state.error !== undefined && state.error.length > 0
+                ? `error: ${state.error} · ${baseControls}`
+                : baseControls;
         return (
             <TuiComponentTerminal
                 columns={props.columns}

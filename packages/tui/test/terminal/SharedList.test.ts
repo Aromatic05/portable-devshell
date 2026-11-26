@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { PassThrough } from "node:stream";
+import type { WriteStream } from "node:tty";
 import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
+import { render } from "ink";
+import { TuiTerminalBuffer } from "../../src/terminal/emulation/Buffer.ts";
 import { TuiSharedTerminalList } from "../../src/terminal/SharedList.ts";
+import { TuiComponentSharedTerminals } from "../../src/terminal/SharedView.tsx";
 import type { TerminalSessionDescriptor } from "@portable-devshell/shared";
 
 function terminal(id: string, instance: string): TerminalSessionDescriptor {
@@ -97,4 +104,78 @@ test("shared terminal list supports observe/control modes, creating persistent s
     assert.deepEqual(killed, ["created"]);
     assert.equal(list.getSnapshot().sessions.length, 1);
     list.dispose();
+});
+
+test("closeSelected refreshes and retries once on stale version conflict", async () => {
+    const sessions: TerminalSessionDescriptor[] = [
+        { ...terminal("target", "alpha"), version: 1 },
+    ];
+    const killVersions: number[] = [];
+    const list = new TuiSharedTerminalList({
+        list: async () => sessions.map((session) => ({ ...session })),
+        kill: async (_instance, identity) => {
+            killVersions.push(identity.version);
+            if (identity.version === 1) {
+                sessions[0] = { ...sessions[0]!, version: 2 };
+                const error = new Error("stale version mismatch");
+                (error as { code?: string }).code = "instance.conflict";
+                throw error;
+            }
+            const [removed] = sessions.splice(0, 1);
+            return { ...removed!, state: "killed", version: 3 };
+        },
+    });
+    await list.bind("alpha");
+    assert.equal(await list.closeSelected(), true);
+    assert.deepEqual(killVersions, [1, 2]);
+    assert.equal(list.getSnapshot().sessions.length, 0);
+    assert.equal(list.getSnapshot().error, undefined);
+    list.dispose();
+});
+
+test("SharedView renders state.error in header while state.active is set", async () => {
+    const list = new TuiSharedTerminalList(async () => [
+        { ...terminal("sess-1", "alpha"), name: "dev" },
+    ]);
+    await list.bind("alpha");
+    list.enter("observe");
+    list.setError("takeover busy");
+
+    const buffer = new TuiTerminalBuffer({ columns: 80, rows: 10 });
+    const snapshot = { ...buffer.getSnapshot(), status: "running" as const };
+    const output = new PassThrough();
+    Object.assign(output, { columns: 120 });
+    let text = "";
+    output.on("data", (chunk) => {
+        text += chunk.toString();
+    });
+    const view = render(
+        createElement(TuiComponentSharedTerminals, {
+            columns: 120,
+            rows: 10,
+            focused: true,
+            instance: "alpha",
+            source: list,
+            terminal: {
+                getSnapshot: () => snapshot,
+                subscribe: () => () => undefined,
+            },
+            onGraphicsVisibility() {},
+        }),
+        {
+            stdout: output as unknown as WriteStream,
+            debug: true,
+            patchConsole: false,
+            exitOnCtrlC: false,
+        },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    view.cleanup();
+    output.destroy();
+    buffer.dispose();
+    list.dispose();
+
+    const plain = stripVTControlCharacters(text);
+    assert.match(plain, /error: takeover busy/u);
+    assert.match(plain, /\[OBSERVE\]/u);
 });

@@ -53,6 +53,17 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             return Promise.resolve();
         }
 
+        sendControl(
+            takeover: boolean,
+            command: TerminalStreamCommandIdentity,
+        ): Promise<void> {
+            this.sent.push({
+                operation: "control",
+                payload: { ...command, takeover },
+            });
+            return Promise.resolve();
+        }
+
         sendResize(
             cols: number,
             rows: number,
@@ -430,6 +441,79 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         ]);
         assert.equal(factory.snapshot("alpha")?.terminalId, "terminal-new");
+    });
+
+    test("control terminal PTY stays alive in observe mode when controlChanged carries error", async () => {
+        const stream = new FakeAttachment();
+        const session: TerminalSessionDescriptor = {
+            cols: 80,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            humanControl: false,
+            instance: "alpha",
+            latestSeq: 0,
+            rows: 24,
+            state: "running",
+            terminalId: "terminal-observe",
+            version: 1,
+        };
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                return attachAttachment(stream, { ...session });
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async list() {
+                return [{ ...session }];
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const factory = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        });
+        const pty = factory
+            .create("alpha")("alpha", ["terminal-observe", "observe"], {
+                columns: 80,
+                environment: {},
+                rows: 24,
+            });
+        const output: string[] = [];
+        const exits: number[] = [];
+        pty.onData((data) => output.push(data));
+        pty.onExit((event) => exits.push(event.exitCode));
+
+        await waitFor(
+            () => factory.snapshot("alpha:terminal-observe") !== undefined,
+        );
+        const controlPromise = factory.setControl(
+            "alpha",
+            "terminal-observe",
+            true,
+        );
+        await waitFor(() =>
+            stream.sent.some((entry) => entry.operation === "control"),
+        );
+
+        stream.push({
+            kind: "controlChanged",
+            clientSeq: 1,
+            error: "another human holds control",
+            humanControl: false,
+            session: { ...session, version: 2 },
+        });
+
+        await assert.rejects(controlPromise, /another human holds control/u);
+        assert.equal(stream.closed, false);
+        assert.deepEqual(exits, []);
+        assert.equal(factory.snapshot("alpha:terminal-observe")?.version, 2);
+
+        stream.push({ kind: "output", frame: { data: "still-alive", seq: 1 } });
+        await waitFor(() => output.includes("still-alive"));
+        pty.kill();
     });
 }
 

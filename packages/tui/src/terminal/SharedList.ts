@@ -184,13 +184,30 @@ export class TuiSharedTerminalList {
             return false;
         this.#update({ ...this.#snapshot, loading: true, error: undefined });
         try {
-            await this.#operations.kill(instance, {
-                generation: selected.generation,
-                terminalId: selected.terminalId,
-                version: selected.version,
-            });
+            try {
+                await this.#operations.kill(instance, {
+                    generation: selected.generation,
+                    terminalId: selected.terminalId,
+                    version: selected.version,
+                });
+            } catch (error) {
+                if (!isStaleVersionConflict(error)) throw error;
+                await this.refresh();
+                if (this.#snapshot.error !== undefined) return false;
+                const fresh = this.#snapshot.sessions.find(
+                    (session) =>
+                        session.terminalId === selected.terminalId &&
+                        session.state === "running",
+                );
+                if (fresh === undefined) return true;
+                await this.#operations.kill(instance, {
+                    generation: fresh.generation,
+                    terminalId: fresh.terminalId,
+                    version: fresh.version,
+                });
+            }
             await this.refresh();
-            return true;
+            return this.#snapshot.error === undefined;
         } catch (error) {
             this.#update({
                 ...this.#snapshot,
@@ -211,4 +228,17 @@ export class TuiSharedTerminalList {
         this.#snapshot = snapshot;
         for (const listener of this.#listeners) listener();
     }
+}
+
+function isStaleVersionConflict(error: unknown): boolean {
+    if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "instance.conflict"
+    ) {
+        return true;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes("version");
 }

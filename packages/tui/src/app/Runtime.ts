@@ -23,7 +23,10 @@ import {
 import { TuiDomainReader } from "./control/Reader.js";
 import type { TuiInteractionProjection } from "../interaction/Projection.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
-import { currentTuiRoute } from "../state/route/State.js";
+import {
+    currentTuiRoute,
+    tuiRouteContextKey,
+} from "../state/route/State.js";
 import { TuiApp } from "../view/shell/App.js";
 import type { TuiAppKey } from "../view/shell/App.js";
 import {
@@ -261,7 +264,7 @@ export class TuiRuntime {
             open: (instance, input) =>
                 domains.terminalTransport(instance).open({
                     ...input,
-                    workspace: this.#requireInstanceHome(instance),
+                    workspace: this.#resolveSharedTerminalWorkspace(instance),
                 }),
         });
         this.#terminalController = new TuiTerminalController({
@@ -784,6 +787,61 @@ export class TuiRuntime {
             clearTimeout(this.#inputEscapeTimer);
             this.#inputEscapeTimer = undefined;
         }
+    }
+
+    #resolveSharedTerminalWorkspace(instance: string): string {
+        const activeContexts = this.domains.context.state.contexts.filter(
+            (context) => context.status === "active",
+        );
+        const selectedCtxId = this.#selectedContextId(instance);
+        if (selectedCtxId !== undefined) {
+            const selected = activeContexts.find(
+                (context) => context.ctxId === selectedCtxId,
+            );
+            const workspace = selected?.environments.find(
+                (env) => env.instance === instance,
+            )?.workspace;
+            if (workspace !== undefined && workspace.length > 0) {
+                return workspace;
+            }
+        }
+        const activeForInstance = activeContexts.filter((context) =>
+            context.environments.some((env) => env.instance === instance),
+        );
+        if (activeForInstance.length === 1) {
+            const workspace = activeForInstance[0]!.environments.find(
+                (env) => env.instance === instance,
+            )?.workspace;
+            if (workspace !== undefined && workspace.length > 0) {
+                return workspace;
+            }
+        }
+        return this.#requireInstanceHome(instance);
+    }
+
+    #selectedContextId(instance: string): string | undefined {
+        const state = this.store.getState();
+        const auditRoute =
+            state.ui.routeStacks[tuiRouteContextKey("audit", instance)]?.at(-1);
+        if (
+            auditRoute?.page === "audit" &&
+            auditRoute.view !== "contexts" &&
+            auditRoute.scope === "context"
+        ) {
+            return auditRoute.ctxId;
+        }
+        const messagesRoute =
+            state.ui.routeStacks[
+                tuiRouteContextKey("messages", undefined)
+            ]?.at(-1);
+        if (
+            messagesRoute?.page === "messages" &&
+            messagesRoute.view === "thread" &&
+            messagesRoute.instance === instance
+        ) {
+            return messagesRoute.ctxId;
+        }
+        return undefined;
     }
 
     #requireInstanceHome(instance: string): string {

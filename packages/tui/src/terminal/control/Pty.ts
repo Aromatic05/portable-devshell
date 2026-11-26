@@ -430,6 +430,15 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                     ),
                 };
                 this.#writeIdentity(updated);
+                if (next.error !== undefined) {
+                    const pending = this.#pending.get(next.clientSeq);
+                    if (pending !== undefined) {
+                        clearTimeout(pending.timer);
+                        this.#pending.delete(next.clientSeq);
+                        pending.reject(new Error(next.error));
+                    }
+                    continue;
+                }
                 if (next.snapshot !== undefined) {
                     this.#emitData(next.snapshot.data);
                 }
