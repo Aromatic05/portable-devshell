@@ -271,7 +271,7 @@ test("WorkerToolCallScheduler admits one urgent process operation beyond normal 
             });
 
     const firstCall = run("normal-1", "bash_run", first);
-    const secondCall = run("normal-2", "task_read", second);
+    const secondCall = run("normal-2", "file_read", second);
     await waitFor(() => started.length === 2);
 
     const urgentCall = run("urgent", "task_input", urgent);
@@ -316,7 +316,7 @@ test("WorkerToolCallScheduler prioritizes queued urgent process operations", asy
 
     const blockerCall = reserve("blocker", "bash_run", blocker);
     await waitFor(() => started.length === 1);
-    const normalCall = reserve("normal", "task_read", normal);
+    const normalCall = reserve("normal", "file_read", normal);
     const urgentCall = reserve("urgent", "task_input", urgent);
     await waitFor(() => started.includes("urgent"));
     assert.deepEqual(started, ["blocker", "urgent"]);

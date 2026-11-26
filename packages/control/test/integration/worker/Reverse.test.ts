@@ -317,7 +317,7 @@ test(
             {
                 input: {
                     command: readRelativeMarkerCommand(workspaceMarkerName),
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 toolName: "bash_run",
                 workspace,
@@ -1163,7 +1163,7 @@ async function assertReverseMarker(
         {
             input: {
                 command: readRelativeMarkerCommand(markerName),
-                timeoutMs: 30_000,
+                waitMs: 30_000,
             },
             toolName: "bash_run",
             workspace,

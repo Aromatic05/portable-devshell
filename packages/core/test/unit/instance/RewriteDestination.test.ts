@@ -39,7 +39,7 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
         for (const worker of workers) { worker.rpc.close(); worker.endpoint.close(); }
         await rm(root, { recursive: true, force: true });
     });
-    const definitions: ToolDefinition[] = ["bash_run", "task_read"].map((name) => ({
+    const definitions: ToolDefinition[] = ["bash_run", "task_input"].map((name) => ({
         name, description: name, group: name.split("_")[0]!, requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" },
     }));
     const makeState = (name: string) => {
@@ -53,9 +53,9 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
                 assert.equal((payload as { input: { waitMs: number } }).input.waitMs, WAIT_HANDOFF_MS);
                 return { task: { id: "beta-task", status: "running" }, termination: "running", waitReason: "timeout", waitMs: WAIT_HANDOFF_MS };
             },
-            task_read: (payload) => {
+            task_input: (payload) => {
                 workerReads.push(name);
-                const input = (payload as { input: { task: string; untilExit: boolean; timeMs: number } }).input;
+                const input = (payload as { input: { task: string; untilExit: boolean; waitMs: number } }).input;
                 assert.equal(input.task, "beta-task");
                 assert.equal(input.untilExit, true);
                 return { waitReason: "terminal", termination: "exited", exitCode: 0, task: { id: "beta-task", status: "0" } };

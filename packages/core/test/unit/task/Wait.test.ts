@@ -17,7 +17,7 @@ import {
 } from "../../../src/task/wait/index.ts";
 import { installWaitToolCallRewrite } from "../../../src/task/wait/Runtime.ts";
 
-test("Wait rewrite clamps task run/read and detaches timed-out tasks", async () => {
+test("Wait rewrite clamps bash_run/task_input and detaches timed-out tasks", async () => {
     const detached: WaitDetachInput[] = [];
     const instanceName = asInstanceName("local");
     const wait = {
@@ -168,18 +168,84 @@ test("Wait rewrite clamps task run/read and detaches timed-out tasks", async () 
             value: {
                 context,
                 kind: "call",
-                payload: { task: "task-3", timeMs: 300_000 },
-                toolName: "task_read",
+                payload: { task: "task-3", waitMs: 300_000 },
+                toolName: "task_input",
             },
         }, runtime);
-        assert.equal((read.payload as Record<string, JsonValue>).timeMs, WAIT_SYNC_MS);
+        assert.equal((read.payload as Record<string, JsonValue>).waitMs, WAIT_SYNC_MS);
+
+        const shortTaskInput = await rewrite({
+            callId: "call-input-short",
+            direction: "outbound",
+            value: {
+                context,
+                kind: "result",
+                payload: {
+                    task: { id: "task-3", status: "running", pty: false },
+                    termination: "running",
+                    waitReason: "timeout",
+                    waitMs: 5_000,
+                    untilExit: true,
+                },
+                toolName: "task_input",
+            },
+        }, runtime);
+        assert.equal((shortTaskInput.payload as Record<string, JsonValue>).detached, undefined);
+        assert.equal(detached.length, 1);
+
+        const interactiveTaskInput = await rewrite({
+            callId: "call-input-interactive",
+            direction: "outbound",
+            value: {
+                context,
+                kind: "result",
+                payload: {
+                    task: { id: "task-3", status: "running", pty: true },
+                    termination: "running",
+                    waitReason: "timeout",
+                    waitMs: WAIT_SYNC_MS,
+                    untilExit: false,
+                },
+                toolName: "task_input",
+            },
+        }, runtime);
+        assert.equal((interactiveTaskInput.payload as Record<string, JsonValue>).detached, undefined);
+        assert.equal(detached.length, 1);
+
+        const longTaskInput = await rewrite({
+            callId: "call-input-long",
+            direction: "outbound",
+            value: {
+                context,
+                kind: "result",
+                payload: {
+                    task: { id: "task-3", status: "running", pty: false },
+                    termination: "running",
+                    waitReason: "timeout",
+                    waitMs: WAIT_SYNC_MS,
+                    untilExit: true,
+                },
+                toolName: "task_input",
+            },
+        }, runtime);
+        assert.equal((longTaskInput.payload as Record<string, JsonValue>).detached, true);
+        assert.equal(detached.length, 2);
+        assert.deepEqual(detached[1], {
+            callId: "call-input-long",
+            ctxId: "ctx-1",
+            instance: instanceName,
+            source: "mcp",
+            targetId: "task-3",
+            toolName: "task_input",
+            workspace: "/repo",
+        });
     } finally {
         contribution.release();
         uninstall();
     }
 });
 
-test("WaitService persists detached task and resolves it through native task_read", async () => {
+test("WaitService persists detached task and resolves it through native task_input", async () => {
     const instanceName = asInstanceName("local");
     const root = await createTestTempDirectory("wait-runtime");
     const filePath = join(root, "detached-waits.json");
@@ -227,11 +293,11 @@ test("WaitService persists detached task and resolves it through native task_rea
     const [record] = await service.list("ctx-1");
     assert.equal(record?.status, "resolved");
     assert.deepEqual(events, ["wait.detached", "wait.resolved"]);
-    assert.equal(calls[0]?.toolName, "task_read");
+    assert.equal(calls[0]?.toolName, "task_input");
     assert.deepEqual(calls[0]?.input, {
         untilExit: true,
         task: "task-1",
-        timeMs: WAIT_SYNC_MS,
+        waitMs: WAIT_SYNC_MS,
     });
 
     const restored = new WaitService({
@@ -242,6 +308,92 @@ test("WaitService persists detached task and resolves it through native task_rea
     assert.equal((await restored.list("ctx-1"))[0]?.status, "resolved");
     await service.close();
     await restored.close();
+});
+
+test("WaitService.#monitor passes waitMs: WAIT_SYNC_MS and advances cursor across polls", async (t) => {
+    const root = await createTestTempDirectory("wait-cursor");
+    const filePath = join(root, "waits.json");
+    const calls: Array<{ toolName: string; input: JsonValue }> = [];
+    const responses: JsonValue[] = [
+        {
+            task: { id: "task-cursor", status: "running", pty: false },
+            cursor: "tc1_step1",
+            waitReason: "timeout",
+            waitMs: WAIT_SYNC_MS,
+            termination: "running",
+        },
+        {
+            task: { id: "task-cursor", status: "running", pty: false },
+            cursor: "tc1_step2",
+            waitReason: "timeout",
+            waitMs: WAIT_SYNC_MS,
+            termination: "running",
+        },
+        {
+            task: { id: "task-cursor", status: "exited", pty: false },
+            cursor: "tc1_done",
+            waitReason: "terminal",
+            termination: "exited",
+        },
+    ];
+    let resolved!: () => void;
+    const done = new Promise<void>((resolve) => { resolved = resolve; });
+    const service = new WaitService({
+        appendEvent: async (type) => {
+            if (type === "wait.resolved") resolved();
+        },
+        filePath,
+        invoke: {
+            async invoke(toolName, input) {
+                calls.push({ toolName, input });
+                return responses[calls.length - 1]!;
+            },
+        },
+        waitId: () => "wait-cursor",
+    });
+    t.after(() => service.close());
+
+    await service.detach({
+        callId: "call-cursor",
+        ctxId: "ctx-cursor",
+        instance: asInstanceName("local"),
+        source: "mcp",
+        targetId: "task-cursor",
+        toolName: "bash_run",
+        workspace: "/repo",
+    });
+    await done;
+
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls, [
+        {
+            toolName: "task_input",
+            input: {
+                untilExit: true,
+                task: "task-cursor",
+                waitMs: WAIT_SYNC_MS,
+            },
+        },
+        {
+            toolName: "task_input",
+            input: {
+                untilExit: true,
+                task: "task-cursor",
+                waitMs: WAIT_SYNC_MS,
+                cursor: "tc1_step1",
+            },
+        },
+        {
+            toolName: "task_input",
+            input: {
+                untilExit: true,
+                task: "task-cursor",
+                waitMs: WAIT_SYNC_MS,
+                cursor: "tc1_step2",
+            },
+        },
+    ]);
+    assert.equal((await service.list("ctx-cursor"))[0]?.status, "resolved");
 });
 
 test("Wait recovery keeps same-target Contexts isolated and resumes each monitor once", { timeout: 5_000 }, async (t) => {
@@ -299,9 +451,9 @@ test("Wait recovery keeps same-target Contexts isolated and resumes each monitor
         },
         invoke: {
             async invoke(tool, payload, context) {
-                assert.equal(tool, "task_read");
+                assert.equal(tool, "task_input");
                 assert.equal(context.workspace, "/shared");
-                assert.deepEqual(payload, { untilExit: true, task: "same-task", timeMs: WAIT_SYNC_MS });
+                assert.deepEqual(payload, { untilExit: true, task: "same-task", waitMs: WAIT_SYNC_MS });
                 resumed.push(context.ctxId!);
                 return { waitReason: "terminal", task: { id: "same-task", status: "exited" } };
             },

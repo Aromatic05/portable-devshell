@@ -179,17 +179,19 @@ export class WaitService {
     }
 
     async #monitor(waitId: string, signal: AbortSignal): Promise<void> {
+        let cursor: string | undefined;
         for (;;) {
             if (signal.aborted) return;
             const record = this.#records.get(waitId);
             if (record === undefined || record.status !== "detached") return;
             try {
                 const result = await this.#invoke.invoke(
-                    "task_read",
+                    "task_input",
                     {
                         untilExit: true,
                         task: record.targetId,
-                        timeMs: WAIT_SYNC_MS,
+                        waitMs: WAIT_SYNC_MS,
+                        ...(cursor === undefined ? {} : { cursor }),
                     },
                     {
                         ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
@@ -201,7 +203,10 @@ export class WaitService {
                     signal,
                 );
                 if (signal.aborted) return;
-                if (readString(result, "waitReason") !== "terminal") continue;
+                if (readString(result, "waitReason") !== "terminal") {
+                    cursor = readString(result, "cursor") ?? cursor;
+                    continue;
+                }
                 await this.#settleObserved(waitId, "resolved", { result }, signal);
                 return;
             } catch (error) {
@@ -224,7 +229,7 @@ export class WaitService {
         signal: AbortSignal,
     ): Promise<void> {
         // A terminal observation is a fact. A failed state commit must never
-        // cause another task_read that could report a missing task instead.
+        // cause another task_input that could report a missing task instead.
         while (!signal.aborted) {
             try {
                 await this.#settle(waitId, status, terminal);

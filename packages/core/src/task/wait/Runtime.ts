@@ -50,19 +50,27 @@ function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
         if (requested !== undefined && requested > WAIT_HANDOFF_MS)
             return { ...value, payload: { ...input, waitMs: WAIT_HANDOFF_MS } };
     }
-    if (value.toolName === "task_read") {
-        const requested = milliseconds(input.timeMs);
+    if (value.toolName === "task_input") {
+        const requested = milliseconds(input.waitMs);
         if (requested !== undefined && requested > WAIT_SYNC_MS)
-            return { ...value, payload: { ...input, timeMs: WAIT_SYNC_MS } };
+            return { ...value, payload: { ...input, waitMs: WAIT_SYNC_MS } };
     }
     return value;
 }
 
 function isHandoff(value: ToolCallHookValue): boolean {
+    if (value.kind !== "result") return false;
     const output = record(value.payload);
-    return value.toolName === "bash_run" && value.kind === "result" &&
-        output?.termination === "running" && output.waitReason === "timeout" &&
-        (milliseconds(output.waitMs) ?? 0) >= WAIT_HANDOFF_MS;
+    if (output?.termination !== "running" || output.waitReason !== "timeout")
+        return false;
+    if (value.toolName === "bash_run")
+        return (milliseconds(output.waitMs) ?? 0) >= WAIT_HANDOFF_MS;
+    if (value.toolName === "task_input")
+        return (
+            output.untilExit === true &&
+            (milliseconds(output.waitMs) ?? 0) >= WAIT_SYNC_MS
+        );
+    return false;
 }
 
 function presentHandoff(value: ToolCallHookValue): ToolCallHookValue {
@@ -73,10 +81,8 @@ function detachedTarget(value: ToolCallHookValue): string | undefined {
     if (value.kind !== "result") return undefined;
     const output = record(value.payload);
     const task = record(output?.task);
-    if (typeof task?.id !== "string" || output?.termination !== "running") return undefined;
-    if (isHandoff(value)) return task.id;
-    if (value.toolName === "task_read" && output.waitReason === "timeout" && (milliseconds(output.waitMs) ?? 0) > 0) return task.id;
-    return undefined;
+    if (typeof task?.id !== "string") return undefined;
+    return isHandoff(value) ? task.id : undefined;
 }
 
 function detachInput(

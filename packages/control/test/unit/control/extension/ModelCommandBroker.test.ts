@@ -60,7 +60,7 @@ test("Model command broker rejects forged parent provenance before command effec
         { ...record, source: "extension" },
         { ...record, ctxId: "ctx-other" },
         { ...record, workspace: "/other" },
-        { ...record, toolName: "task_read" },
+        { ...record, toolName: "task_input" },
         { ...record, output: { task: { id: "task-other" } } },
     ]) {
         const result = await exercise(forged);

@@ -80,7 +80,7 @@ async function runInstanceCommandsThroughControlRpc(t: {
             "demo-local",
             "/tmp/ws",
             "bash_run",
-            '{"command":"pwd","timeoutMs":30000}',
+            '{"command":"pwd","waitMs":30000}',
         ]),
         0,
     );
@@ -242,7 +242,7 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "bash_run",
                 JSON.stringify({
                     command: readRelativeMarkerCommand(workspaceMarkerName),
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 }),
             ]),
             0,
@@ -257,7 +257,7 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "aromatic-pc",
                 workspacePath,
                 "bash_run",
-                '{"command":"echo portable-devshell","timeoutMs":30000}',
+                '{"command":"echo portable-devshell","waitMs":30000}',
             ]),
             0,
         );
@@ -537,7 +537,7 @@ async function runInteractiveCreateFlow(t: {
             "bash_run",
             JSON.stringify({
                 command: readRelativeMarkerCommand(workspaceMarkerName),
-                timeoutMs: 30_000,
+                waitMs: 30_000,
             }),
         ]),
         0,

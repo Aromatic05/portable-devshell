@@ -30,10 +30,10 @@
             "demo-local",
             "/tmp/ws",
             "bash_run",
-            "{\"command\":\"pwd\",\"timeoutMs\":30000}"
+            "{\"command\":\"pwd\",\"waitMs\":30000}"
         ],
         "expected": {
-            "inputSource": "{\"command\":\"pwd\",\"timeoutMs\":30000}",
+            "inputSource": "{\"command\":\"pwd\",\"waitMs\":30000}",
             "instance": "demo-local",
             "kind": "instance.call",
             "toolName": "bash_run",
