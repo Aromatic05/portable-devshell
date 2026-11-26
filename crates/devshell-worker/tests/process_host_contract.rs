@@ -1072,3 +1072,165 @@ fn persistent_terminal_closes_promptly_during_respawn_backoff() {
         "close should wake up backoff wait promptly (elapsed: {elapsed:?})"
     );
 }
+
+#[test]
+fn human_created_terminal_can_be_adopted_by_model_and_managed_by_name() {
+    let instance = "process-human-create";
+    let fixture = WorkerFixture::start(instance);
+    let ws = fixture.env.protocol_workspace();
+
+    // Create via CLI before any Process Host exists (delegates through running Worker daemon).
+    let created = fixture.env.json_command(&[
+        "terminal",
+        "create",
+        "--instance",
+        instance,
+        "--workspace",
+        &ws,
+        "--name",
+        "human-dev",
+        "--detach",
+    ]);
+    let id = created["id"].as_str().expect("created id").to_owned();
+    assert_eq!(created["instance"], instance, "{created}");
+    assert_eq!(created["name"], "human-dev", "{created}");
+    assert_eq!(created["persistent"], true, "{created}");
+    assert_eq!(created["state"], "running", "{created}");
+
+    // Model discovers the human-created terminal in the same workspace and operates it.
+    let listed = fixture.tool("task_manage", json!({"command": "list"}));
+    let tasks = listed["tasks"].as_array().expect("tasks array");
+    assert!(
+        tasks
+            .iter()
+            .any(|entry| entry["id"] == id && entry["name"] == "human-dev"),
+        "model should discover human-created terminal: {listed}"
+    );
+
+    let reply = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf 'MODEL_ADOPTED_OK\\n'\r",
+            "waitMs": 5000
+        }),
+    );
+    assert!(
+        reply["stdout"].as_str().unwrap().contains("MODEL_ADOPTED_OK"),
+        "{reply}"
+    );
+
+    // Human inspects by name without entering raw attach mode.
+    let inspected = fixture
+        .env
+        .json_command(&["terminal", "inspect", "human-dev"]);
+    assert_eq!(inspected["task"], id, "{inspected}");
+    assert!(
+        inspected["text"]
+            .as_str()
+            .unwrap()
+            .contains("MODEL_ADOPTED_OK"),
+        "{inspected}"
+    );
+
+    // Human lists as table and closes by name.
+    let table_output = fixture
+        .env
+        .std_command()
+        .args(["terminal", "list", "--table"])
+        .output()
+        .unwrap();
+    assert!(table_output.status.success());
+    let table_text = String::from_utf8_lossy(&table_output.stdout);
+    assert!(table_text.contains("human-dev"), "{table_text}");
+    assert!(table_text.contains("terminal"), "{table_text}");
+
+    let closed = fixture
+        .env
+        .json_command(&["terminal", "close", "human-dev"]);
+    assert_eq!(closed["taskId"], id, "{closed}");
+    assert_eq!(closed["killRequested"], true, "{closed}");
+    assert_eq!(closed["state"], "exited", "{closed}");
+}
+
+#[test]
+fn native_attach_supports_live_takeover_toggle_and_name_lookup() {
+    let instance = "process-live-toggle";
+    let fixture = WorkerFixture::start(instance);
+    let created = fixture.tool(
+        "task_manage",
+        json!({
+            "command": "create",
+            "name": "live-toggle",
+            "cwd": "./"
+        }),
+    );
+    let id = created["task"]["id"].as_str().unwrap().to_owned();
+
+    // Attach by terminal name with initial takeover.
+    let mut attach = LocalAttach::start(&fixture.env, "live-toggle");
+    attach.input(b"printf 'HUMAN_INIT_OK\\n'\r");
+    attach.expect("HUMAN_INIT_OK");
+
+    // While human holds control, model input is rejected.
+    let rejected = fixture.tool_raw(
+        "task_input",
+        json!({"task": id, "input": "printf 'BLOCKED\\n'\r"}),
+    );
+    assert_eq!(rejected["type"], "error", "{rejected}");
+    assert_eq!(rejected["error"]["code"], "process.controlOwned", "{rejected}");
+
+    // Human presses Ctrl+] t to release control and switch to OBSERVE mode live.
+    attach.input(&[0x1d, b't']);
+    attach.expect("[OBSERVE]");
+
+    // Model can now write while the human watches live in the same attach session.
+    let model_reply = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf 'MODEL_WHILE_OBSERVING\\n'\r",
+            "waitMs": 5000
+        }),
+    );
+    assert!(
+        model_reply["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("MODEL_WHILE_OBSERVING"),
+        "{model_reply}"
+    );
+    attach.expect("MODEL_WHILE_OBSERVING");
+
+    // Human presses Ctrl+] t again to reclaim control live.
+    attach.received.clear();
+    attach.input(&[0x1d, b't']);
+    attach.expect("[CONTROL]");
+
+    let rejected_again = fixture.tool_raw(
+        "task_input",
+        json!({"task": id, "input": "printf 'BLOCKED_AGAIN\\n'\r"}),
+    );
+    assert_eq!(rejected_again["type"], "error", "{rejected_again}");
+    assert_eq!(
+        rejected_again["error"]["code"],
+        "process.controlOwned",
+        "{rejected_again}"
+    );
+
+    // Detach immediately with Ctrl+] d.
+    attach.input(&[0x1d, b'd']);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = attach.child.try_wait().unwrap() {
+            assert!(status.success(), "{status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "attach did not detach on Ctrl+] d");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // Close cleanly.
+    let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
+    assert_eq!(closed["state"], "exited", "{closed}");
+}

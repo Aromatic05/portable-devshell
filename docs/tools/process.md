@@ -54,12 +54,24 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 同一台 Worker 主机上，通过实例共用的 Worker binary 直接使用：
 
 ```bash
-devshell-worker terminal list
-devshell-worker terminal attach <id>
-devshell-worker terminal attach <id> --takeover
+devshell-worker terminal list                                    # TTY 下默认表格展示，--all 看历史，--json 输出原始 JSON
+devshell-worker terminal create --workspace . --name dev         # 人工创建持久终端并立即接管（--detach 后台创建，--stateless 绑定无 workspace 作用域）
+devshell-worker terminal attach [name|short-id]                  # 观察模式（仅 1 个活跃 PTY 时可省略目标）
+devshell-worker terminal attach [name|short-id] --takeover       # 显式取得独占输入
+devshell-worker terminal inspect <name|short-id>                 # 不进入交互模式查看当前 PTY 可见屏幕
+devshell-worker terminal close <name|short-id>                   # 终止任务或持久终端
 ```
 
-普通 attach 为观察；`--takeover` 显式取得独占输入。Ctrl+] 退出 Attach 并释放控制权，不终止进程。接管期间模型 `task_input` 写入被拒绝，释放后可以继续输入。TUI Sessions 通过 Terminal Stream 使用同一 PTY，进入会话时接管输入。原始 PTY 字节流在连接时的状态恢复之后继续传输。
+双向接管闭环：
+- **模型创建 → 人类接管**：模型通过 `bash_run(pty: true)` 或 `task_manage(command="create")` 启动后，人类用 `attach` 观察或 `--takeover` 接管。
+- **人类创建 → 模型接管**：人类用 `devshell-worker terminal create --workspace <path> --name <name>` 创建持久终端并先完成登录/MFA/环境初始化，随后按 `Ctrl+] t` 释放控制权退回观察态（或按 `Ctrl+]` / `Ctrl+] d` 脱离），同 Workspace 下的模型即可通过 `task_manage(command="list")`、`task_inspect` 与 `task_input` 直接接手。
+
+Attach 会话快捷键与行为：
+- `Ctrl+]`（单独按，约 300ms）或 `Ctrl+] d`：脱离 Attach 并释放控制权，不终止进程。
+- `Ctrl+] t`：在会话内实时切换 **观察（OBSERVE）↔ 接管（CONTROL）**，终端标题栏（OSC 0）实时提示当前模式；接管期间模型 `task_input` 写入被拒绝，释放后可立即继续输入。
+- `Ctrl+] ]`：在接管模式下向远端 PTY 发送字面 `Ctrl+]`（`0x1d`）。
+- 遇到输出突增触发 `stream.gap` 时自动重连并恢复屏幕快照。
+- TUI Sessions 通过 Terminal Stream 使用同一 PTY，进入会话时接管输入。原始 PTY 字节流在连接时的状态恢复之后继续传输。
 
 ## 生命周期与作用域
 
