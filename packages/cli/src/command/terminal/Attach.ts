@@ -28,9 +28,11 @@ export async function attachControlTerminal(
     const stdinTty = options.stdin as NodeJS.ReadStream;
     const stdoutTty = options.stdout as NodeJS.WriteStream;
     let session = { ...options.session };
-    let controlling = options.initialTakeover;
+    const isPipe = () => session.pty === false;
+    let controlling = isPipe() ? false : options.initialTakeover;
     let clientSeq = 0;
     let detaching = false;
+    let exited = false;
     let stream: TerminalAttachment | undefined;
     let latestSeq = 0;
     let chordPending = false;
@@ -43,18 +45,26 @@ export async function attachControlTerminal(
     >();
 
     const writeTitle = (note?: string) => {
-        const mode = controlling ? "[CONTROL]" : "[OBSERVE]";
+        const pipe = isPipe();
+        const mode = pipe
+            ? "[PIPE]"
+            : controlling
+              ? "[CONTROL]"
+              : "[OBSERVE]";
         const label =
             session.name !== undefined && session.name.length > 0
                 ? session.name
                 : session.terminalId.slice(0, 16);
         const hint =
             note ??
-            (controlling
-                ? "Ctrl+] d detach | Ctrl+] t observe"
-                : "read-only | Ctrl+] t takeover | Ctrl+] d detach");
+            (pipe
+                ? "read-only log stream | Ctrl+] d detach"
+                : controlling
+                  ? "Ctrl+] d detach | Ctrl+] t observe"
+                  : "read-only | Ctrl+] t takeover | Ctrl+] d detach");
+        const size = pipe ? "" : ` (${session.cols}x${session.rows})`;
         options.stdout.write(
-            `\u001B]0;devshell ${mode} ${label} (${session.cols}x${session.rows}) — ${hint}\u0007`,
+            `\u001B]0;devshell ${mode} ${label}${size} — ${hint}\u0007`,
         );
     };
 
@@ -93,6 +103,11 @@ export async function attachControlTerminal(
     };
 
     const toggleControl = () => {
+        if (isPipe()) {
+            options.stdout.write("\x07");
+            writeTitle("pipe tasks are read-only");
+            return;
+        }
         enqueue(async () => {
             if (detaching || stream === undefined) return;
             if (stream.sendControl === undefined) {
@@ -226,6 +241,7 @@ export async function attachControlTerminal(
                 throw new Error("Terminal stream seed is missing.");
             }
             session = seed.session;
+            if (isPipe()) controlling = false;
             latestSeq = seed.snapshot?.seq ?? 0;
             writeTitle();
             if (seed.snapshot !== undefined) {
@@ -279,6 +295,7 @@ export async function attachControlTerminal(
                     continue;
                 }
                 if (message.kind === "exit") {
+                    exited = true;
                     options.stderr.write(
                         `\r\n[terminal exited: code=${message.event.exitCode}${message.event.signal ? ` signal=${message.event.signal}` : ""}]\r\n`,
                     );
@@ -328,6 +345,15 @@ export async function attachControlTerminal(
         stdinTty.pause();
         stream?.close();
         options.stdout.write(FULL_TERMINAL_RESET);
+        if (detaching && !exited) {
+            const label =
+                session.name !== undefined && session.name.length > 0
+                    ? `${session.name} (${session.terminalId})`
+                    : session.terminalId;
+            options.stderr.write(
+                `[detached from ${label} — session still running]\n`,
+            );
+        }
     }
 }
 

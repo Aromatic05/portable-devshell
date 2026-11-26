@@ -119,7 +119,7 @@ export function renderCliTopicUsage(
                 return [
                     "Usage:",
                     "  devshell terminal list <instance> [--all]",
-                    "  devshell terminal create <instance> [--workspace <path>] [--name <name>] [--cwd <dir>] [--command <cmd>] [--cols <n>] [--rows <n>] [--ephemeral] [--detach]",
+                    "  devshell terminal create <instance> [--workspace <path>] [--name <name>] [--cwd <dir>] [--command <cmd>] [--shell <path>] [--cols <n>] [--rows <n>] [--ephemeral] [--detach]",
                     "  devshell terminal attach <instance> [target] [--takeover]",
                     "  devshell terminal inspect <instance> [target]",
                     "  devshell terminal close <instance> [target]",

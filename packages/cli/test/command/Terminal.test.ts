@@ -630,7 +630,7 @@ test("terminal.create and terminal.attach print workspace and shortcut banners t
 
     assert.equal(
         createHarness.stderrChunks.join(""),
-        "[created dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha · workspace: /repo/workspace · Ctrl+] t: hand off · Ctrl+] d: detach]\n",
+        "[created dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha · workspace: /repo/workspace · Ctrl+] t: hand off · Ctrl+] d: detach]\n[detached from dev-shell (process-11111111-2222-3333-4444-555555555555) — session still running]\n",
     );
 
     const attachHarness = makeAttachHarness(session);
@@ -666,6 +666,196 @@ test("terminal.create and terminal.attach print workspace and shortcut banners t
 
     assert.equal(
         attachHarness.stderrChunks.join(""),
-        "[attaching dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha (observe) · workspace: /repo/workspace · Ctrl+] t: toggle control · Ctrl+] d: detach]\n",
+        "[attaching dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha (observe) · workspace: /repo/workspace · Ctrl+] t: toggle control · Ctrl+] d: detach]\n[detached from dev-shell (process-11111111-2222-3333-4444-555555555555) — session still running]\n",
     );
+});
+
+test("terminal create parses --shell and forwards it to transport.open", async () => {
+    const parser = new CliParser();
+    const parsed = parser.parse([
+        "terminal",
+        "create",
+        "alpha",
+        "--shell",
+        "/bin/zsh",
+        "--detach",
+    ]);
+    assert.deepEqual(parsed, {
+        detach: true,
+        ephemeral: false,
+        instance: "alpha",
+        kind: "terminal.create",
+        shell: "/bin/zsh",
+    });
+
+    const openedInputs: TerminalOpenInput[] = [];
+    const transport: TerminalTransport = {
+        attach: async () => {
+            throw new Error("attach not expected");
+        },
+        get: async () => makeSession(),
+        kill: async () => makeSession(),
+        list: async () => [],
+        open: async (input) => {
+            openedInputs.push(input);
+            return makeSession({
+                cols: input.cols,
+                rows: input.rows,
+                workspace: input.workspace,
+            });
+        },
+    };
+    const context = {
+        clients: {
+            instance: {
+                listInstances: async () => [
+                    { homeDirectory: "/home/alpha", name: "alpha" },
+                ],
+            },
+            terminal: () => transport,
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stderr: { write: () => {} },
+        stdin: Readable.from([]),
+        stdout: { write: () => {} },
+        writeJson: () => {},
+        writeRecords: () => {},
+        writeValue: () => {},
+    } as unknown as CliDispatchContext;
+
+    await executeTerminalCommand(parsed, context);
+    assert.equal(openedInputs[0]?.shell, "/bin/zsh");
+});
+
+test("pipe tasks render pipe/read-only in table, reject takeover/inspect, ignore Ctrl+] t, and print detach banner", async () => {
+    const pipeSession = makeSession({
+        cols: 0,
+        command: "npm run build",
+        humanControl: false,
+        name: "build-job",
+        persistent: false,
+        pty: false,
+        rows: 0,
+        terminalId: "process-pipepipe-2222-3333-4444-555555555555",
+    });
+    const table = renderTerminalTable([pipeSession]);
+    assert.match(table, /\bpipe\b/u);
+    assert.match(table, /\bread-only\b/u);
+    assert.doesNotMatch(table, /\b0x0\b/u);
+
+    const h = makeAttachHarness(pipeSession);
+    const context = {
+        clients: {
+            instance: { listInstances: async () => [] },
+            terminal: () => ({
+                ...h.transport,
+                inspect: async () => {
+                    throw new Error("inspect should not be called on pipe task");
+                },
+            }),
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        writeJson: () => {},
+        writeRecords: () => {},
+        writeValue: () => {},
+    } as unknown as CliDispatchContext;
+
+    await assert.rejects(
+        executeTerminalCommand(
+            {
+                instance: "alpha",
+                kind: "terminal.attach",
+                takeover: true,
+                target: "build-job",
+            },
+            context,
+        ),
+        (error: unknown) =>
+            error instanceof CliRenderError &&
+            error.code === "cli.usage" &&
+            /Pipe tasks are read-only/u.test(error.message),
+    );
+
+    await assert.rejects(
+        executeTerminalCommand(
+            {
+                instance: "alpha",
+                kind: "terminal.inspect",
+                target: "build-job",
+            },
+            context,
+        ),
+        (error: unknown) =>
+            error instanceof CliRenderError &&
+            error.code === "cli.usage" &&
+            /Pipe tasks have no PTY screen/u.test(error.message),
+    );
+
+    const attaching = executeTerminalCommand(
+        {
+            instance: "alpha",
+            kind: "terminal.attach",
+            takeover: false,
+            target: "build-job",
+        },
+        context,
+    );
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) => chunk.includes("[PIPE]")),
+    );
+    assert.doesNotMatch(h.stdoutChunks[0] ?? "", /0x0/u);
+
+    // Ctrl+] t on pipe task rings bell and does not sendControl
+    h.stdin.write(Buffer.from([0x1d, 0x74]));
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) =>
+            chunk.includes("pipe tasks are read-only"),
+        ),
+    );
+    assert.equal(h.stdoutChunks.includes("\x07"), true);
+    assert.equal(
+        h.stream.sent.some((entry) => entry.operation === "control"),
+        false,
+    );
+
+    // Detach via Ctrl+] d prints detached banner to stderr after FULL_TERMINAL_RESET
+    h.stdin.write(Buffer.from([0x1d, 0x64]));
+    await attaching;
+
+    const fullReset =
+        "\u001B]0;\u0007\u001B[0m\u001B[?25h\u001B[?1l\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[?2004l\u001B[?1049l";
+    assert.equal(h.stdoutChunks.at(-1), fullReset);
+    assert.equal(
+        h.stderrChunks.join(""),
+        "[attaching build-job (process-pipepipe-2222-3333-4444-555555555555) on alpha (pipe · read-only) · workspace: /workspace · Ctrl+] d: detach]\n[detached from build-job (process-pipepipe-2222-3333-4444-555555555555) — session still running]\n",
+    );
+});
+
+test("attachControlTerminal does not print detach banner when session exits", async () => {
+    const session = makeSession({ humanControl: false, name: "short-job" });
+    const h = makeAttachHarness(session);
+
+    const running = attachControlTerminal({
+        initialTakeover: false,
+        session,
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        transport: h.transport,
+    });
+
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) => chunk.includes("[OBSERVE]")),
+    );
+    h.stream.push({ event: { exitCode: 0 }, kind: "exit" });
+    await running;
+
+    const stderrText = h.stderrChunks.join("");
+    assert.match(stderrText, /\[terminal exited: code=0\]/u);
+    assert.doesNotMatch(stderrText, /detached from/u);
 });

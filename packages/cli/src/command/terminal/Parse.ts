@@ -14,6 +14,7 @@ export type CliTerminalCommand =
           kind: "terminal.create";
           name?: string;
           rows?: number;
+          shell?: string;
           workspace?: string;
       }
     | {
@@ -83,6 +84,7 @@ function parseCreate(argv: readonly string[]): CliTerminalCommand {
     let command: string | undefined;
     let cols: number | undefined;
     let rows: number | undefined;
+    let shell: string | undefined;
     let ephemeral = false;
     let detach = false;
 
@@ -96,6 +98,8 @@ function parseCreate(argv: readonly string[]): CliTerminalCommand {
             cwd = requireOptionValue(argv, ++index, "--cwd");
         } else if (arg === "--command") {
             command = requireOptionValue(argv, ++index, "--command");
+        } else if (arg === "--shell") {
+            shell = requireOptionValue(argv, ++index, "--shell");
         } else if (arg === "--cols") {
             cols = parsePositiveInt(
                 requireOptionValue(argv, ++index, "--cols"),
@@ -137,6 +141,7 @@ function parseCreate(argv: readonly string[]): CliTerminalCommand {
         kind: "terminal.create",
         ...(name === undefined ? {} : { name }),
         ...(rows === undefined ? {} : { rows }),
+        ...(shell === undefined ? {} : { shell }),
         ...(workspace === undefined ? {} : { workspace }),
     };
 }

@@ -57,6 +57,7 @@ export async function executeTerminalCommand(
                 ...(command.name === undefined ? {} : { name: command.name }),
                 persistent: !command.ephemeral,
                 rows,
+                ...(command.shell === undefined ? {} : { shell: command.shell }),
                 workspace,
             });
             const interactive =
@@ -99,8 +100,16 @@ export async function executeTerminalCommand(
                 (session) => session.state === "running",
             );
             const target = resolveTerminalTarget(sessions, command.target, true);
+            const isPipe = target.pty === false;
+            if (isPipe && command.takeover) {
+                throw CliRenderError.usage(
+                    "Pipe tasks are read-only and do not support --takeover; attach without --takeover to watch output.",
+                );
+            }
             context.stderr.write(
-                `[attaching ${formatTargetLabel(target)} on ${command.instance} (${command.takeover ? "control" : "observe"}) · workspace: ${target.workspace ?? "(unknown)"} · Ctrl+] t: toggle control · Ctrl+] d: detach]\n`,
+                isPipe
+                    ? `[attaching ${formatTargetLabel(target)} on ${command.instance} (pipe · read-only) · workspace: ${target.workspace ?? "(unknown)"} · Ctrl+] d: detach]\n`
+                    : `[attaching ${formatTargetLabel(target)} on ${command.instance} (${command.takeover ? "control" : "observe"}) · workspace: ${target.workspace ?? "(unknown)"} · Ctrl+] t: toggle control · Ctrl+] d: detach]\n`,
             );
             await attachControlTerminal({
                 initialTakeover: command.takeover,
@@ -122,6 +131,11 @@ export async function executeTerminalCommand(
             }
             const sessions = await transport.list();
             const target = resolveTerminalTarget(sessions, command.target, false);
+            if (target.pty === false) {
+                throw CliRenderError.usage(
+                    "Pipe tasks have no PTY screen; use `devshell terminal attach` to watch live output.",
+                );
+            }
             const result = await transport.inspect({
                 generation: target.generation,
                 terminalId: target.terminalId,
@@ -216,16 +230,23 @@ export function renderTerminalTable(
     sessions: readonly TerminalSessionDescriptor[],
 ): string {
     if (sessions.length === 0) return "No terminal sessions.\n";
-    const rows = sessions.map((session) => ({
-        ctrl: session.humanControl ? "human" : "model",
-        detail: session.command ?? session.cwd ?? "",
-        id: shortId(session.terminalId),
-        name: session.name ?? "-",
-        size: `${session.cols}x${session.rows}`,
-        state: session.persistent
-            ? `${session.state}*`
-            : session.state,
-    }));
+    const rows = sessions.map((session) => {
+        const isPipe = session.pty === false;
+        return {
+            ctrl: isPipe
+                ? "read-only"
+                : session.humanControl
+                  ? "human"
+                  : "model",
+            detail: session.command ?? session.cwd ?? "",
+            id: shortId(session.terminalId),
+            name: session.name ?? "-",
+            size: isPipe ? "pipe" : `${session.cols}x${session.rows}`,
+            state: session.persistent
+                ? `${session.state}*`
+                : session.state,
+        };
+    });
     const header = {
         ctrl: "CTRL",
         detail: "CWD / CMD",
