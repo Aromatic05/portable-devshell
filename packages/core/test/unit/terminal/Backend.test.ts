@@ -728,6 +728,49 @@ test("worker terminal backend resyncs mid-session stream.gap via restore snapsho
     assert.deepEqual(frames[2], { data: "after-resync", seq: 3 });
 });
 
+test("a snapshot reply cannot rewind output delivered while the restore was in flight", async () => {
+    const worker = new FakeWorkerTerminal();
+    const attach = worker.attach.bind(worker);
+    let resolveSnapshot!: (result: WorkerTerminalAttachResult) => void;
+    const snapshot = new Promise<WorkerTerminalAttachResult>((resolve) => {
+        resolveSnapshot = resolve;
+    });
+    worker.attach = (input) => {
+        if (!input.restore) return attach(input);
+        worker.attaches.push(input);
+        return snapshot;
+    };
+    const opened = await new WorkerTerminalBackend({ worker }).open({
+        cols: 80, rows: 24, workspace: "/workspace",
+    });
+    assert.ok("process" in opened);
+    const frames: string[] = [];
+    opened.process.onData((data) => frames.push(data));
+    worker.attachErrors.push(createRemoteError({
+        code: "stream.gap", message: "restore required", retryable: true,
+    }));
+    worker.connected!();
+    await setImmediate();
+    assert.deepEqual(worker.attaches.at(-1), { ...openAttachInput, fromSeq: 1, restore: true });
+    for (const [seq, data] of [[2, "second"], [3, "third"]] as const) {
+        worker.notification!({
+            method: "terminal.output",
+            params: { ...openAttachInput, seq, dataBase64: Buffer.from(data).toString("base64") },
+        });
+    }
+    resolveSnapshot({
+        session: { ...worker.descriptor(), latestSeq: 2 },
+        replay: [],
+        snapshot: { seq: 2, data: "stale screen" },
+    });
+    await setImmediate();
+    assert.deepEqual(frames, ["replay", "second", "third"]);
+    worker.connected!();
+    await setImmediate();
+    assert.deepEqual(worker.attaches.at(-1), { ...openAttachInput, fromSeq: 3 });
+    opened.process.dispose!();
+});
+
 test("a final exit recovers missing output after one transient attachment failure", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const worker = new FakeWorkerTerminal();

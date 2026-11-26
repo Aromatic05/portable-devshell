@@ -477,7 +477,9 @@ class WorkerTerminalProcess implements TerminalProcess {
         if (attached.session.humanControl === false) this.#clearController();
         this.#descriptor = attached.session;
         this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
-        if (attached.snapshot !== undefined) {
+        if (attached.snapshot !== undefined && attached.snapshot.seq >= this.#lastSeq) {
+            // Live frames can arrive while the snapshot RPC is in flight. An
+            // older snapshot must not rewind a screen that already has them.
             // Reset the decoder as well as the terminal. For initial recovery
             // after a Control restart (localSeq === 0), anchor localSeq at
             // snapshot.seq + 1 so client sequence continuity holds. For a
