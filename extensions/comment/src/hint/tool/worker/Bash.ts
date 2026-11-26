@@ -36,7 +36,7 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
             ),
         );
     } else if (termination === "running") {
-        hints.push(diagnosticHint("bash.taskRunning", "Continue with task_input (omit input to poll) using the returned task ID and cursor; the process is still running."));
+        hints.push(diagnosticHint("bash.taskRunning", "Continue with task_input (omit input to poll) using the returned task ID and cursor, or stop it with task_manage(command: \"close\", task); the process is still running."));
     } else if (termination === "signaled") {
         hints.push(
             errorHint(

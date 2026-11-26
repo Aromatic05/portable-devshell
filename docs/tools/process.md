@@ -11,25 +11,27 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 ```
 
 - `waitMs` 控制本次调用同步等待多久，默认 `10000`（10 秒）；等待结束不终止进程。为 `0` 时立即返回运行中的任务。
-- `pty` 为可选布尔值（默认 `false`）：普通命令默认使用 Pipe（非交互式）；需要真实终端或后续通过 `task_input` 发送交互输入时设置 `pty: true`。
+- 启动后台常驻服务时不要用 `&`（shell 退出时会清理整个进程组），请前台运行并传入较短的 `waitMs`，通过返回的 `task.id` 与 `task_manage(command="close")` 管理生命周期。
+- 若 `bash_run` 在首次返回 `task.id` 前被显式取消（cancel），Worker 会终止对应进程组以避免遗留孤儿进程。
+- `pty` 为可选布尔值（默认 `false`）：普通命令默认使用 Pipe（非交互式）；需要真实终端或后续通过 `task_input` 发送交互输入时设置 `pty: true`（默认尺寸 `120×36`）。
 - `cwd` 与 `env` 保留 shell 执行契约。
 - `timeoutMs`、`maxCaptureBytes`、`stdin`、`keepStdin`、`tty` 已从 `bash_run` 契约移除。
 
-结果返回 `BashRunOutput`，包含 `task.id`、`task.status`、`termination`、不透明字符串 `cursor`、`stdout` / `stderr`、字节计数与截断标志、退出码 / 信号与等待信息。长输出可通过返回的 `stdoutPath` / `stderrPath`（`/.devshell/tool-results/<id>/stdout|stderr`）使用 `file_read` 读取。
+结果返回 `BashRunOutput`，包含 `task.id`、`task.status`、`task.pty`（人工接管期间附带 `task.humanControl: true`）、`termination`、不透明字符串 `cursor`、`stdout` / `stderr`、字节计数与截断标志、退出码 / 信号与等待信息。长输出可通过返回的 `stdoutPath` / `stderrPath`（`/.devshell/tool-results/<id>/stdout|stderr`）使用 `file_read` 读取。
 
 ## 交互与轮询：`task_input`
 
 `task_input` 合并了原先的 `task_read` 与 `task_input`，采用与 Codex `write_stdin` 一致的统一接口，输入为 `{ task, input?, cursor?, waitMs?, untilExit? }`：
 
 ```json
-{"task":"process-…","cursor":"12","waitMs":5000}
+{"task":"process-…","cursor":"tc1_…","waitMs":5000}
 ```
 
 - 省略 `input` 或传入 `""` 时只轮询/等待新输出而不写入输入；此时可用于 Pipe 命令或 PTY 命令。
-- 传入非空 `input` 时向任务写入原始字符串；要求目标为 `pty: true` 启动的 PTY 任务或 `task_manage` 创建的持久终端，非 PTY 的 Pipe 命令会拒绝非空输入。
-- `cursor` 为不透明字符串（来自 `bash_run` 或上一次 `task_input` 返回）。各读取者独立维护游标，读取不会消耗其他客户端的输出。
-- `waitMs` 控制等待时长，默认 `5000`（5 秒）。
-- `untilExit: true` 等待终态；否则在新输出可用或达到 `waitMs` 时返回。
+- 传入非空 `input` 时向任务写入原始字符串（TUI/ConPTY 回车推荐 `\r`，普通行 shell 可用 `\n`，Ctrl+C 为 `\u0003`，Ctrl+D 为 `\u0004`）；要求目标为 `pty: true` 启动的 PTY 任务或 `task_manage` 创建的持久终端，非 PTY 的 Pipe 命令会拒绝非空输入。
+- `cursor` 为不透明字符串（来自 `bash_run`、`task_manage(command="create")` 或上一次 `task_input` 返回）。写入非空 `input` 但省略 `cursor` 时，默认从当前输出尾部开始采集，避免重放整个终端历史；纯读省略 `cursor` 时从头读取。
+- `waitMs` 控制等待时长，默认 `5000`（5 秒）；未指定 `untilExit: true` 时在收到新输出后会短暂聚合（150ms）以减少流式输出轮询风暴。
+- `untilExit: true` 等待非持久任务退出（不可用于持久交互终端，因为持久终端退出会自动重启）；否则在新输出可用或达到 `waitMs` 时返回。
 - 原 `eof` 与 `timeMs` 参数已移除，返回结构同为 `BashRunOutput`。
 
 ## 终端快照：`task_inspect`
@@ -40,9 +42,9 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 
 `task_manage` 使用扁平对象 `{ command, task?, name?, cwd?, shell?, cols?, rows? }`，支持：
 
-- `{"command":"list"}`：列出当前执行作用域内的进程与终端摘要，包含 `id`、`kind`、`persistent`、`pty`、`state`、可选 `name` / `cwd` / `command`、`humanControl`、可选 `exitCode`、`createdAtMs`。
-- `{"command":"create","name":"…","cwd":"./"}`：创建一个持久人机协同交互终端（可选 `name`、`cwd`、`shell`、`cols`、`rows`）。持久终端不会被自动回收，其中 shell 退出后会自动重生，并与 `devshell-worker terminal` 协同工作。
-- `{"command":"close","task":"process-…"}`：关闭并终止对应任务或持久终端，已保留的输出仍可读。
+- `{"command":"list"}`：列出当前执行作用域内的进程与终端摘要（运行中任务与持久终端置顶，已完成历史最多保留最近 10 条），包含 `id`、`kind`、`persistent`、`pty`、`state`、可选 `name` / `cwd` / `command`、`humanControl`、可选 `exitCode`、`createdAtMs`。
+- `{"command":"create","name":"…","cwd":"./"}`：创建一个持久人机协同交互终端（可选 `name`、`cwd`、`shell`、`cols` 默认 `120`、`rows` 默认 `36`），同时返回初始 `cursor`。持久终端在运行期间不会被自动回收，shell 退出后会自动重启（带退避与瞬崩熔断），并与 `devshell-worker terminal` 协同工作。
+- `{"command":"close","task":"process-…"}`：关闭并终止对应任务或持久终端，短暂等待进程收敛后返回最终 `state`，已保留的输出仍可读。
 
 ## 人机协同
 
