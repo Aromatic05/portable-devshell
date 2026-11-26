@@ -214,6 +214,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         assert.equal(openCalls, 1);
         assert.deepEqual(attachCalls[1], {
             fromSeq: 0,
+            takeover: true,
             generation: 3,
             terminalId: "terminal-1",
         });

@@ -711,7 +711,7 @@ test("generic enabled=false config patch stops the worker and cancels unresolved
     const cancelledWaits: string[] = [];
     const waits = [
         { status: "waiting", waitId: "wait-question" },
-        { status: "detached", waitId: "wait-tmux" },
+        { status: "detached", waitId: "wait-process" },
         { status: "resolved", waitId: "wait-result" },
     ];
     const worker = {
@@ -759,7 +759,7 @@ test("generic enabled=false config patch stops the worker and cancels unresolved
     });
 
     assert.equal(stopCalls, 1);
-    assert.deepEqual(cancelledWaits, ["wait-question", "wait-tmux"]);
+    assert.deepEqual(cancelledWaits, ["wait-question", "wait-process"]);
     assert.equal(
         waits.find((entry) => entry.waitId === "wait-result")?.status,
         "resolved",

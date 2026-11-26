@@ -2025,16 +2025,16 @@ import {
                     rows: runtime.rows,
                 },
             );
-            const tmuxTabRegion = instancesLayoutRegions.find(
+            const sessionsTabRegion = instancesLayoutRegions.find(
                 (region) =>
                     region.target.kind === "terminalTab" &&
                     region.target.tab === "sessions",
             )!;
             host.write(
-                mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "press"),
+                mouseSequence(0, sessionsTabRegion.x, sessionsTabRegion.y, "press"),
             );
             host.write(
-                mouseSequence(0, tmuxTabRegion.x, tmuxTabRegion.y, "release"),
+                mouseSequence(0, sessionsTabRegion.x, sessionsTabRegion.y, "release"),
             );
             await waitUntil(() => {
                 const route = currentTuiRoute(runtime.store.getState());

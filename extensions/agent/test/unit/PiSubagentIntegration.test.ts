@@ -421,7 +421,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
                 assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
                 assert.equal(names.has("terminal_manage"), true);
-                return fauxModule.fauxAssistantMessage("CHILD_TMUX_DONE");
+                return fauxModule.fauxAssistantMessage("CHILD_PROCESS_DONE");
             },
         ]);
         await toolByName(subagents, "agent_interact").execute("interact-process", {
@@ -436,7 +436,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         const childProcessAgents = childProcess.agents as Array<Record<string, unknown>>;
         assert.equal(
             record(childProcessAgents[0]?.lastTurn)?.result,
-            "CHILD_TMUX_DONE",
+            "CHILD_PROCESS_DONE",
         );
         assert.equal(
             toolCalls.some(
@@ -587,7 +587,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
                 assert.equal(names.has("task_read"), true);
                 assert.equal(names.has("task_input"), true);
                 assert.equal(names.has("terminal_manage"), true);
-                return fauxModule.fauxAssistantMessage("MAIN_TMUX_DONE");
+                return fauxModule.fauxAssistantMessage("MAIN_PROCESS_DONE");
             },
         ]);
         await main.prompt("exercise process exposure");

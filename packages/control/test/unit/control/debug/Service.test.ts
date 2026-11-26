@@ -89,13 +89,13 @@ test("DebugPatchManager holds one Context without intercepting the same tool in 
     assert.deepEqual(target.calls, ["ctx-other:file_read"]);
     assert.equal(manager.listPatches()[0]?.invocationCount, 1);
 
-    assert.deepEqual(await invoke("tmux_read", { ctxId: "ctx-own" }), {
+    assert.deepEqual(await invoke("task_read", { ctxId: "ctx-own" }), {
         ctxId: "ctx-own",
-        toolName: "tmux_read",
+        toolName: "task_read",
     });
     assert.deepEqual(target.calls, [
         "ctx-other:file_read",
-        "ctx-own:tmux_read",
+        "ctx-own:task_read",
     ]);
     assert.equal(manager.listPatches()[0]?.invocationCount, 1);
 
@@ -103,7 +103,7 @@ test("DebugPatchManager holds one Context without intercepting the same tool in 
     await assert.rejects(ownCall, /host cancelled own Context/iu);
     assert.deepEqual(target.calls, [
         "ctx-other:file_read",
-        "ctx-own:tmux_read",
+        "ctx-own:task_read",
     ]);
 
     const record = manager
