@@ -9,7 +9,7 @@ test("final integration includes the persistent-task long handoff smoke", () => 
         "Resolve prepared Worker",
         "Real Worker smoke",
         "MCP smoke",
-        "Long tmux handoff smoke",
+        "Long process handoff smoke",
         "Web browser smoke",
     ]);
 });

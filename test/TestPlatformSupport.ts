@@ -183,21 +183,6 @@ export function commandAvailable(
     return result.status === 0;
 }
 
-export function tmuxTestOptions(workerBinaryPath: string | undefined): {
-    skip: false | string;
-} {
-    if (workerBinaryPath === undefined) {
-        return realWorkerTestOptions(workerBinaryPath);
-    }
-    if (process.platform === "win32") {
-        return { skip: false };
-    }
-    return {
-        skip: commandAvailable("tmux", ["-V"])
-            ? false
-            : "requires tmux on PATH",
-    };
-}
 
 function normalizeWorkerPlatform(platform: string): string {
     switch (platform) {

@@ -71,6 +71,10 @@ const workspacePackages = new Map([
         new URL("../../control/src/index.ts", import.meta.url).href,
     ],
     [
+        "@portable-devshell/core",
+        new URL("../../core/src/index.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/core/approval",
         new URL("../../core/src/approval/Public.ts", import.meta.url).href,
     ],

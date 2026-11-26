@@ -122,35 +122,35 @@ try {
         assert.ok(result.error, JSON.stringify(result));
     }
 
-    const mux = async (id, tool, args) => {
+    const processTool = async (id, tool, args) => {
         const result = await statelessCall(id, tool, args);
         assert.equal(result.error, undefined, JSON.stringify(result));
         return result.result.structuredContent;
     };
     const noTask = await statelessCall("input-empty", "task_input", { task: "missing", input: "x" });
     assert.ok(noTask.error, JSON.stringify(noTask));
-    const before = await mux("list-before", "terminal_manage", { command: "list" });
-    const created = await mux("create-terminal", "terminal_manage", { command: "create", cwd: fixture.workspace });
+    const before = await processTool("list-before", "terminal_manage", { command: "list" });
+    const created = await processTool("create-terminal", "terminal_manage", { command: "create", cwd: fixture.workspace });
     const terminal = created.id;
     assert.equal(typeof terminal, "string");
-    const listed = await mux("list-terminals", "terminal_manage", { command: "list" });
+    const listed = await processTool("list-terminals", "terminal_manage", { command: "list" });
     assert.ok(listed.tasks.some((entry) => entry.id === terminal && entry.workspace == null));
-    await mux("inspect-terminal", "terminal_inspect", { terminal });
+    await processTool("inspect-terminal", "terminal_inspect", { terminal });
     const interactive = process.platform === "win32"
         ? '$value = Read-Host "ready"; Write-Output "received:$value"'
         : "printf 'ready\n'; IFS= read -r value; printf 'received:%s\n' \"$value\"";
-    const startedTask = await mux("run-task", "bash_run", {
+    const startedTask = await processTool("run-task", "bash_run", {
         command: interactive, cwd: fixture.workspace, waitMs: 1000, tty: true,
     });
     assert.equal(startedTask.termination, "running", JSON.stringify(startedTask));
     assert.equal(startedTask.detached, undefined);
     const task = startedTask.task.id;
-    await mux("input-task", "task_input", { task, input: "hello\r" });
-    const finished = await mux("read-task", "task_read", { task, cursor: startedTask.cursor, timeMs: 3000, untilExit: true });
+    await processTool("input-task", "task_input", { task, input: "hello\r" });
+    const finished = await processTool("read-task", "task_read", { task, cursor: startedTask.cursor, timeMs: 3000, untilExit: true });
     assert.equal(finished.task.status, "0", JSON.stringify(finished));
     assert.match(finished.stdout, /received:hello/u);
-    await mux("close-terminal", "terminal_manage", { command: "close", id: terminal });
-    const closed = await mux("read-closed", "task_read", { task: terminal, untilExit: true, timeMs: 3000 });
+    await processTool("close-terminal", "terminal_manage", { command: "close", id: terminal });
+    const closed = await processTool("read-closed", "task_read", { task: terminal, untilExit: true, timeMs: 3000 });
     assert.notEqual(closed.task.status, "running");
     assert.deepEqual(listContexts(), contextsBefore);
 
@@ -202,7 +202,7 @@ try {
     assert.equal(environment?.platform, undefined);
 
     // A bound workspace and the stateless endpoint must not share terminal resources.
-    const explicitMux = async (id, args) => {
+    const explicitTerminal = async (id, args) => {
         const result = await postJson(endpoint, {
             jsonrpc: "2.0", id, method: "tools/call",
             params: { name: "terminal_manage", arguments: { ctxId, ...args } },
@@ -210,13 +210,13 @@ try {
         assert.equal(result.body.error, undefined, JSON.stringify(result.body));
         return result.body.result.structuredContent;
     };
-    const ordinaryTerminal = (await explicitMux("create-workspace-terminal", {
+    const ordinaryTerminal = (await explicitTerminal("create-workspace-terminal", {
         command: "create", cwd: fixture.workspace,
     })).id;
-    const ordinaryList = await explicitMux("list-workspace-terminals", { command: "list" });
+    const ordinaryList = await explicitTerminal("list-workspace-terminals", { command: "list" });
     assert.ok(ordinaryList.tasks.some((entry) => entry.id === ordinaryTerminal && entry.workspace));
     assert.ok(ordinaryList.tasks.every((entry) => !listed.tasks.some((stateless) => stateless.id === entry.id)));
-    const independentList = await mux("list-independent", "terminal_manage", { command: "list" });
+    const independentList = await processTool("list-independent", "terminal_manage", { command: "list" });
     assert.ok(independentList.tasks.every((entry) => !ordinaryList.tasks.some((ordinary) => ordinary.id === entry.id)));
 
     const toolCall = await postJson(

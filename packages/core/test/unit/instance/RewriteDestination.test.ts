@@ -97,7 +97,7 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
     assert.equal(await alpha.task.api.goal.read("ctx-a"), undefined);
     assert.equal((await beta.task.api.goal.read("ctx-a"))?.objective, "Destination goal");
     await beta.refreshTools();
-    const run = await alpha.toolCalls.api.call("alpha", "bash_run", { waitMs: WAIT_HANDOFF_MS }, context) as Record<string, JsonValue>;
+    const run = await alpha.toolCalls.api.call("alpha", "bash_run", { waitMs: 240_000 }, context) as Record<string, JsonValue>;
     assert.equal(run.detached, true);
     assert.equal(run.waitReason, "timeout");
     await waitResolved;

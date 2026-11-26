@@ -93,10 +93,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
                 `long wait task_read did not return a successful task: ${JSON.stringify(completion)}`,
             );
         }
-        const output = Array.isArray(completion?.output)
-            ? completion.output.map(String)
-            : [];
-        if (!output.some((line) => line.includes(marker))) {
+        if (typeof completion?.stdout !== "string" || !completion.stdout.includes(marker)) {
             throw new Error(
                 `long wait task_read missed the completion marker: ${JSON.stringify(completion)}`,
             );
