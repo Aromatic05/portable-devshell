@@ -86,6 +86,7 @@ export type TerminalStreamMessage =
       }
     | {
           clientSeq: number;
+          error?: string;
           humanControl: boolean;
           kind: "controlChanged";
           session: TerminalSessionDescriptor;

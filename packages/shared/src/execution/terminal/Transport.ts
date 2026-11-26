@@ -254,8 +254,11 @@ function readTerminalStreamMessage(
             payload.snapshot === undefined
                 ? undefined
                 : readRecord(payload.snapshot);
+        const error =
+            typeof payload.error === "string" ? payload.error : undefined;
         return {
             clientSeq: readInteger(payload, "clientSeq"),
+            ...(error === undefined ? {} : { error }),
             humanControl: payload.humanControl === true,
             kind: "controlChanged",
             session: readTerminalSession(session),
