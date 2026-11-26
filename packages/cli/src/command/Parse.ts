@@ -9,6 +9,10 @@ import {
 } from "./extension/Command.js";
 import { parseInstanceCommand, parseWatchCommand } from "./instance/Parse.js";
 import { parseApprovalCommand, parseToolCommand } from "./instance/Tool.js";
+import {
+    parseTerminalCommand,
+    type CliTerminalCommand,
+} from "./terminal/Parse.js";
 import type { CliHelpTopic } from "./Usage.js";
 
 export type CliParsedCommand =
@@ -108,7 +112,8 @@ export type CliParsedCommand =
     | { instance: string; kind: "instance.rotateToken" }
     | { instance: string; kind: "watch.logs" }
     | { instance: string; kind: "watch.status" }
-    | { command?: string; kind: "watch.help" };
+    | { command?: string; kind: "watch.help" }
+    | CliTerminalCommand;
 
 export class CliParser {
     parse(argv: readonly string[]): CliParsedCommand {
@@ -147,6 +152,8 @@ export class CliParser {
                 return parseApprovalCommand(argv.slice(1));
             case "tool":
                 return parseToolCommand(argv.slice(1));
+            case "terminal":
+                return parseTerminalCommand(argv.slice(1));
             case "oauth":
                 return parseOAuthCommand(argv.slice(1));
             case "context":
@@ -193,6 +200,7 @@ function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
         case "oauth":
         case "context":
         case "debug":
+        case "terminal":
         case "tool": {
             const command = argv.slice(1, -1).join(" ");
             return {
