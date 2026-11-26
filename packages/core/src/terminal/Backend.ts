@@ -1,5 +1,9 @@
 import { StringDecoder } from "node:string_decoder";
-import { STREAM_GAP_CODE, type TerminalInspectResult } from "@portable-devshell/shared";
+import {
+    STREAM_GAP_CODE,
+    TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+    type TerminalInspectResult,
+} from "@portable-devshell/shared";
 import type {
     WorkerTerminalPort,
     WorkerTerminalDescriptor,
@@ -59,16 +63,17 @@ export class WorkerTerminalBackend implements TerminalBackend {
                 descriptor.state === "running" &&
                 !known?.has(descriptor.terminalId),
         );
-        return await Promise.all(
-            descriptors.map(async (descriptor) => {
-                const process = new WorkerTerminalProcess(
-                    this.options.worker,
-                    descriptor,
-                );
-                await process.initialize();
-                return { identity: remoteIdentity(descriptor), process };
-            }),
-        );
+        const sessions = descriptors.map((descriptor) => ({
+            identity: remoteIdentity(descriptor),
+            process: new WorkerTerminalProcess(this.options.worker, descriptor),
+        }));
+        try {
+            await Promise.all(sessions.map(({ process }) => process.initialize()));
+            return sessions;
+        } catch (error) {
+            for (const { process } of sessions) process.dispose();
+            throw error;
+        }
     }
 
     async listMetadata(): Promise<readonly TerminalBackendSessionIdentity[]> {
@@ -397,7 +402,7 @@ class WorkerTerminalProcess implements TerminalProcess {
     #scheduleResume(): void {
         const current = this.#resumeTail.then(async () => {
             await this.#serialize(async () => {
-                await this.#resume();
+                await this.#resume(true);
             });
         });
         this.#resumeTail = current.catch((error: unknown) => {
@@ -405,31 +410,41 @@ class WorkerTerminalProcess implements TerminalProcess {
         });
     }
 
-    async #resume(): Promise<void> {
+    async #resume(background = false): Promise<void> {
         if (this.#closed) return;
-        const initialRestore =
-            this.#localSeq === 0 && this.#worker.control !== undefined;
         let attached;
         try {
-            attached = await this.#worker.attach({
-                fromSeq: this.#lastSeq,
-                ...(initialRestore ? { restore: true } : {}),
-                generation: this.#descriptor.generation,
-                terminalId: this.#descriptor.terminalId,
-            });
+            attached = await this.#attachForResume();
         } catch (error) {
-            if (!initialRestore && isStreamGapError(error)) {
-                attached = await this.#worker.attach({
-                    fromSeq: this.#lastSeq,
-                    generation: this.#descriptor.generation,
-                    restore: true,
-                    terminalId: this.#descriptor.terminalId,
-                });
-            } else {
-                throw error;
-            }
+            // A failed subscription is not evidence that the PTY died. Leave
+            // the next attempt to another connection or notification.
+            if (background && isTemporaryAttachError(error)) return;
+            throw error;
         }
         await this.#applyAttached(attached);
+    }
+
+    async #attachForResume(): ReturnType<WorkerTerminalPort["attach"]> {
+        const initialRestore =
+            this.#localSeq === 0 && this.#worker.control !== undefined;
+        const input = {
+            fromSeq: this.#lastSeq,
+            generation: this.#descriptor.generation,
+            terminalId: this.#descriptor.terminalId,
+        };
+        try {
+            return await this.#worker.attach({
+                ...input,
+                ...(initialRestore ? { restore: true } : {}),
+            });
+        } catch (error) {
+            if (initialRestore || !isStreamGapError(error)) throw error;
+            return await this.#worker.attach({
+                ...input,
+                fromSeq: this.#lastSeq,
+                restore: true,
+            });
+        }
     }
 
     async #applyAttached(
@@ -686,6 +701,20 @@ function isStreamGapError(error: unknown): boolean {
         error !== null &&
         "code" in error &&
         (error as { code?: unknown }).code === STREAM_GAP_CODE
+    );
+}
+
+function isTemporaryAttachError(error: unknown): boolean {
+    const { code, retryable } = (error ?? {}) as {
+        code?: unknown;
+        retryable?: unknown;
+    };
+    return (
+        // The worker's RPC errors carry retryable; local transport errors may not.
+        retryable !== false ||
+        code === TRANSPORT_RPC_RESULT_UNCERTAIN_CODE ||
+        code === "process.hostFailed" ||
+        code === "terminal.bridgeFailed"
     );
 }
 

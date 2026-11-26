@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRemoteError } from "@portable-devshell/shared";
+import { setImmediate } from "node:timers/promises";
+import { createRemoteError, TRANSPORT_RPC_RESULT_UNCERTAIN_CODE } from "@portable-devshell/shared";
 
 import {
     WorkerTerminalBackend,
 } from "../../../src/terminal/Backend.ts";
 import type {
+    TerminalProcessExit,
     WorkerTerminalAttachResult,
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
@@ -13,6 +15,7 @@ import type {
     WorkerTerminalOpenInput,
     WorkerTerminalPort,
 } from "../../../src/terminal/Api.ts";
+import { TerminalSessionService } from "../../../src/terminal/Service.ts";
 
 class FakeWorkerTerminal implements WorkerTerminalPort {
     readonly attaches: Array<Parameters<WorkerTerminalPort["attach"]>[0]> = [];
@@ -346,6 +349,160 @@ test("worker terminal backend replays, fences async operations, and resumes afte
 
     await process.kill();
     assert.equal(worker.kills[0]?.version, 2);
+});
+
+test("a lost resume reply keeps the session running until the next reconnect", async (t) => {
+    const worker = new FakeWorkerTerminal();
+    const backend = new WorkerTerminalBackend({ worker });
+    const service = new TerminalSessionService();
+    t.after(() => service.close());
+    const errors: Error[] = [];
+    const opened = await service.open({
+        backend: {
+            open: async (input) => {
+                const opened = await backend.open(input);
+                assert.ok("process" in opened);
+                opened.process.onError!((error) => errors.push(error));
+                return opened;
+            },
+        },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const output: Array<{ data: string; seq: number }> = [];
+    const exits: TerminalProcessExit[] = [];
+    const attachment = service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onExit: (exit) => exits.push(exit),
+        onOutput: (frame) => output.push(frame),
+        terminalId: opened.terminalId,
+    });
+    assert.deepEqual(attachment.replay, [{ data: "replay", seq: 1 }]);
+    const resumeInput = { ...openAttachInput, fromSeq: 1 };
+    const connected = worker.connected;
+    assert.ok(connected);
+
+    worker.latestSeq = 2;
+    worker.attachErrors.push(createRemoteError({
+        code: TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+        message: "connection closed before the attach reply",
+        retryable: false,
+    }));
+    connected();
+    await setImmediate();
+
+    assert.deepEqual(worker.attaches, [openAttachInput, resumeInput]);
+    assert.equal(worker.connected, connected);
+    assert.equal(service.get(opened.terminalId).state, "running");
+    assert.deepEqual(errors, []);
+    assert.deepEqual(exits, []);
+    assert.deepEqual(output, []);
+
+    connected();
+    await setImmediate();
+
+    assert.deepEqual(worker.attaches, [openAttachInput, resumeInput, resumeInput]);
+    assert.deepEqual(output, [{ data: "replay", seq: 2 }]);
+    assert.deepEqual(errors, []);
+    assert.equal(service.get(opened.terminalId).state, "running");
+
+    assert.ok(worker.notification);
+    worker.notification({
+        method: "terminal.output",
+        params: {
+            dataBase64: Buffer.from("live").toString("base64"),
+            generation: opened.generation,
+            seq: 3,
+            terminalId: opened.terminalId,
+        },
+    });
+    worker.notification({
+        method: "terminal.exit",
+        params: {
+            exitCode: 7,
+            generation: opened.generation,
+            latestSeq: 3,
+            signal: 0,
+            terminalId: opened.terminalId,
+            version: 2,
+        },
+    });
+    assert.deepEqual(output, [{ data: "replay", seq: 2 }, { data: "live", seq: 3 }]);
+    assert.deepEqual(exits, [{ exitCode: 7, signal: 0 }]);
+    assert.equal(service.get(opened.terminalId).state, "exited");
+    assert.equal(worker.connected, undefined);
+    assert.equal(worker.disconnected, undefined);
+    assert.equal(worker.notification, undefined);
+});
+
+test("terminal.error requests recovery but a definitive remote rejection still fails the process", async () => {
+    const worker = new FakeWorkerTerminal();
+    const backend = new WorkerTerminalBackend({ worker });
+    const opened = await backend.open({ cols: 80, rows: 24, workspace: "/workspace" });
+    assert.ok("process" in opened);
+    const errors: Error[] = [];
+    opened.process.onError!((error) => errors.push(error));
+    const resumeInput = { ...openAttachInput, fromSeq: 1 };
+    const notify = worker.notification;
+    assert.ok(notify);
+    const notification = {
+        method: "terminal.error" as const,
+        params: { generation: 9, message: "stream disconnected", terminalId: "remote-terminal" },
+    };
+
+    worker.attachErrors.push(Object.assign(new Error("stream disconnected"), {
+        code: "terminal.bridgeFailed",
+        retryable: false,
+    }));
+    notify(notification);
+    await setImmediate();
+    assert.deepEqual(worker.attaches, [openAttachInput, resumeInput]);
+    assert.deepEqual(errors, []);
+    assert.equal(worker.notification, notify);
+
+    const missing = Object.assign(new Error("unknown process remote-terminal"), {
+        code: "process.notFound",
+        retryable: false,
+    });
+    worker.attachErrors.push(missing);
+    notify(notification);
+    await setImmediate();
+    assert.deepEqual(worker.attaches, [openAttachInput, resumeInput, resumeInput]);
+    assert.deepEqual(errors, [missing]);
+    assert.equal(worker.connected, undefined);
+    assert.equal(worker.disconnected, undefined);
+    assert.equal(worker.notification, undefined);
+});
+
+test("a failed recovery attach releases its listeners and can be recovered again", async (t) => {
+    const worker = new FakeWorkerTerminal();
+    const backend = new WorkerTerminalBackend({ worker });
+    const service = new TerminalSessionService();
+    t.after(() => service.close());
+    const temporary = new Error("transport closed before attaching");
+    worker.attachErrors.push(temporary);
+
+    await assert.rejects(service.recover("alpha", backend), (error) => error === temporary);
+    assert.deepEqual(service.list("alpha"), []);
+    assert.deepEqual(worker.kills, []);
+    assert.equal(worker.connected, undefined);
+    assert.equal(worker.disconnected, undefined);
+    assert.equal(worker.notification, undefined);
+
+    const [recovered] = await service.recover("alpha", backend);
+    assert.ok(recovered);
+    assert.equal(recovered.state, "running");
+    assert.deepEqual(worker.attaches, [openAttachInput, openAttachInput]);
+    const attachment = service.attach({
+        fromSeq: 0,
+        generation: recovered.generation,
+        onOutput() {},
+        terminalId: recovered.terminalId,
+    });
+    assert.deepEqual(attachment.replay, [{ data: "replay", seq: 1 }]);
 });
 
 test("worker terminal backend preserves an exit received before listeners are registered", async () => {
