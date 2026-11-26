@@ -3,10 +3,6 @@ import { randomUUID } from "node:crypto";
 import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 
 import { createDevshellPiExtension, type DevshellPiToolSession, type PiExtensionApiLike } from "../adapt/Bridge.js";
-import {
-    PI_PROCESS_TOOL_DOMAIN,
-    PiToolExposureController,
-} from "../adapt/ToolExposure.js";
 import type { PiAgentProfile } from "../profile/Profile.js";
 import type { PiModelLike, PiModelRuntimeLike, PiSdkModule, PiSessionLike } from "../runtime/Sdk.js";
 import {
@@ -159,9 +155,6 @@ export class PiSubagentRuntime {
         const session = created.session;
         session.setSessionName?.(path);
         this.#gui.attach(session, this.#localCwd);
-        const toolExposure = new PiToolExposureController(session, {
-            process: PI_PROCESS_TOOL_DOMAIN,
-        });
         const record: PiSubagentRecord = {
             activity: "running",
             id: randomUUID(),
@@ -172,7 +165,6 @@ export class PiSubagentRuntime {
             ...(profile === undefined ? {} : { profile: profile.name }),
             session,
             task: input.task,
-            toolExposure,
             turnGeneration: 0,
         };
         record.unsubscribe = session.subscribe?.((event) =>
@@ -281,7 +273,6 @@ export class PiSubagentRuntime {
         if (record.activity === "running")
             await record.session.abort().catch(() => undefined);
         record.unsubscribe?.();
-        record.toolExposure?.close();
         this.#gui.detach(record.session);
         record.session.dispose();
         record.lifecycle = "terminated";

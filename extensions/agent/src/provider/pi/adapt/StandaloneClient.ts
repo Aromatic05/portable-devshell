@@ -106,7 +106,6 @@ export function createStandalonePiToolExposureSurface(
     return {
         getActiveToolNames: () => pi.getActiveTools(),
         setActiveToolsByName: (toolNames) => pi.setActiveTools([...toolNames]),
-        subscribe: (listener) => pi.on("tool_execution_end", listener),
     };
 }
 

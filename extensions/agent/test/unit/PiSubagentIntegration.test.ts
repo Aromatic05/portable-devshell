@@ -15,10 +15,7 @@ import {
 
 import { createDevshellPiExtension, type DevshellPiToolSession } from "../../src/provider/pi/adapt/Bridge.ts";
 import { createStandalonePiToolExposureSurface } from "../../src/provider/pi/adapt/StandaloneClient.ts";
-import {
-    PI_PROCESS_TOOL_DOMAIN,
-    PiToolExposureController,
-} from "../../src/provider/pi/adapt/ToolExposure.ts";
+import { PiToolExposureController } from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProfileCatalog } from "../../src/provider/pi/profile/Loader.ts";
 import { PiMainRuntime } from "../../src/provider/pi/runtime/MainRuntime.ts";
 import {
@@ -92,11 +89,11 @@ function effectiveToolNames(context: FauxContext): Set<string> {
     return names;
 }
 
-function assertProcessToolExposure(context: FauxContext, expanded: boolean): void {
+function assertTaskToolExposure(context: FauxContext, allowed: boolean): void {
     const names = effectiveToolNames(context);
     assert.equal(names.has("task_manage"), true);
-    assert.equal(names.has("task_input"), expanded);
-    assert.equal(names.has("task_inspect"), expanded);
+    assert.equal(names.has("task_input"), allowed);
+    assert.equal(names.has("task_inspect"), allowed);
 }
 
 function lastToolResultText(context: FauxContext, toolName: string, isError: boolean): string {
@@ -115,10 +112,6 @@ const terminalId = "terminal-integration";
 const terminalCursor = "terminal-cursor";
 const terminalInput = "printf TERMINAL_ECHO\n";
 const terminalCalls = [
-    { name: "task_manage", input: { command: "list" } },
-    { name: "task_manage", input: { command: "close", task: existingTerminal } },
-    { name: "task_manage", input: { command: "create", task: existingTerminal } },
-    { name: "task_manage", input: { command: "create" } },
     { name: "task_input", input: { task: terminalId, cursor: terminalCursor, input: terminalInput } },
 ] as const;
 
@@ -129,28 +122,8 @@ function terminalResponses(faux: FauxModule) {
     );
     return [
         (context: FauxContext) => {
-            assertProcessToolExposure(context, false);
-            return call("task_manage", terminalCalls[0].input);
-        },
-        (context: FauxContext) => {
-            assertProcessToolExposure(context, true);
-            assert.match(lastToolResultText(context, "task_manage", false), /existing-terminal/u);
-            return call("task_manage", terminalCalls[1].input);
-        },
-        (context: FauxContext) => {
-            assertProcessToolExposure(context, true);
-            assert.match(lastToolResultText(context, "task_manage", false), /exited/u);
-            return call("task_manage", terminalCalls[2].input);
-        },
-        (context: FauxContext) => {
-            assertProcessToolExposure(context, true);
-            assert.match(lastToolResultText(context, "task_manage", true), /tool\.invalidArguments/u);
-            return call("task_manage", terminalCalls[3].input);
-        },
-        (context: FauxContext) => {
-            assertProcessToolExposure(context, true);
-            const created = JSON.parse(lastToolResultText(context, "task_manage", false));
-            return call("task_input", { task: created.task.id, cursor: created.cursor, input: terminalInput });
+            assertTaskToolExposure(context, true);
+            return call("task_input", terminalCalls[0].input);
         },
         (context: FauxContext) => {
             assert.match(lastToolResultText(context, "task_input", false), /TERMINAL_ECHO/u);
@@ -350,7 +323,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         localCwd: cwd,
         modelRuntime: runtimeForSubagents as never,
         onChildrenChanged: (hasAliveChildren) =>
-            exposureRef.current?.setExpanded("agent", hasAliveChildren),
+            exposureRef.current?.setExpanded(hasAliveChildren),
         profiles,
         sdk: {
             DefaultResourceLoader,
@@ -400,11 +373,8 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         thinkingLevel: main.agent.state.thinkingLevel,
     }));
     const mainExposure = new PiToolExposureController(main as never, {
-        agent: {
-            expanded: PI_SUBAGENT_TOOL_NAMES,
-            gateway: ["agent_spawn"],
-        },
-        process: PI_PROCESS_TOOL_DOMAIN,
+        expanded: PI_SUBAGENT_TOOL_NAMES,
+        gateway: ["agent_spawn"],
     });
     exposureRef.current = mainExposure;
 
@@ -413,14 +383,16 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         assert.equal(initial.has("agent_spawn"), true);
         assert.equal(initial.has("agent_poll"), false);
         assert.equal(initial.has("bash_run"), true);
-        assert.equal(initial.has("task_input"), false);
+        assert.equal(initial.has("task_input"), true);
+        assert.equal(initial.has("task_inspect"), true);
 
         faux.setResponses([
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("agent_spawn"), false);
                 assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_input"), false);
+                assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("task_inspect"), true);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("file_read", {
                         files: [{ path: "./marker.txt", view: "content" }],
@@ -636,7 +608,8 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_input"), false);
+                assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("task_inspect"), true);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("bash_run", { command: "sleep 1", waitMs: 0 }),
                     { stopReason: "toolUse" },
@@ -666,14 +639,13 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         );
     } finally {
         await subagents.close().catch(() => undefined);
-        mainExposure.close();
         main.dispose();
         await rm(root, { force: true, recursive: true });
     }
 });
 
 for (const mode of ["embedded", "standalone"] as const) {
-    test(`real Pi ${mode} main exposes terminal tools when tasks are listed or created`, async (t) => {
+    test(`real Pi ${mode} main can use an allowed terminal tool on its first turn`, async (t) => {
         const root = await mkdtemp(join(tmpdir(), "devshell-pi-terminal-integration-"));
         t.after(() => rm(root, { force: true, recursive: true }));
         const agentDir = join(root, "agent");
@@ -746,6 +718,101 @@ for (const mode of ["embedded", "standalone"] as const) {
             await session.prompt("exercise persistent terminal exposure");
             assert.deepEqual(toolCalls, terminalCalls);
             assert.equal(session.getLastAssistantText(), "TERMINAL_DONE");
+        } finally {
+            await main.close();
+            session.dispose();
+        }
+    });
+
+    test(`real Pi ${mode} main keeps denied terminal tools out of the model`, async (t) => {
+        const root = await mkdtemp(join(tmpdir(), "devshell-pi-denied-terminal-integration-"));
+        t.after(() => rm(root, { force: true, recursive: true }));
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "workspace");
+        await mkdir(agentDir);
+        await mkdir(cwd);
+
+        const fauxModule = await loadFauxModule();
+        const faux = fauxModule.fauxProvider({ tokensPerSecond: 1_000_000 });
+        const modelRuntime = await ModelRuntime.create({
+            allowModelNetwork: false,
+            authPath: join(agentDir, "auth.json"),
+            modelsPath: join(agentDir, "models.json"),
+        });
+        modelRuntime.registerNativeProvider(faux.provider as never);
+        const model = modelRuntime.getModel("faux", "faux-1");
+        assert.ok(model);
+
+        const toolCalls: Array<{ name: string; input: unknown }> = [];
+        const main = new PiMainRuntime({
+            agentDir,
+            gui: { attach: (session) => session.sessionId, detach() {} },
+            localCwd: cwd,
+            modelRuntime: modelRuntime as never,
+            sdk: {
+                DefaultResourceLoader,
+                ModelRuntime,
+                SessionManager,
+                SettingsManager,
+                createAgentSession,
+                getAgentDir: () => agentDir,
+            } as never,
+            tools: createToolSession(toolCalls),
+        });
+        const mainState = () => ({ model, running: false });
+        const settingsManager = SettingsManager.create(cwd, agentDir);
+        const resourceLoader = new DefaultResourceLoader({
+            agentDir,
+            cwd,
+            extensionFactories: [{
+                factory: async (pi) => {
+                    await main.extension()(pi);
+                    if (mode === "standalone") {
+                        pi.on("session_start", () => {
+                            main.bindMain(mainState, createStandalonePiToolExposureSurface(pi));
+                        });
+                    }
+                },
+                hidden: true,
+                name: "portable-devshell-denied-terminal-integration",
+            }],
+            settingsManager,
+        });
+        await resourceLoader.reload();
+        const { session } = await createAgentSession({
+            agentDir,
+            cwd,
+            excludeTools: ["task_input", "task_inspect"],
+            model,
+            modelRuntime,
+            noTools: "builtin",
+            resourceLoader,
+            sessionManager: SessionManager.create(cwd, join(root, "sessions")),
+            settingsManager,
+        });
+        try {
+            if (mode === "embedded") main.bindMain(mainState, session);
+            await session.bindExtensions({});
+            faux.setResponses([
+                (context) => {
+                    assertTaskToolExposure(context, false);
+                    return fauxModule.fauxAssistantMessage(
+                        fauxModule.fauxToolCall("task_manage", { command: "list" }),
+                        { stopReason: "toolUse" },
+                    );
+                },
+                (context) => {
+                    assertTaskToolExposure(context, false);
+                    assert.match(lastToolResultText(context, "task_manage", false), /existing-terminal/u);
+                    return fauxModule.fauxAssistantMessage("DENIED_TERMINAL_DONE");
+                },
+            ]);
+
+            await session.prompt("do not use denied terminal tools");
+            assert.deepEqual(toolCalls, [
+                { name: "task_manage", input: { command: "list" } },
+            ]);
+            assert.equal(session.getLastAssistantText(), "DENIED_TERMINAL_DONE");
         } finally {
             await main.close();
             session.dispose();

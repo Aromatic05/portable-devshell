@@ -4,7 +4,6 @@ import {
     type PiExtensionApiLike,
 } from "../adapt/Bridge.js";
 import {
-    PI_PROCESS_TOOL_DOMAIN,
     PiToolExposureController,
     type PiToolExposureSurface,
 } from "../adapt/ToolExposure.js";
@@ -40,7 +39,7 @@ export class PiMainRuntime {
             localCwd: options.localCwd,
             modelRuntime: options.modelRuntime,
             onChildrenChanged: (hasAliveChildren) =>
-                this.#toolExposure?.setExpanded("agent", hasAliveChildren),
+                this.#toolExposure?.setExpanded(hasAliveChildren),
             profiles: new PiAgentProfileCatalog(options.agentDir, options.tools),
             sdk: options.sdk,
             tools: options.tools,
@@ -63,11 +62,8 @@ export class PiMainRuntime {
     ): void {
         this.#subagents.bindMain(main);
         this.#toolExposure = new PiToolExposureController(surface, {
-            agent: {
-                expanded: PI_SUBAGENT_TOOL_NAMES,
-                gateway: ["agent_spawn"],
-            },
-            process: PI_PROCESS_TOOL_DOMAIN,
+            expanded: PI_SUBAGENT_TOOL_NAMES,
+            gateway: ["agent_spawn"],
         });
     }
 
@@ -77,6 +73,5 @@ export class PiMainRuntime {
 
     async close(): Promise<void> {
         await this.#subagents.close();
-        this.#toolExposure?.close();
     }
 }

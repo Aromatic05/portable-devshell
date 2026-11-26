@@ -16,10 +16,7 @@ import type {
 import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
-import {
-    PI_PROCESS_TOOL_DOMAIN,
-    PiToolExposureController,
-} from "../../src/provider/pi/adapt/ToolExposure.ts";
+import { PiToolExposureController } from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/runtime/AgentProcess.ts";
 import {
     parseAgentWorkerTarget,
@@ -422,89 +419,27 @@ test("Pi provider child does not inherit Extension sandbox permission flags", as
     }
 });
 
-test("PiToolExposureController expands process tools when task_manage list returns existing tasks", () => {
-    const emitToolEnd = (
-        listeners: Set<(event: unknown) => void>,
-        toolName: string,
-        details: unknown,
-        isError = false,
-    ) => {
-        for (const listener of listeners) {
-            listener({
-                type: "tool_execution_end",
-                toolName,
-                isError,
-                result: { details },
-            });
-        }
-    };
-
-    const createHarness = () => {
-        let active = ["file_read", "bash_run", "task_input", "task_inspect", "task_manage"];
-        const listeners = new Set<(event: unknown) => void>();
-        const controller = new PiToolExposureController(
-            {
-                getActiveToolNames: () => [...active],
-                setActiveToolsByName: (names) => {
-                    active = [...names];
-                },
-                subscribe: (listener) => {
-                    listeners.add(listener);
-                    return () => listeners.delete(listener);
-                },
+test("Pi agent gating does not reactivate disabled task tools", () => {
+    let active = ["task_input", "task_manage", "agent_spawn", "agent_poll"];
+    const controller = new PiToolExposureController(
+        {
+            getActiveToolNames: () => [...active],
+            setActiveToolsByName: (names) => {
+                active = [...names];
             },
-            { process: PI_PROCESS_TOOL_DOMAIN },
-        );
-        return {
-            active: () => [...active],
-            controller,
-            emit: (toolName: string, details: unknown, isError = false) =>
-                emitToolEnd(listeners, toolName, details, isError),
-        };
-    };
+        },
+        {
+            expanded: ["agent_spawn", "agent_poll", "agent_interact", "agent_manage"],
+            gateway: ["agent_spawn"],
+        },
+    );
 
-    const emptyList = createHarness();
-    assert.deepEqual(emptyList.active(), ["file_read", "bash_run", "task_manage"]);
-    emptyList.emit("task_manage", { tasks: [] });
-    assert.equal(emptyList.controller.isExpanded("process"), false);
-    emptyList.emit("task_manage", { taskId: "t1", state: "exited" });
-    assert.equal(emptyList.controller.isExpanded("process"), false);
-    emptyList.emit("task_manage", { tasks: [{ id: "t1" }] }, true);
-    assert.equal(emptyList.controller.isExpanded("process"), false);
-
-    emptyList.emit("task_manage", { tasks: [{ id: "t1", state: "running" }] });
-    assert.equal(emptyList.controller.isExpanded("process"), true);
-    assert.deepEqual(emptyList.active(), [
-        "file_read",
-        "bash_run",
-        "task_input",
-        "task_inspect",
-        "task_manage",
-    ]);
-    emptyList.controller.close();
-
-    const created = createHarness();
-    created.emit("task_manage", { task: { id: "t2" }, cursor: "c2" });
-    assert.equal(created.controller.isExpanded("process"), true);
-    created.controller.close();
-
-    const handoff = createHarness();
-    handoff.emit("file_read", { comment: ["unrelated note"] });
-    assert.equal(handoff.controller.isExpanded("process"), false);
-    handoff.emit("file_read", {
-        comment: [
-            "[Terminal handoff] Human released control of terminal p1. Inspect the current screen with task_inspect, or send input with task_input (omit any pre-handoff cursor to anchor at the latest output).",
-        ],
-    });
-    assert.equal(handoff.controller.isExpanded("process"), true);
-    assert.deepEqual(handoff.active(), [
-        "file_read",
-        "bash_run",
-        "task_input",
-        "task_inspect",
-        "task_manage",
-    ]);
-    handoff.controller.close();
+    assert.deepEqual(active, ["task_input", "task_manage", "agent_spawn"]);
+    active = ["task_manage", "agent_spawn"];
+    controller.setExpanded(true);
+    assert.deepEqual(active, ["task_manage", "agent_spawn", "agent_poll"]);
+    controller.setExpanded(false);
+    assert.deepEqual(active, ["task_manage", "agent_spawn"]);
 });
 
 function startOptions(
