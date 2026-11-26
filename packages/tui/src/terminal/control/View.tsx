@@ -11,6 +11,8 @@ export interface TuiTerminalRenderSource {
 export interface TuiComponentTerminalProps {
     columns: number;
     focused: boolean;
+    headerControls?: string;
+    headerTitle?: string;
     instance?: string;
     onGraphicsVisibility(visible: boolean): void;
     rows: number;
@@ -53,13 +55,16 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
         snapshot.graphics.count === 0
             ? ""
             : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
-    const controls = props.focused
-        ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar"
-        : "→/Tab focus · r replay · K kill";
+    const controls =
+        props.headerControls ??
+        (props.focused
+            ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar"
+            : "→/Tab focus · r replay · K kill");
+    const title = props.headerTitle ?? `terminal · ${props.instance ?? "no instance"}`;
     return (
         <Box flexDirection="column" height={props.rows + 1} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined}>
-                {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll}${selection}${graphics} · ${controls}`}
+                {`${title} · ${status}${scroll}${selection}${graphics} · ${controls}`}
             </Text>
             {snapshot.lines.slice(0, props.rows).map((line, row) => (
                 <Box

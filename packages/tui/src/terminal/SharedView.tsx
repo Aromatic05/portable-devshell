@@ -1,10 +1,36 @@
 import { useSyncExternalStore } from "react";
 import { Box, Text } from "ink";
+import type { TerminalSessionDescriptor } from "@portable-devshell/shared";
 import {
     TuiComponentTerminal,
     type TuiTerminalRenderSource,
 } from "./control/View.js";
 import type { TuiSharedTerminalList } from "./SharedList.js";
+
+function shortId(terminalId: string): string {
+    return terminalId.length > 20 ? terminalId.slice(0, 16) : terminalId;
+}
+
+function sessionLabel(session: TerminalSessionDescriptor): string {
+    return session.name !== undefined && session.name.length > 0
+        ? `${session.name} (${shortId(session.terminalId)})`
+        : shortId(session.terminalId);
+}
+
+function formatSessionRow(session: TerminalSessionDescriptor): string {
+    const parts: string[] = [sessionLabel(session)];
+    const badges: string[] = [];
+    if (session.persistent) badges.push("persistent");
+    if (session.humanControl) badges.push("CONTROL");
+    if (badges.length > 0) parts.push(`[${badges.join(" · ")}]`);
+    parts.push(`${session.cols}x${session.rows}`);
+    const detail =
+        session.command !== undefined && session.command.length > 0
+            ? session.command
+            : session.cwd;
+    if (detail !== undefined && detail.length > 0) parts.push(detail);
+    return parts.join(" · ");
+}
 
 export function TuiComponentSharedTerminals(props: {
     columns: number;
@@ -21,11 +47,20 @@ export function TuiComponentSharedTerminals(props: {
         () => props.source.getSnapshot(),
     );
     if (state.active !== undefined) {
+        const mode = state.mode ?? "control";
+        const modeBadge = mode === "observe" ? "[OBSERVE]" : "[CONTROL]";
+        const headerTitle = `session · ${props.instance ?? "no instance"} · ${sessionLabel(state.active)} ${modeBadge}`;
+        const headerControls =
+            mode === "observe"
+                ? "read-only · t take control · q/Esc back · Ctrl+] sidebar"
+                : "Ctrl+] release & sidebar";
         return (
             <TuiComponentTerminal
                 columns={props.columns}
                 rows={props.rows}
                 focused={props.focused}
+                headerControls={headerControls}
+                headerTitle={headerTitle}
                 instance={props.instance}
                 source={props.terminal}
                 onGraphicsVisibility={props.onGraphicsVisibility}
@@ -47,10 +82,13 @@ export function TuiComponentSharedTerminals(props: {
                 {state.error ??
                     (state.loading
                         ? "Loading sessions…"
-                        : "↑/↓ select · Enter take control · r refresh · Ctrl+] detach")}
+                        : "↑/↓ select · Enter control · o observe · n new · x close · r refresh · Ctrl+] sidebar")}
             </Text>
             {state.sessions.length === 0 && !state.loading ? (
-                <Text dimColor>No running PTY sessions</Text>
+                <Text dimColor>
+                    No running PTY sessions (press n to create a persistent
+                    shell)
+                </Text>
             ) : null}
             {state.sessions
                 .slice(start, start + available)
@@ -65,7 +103,7 @@ export function TuiComponentSharedTerminals(props: {
                         wrap="truncate-end"
                     >
                         {start + index === state.selectedIndex ? "> " : "  "}
-                        {session.terminalId} · {session.state}
+                        {formatSessionRow(session)}
                     </Text>
                 ))}
         </Box>

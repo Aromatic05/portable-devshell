@@ -13,7 +13,10 @@ import {
     type TuiTerminalGraphicsSupport,
 } from "./graphics/Renderer.js";
 import type { TuiTerminalSession } from "./emulation/Session.js";
-import type { TuiSharedTerminalList } from "./SharedList.js";
+import type {
+    SharedTerminalMode,
+    TuiSharedTerminalList,
+} from "./SharedList.js";
 
 export interface TuiTerminalMouseEvent {
     button: number;
@@ -30,6 +33,11 @@ export interface TuiTerminalControllerOptions {
     handleAppMouse(event: TuiTerminalMouseEvent): Promise<void>;
     rows(): number;
     domains: TuiDomainSession;
+    setSharedControl?(
+        instance: string,
+        terminalId: string,
+        takeover: boolean,
+    ): Promise<void>;
     stdout: WriteStream;
     store: TuiAppStore;
     terminal: TuiTerminalSession;
@@ -198,16 +206,63 @@ export class TuiTerminalController {
         );
     }
 
-    async #attachShared(): Promise<void> {
-        const session = this.#options.sharedTerminals.enter();
+    async #attachShared(mode: SharedTerminalMode): Promise<void> {
+        const session = this.#options.sharedTerminals.enter(mode);
         if (session === undefined) return;
         await this.#options.terminal.start({
             columns: this.#columns,
             rows: this.#rows,
-            command: { args: [session.terminalId], command: session.instance },
+            command: {
+                args: [session.terminalId, mode],
+                command: session.instance,
+            },
             instance: session.instance,
         });
         this.syncFocus();
+    }
+
+    async #createShared(): Promise<void> {
+        const created = await this.#options.sharedTerminals.create(
+            this.#columns,
+            this.#rows,
+        );
+        if (created === undefined) return;
+        await this.#options.terminal.start({
+            columns: this.#columns,
+            rows: this.#rows,
+            command: {
+                args: [created.terminalId, "control"],
+                command: created.instance,
+            },
+            instance: created.instance,
+        });
+        this.syncFocus();
+    }
+
+    async #closeShared(): Promise<void> {
+        await this.#options.sharedTerminals.closeSelected();
+    }
+
+    async #takeSharedControl(): Promise<void> {
+        const snapshot = this.#options.sharedTerminals.getSnapshot();
+        const active = snapshot.active;
+        if (
+            active === undefined ||
+            snapshot.mode === "control" ||
+            this.#options.setSharedControl === undefined
+        )
+            return;
+        try {
+            await this.#options.setSharedControl(
+                active.instance,
+                active.terminalId,
+                true,
+            );
+            this.#options.sharedTerminals.setMode("control");
+            this.#options.terminal.resize(this.#columns, this.#rows);
+        } catch (error) {
+            this.#options.sharedTerminals.setError(readErrorMessage(error));
+        }
     }
 
     scroll(direction: "pageUp" | "pageDown" | "top" | "bottom"): void {
@@ -317,8 +372,18 @@ export class TuiTerminalController {
                     else if (action.data === "\u001B[B" || action.data === "j")
                         list.move(1);
                     else if (action.data === "r") void list.refresh();
+                    else if (action.data === "n")
+                        this.#options.enqueueInput(() => this.#createShared());
+                    else if (action.data === "x")
+                        this.#options.enqueueInput(() => this.#closeShared());
+                    else if (action.data === "o")
+                        this.#options.enqueueInput(() =>
+                            this.#attachShared("observe"),
+                        );
                     else if (action.data === "\r" || action.data === "\n")
-                        this.#options.enqueueInput(() => this.#attachShared());
+                        this.#options.enqueueInput(() =>
+                            this.#attachShared("control"),
+                        );
                 } else if (action.type === "scroll")
                     listScroll(
                         this.#options.sharedTerminals,
@@ -329,6 +394,31 @@ export class TuiTerminalController {
                     this.#options.enqueueInput(() =>
                         this.#options.handleAppMouse(action),
                     );
+                continue;
+            }
+            if (
+                tab === "sessions" &&
+                this.#options.sharedTerminals.getSnapshot().active !==
+                    undefined &&
+                this.#options.sharedTerminals.getSnapshot().mode === "observe"
+            ) {
+                if (action.type === "data") {
+                    if (action.data === "t") {
+                        this.#options.enqueueInput(() =>
+                            this.#takeSharedControl(),
+                        );
+                    } else if (action.data === "q" || action.data === "\u001B") {
+                        this.#leaveShared();
+                        void this.#options.sharedTerminals.refresh();
+                        this.syncFocus();
+                    }
+                } else if (action.type === "scroll") {
+                    this.scroll(action.direction);
+                } else if (action.type === "mouse") {
+                    this.#options.enqueueInput(
+                        async () => await this.handleMouse(action),
+                    );
+                }
                 continue;
             }
             if (action.type === "data")

@@ -1,15 +1,35 @@
-import type { TerminalSessionDescriptor } from "@portable-devshell/shared";
+import type {
+    TerminalOpenInput,
+    TerminalSessionDescriptor,
+    TerminalVersionedIdentity,
+} from "@portable-devshell/shared";
+
+export type SharedTerminalMode = "observe" | "control";
 
 export interface SharedTerminalSnapshot {
     instance?: string;
     active?: TerminalSessionDescriptor;
+    mode?: SharedTerminalMode;
     sessions: readonly TerminalSessionDescriptor[];
     selectedIndex: number;
     loading: boolean;
     error?: string;
 }
 
+export interface TuiSharedTerminalOperations {
+    list(instance: string): Promise<TerminalSessionDescriptor[]>;
+    open?(
+        instance: string,
+        input: Omit<TerminalOpenInput, "workspace">,
+    ): Promise<TerminalSessionDescriptor>;
+    kill?(
+        instance: string,
+        identity: TerminalVersionedIdentity,
+    ): Promise<TerminalSessionDescriptor>;
+}
+
 export class TuiSharedTerminalList {
+    readonly #operations: TuiSharedTerminalOperations;
     #snapshot: SharedTerminalSnapshot = {
         sessions: [],
         selectedIndex: 0,
@@ -19,10 +39,13 @@ export class TuiSharedTerminalList {
     readonly #listeners = new Set<() => void>();
 
     constructor(
-        private readonly list: (
-            instance: string,
-        ) => Promise<TerminalSessionDescriptor[]>,
-    ) {}
+        source:
+            | ((instance: string) => Promise<TerminalSessionDescriptor[]>)
+            | TuiSharedTerminalOperations,
+    ) {
+        this.#operations =
+            typeof source === "function" ? { list: source } : source;
+    }
 
     getSnapshot(): SharedTerminalSnapshot {
         return this.#snapshot;
@@ -52,15 +75,24 @@ export class TuiSharedTerminalList {
             this.#snapshot.sessions[this.#snapshot.selectedIndex]?.terminalId;
         this.#update({ ...this.#snapshot, loading: true, error: undefined });
         try {
-            const sessions = (await this.list(instance)).filter(
+            const sessions = (await this.#operations.list(instance)).filter(
                 (session) => session.state === "running",
             );
             if (revision !== this.#revision) return;
             const index = sessions.findIndex(
                 (session) => session.terminalId === selected,
             );
+            const active =
+                this.#snapshot.active === undefined
+                    ? undefined
+                    : (sessions.find(
+                          (session) =>
+                              session.terminalId ===
+                              this.#snapshot.active?.terminalId,
+                      ) ?? this.#snapshot.active);
             this.#update({
                 ...this.#snapshot,
+                active,
                 sessions,
                 selectedIndex: Math.max(0, index),
                 loading: false,
@@ -84,13 +116,92 @@ export class TuiSharedTerminalList {
         );
         this.#update({ ...this.#snapshot, selectedIndex });
     }
-    enter(): TerminalSessionDescriptor | undefined {
+    enter(mode: SharedTerminalMode = "control"): TerminalSessionDescriptor | undefined {
         const active = this.#snapshot.sessions[this.#snapshot.selectedIndex];
-        if (active !== undefined) this.#update({ ...this.#snapshot, active });
+        if (active !== undefined)
+            this.#update({ ...this.#snapshot, active, error: undefined, mode });
         return active;
     }
+    setMode(mode: SharedTerminalMode): void {
+        if (this.#snapshot.active === undefined) return;
+        this.#update({
+            ...this.#snapshot,
+            active: {
+                ...this.#snapshot.active,
+                humanControl: mode === "control",
+            },
+            error: undefined,
+            mode,
+        });
+    }
+    setError(error?: string): void {
+        this.#update({ ...this.#snapshot, error });
+    }
+    async create(
+        cols: number,
+        rows: number,
+    ): Promise<TerminalSessionDescriptor | undefined> {
+        const instance = this.#snapshot.instance;
+        if (instance === undefined || this.#operations.open === undefined)
+            return undefined;
+        this.#update({ ...this.#snapshot, loading: true, error: undefined });
+        try {
+            const created = await this.#operations.open(instance, {
+                cols,
+                persistent: true,
+                rows,
+            });
+            await this.refresh();
+            const index = this.#snapshot.sessions.findIndex(
+                (session) => session.terminalId === created.terminalId,
+            );
+            this.#update({
+                ...this.#snapshot,
+                active: created,
+                error: undefined,
+                loading: false,
+                mode: "control",
+                selectedIndex: index >= 0 ? index : this.#snapshot.selectedIndex,
+            });
+            return created;
+        } catch (error) {
+            this.#update({
+                ...this.#snapshot,
+                error: error instanceof Error ? error.message : String(error),
+                loading: false,
+            });
+            return undefined;
+        }
+    }
+    async closeSelected(): Promise<boolean> {
+        const instance = this.#snapshot.instance;
+        const selected = this.#snapshot.sessions[this.#snapshot.selectedIndex];
+        if (
+            instance === undefined ||
+            selected === undefined ||
+            this.#operations.kill === undefined
+        )
+            return false;
+        this.#update({ ...this.#snapshot, loading: true, error: undefined });
+        try {
+            await this.#operations.kill(instance, {
+                generation: selected.generation,
+                terminalId: selected.terminalId,
+                version: selected.version,
+            });
+            await this.refresh();
+            return true;
+        } catch (error) {
+            this.#update({
+                ...this.#snapshot,
+                error: error instanceof Error ? error.message : String(error),
+                loading: false,
+            });
+            return false;
+        }
+    }
     leave(): void {
-        this.#update({ ...this.#snapshot, active: undefined });
+        this.#update({ ...this.#snapshot, active: undefined, mode: undefined });
     }
     dispose(): void {
         ++this.#revision;

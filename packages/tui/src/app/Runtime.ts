@@ -254,14 +254,31 @@ export class TuiRuntime {
             reconnect: async () => await this.session.reconnect(),
             store: this.store,
         });
-        this.sharedTerminals = new TuiSharedTerminalList((instance) =>
-            domains.terminalTransport(instance).list(),
-        );
+        this.sharedTerminals = new TuiSharedTerminalList({
+            kill: (instance, identity) =>
+                domains.terminalTransport(instance).kill(identity),
+            list: (instance) => domains.terminalTransport(instance).list(),
+            open: (instance, input) =>
+                domains.terminalTransport(instance).open({
+                    ...input,
+                    workspace: this.#requireInstanceHome(instance),
+                }),
+        });
         this.#terminalController = new TuiTerminalController({
             columns: () => this.columns,
             graphicsSupport: terminalGraphicsSupport,
             rows: () => this.rows,
             domains,
+            setSharedControl: async (instance, terminalId, takeover) => {
+                if (this.#controlTerminalPty === undefined) {
+                    throw new Error("Control terminal transport is unavailable.");
+                }
+                await this.#controlTerminalPty.setControl(
+                    instance,
+                    terminalId,
+                    takeover,
+                );
+            },
             stdout: this.#stdout,
             store: this.store,
             terminal: this.terminal,

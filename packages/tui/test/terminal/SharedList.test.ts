@@ -47,3 +47,54 @@ test("changing the instance ignores the previous instance's delayed terminal lis
     assert.equal(list.getSnapshot().sessions[0]?.terminalId, "beta");
     list.dispose();
 });
+
+test("shared terminal list supports observe/control modes, creating persistent sessions, and closing selected sessions", async () => {
+    const sessions: TerminalSessionDescriptor[] = [
+        {
+            ...terminal("first", "alpha"),
+            name: "build-shell",
+            persistent: true,
+        },
+    ];
+    const killed: string[] = [];
+    const openedInputs: unknown[] = [];
+    const list = new TuiSharedTerminalList({
+        list: async () => [...sessions],
+        open: async (instance, input) => {
+            openedInputs.push(input);
+            const created: TerminalSessionDescriptor = {
+                ...terminal("created", instance),
+                cols: input.cols,
+                persistent: input.persistent,
+                rows: input.rows,
+            };
+            sessions.push(created);
+            return created;
+        },
+        kill: async (_instance, identity) => {
+            killed.push(identity.terminalId);
+            const index = sessions.findIndex(
+                (item) => item.terminalId === identity.terminalId,
+            );
+            const [removed] = sessions.splice(index, 1);
+            return { ...removed!, state: "killed" };
+        },
+    });
+    await list.bind("alpha");
+    assert.equal(list.enter("observe")?.terminalId, "first");
+    assert.equal(list.getSnapshot().mode, "observe");
+    list.setMode("control");
+    assert.equal(list.getSnapshot().mode, "control");
+    list.leave();
+
+    const created = await list.create(120, 36);
+    assert.equal(created?.terminalId, "created");
+    assert.equal(list.getSnapshot().mode, "control");
+    assert.deepEqual(openedInputs, [{ cols: 120, persistent: true, rows: 36 }]);
+    list.leave();
+
+    assert.equal(await list.closeSelected(), true);
+    assert.deepEqual(killed, ["created"]);
+    assert.equal(list.getSnapshot().sessions.length, 1);
+    list.dispose();
+});
