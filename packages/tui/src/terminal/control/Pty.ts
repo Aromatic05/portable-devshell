@@ -146,6 +146,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     #exited = false;
     #gapCount = 0;
     #gapWindowStart = Date.now();
+    #lastPipeWasCr = false;
     #operationTail = Promise.resolve();
     #stream?: TerminalAttachment;
     #takeover: boolean;
@@ -297,6 +298,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         if (seed.kind !== "seed")
             throw new Error("Terminal stream seed is missing.");
         const acknowledged = seed.session;
+        this.#lastPipeWasCr = false;
         this.#writeIdentity({
             ...acknowledged,
             latestSeq: seed.snapshot?.seq ?? fromSeq,
@@ -423,7 +425,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 }
                 const updated = { ...identity, latestSeq: frame.seq };
                 this.#writeIdentity(updated);
-                this.#emitData(frame.data);
+                this.#emitData(this.#formatOutput(updated, frame.data));
                 await stream.ack(updated, frame.seq);
                 continue;
             }
@@ -501,6 +503,21 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         }
         this.#gapCount += 1;
         return this.#gapCount <= MAX_GAP_RECONNECTS;
+    }
+
+    #formatOutput(identity: StoredTerminalIdentity, data: string): string {
+        if (identity.pty !== false) return data;
+        let result = "";
+        for (let index = 0; index < data.length; index += 1) {
+            const ch = data[index]!;
+            if (ch === "\n" && !this.#lastPipeWasCr) {
+                result += "\r\n";
+            } else {
+                result += ch;
+            }
+            this.#lastPipeWasCr = ch === "\r";
+        }
+        return result;
     }
 
     #requireIdentity(): StoredTerminalIdentity {

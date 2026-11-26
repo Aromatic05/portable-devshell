@@ -574,6 +574,55 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             true,
         );
     });
+
+    test("control terminal PTY normalizes bare LF to CRLF for pipe tasks without doubling split CRLF", async () => {
+        const stream = new FakeAttachment();
+        const session: TerminalSessionDescriptor = {
+            cols: 0,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            instance: "alpha",
+            latestSeq: 0,
+            pty: false,
+            rows: 0,
+            state: "running",
+            terminalId: "pipe-lf",
+            version: 1,
+        };
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                return attachAttachment(stream, { ...session });
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async list() {
+                return [{ ...session }];
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const factory = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        });
+        const pty = factory
+            .create("alpha")("alpha", ["pipe-lf", "observe"], {
+                columns: 80,
+                environment: {},
+                rows: 24,
+            });
+        const output: string[] = [];
+        pty.onData((data) => output.push(data));
+
+        await waitFor(() => factory.snapshot("alpha:pipe-lf") !== undefined);
+        stream.push({ kind: "output", frame: { data: "line1\nline2\r\nline3\r", seq: 1 } });
+        stream.push({ kind: "output", frame: { data: "\nline4\n", seq: 2 } });
+        await waitFor(() => output.length === 2);
+        assert.equal(output.join(""), "line1\r\nline2\r\nline3\r\nline4\r\n");
+        pty.kill();
+    });
 }
 
 {
