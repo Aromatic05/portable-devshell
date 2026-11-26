@@ -84,6 +84,13 @@ export async function executeTerminalCommand(
                     "terminal attach supports only text output",
                 );
             }
+            const stdinTty = context.stdin as Partial<NodeJS.ReadStream>;
+            const stdoutTty = context.stdout as Partial<NodeJS.WriteStream>;
+            if (stdinTty.isTTY !== true || stdoutTty.isTTY !== true) {
+                throw CliRenderError.usage(
+                    "terminal attach requires an interactive TTY",
+                );
+            }
             const transport = terminalClient(command.instance);
             const sessions = (await transport.list()).filter(
                 (session) => session.state === "running",

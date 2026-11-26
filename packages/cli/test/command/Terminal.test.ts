@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import test from "node:test";
-import type {
-    TerminalInspectResult,
-    TerminalOpenInput,
-    TerminalSessionDescriptor,
-    TerminalTransport,
+import {
+    STREAM_GAP_CODE,
+    type TerminalAttachment,
+    type TerminalInspectResult,
+    type TerminalOpenInput,
+    type TerminalSessionDescriptor,
+    type TerminalStreamMessage,
+    type TerminalTransport,
+    type TerminalVersionedIdentity,
 } from "@portable-devshell/shared";
+import type { TerminalStreamCommandIdentity } from "@portable-devshell/shared/testing";
+import { CliRenderError } from "../../src/app/Failure.ts";
 import { CliParser } from "../../src/command/Parse.ts";
+import { attachControlTerminal } from "../../src/command/terminal/Attach.ts";
 import {
     executeTerminalCommand,
     renderTerminalTable,
@@ -224,4 +231,325 @@ test("executeTerminalCommand handles list, create --detach, inspect, and close",
     );
     assert.deepEqual(killedIds, [sessions[0]!.terminalId]);
     assert.match(output.splice(0).join(""), /Closed terminal dev-server/u);
+});
+
+class FakeAttachStream {
+    readonly sent: Array<{ operation: string; payload: unknown }> = [];
+    closed = false;
+    readonly #messages: TerminalStreamMessage[] = [];
+    readonly #waiters: Array<(message: TerminalStreamMessage) => void> = [];
+
+    ack(
+        identity: TerminalVersionedIdentity,
+        throughSeq: number,
+    ): Promise<void> {
+        this.sent.push({
+            operation: "ack",
+            payload: {
+                generation: identity.generation,
+                terminalId: identity.terminalId,
+                throughSeq,
+                version: identity.version,
+            },
+        });
+        return Promise.resolve();
+    }
+
+    close(): void {
+        if (this.closed) return;
+        this.closed = true;
+        this.push({ kind: "closed" });
+    }
+
+    next(): Promise<TerminalStreamMessage> {
+        const message = this.#messages.shift();
+        if (message !== undefined) return Promise.resolve(message);
+        return new Promise((resolve) => this.#waiters.push(resolve));
+    }
+
+    sendControl(
+        takeover: boolean,
+        command: TerminalStreamCommandIdentity,
+    ): Promise<void> {
+        this.sent.push({
+            operation: "control",
+            payload: { ...command, takeover },
+        });
+        return Promise.resolve();
+    }
+
+    sendInput(
+        data: string,
+        command: TerminalStreamCommandIdentity,
+    ): Promise<void> {
+        this.sent.push({
+            operation: "input",
+            payload: { ...command, data },
+        });
+        return Promise.resolve();
+    }
+
+    sendResize(
+        cols: number,
+        rows: number,
+        command: TerminalStreamCommandIdentity,
+    ): Promise<void> {
+        this.sent.push({
+            operation: "resize",
+            payload: { ...command, cols, rows },
+        });
+        return Promise.resolve();
+    }
+
+    push(message: TerminalStreamMessage): void {
+        const waiter = this.#waiters.shift();
+        if (waiter === undefined) this.#messages.push(message);
+        else waiter(message);
+    }
+
+    asTerminalAttachment(): TerminalAttachment {
+        return this as unknown as TerminalAttachment;
+    }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!predicate()) {
+        if (Date.now() >= deadline)
+            throw new Error("Timed out waiting for terminal attach condition.");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}
+
+function makeAttachHarness(session: TerminalSessionDescriptor) {
+    const stream = new FakeAttachStream();
+    const stdin = new PassThrough() as PassThrough & {
+        isRaw?: boolean;
+        isTTY?: boolean;
+        setRawMode?(mode: boolean): void;
+    };
+    stdin.isTTY = true;
+    stdin.setRawMode = (mode: boolean) => {
+        stdin.isRaw = mode;
+    };
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const stdout = {
+        columns: session.cols,
+        isTTY: true,
+        rows: session.rows,
+        write: (chunk: string) => stdoutChunks.push(chunk),
+    };
+    const stderr = {
+        write: (chunk: string) => stderrChunks.push(chunk),
+    };
+    const transport: TerminalTransport = {
+        attach: async () => {
+            stream.push({ kind: "seed", session });
+            return stream.asTerminalAttachment();
+        },
+        get: async () => session,
+        kill: async () => session,
+        list: async () => [session],
+        open: async () => session,
+    };
+    return { stderr, stderrChunks, stdin, stdout, stdoutChunks, stream, transport };
+}
+
+test("attachControlTerminal emits full ANSI reset on detach and handles Ctrl+] keybindings", async () => {
+    const session = makeSession({ humanControl: true });
+    const h = makeAttachHarness(session);
+
+    const running = attachControlTerminal({
+        initialTakeover: true,
+        session,
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        transport: h.transport,
+    });
+
+    await waitFor(() =>
+        h.stream.sent.some((entry) => entry.operation === "resize"),
+    );
+
+    // Ctrl+] then ] sends literal 0x1d
+    h.stdin.write(Buffer.from([0x1d, 0x5d]));
+    await waitFor(() =>
+        h.stream.sent.some(
+            (entry) =>
+                entry.operation === "input" &&
+                (entry.payload as { data: string }).data === "\u001d",
+        ),
+    );
+
+    // Multi-byte UTF-8 split across chunks
+    h.stdin.write(Buffer.from([0xf0, 0x9f]));
+    h.stdin.write(Buffer.from([0x98, 0x80]));
+    await waitFor(() =>
+        h.stream.sent.some(
+            (entry) =>
+                entry.operation === "input" &&
+                (entry.payload as { data: string }).data === "😀",
+        ),
+    );
+
+    // Unknown key after Ctrl+] does NOT detach and updates title hint
+    h.stdin.write(Buffer.from([0x1d, 0x61])); // Ctrl+] a
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) =>
+            chunk.includes("Ctrl+] d: detach · t: toggle control · ]: send ^]"),
+        ),
+    );
+    assert.equal(h.stream.closed, false);
+
+    // Ctrl+] d detaches and emits full reset sequence
+    h.stdin.write(Buffer.from([0x1d, 0x64]));
+    await running;
+
+    const fullReset =
+        "\u001B]0;\u0007\u001B[0m\u001B[?25h\u001B[?1l\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[?2004l\u001B[?1049l";
+    assert.equal(h.stdoutChunks.at(-1), fullReset);
+    assert.equal(h.stdin.isRaw, false);
+});
+
+test("attachControlTerminal detaches on Ctrl+] Ctrl+]", async () => {
+    const session = makeSession({ humanControl: true });
+    const h = makeAttachHarness(session);
+
+    const running = attachControlTerminal({
+        initialTakeover: true,
+        session,
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        transport: h.transport,
+    });
+
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) => chunk.includes("[CONTROL]")),
+    );
+
+    h.stdin.write(Buffer.from([0x1d, 0x1d]));
+    await running;
+    assert.equal(h.stream.closed, true);
+});
+
+test("attachControlTerminal keeps observe session alive on controlChanged error and rings bell", async () => {
+    const session = makeSession({ humanControl: false });
+    const h = makeAttachHarness(session);
+
+    const running = attachControlTerminal({
+        initialTakeover: false,
+        session,
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        transport: h.transport,
+    });
+
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) => chunk.includes("[OBSERVE]")),
+    );
+
+    h.stdin.write(Buffer.from([0x1d, 0x74])); // Ctrl+] t
+    await waitFor(() =>
+        h.stream.sent.some((entry) => entry.operation === "control"),
+    );
+    const controlCmd = h.stream.sent.find(
+        (entry) => entry.operation === "control",
+    )!.payload as TerminalStreamCommandIdentity;
+
+    h.stream.push({
+        clientSeq: controlCmd.clientSeq,
+        error: "another human holds control",
+        humanControl: false,
+        kind: "controlChanged",
+        session: { ...session, version: session.version + 1 },
+    });
+
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) =>
+            chunk.includes("another human holds control"),
+        ),
+    );
+    assert.equal(h.stdoutChunks.includes("\x07"), true);
+    assert.equal(h.stream.closed, false);
+
+    // Session is still alive and receives output
+    h.stream.push({
+        frame: { data: "still-streaming", seq: 6 },
+        kind: "output",
+    });
+    await waitFor(() => h.stdoutChunks.includes("still-streaming"));
+
+    h.stdin.write(Buffer.from([0x1d, 0x64]));
+    await running;
+});
+
+test("attachControlTerminal caps stream.gap reconnects within window", async () => {
+    const session = makeSession({ humanControl: false });
+    let attachCount = 0;
+    const h = makeAttachHarness(session);
+    h.transport.attach = async () => {
+        attachCount += 1;
+        const stream = new FakeAttachStream();
+        stream.push({ kind: "seed", session });
+        const gapError = Object.assign(new Error("stream gap"), {
+            code: STREAM_GAP_CODE,
+        });
+        stream.push({ error: gapError, kind: "closed" });
+        return stream.asTerminalAttachment();
+    };
+
+    await assert.rejects(
+        attachControlTerminal({
+            initialTakeover: false,
+            session,
+            stderr: h.stderr,
+            stdin: h.stdin,
+            stdout: h.stdout,
+            transport: h.transport,
+        }),
+        /stream gap/u,
+    );
+    assert.equal(attachCount, 6);
+});
+
+test("terminal.attach requires an interactive TTY", async () => {
+    const session = makeSession();
+    const transport: TerminalTransport = {
+        attach: async () => {
+            throw new Error("attach should not be called without TTY");
+        },
+        get: async () => session,
+        kill: async () => session,
+        list: async () => [session],
+        open: async () => session,
+    };
+    const context = {
+        clients: {
+            instance: { listInstances: async () => [] },
+            terminal: () => transport,
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stderr: { write: () => {} },
+        stdin: Readable.from([]),
+        stdout: { write: () => {} },
+        writeJson: () => {},
+        writeRecords: () => {},
+        writeValue: () => {},
+    } as unknown as CliDispatchContext;
+
+    await assert.rejects(
+        executeTerminalCommand(
+            { instance: "alpha", kind: "terminal.attach", takeover: false },
+            context,
+        ),
+        (error: unknown) =>
+            error instanceof CliRenderError &&
+            error.code === "cli.usage" &&
+            /interactive TTY/u.test(error.message),
+    );
 });

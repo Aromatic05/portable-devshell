@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import {
     STREAM_GAP_CODE,
     type TerminalAttachment,
@@ -6,7 +7,11 @@ import {
 } from "@portable-devshell/shared";
 
 const CTRL_RBRACKET = 0x1d;
-const CHORD_TIMEOUT_MS = 300;
+const CHORD_TIMEOUT_MS = 800;
+const MAX_GAP_RECONNECTS = 5;
+const GAP_WINDOW_MS = 2_000;
+const FULL_TERMINAL_RESET =
+    "\u001B]0;\u0007\u001B[0m\u001B[?25h\u001B[?1l\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[?2004l\u001B[?1049l";
 
 export interface AttachControlTerminalOptions {
     initialTakeover: boolean;
@@ -31,20 +36,23 @@ export async function attachControlTerminal(
     let chordPending = false;
     let chordTimer: ReturnType<typeof setTimeout> | undefined;
     let operationTail = Promise.resolve();
+    const inputDecoder = new StringDecoder("utf8");
     const pendingControls = new Map<
         number,
         { reject(error: Error): void; resolve(humanControl: boolean): void }
     >();
 
-    const writeTitle = () => {
+    const writeTitle = (note?: string) => {
         const mode = controlling ? "[CONTROL]" : "[OBSERVE]";
         const label =
             session.name !== undefined && session.name.length > 0
                 ? session.name
                 : session.terminalId.slice(0, 16);
-        const hint = controlling
-            ? "Ctrl+] d detach | Ctrl+] t observe"
-            : "read-only | Ctrl+] t takeover | Ctrl+] d detach";
+        const hint =
+            note ??
+            (controlling
+                ? "Ctrl+] d detach | Ctrl+] t observe"
+                : "read-only | Ctrl+] t takeover | Ctrl+] d detach");
         options.stdout.write(
             `\u001B]0;devshell ${mode} ${label} (${session.cols}x${session.rows}) — ${hint}\u0007`,
         );
@@ -111,7 +119,7 @@ export async function attachControlTerminal(
                 options.stdout.write("\x07");
                 const message =
                     error instanceof Error ? error.message : String(error);
-                options.stderr.write(`\r\n[terminal] ${message}\r\n`);
+                writeTitle(message);
             }
         });
     };
@@ -122,7 +130,8 @@ export async function attachControlTerminal(
             options.stdout.write("\x07");
             return;
         }
-        const text = bytes.toString("utf8");
+        const text = inputDecoder.write(bytes);
+        if (text.length === 0) return;
         enqueue(async () => {
             if (!controlling || detaching || stream === undefined) return;
             const seq = ++clientSeq;
@@ -150,8 +159,9 @@ export async function attachControlTerminal(
                 chordPending = false;
                 clearTimeout(chordTimer);
                 chordTimer = undefined;
-                if (byte === 0x64 || byte === 0x44) {
-                    // d / D -> detach
+                if (byte === 0x64 || byte === 0x44 || byte === CTRL_RBRACKET) {
+                    // d / D / Ctrl+] -> detach
+                    flushOut();
                     detach();
                     return;
                 }
@@ -161,18 +171,20 @@ export async function attachControlTerminal(
                     toggleControl();
                     continue;
                 }
-                if (byte === CTRL_RBRACKET) {
+                if (byte === 0x5d) {
                     // ] -> send literal Ctrl+]
-                    pendingOut.push(CTRL_RBRACKET);
+                    if (controlling) pendingOut.push(CTRL_RBRACKET);
+                    writeTitle();
                     continue;
                 }
-                // Any other key after Ctrl+] detaches immediately (preserving bare Ctrl+] ergonomics).
-                detach();
-                return;
+                // Any other key after Ctrl+] stays attached and shows hint.
+                writeTitle("Ctrl+] d: detach · t: toggle control · ]: send ^]");
+                continue;
             }
             if (byte === CTRL_RBRACKET) {
                 flushOut();
                 chordPending = true;
+                writeTitle("Ctrl+] waiting: d detach · t toggle · ] send ^]");
                 chordTimer = setTimeout(() => {
                     if (chordPending) {
                         chordPending = false;
@@ -197,6 +209,8 @@ export async function attachControlTerminal(
     process.on("SIGWINCH", onResize);
 
     try {
+        let gapCount = 0;
+        let gapWindowStart = Date.now();
         while (!detaching) {
             latestSeq = 0;
             stream = await options.transport.attach({
@@ -244,11 +258,18 @@ export async function attachControlTerminal(
                 }
                 if (message.kind === "controlChanged") {
                     session = message.session;
+                    const pending = pendingControls.get(message.clientSeq);
+                    if (message.error !== undefined) {
+                        if (pending !== undefined) {
+                            pendingControls.delete(message.clientSeq);
+                            pending.reject(new Error(message.error));
+                        }
+                        continue;
+                    }
                     if (message.snapshot !== undefined) {
                         latestSeq = Math.max(latestSeq, message.snapshot.seq);
                         options.stdout.write(message.snapshot.data);
                     }
-                    const pending = pendingControls.get(message.clientSeq);
                     if (pending !== undefined) {
                         pendingControls.delete(message.clientSeq);
                         pending.resolve(message.humanControl);
@@ -275,6 +296,15 @@ export async function attachControlTerminal(
                         message.error !== undefined &&
                         isStreamGapError(message.error)
                     ) {
+                        const now = Date.now();
+                        if (now - gapWindowStart > GAP_WINDOW_MS) {
+                            gapWindowStart = now;
+                            gapCount = 0;
+                        }
+                        gapCount += 1;
+                        if (gapCount > MAX_GAP_RECONNECTS) {
+                            throw message.error;
+                        }
                         reconnectOnGap = true;
                     } else if (!detaching && message.error !== undefined) {
                         throw message.error;
@@ -293,7 +323,7 @@ export async function attachControlTerminal(
         }
         stdinTty.pause();
         stream?.close();
-        options.stdout.write("\u001B]0;\u0007");
+        options.stdout.write(FULL_TERMINAL_RESET);
     }
 }
 
