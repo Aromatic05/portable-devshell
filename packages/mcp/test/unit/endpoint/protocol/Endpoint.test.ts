@@ -665,6 +665,63 @@ test("stateless tools/list preserves bash lifecycle guidance without advertising
     }
 });
 
+test("caller-correctable process tool errors map to JSON-RPC InvalidParams", async () => {
+    for (const code of [
+        "rpc.invalidParams",
+        "process.notFound",
+        "process.notTerminal",
+        "process.stdinClosed",
+        "process.exited",
+        "process.controlOwned",
+    ]) {
+        const harness = createWorkerHarness({
+            callHandler: async () => {
+                throw createRemoteError({
+                    code,
+                    message: `${code} failure`,
+                    retryable: false,
+                });
+            },
+        });
+        const binding = createBinding(harness);
+        const server = await createBindingServer(binding);
+        try {
+            const session = await initialize(server.url);
+            const envResponse = await postJson(
+                server.url,
+                {
+                    id: "req-env",
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        arguments: { workspace: "/workspace" },
+                        name: "environ_info",
+                    },
+                },
+                session.headers,
+            );
+            const ctxId = envResponse.body.result.structuredContent.ctxId as string;
+            const response = await postJson(
+                server.url,
+                {
+                    id: `req-${code}`,
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        arguments: { command: "pwd", ctxId },
+                        name: "bash_run",
+                    },
+                },
+                session.headers,
+            );
+            assert.equal(response.body.error?.code, -32602, `expected InvalidParams for ${code}`);
+            assert.equal(response.body.error?.data?.code, code);
+        } finally {
+            await server.close();
+        }
+    }
+});
+
 test("removed tool recipients are strictly rejected over MCP", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);

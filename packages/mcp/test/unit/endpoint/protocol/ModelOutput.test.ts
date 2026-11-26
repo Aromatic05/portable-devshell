@@ -359,3 +359,60 @@ test("file_read keeps worker continuation when the next indivisible line exceeds
     assert.equal(file.content, original.files[0]!.content);
     assert.equal(file.nextSelector, "74");
 });
+
+test("task_inspect oversized screen text is bounded and marked truncated", () => {
+    const original = {
+        task: "process-1",
+        state: "running",
+        humanControl: false,
+        seq: 10,
+        rows: 500,
+        cols: 200,
+        cursorRow: 0,
+        cursorCol: 0,
+        alternateScreen: false,
+        text: "HEADER\n" + "屏".repeat(6_000) + "\nFOOTER",
+    };
+    const projected = projectMcpModelOutput("task_inspect", original);
+    const output = data(projected);
+    assert.equal(size(projected) <= 4_000 * 3, true);
+    assert.equal(output.truncated, true);
+    assert.equal((output.text as string).startsWith("HEADER"), true);
+    assert.equal((output.text as string).endsWith("FOOTER"), true);
+    assert.equal((output.text as string).includes("\uFFFD"), false);
+});
+
+test("task_manage oversized list keeps running/persistent tasks and accounts for omitted tasks", () => {
+    const running = Array.from({ length: 4 }, (_, i) => ({
+        id: `process-running-${i}`,
+        kind: "terminal",
+        persistent: true,
+        pty: true,
+        state: "running",
+        command: "bash",
+        humanControl: false,
+        createdAtMs: 1_000 + i,
+    }));
+    const completed = Array.from({ length: 30 }, (_, i) => ({
+        id: `process-done-${i}`,
+        kind: "task",
+        persistent: false,
+        pty: false,
+        state: "exited",
+        command: "echo " + "x".repeat(240),
+        cwd: "/workspace/very/long/path/that/fills/budget",
+        humanControl: false,
+        exitCode: 0,
+        createdAtMs: 500 + i,
+    }));
+    const original = { tasks: [...running, ...completed] };
+    const projected = projectMcpModelOutput("task_manage", original);
+    const output = data(projected);
+    const kept = output.tasks as Array<Record<string, JsonValue>>;
+    assert.equal(size(projected) <= 1_000 * 3, true);
+    assert.equal((output.omittedTasks as number) > 0, true);
+    assert.equal(kept.length + (output.omittedTasks as number), 34);
+    for (const r of running) {
+        assert.equal(kept.some((entry) => entry.id === r.id), true);
+    }
+});

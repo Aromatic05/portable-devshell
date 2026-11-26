@@ -359,6 +359,7 @@ function toMcpError(error: unknown): ProtocolError {
 
 function isCorrectableToolError(code: string): boolean {
     return code === "tool.invalidArguments" ||
+        code === "rpc.invalidParams" ||
         code === "control.invalidTarget" ||
         code === "mcp.contextInvalid" ||
         code === "mcp.contextExpired" ||
@@ -368,7 +369,12 @@ function isCorrectableToolError(code: string): boolean {
         code === "file.patchAmbiguous" ||
         code === "bash.invalidCwd" ||
         code === "bash.invalidCommand" ||
-        code === "process.invalidCwd";
+        code === "process.notFound" ||
+        code === "process.notTerminal" ||
+        code === "process.notPipe" ||
+        code === "process.stdinClosed" ||
+        code === "process.exited" ||
+        code === "process.controlOwned";
 }
 
 function readToolCallRecovery(payload: JsonValue | undefined): Record<string, JsonValue> {
