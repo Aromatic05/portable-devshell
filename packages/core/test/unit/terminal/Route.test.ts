@@ -398,3 +398,179 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
 }
+
+test("terminal route takeover snapshot prunes pendingBytes so subsequent output within window does not trigger stream.gap", async () => {
+    const dataListeners = new Set<(data: string, sourceSeq?: number) => void>();
+    const process: TerminalProcess = {
+        async acquireControl() {
+            return { data: "snap", seq: 2 };
+        },
+        async releaseControl() {},
+        kill() {},
+        onData(listener) {
+            dataListeners.add(listener);
+            return () => dataListeners.delete(listener);
+        },
+        onExit() {
+            return () => undefined;
+        },
+        resize() {},
+        write() {},
+    };
+    const emitOutput = (data: string) => {
+        for (const listener of dataListeners) listener(data);
+    };
+
+    const sessions = new TerminalSessionService({
+        idFactory: () => "term-route-prune",
+    });
+    const backend = { open: async () => process };
+    const opened = await sessions.open({
+        backend,
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const route = createTerminalRouteModule({
+        backend,
+        instance: "alpha",
+        maxUnackedBytes: 20,
+        sessions,
+    });
+    const attach = route.streams?.find((entry) => entry.name === "attach");
+    assert.ok(attach);
+
+    const stream = new StreamHarness();
+    const done = attach.handle(
+        stream as never,
+        {
+            id: "attach-prune",
+            name: "attach",
+            payload: {
+                fromSeq: 0,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        },
+        attachContext("attach-prune"),
+    );
+
+    await waitFor(() => stream.sent.some((msg) => msg.name === "seed"));
+
+    // Fill the 20-byte unacked window without sending ack frames.
+    emitOutput("1234567890");
+    emitOutput("abcdefghij");
+    await waitFor(
+        () =>
+            stream.sent.filter((msg) => msg.name === "output").length === 2,
+    );
+
+    // Take control; snapshot seq=2 should prune frames 1 and 2 from pendingBytes.
+    await stream.deliver({
+        name: "control",
+        payload: {
+            clientSeq: 1,
+            generation: opened.generation,
+            takeover: true,
+            terminalId: opened.terminalId,
+            version: opened.version,
+        },
+    });
+    await waitFor(() =>
+        stream.sent.some((msg) => msg.name === "controlChanged"),
+    );
+
+    // Emitting 15 more bytes must succeed instead of cancelling with stream.gap.
+    emitOutput("123456789012345");
+    await waitFor(
+        () =>
+            stream.sent.filter((msg) => msg.name === "output").length === 3,
+    );
+    assert.equal(stream.cancelled, false);
+
+    await stream.close();
+    await done;
+});
+
+test("terminal route ignores controlChanged send when stream has already closed", async () => {
+    const process: TerminalProcess = {
+        async acquireControl() {
+            return { data: "snap", seq: 0 };
+        },
+        async releaseControl() {},
+        kill() {},
+        onData() {
+            return () => undefined;
+        },
+        onExit() {
+            return () => undefined;
+        },
+        resize() {},
+        write() {},
+    };
+    const sessions = new TerminalSessionService({
+        idFactory: () => "term-route-closed",
+    });
+    const backend = { open: async () => process };
+    const opened = await sessions.open({
+        backend,
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const route = createTerminalRouteModule({
+        backend,
+        instance: "alpha",
+        sessions,
+    });
+    const attach = route.streams?.find((entry) => entry.name === "attach");
+    assert.ok(attach);
+
+    class StrictClosedStream extends StreamHarness {
+        override async send(message: ControlStreamMessage): Promise<void> {
+            if (this.closed) {
+                throw new Error("Cannot send on closed stream");
+            }
+            await super.send(message);
+        }
+    }
+
+    const stream = new StrictClosedStream();
+    const done = attach.handle(
+        stream as never,
+        {
+            id: "attach-closed",
+            name: "attach",
+            payload: {
+                fromSeq: 0,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        },
+        attachContext("attach-closed"),
+    );
+
+    await waitFor(() => stream.sent.some((msg) => msg.name === "seed"));
+    await stream.close();
+    await done;
+
+    // Delivering a control event after stream close must not throw.
+    await assert.doesNotReject(() =>
+        stream.deliver({
+            name: "control",
+            payload: {
+                clientSeq: 2,
+                generation: opened.generation,
+                takeover: true,
+                terminalId: opened.terminalId,
+                version: opened.version,
+            },
+        }),
+    );
+    assert.equal(
+        stream.sent.some((msg) => msg.name === "controlChanged"),
+        false,
+    );
+});

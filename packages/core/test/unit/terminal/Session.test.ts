@@ -13,6 +13,7 @@ class FakeTerminalProcess implements TerminalProcess {
     disposed = false;
     exitOnKill?: TerminalProcessExit;
     killed = false;
+    restoreSnapshot?: () => Promise<{ data: string; seq: number } | undefined>;
     readonly #data = new Set<(data: string) => void>();
     readonly #exit = new Set<(exit: TerminalProcessExit) => void>();
 
@@ -586,4 +587,55 @@ test("terminal session propagates rich metadata and fires onControlReleased once
     assert.deepEqual(released, [
         { cols: 120, name: "dev-server", rows: 36, terminalId: "term-handoff" },
     ]);
+});
+
+test("terminal attach with restoreSnapshot allows fromSeq 0 on replay overflow but still rejects stale fromSeq > 0", async () => {
+    const process = new FakeTerminalProcess();
+    process.restoreSnapshot = async () => ({ data: "snap", seq: 3 });
+    const service = new TerminalSessionService({
+        idFactory: () => "terminal-snapshot-gap",
+        maxReplayBytes: 6,
+    });
+    const opened = await service.open({
+        backend: { open: async () => process },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+
+    process.emit("1111");
+    process.emit("2222");
+    process.emit("3333");
+
+    const observed = service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        takeover: false,
+        terminalId: opened.terminalId,
+    });
+    assert.deepEqual(observed.replay, [{ data: "3333", seq: 3 }]);
+    observed.detach();
+
+    assert.throws(
+        () =>
+            service.attach({
+                fromSeq: 1,
+                generation: opened.generation,
+                onOutput() {},
+                takeover: false,
+                terminalId: opened.terminalId,
+            }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "stream.gap");
+            assert.deepEqual((error as { details?: unknown }).details, {
+                latestSeq: 3,
+                oldestAvailableSeq: 3,
+                requestedFromSeq: 1,
+                terminalId: opened.terminalId,
+            });
+            return true;
+        },
+    );
 });

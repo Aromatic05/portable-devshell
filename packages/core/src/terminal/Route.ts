@@ -121,9 +121,29 @@ export function createTerminalRouteModule(
                 );
                 let sendTail = Promise.resolve();
                 let terminal = false;
+                let endedFlag = false;
                 let pendingBytes = 0;
                 let lastAckedSeq = input.fromSeq;
                 const pendingFrames = new Map<number, number>();
+                const prunePendingThrough = (seq: number) => {
+                    for (const [frameSeq, bytes] of pendingFrames) {
+                        if (frameSeq <= seq) {
+                            pendingFrames.delete(frameSeq);
+                            pendingBytes -= bytes;
+                        }
+                    }
+                };
+                const sendSerialized = (
+                    message: ControlStreamMessage,
+                ): Promise<void> => {
+                    if (terminal || endedFlag) return Promise.resolve();
+                    const queued = sendTail.then(async () => {
+                        if (endedFlag) return;
+                        await stream.send(message);
+                    });
+                    sendTail = queued.catch(() => undefined);
+                    return queued;
+                };
                 // Registered stream callbacks can close before attach completes.
                 // Keep this binding unset until a durable attachment exists.
                 // eslint-disable-next-line prefer-const
@@ -160,11 +180,7 @@ export function createTerminalRouteModule(
                                 "Terminal acknowledgement sequence is invalid.",
                             );
                         lastAckedSeq = identity.throughSeq;
-                        for (const [seq, bytes] of pendingFrames)
-                            if (seq <= identity.throughSeq) {
-                                pendingFrames.delete(seq);
-                                pendingBytes -= bytes;
-                            }
+                        prunePendingThrough(identity.throughSeq);
                         return;
                     }
 
@@ -192,8 +208,9 @@ export function createTerminalRouteModule(
                                     lastAckedSeq,
                                     snapshot.seq,
                                 );
+                                prunePendingThrough(lastAckedSeq);
                             }
-                            await stream.send({
+                            await sendSerialized({
                                 name: "controlChanged",
                                 payload: {
                                     clientSeq: identity.clientSeq,
@@ -210,7 +227,7 @@ export function createTerminalRouteModule(
                             const currentSession = options.sessions.get(
                                 identity.terminalId,
                             );
-                            await stream.send({
+                            await sendSerialized({
                                 name: "controlChanged",
                                 payload: {
                                     clientSeq: identity.clientSeq,
@@ -277,7 +294,6 @@ export function createTerminalRouteModule(
                 const ended = new Promise<void>((resolve) => {
                     resolveEnded = resolve;
                 });
-                let endedFlag = false;
                 const end = () => {
                     if (endedFlag) return;
                     endedFlag = true;

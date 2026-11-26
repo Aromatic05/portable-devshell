@@ -224,7 +224,7 @@ export class TerminalSessionService implements TerminalSessionApi {
             !seededFromStart &&
             request.fromSeq < oldestAvailableSeq - 1 &&
             !(request.takeover && session.process.acquireControl !== undefined) &&
-            session.process.restoreSnapshot === undefined
+            !(request.fromSeq === 0 && session.process.restoreSnapshot !== undefined)
         ) {
             throw createRemoteError({
                 code: STREAM_GAP_CODE,
