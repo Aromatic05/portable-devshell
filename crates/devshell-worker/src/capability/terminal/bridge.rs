@@ -2,11 +2,11 @@
 //! notification channel. This owns subscriptions, never PTYs or task state.
 use serde_json::json;
 use std::collections::HashSet;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use crate::capability::process::client::ProcessHostClient;
 use crate::capability::rpc::{codec, error::RpcError, notification::WorkerNotificationQueue};
-use crate::transport::endpoint::channel::LocalIpcStream;
 
 use super::model::TerminalDescriptor;
 
@@ -141,7 +141,7 @@ impl TerminalBridge {
 
     fn forward(
         &self,
-        mut channel: LocalIpcStream,
+        mut channel: impl Read,
         descriptor: &TerminalDescriptor,
         mut forwarded_seq: u64,
     ) -> Result<(), String> {
@@ -221,15 +221,10 @@ fn bridge_error(error: impl Into<String>) -> RpcError {
 mod tests {
     use super::*;
     use crate::capability::rpc::response::RpcResponse;
-    use crate::transport::endpoint::channel::LocalIpcListener;
 
     #[test]
     fn exit_notification_carries_final_seq_when_queued_output_is_evicted() {
-        let dir = crate::testing::temp_dir();
-        let path = dir.path().join("terminal.sock");
-        let listener = LocalIpcListener::bind(&path).unwrap();
-        let mut writer = LocalIpcStream::connect(&path).unwrap();
-        let reader = listener.accept().unwrap();
+        let mut wire = Vec::new();
         let queue = Arc::new(WorkerNotificationQueue::new(256));
         let bridge = TerminalBridge::new(Arc::clone(&queue));
         let descriptor = serde_json::from_value(json!({
@@ -249,11 +244,9 @@ mod tests {
                 {"seq": 9, "dataBase64": "d29ybGQ="}
             ]}),
         ] {
-            codec::write_response(&mut writer, &RpcResponse::success("stream", result))
-                .unwrap();
+            codec::write_response(&mut wire, &RpcResponse::success("stream", result)).unwrap();
         }
-        drop(writer);
-        bridge.forward(reader, &descriptor, 7).unwrap();
+        bridge.forward(wire.as_slice(), &descriptor, 7).unwrap();
         assert_eq!(queue.try_pop().unwrap().unwrap(), json!({
             "type": "notification", "method": "terminal.exit", "params": {
                 "terminalId": "test-terminal", "generation": 1, "version": 2,
