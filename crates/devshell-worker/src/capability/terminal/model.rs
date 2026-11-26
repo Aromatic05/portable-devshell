@@ -12,6 +12,8 @@ pub struct TerminalOpenInput {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -73,8 +75,14 @@ pub struct TerminalDescriptor {
     pub command: Option<String>,
     #[serde(default)]
     pub persistent: bool,
+    #[serde(default = "default_pty")]
+    pub pty: bool,
     #[serde(default)]
     pub human_control: bool,
+}
+
+fn default_pty() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

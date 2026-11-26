@@ -64,7 +64,7 @@ impl TerminalManager {
                                 else {
                                     continue;
                                 };
-                                if descriptor.state != "running" {
+                                if descriptor.state != "running" || !descriptor.pty {
                                     continue;
                                 }
                                 let was_human = tracked.get(&descriptor.terminal_id).copied();
@@ -113,7 +113,7 @@ impl TerminalManager {
         )?;
         let client = ProcessHostClient::ensure(&self.instance).map_err(host_error)?;
         let mut spawn_params = json!({
-            "command": "",
+            "command": input.shell.unwrap_or_default(),
             "interactive": true,
             "persistent": input.persistent.unwrap_or(false),
             "cwd": input.cwd.unwrap_or_else(|| "./".into()),
@@ -146,6 +146,9 @@ impl TerminalManager {
             TIMEOUT,
         )?;
         let session: TerminalDescriptor = decode(described["terminal"].clone())?;
+        if !session.pty {
+            return Err(RpcError::new("process.notTerminal", "process has no PTY"));
+        }
         let screen = client.call_rpc(
             "process.v1.inspect",
             json!({"id": input.terminal_id}),

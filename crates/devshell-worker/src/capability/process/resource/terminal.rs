@@ -10,7 +10,12 @@ use crate::capability::terminal::{
 
 impl ManagedProcess {
     pub(super) fn terminal_descriptor(&self, state: &State) -> Option<TerminalDescriptor> {
-        let (cols, rows) = state.screen.as_ref()?.size();
+        let (cols, rows, pty, human_control) = if self.tty {
+            let (cols, rows) = state.screen.as_ref()?.size();
+            (cols, rows, true, state.active_controller().is_some())
+        } else {
+            (0, 0, false, false)
+        };
         Some(TerminalDescriptor {
             terminal_id: self.id.clone(),
             generation: 1, // A globally unique process ID is never recycled.
@@ -33,7 +38,8 @@ impl ManagedProcess {
                 .map(|path| path.display().to_string()),
             command: self.command.clone(),
             persistent: self.persistent,
-            human_control: state.active_controller().is_some(),
+            pty,
+            human_control,
         })
     }
 
@@ -46,7 +52,7 @@ impl ManagedProcess {
         if input.generation != session.generation {
             return Err(conflict("Terminal generation changed."));
         }
-        let snapshot = if input.restore {
+        let snapshot = if input.restore && self.tty {
             let screen = state
                 .screen
                 .as_ref()
@@ -59,11 +65,16 @@ impl ManagedProcess {
         } else {
             None
         };
-        let output = state.output.replay_after(
+        let mut output = state.output.replay_after(
             snapshot
                 .as_ref()
                 .map_or(input.from_seq, |screen| screen.seq),
         );
+        if output.gap && !self.tty && input.restore {
+            output = state
+                .output
+                .replay_after(output.oldest_seq.saturating_sub(1));
+        }
         if output.gap {
             return Err(RpcError::new(
                 "stream.gap",
@@ -120,6 +131,9 @@ impl ManagedProcess {
         input: TerminalCommandInput,
         data: &[u8],
     ) -> Result<Value, RpcError> {
+        if !self.tty {
+            return Err(not_terminal());
+        }
         let state = self.state.lock().map_err(lock_error)?;
         self.validate_terminal(&state, &input)?;
         self.enqueue(data)?;
@@ -132,6 +146,9 @@ impl ManagedProcess {
         cols: u16,
         rows: u16,
     ) -> Result<Value, RpcError> {
+        if !self.tty {
+            return Err(not_terminal());
+        }
         let mut state = self.state.lock().map_err(lock_error)?;
         self.validate_terminal(&state, &input)?;
         let control = self.control.lock().map_err(lock_error)?.clone();

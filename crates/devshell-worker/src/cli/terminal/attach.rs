@@ -186,167 +186,178 @@ pub(super) fn run(
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("PTY attach requires an interactive terminal".into());
     }
-    let _mode = TerminalMode::enter()?;
-    let mut size = crossterm::terminal::size().map_err(io_error)?;
-    let mut sub = ActiveSubscription::open(&client, id, label, takeover, size)?;
+    let mut detached = false;
+    {
+        let _mode = TerminalMode::enter()?;
+        let mut size = crossterm::terminal::size().map_err(io_error)?;
+        let mut sub = ActiveSubscription::open(&client, id, label, takeover, size)?;
 
-    // The input thread belongs to this CLI invocation, not the Process Host.
-    // It may be blocked in the local console when the child exits. Returning
-    // from main closes the CLI process without terminating the shared PTY.
-    let (input_tx, input_rx) = mpsc::sync_channel(32);
-    std::thread::spawn(move || {
-        let mut input = io::stdin().lock();
-        let mut buffer = [0u8; 4096];
-        loop {
-            match input.read(&mut buffer) {
-                Ok(0) => {
-                    let _ = input_tx.send(InputEvent::Eof);
-                    break;
-                }
-                Ok(n) => {
-                    if input_tx.send(InputEvent::Bytes(buffer[..n].to_vec())).is_err() {
+        // The input thread belongs to this CLI invocation, not the Process Host.
+        // It may be blocked in the local console when the child exits. Returning
+        // from main closes the CLI process without terminating the shared PTY.
+        let (input_tx, input_rx) = mpsc::sync_channel(32);
+        std::thread::spawn(move || {
+            let mut input = io::stdin().lock();
+            let mut buffer = [0u8; 4096];
+            loop {
+                match input.read(&mut buffer) {
+                    Ok(0) => {
+                        let _ = input_tx.send(InputEvent::Eof);
+                        break;
+                    }
+                    Ok(n) => {
+                        if input_tx.send(InputEvent::Bytes(buffer[..n].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        let _ = input_tx.send(InputEvent::Error(error.to_string()));
                         break;
                     }
                 }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    let _ = input_tx.send(InputEvent::Error(error.to_string()));
-                    break;
-                }
             }
-        }
-    });
+        });
 
-    let mut pending_escape: Option<Instant> = None;
-    let mut last_observe_hint: Option<Instant> = None;
-    let mut gap_count: u32 = 0;
-    let mut gap_window_start = Instant::now();
-    let mut stdout = io::stdout();
+        let mut pending_escape: Option<Instant> = None;
+        let mut last_observe_hint: Option<Instant> = None;
+        let mut gap_count: u32 = 0;
+        let mut gap_window_start = Instant::now();
+        let mut stdout = io::stdout();
 
-    let result = loop {
-        // 1. Drain any pending stdin events first for snappy interactive feel.
-        let mut action = LoopAction::Continue;
-        while let Ok(input_event) = input_rx.try_recv() {
-            match input_event {
-                InputEvent::Bytes(bytes) => {
-                    action = handle_input_bytes(
-                        &client,
-                        id,
-                        label,
-                        &bytes,
-                        &sub,
-                        &mut pending_escape,
-                        &mut last_observe_hint,
-                        &mut stdout,
-                    )?;
-                    if !matches!(action, LoopAction::Continue) {
-                        break;
-                    }
-                }
-                InputEvent::Eof => {
-                    action = LoopAction::Detach;
-                    break;
-                }
-                InputEvent::Error(message) => {
-                    sub.close(&client, id);
-                    return Err(message);
-                }
-            }
-        }
-
-        match action {
-            LoopAction::Detach => break Ok(()),
-            LoopAction::ToggleTakeover => {
-                let want_takeover = sub.controller.is_none();
-                sub.close(&client, id);
-                match ActiveSubscription::open(&client, id, label, want_takeover, size) {
-                    Ok(next) => {
-                        sub = next;
-                        continue;
-                    }
-                    Err(error) if want_takeover => {
-                        // Another participant holds control; fall back cleanly to observe mode.
-                        sub = ActiveSubscription::open(&client, id, label, false, size)?;
-                        let _ = stdout.write_all(b"\x07");
-                        let _ = write_status_title(
-                            &mut stdout,
+        let result: Result<(), String> = loop {
+            // 1. Drain any pending stdin events first for snappy interactive feel.
+            let mut action = LoopAction::Continue;
+            while let Ok(input_event) = input_rx.try_recv() {
+                match input_event {
+                    InputEvent::Bytes(bytes) => {
+                        action = handle_input_bytes(
+                            &client,
+                            id,
                             label,
-                            false,
-                            sub.pty_size,
-                            Some("takeover busy"),
-                        );
-                        let _ = stdout.flush();
-                        let _ = error;
-                        continue;
+                            &bytes,
+                            &sub,
+                            &mut pending_escape,
+                            &mut last_observe_hint,
+                            &mut stdout,
+                        )?;
+                        if !matches!(action, LoopAction::Continue) {
+                            break;
+                        }
                     }
-                    Err(error) => return Err(error),
+                    InputEvent::Eof => {
+                        action = LoopAction::Detach;
+                        break;
+                    }
+                    InputEvent::Error(message) => {
+                        sub.close(&client, id);
+                        return Err(message);
+                    }
                 }
             }
-            LoopAction::Continue => {}
-        }
 
-        if let Some(since) = pending_escape
-            && since.elapsed() >= CHORD_TIMEOUT
-        {
-            break Ok(());
-        }
-
-        // 2. Poll stream output with a short timeout so resize & chord timeout stay responsive.
-        match sub.events.recv_timeout(POLL_SLICE) {
-            Ok(StreamEvent::Output(value)) => {
-                for frame in value["frames"]
-                    .as_array()
-                    .ok_or("missing raw terminal frames")?
-                {
-                    let data = STANDARD
-                        .decode(
-                            frame["dataBase64"]
-                                .as_str()
-                                .ok_or("missing terminal bytes")?,
-                        )
-                        .map_err(|error| error.to_string())?;
-                    stdout.write_all(&data).map_err(io_error)?;
+            match action {
+                LoopAction::Detach => {
+                    detached = true;
+                    break Ok(());
                 }
-                stdout.flush().map_err(io_error)?;
+                LoopAction::ToggleTakeover => {
+                    let want_takeover = sub.controller.is_none();
+                    sub.close(&client, id);
+                    match ActiveSubscription::open(&client, id, label, want_takeover, size) {
+                        Ok(next) => {
+                            sub = next;
+                            continue;
+                        }
+                        Err(error) if want_takeover => {
+                            // Another participant holds control; fall back cleanly to observe mode.
+                            sub = ActiveSubscription::open(&client, id, label, false, size)?;
+                            let _ = stdout.write_all(b"\x07");
+                            let _ = write_status_title(
+                                &mut stdout,
+                                label,
+                                false,
+                                sub.pty_size,
+                                Some("takeover busy"),
+                            );
+                            let _ = stdout.flush();
+                            let _ = error;
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                LoopAction::Continue => {}
             }
-            Ok(StreamEvent::Error { code, message }) if code == "stream.gap" => {
-                if gap_window_start.elapsed() > GAP_WINDOW {
-                    gap_window_start = Instant::now();
-                    gap_count = 0;
+
+            if let Some(since) = pending_escape
+                && since.elapsed() >= CHORD_TIMEOUT
+            {
+                detached = true;
+                break Ok(());
+            }
+
+            // 2. Poll stream output with a short timeout so resize & chord timeout stay responsive.
+            match sub.events.recv_timeout(POLL_SLICE) {
+                Ok(StreamEvent::Output(value)) => {
+                    for frame in value["frames"]
+                        .as_array()
+                        .ok_or("missing raw terminal frames")?
+                    {
+                        let data = STANDARD
+                            .decode(
+                                frame["dataBase64"]
+                                    .as_str()
+                                    .ok_or("missing terminal bytes")?,
+                            )
+                            .map_err(|error| error.to_string())?;
+                        stdout.write_all(&data).map_err(io_error)?;
+                    }
+                    stdout.flush().map_err(io_error)?;
                 }
-                gap_count += 1;
-                if gap_count > MAX_GAP_RECONNECTS {
+                Ok(StreamEvent::Error { code, message }) if code == "stream.gap" => {
+                    if gap_window_start.elapsed() > GAP_WINDOW {
+                        gap_window_start = Instant::now();
+                        gap_count = 0;
+                    }
+                    gap_count += 1;
+                    if gap_count > MAX_GAP_RECONNECTS {
+                        sub.close(&client, id);
+                        return Err(format!("{code}: {message}"));
+                    }
+                    let was_takeover = sub.controller.is_some();
+                    sub.close(&client, id);
+                    sub = ActiveSubscription::open(&client, id, label, was_takeover, size)?;
+                }
+                Ok(StreamEvent::Error { code, message }) => {
                     sub.close(&client, id);
                     return Err(format!("{code}: {message}"));
                 }
-                let was_takeover = sub.controller.is_some();
-                sub.close(&client, id);
-                sub = ActiveSubscription::open(&client, id, label, was_takeover, size)?;
+                Ok(StreamEvent::Eof) => break Ok(()),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    sub.close(&client, id);
+                    return Err("Process Host stream disconnected".into());
+                }
             }
-            Ok(StreamEvent::Error { code, message }) => {
-                sub.close(&client, id);
-                return Err(format!("{code}: {message}"));
-            }
-            Ok(StreamEvent::Eof) => break Ok(()),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                sub.close(&client, id);
-                return Err("Process Host stream disconnected".into());
-            }
-        }
 
-        let current = crossterm::terminal::size().map_err(io_error)?;
-        if size != current {
-            if let Some(controller) = sub.controller.as_deref() {
-                resize(&client, id, current, controller)?;
-                sub.pty_size = current;
+            let current = crossterm::terminal::size().map_err(io_error)?;
+            if size != current {
+                if let Some(controller) = sub.controller.as_deref() {
+                    resize(&client, id, current, controller)?;
+                    sub.pty_size = current;
+                }
+                size = current;
             }
-            size = current;
-        }
-    };
+        };
 
-    sub.close(&client, id);
-    result
+        sub.close(&client, id);
+        result?;
+    }
+    if detached {
+        eprintln!("[detached from {label} — session still running]");
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

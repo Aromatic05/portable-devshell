@@ -1432,3 +1432,182 @@ fn terminal_descriptor_metadata_inspect_and_release_restores_pre_takeover_size()
     let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
     assert_eq!(closed["state"], "exited", "{closed}");
 }
+
+#[test]
+fn pipe_tasks_expose_observe_and_kill_via_terminal_rpc_and_open_accepts_shell() {
+    let instance = "terminal-pipe-and-shell";
+    let fixture = WorkerFixture::start(instance);
+    let call = |method: &str, message: Value| {
+        fixture.env.rpc(
+            instance,
+            "terminal",
+            &json!({
+                "protocol": "rpc",
+                "type": "request",
+                "id": method,
+                "method": method,
+                "message": message
+            }),
+        )
+    };
+
+    let started = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "printf 'PIPE_READY\\n'; sleep 30",
+            "pty": false,
+            "waitMs": 20
+        }),
+    );
+    let pipe_id = started["task"]["id"].as_str().unwrap().to_owned();
+
+    let listed = call("terminal.list", json!({}));
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let pipe_desc = listed["message"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["terminalId"] == pipe_id)
+        .expect("pipe task should appear in terminal.list")
+        .clone();
+    assert_eq!(pipe_desc["pty"], false, "{pipe_desc}");
+    assert_eq!(pipe_desc["cols"], 0, "{pipe_desc}");
+    assert_eq!(pipe_desc["rows"], 0, "{pipe_desc}");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let attached = call(
+            "terminal.attach",
+            json!({
+                "terminalId": pipe_id,
+                "generation": pipe_desc["generation"],
+                "fromSeq": 0,
+                "restore": true
+            }),
+        );
+        assert_eq!(attached["type"], "reply", "{attached}");
+        assert!(attached["message"].get("snapshot").is_none(), "{attached}");
+        let replay_text: String = attached["message"]["replay"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|frame| {
+                let bytes = STANDARD
+                    .decode(frame["dataBase64"].as_str().unwrap())
+                    .unwrap();
+                Some(String::from_utf8_lossy(&bytes).into_owned())
+            })
+            .collect();
+        if replay_text.contains("PIPE_READY") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "pipe attach did not observe PIPE_READY: {attached}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let control_err = call(
+        "terminal.control",
+        json!({"terminalId": pipe_id, "generation": pipe_desc["generation"]}),
+    );
+    assert_eq!(control_err["type"], "error", "{control_err}");
+    assert_eq!(
+        control_err["error"]["code"],
+        "process.notTerminal",
+        "{control_err}"
+    );
+
+    let write_err = call(
+        "terminal.write",
+        json!({
+            "terminalId": pipe_id,
+            "generation": pipe_desc["generation"],
+            "version": pipe_desc["version"],
+            "clientSeq": 1,
+            "data": STANDARD.encode("echo nope\n")
+        }),
+    );
+    assert_eq!(write_err["type"], "error", "{write_err}");
+    assert_eq!(
+        write_err["error"]["code"],
+        "process.notTerminal",
+        "{write_err}"
+    );
+
+    let inspect_err = call(
+        "terminal.inspect",
+        json!({"terminalId": pipe_id, "generation": pipe_desc["generation"]}),
+    );
+    assert_eq!(inspect_err["type"], "error", "{inspect_err}");
+    assert_eq!(
+        inspect_err["error"]["code"],
+        "process.notTerminal",
+        "{inspect_err}"
+    );
+
+    let killed_pipe = call(
+        "terminal.kill",
+        json!({
+            "terminalId": pipe_id,
+            "generation": pipe_desc["generation"],
+            "version": pipe_desc["version"],
+            "clientSeq": 2
+        }),
+    );
+    assert_eq!(killed_pipe["type"], "reply", "{killed_pipe}");
+    let waited = fixture.wait_task(&pipe_id, Value::Null);
+    assert_ne!(waited["task"]["status"], "running", "{waited}");
+
+    let opened_shell = call(
+        "terminal.open",
+        json!({
+            "cols": 80,
+            "rows": 24,
+            "cwd": "./",
+            "workspace": fixture.env.protocol_workspace(),
+            "shell": "/bin/sh",
+            "command": "printf 'SHELL_OVERRIDE_OK\\n'"
+        }),
+    );
+    assert_eq!(opened_shell["type"], "reply", "{opened_shell}");
+    let shell_desc = &opened_shell["message"];
+    assert_eq!(shell_desc["pty"], true, "{shell_desc}");
+    let shell_id = shell_desc["terminalId"].as_str().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let inspected = call(
+            "terminal.inspect",
+            json!({"terminalId": shell_id, "generation": shell_desc["generation"]}),
+        );
+        assert_eq!(inspected["type"], "reply", "{inspected}");
+        if inspected["message"]["lines"]
+            .as_array()
+            .is_some_and(|lines| {
+                lines
+                    .iter()
+                    .any(|line| line.as_str().is_some_and(|s| s.contains("SHELL_OVERRIDE_OK")))
+            })
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "shell override terminal did not output SHELL_OVERRIDE_OK: {inspected}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    let killed_shell = call(
+        "terminal.kill",
+        json!({
+            "terminalId": shell_id,
+            "generation": shell_desc["generation"],
+            "version": shell_desc["version"],
+            "clientSeq": 3
+        }),
+    );
+    assert_eq!(killed_shell["type"], "reply", "{killed_shell}");
+}
