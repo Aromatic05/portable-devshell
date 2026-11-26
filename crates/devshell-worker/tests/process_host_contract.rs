@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+#[path = "support/process.rs"]
+mod process_fixture;
 mod support;
 
 use std::io::{Read, Write};
@@ -9,6 +11,7 @@ use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use process_fixture::WorkerFixture;
 use serde_json::{Value, json};
 use support::TestEnv;
 
@@ -314,78 +317,6 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
     assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
 }
 
-struct WorkerFixture {
-    env: TestEnv,
-}
-
-impl WorkerFixture {
-    fn start() -> Self {
-        let fixture = Self {
-            env: TestEnv::new(),
-        };
-        fixture.env.json_command(&["start", "--instance", INSTANCE]);
-        fixture
-    }
-
-    fn tool(&self, method: &str, input: Value) -> Value {
-        let result = self.env.rpc(
-            INSTANCE,
-            "tool",
-            &json!({
-                "protocol": "rpc",
-                "type": "request",
-                "id": uuid::Uuid::new_v4().to_string(),
-                "method": method,
-                "message": {
-                    "input": input,
-                    "context": {"workspace": self.env.protocol_workspace()}
-                }
-            }),
-        );
-        assert_eq!(result["type"], "reply", "{method}: {result}");
-        result["message"].clone()
-    }
-
-    fn wait_task(&self, task: &str, cursor: Value) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut cursor = cursor;
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-        loop {
-            let mut result = self.tool(
-                "task_read",
-                json!({
-                    "task": task, "cursor": cursor, "timeMs": 500,
-                }),
-            );
-            stdout.push_str(result["stdout"].as_str().unwrap());
-            stderr.push_str(result["stderr"].as_str().unwrap());
-            if result["termination"] != "running" {
-                result["stdout"] = json!(stdout);
-                result["stderr"] = json!(stderr);
-                return result;
-            }
-            cursor = result["cursor"].clone();
-            assert!(Instant::now() < deadline, "task did not exit: {result}");
-        }
-    }
-}
-
-impl Drop for WorkerFixture {
-    fn drop(&mut self) {
-        let _ = self
-            .env
-            .std_command()
-            .args(["stop", "--instance", INSTANCE])
-            .output();
-        let _ = self
-            .env
-            .std_command()
-            .args(["retire", "--instance", INSTANCE])
-            .output();
-    }
-}
-
 struct LocalAttach {
     child: Child,
     master: std::fs::File,
@@ -498,7 +429,7 @@ impl Drop for LocalAttach {
 
 #[test]
 fn worker_command_and_native_attach_share_one_pty() {
-    let fixture = WorkerFixture::start();
+    let fixture = WorkerFixture::start(INSTANCE);
     assert_eq!(fixture.env.json_command(&["terminal", "list"]), json!([]));
     let started = fixture.tool("bash_run", json!({
         "command": "stty -echo; printf 'attach-ready\\n'; IFS= read -r human; printf 'human:%s\\n' \"$human\"; printf '\\033]2;raw-title\\007'; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
@@ -560,7 +491,7 @@ fn worker_command_and_native_attach_share_one_pty() {
 
 #[test]
 fn hosted_pipe_wait_deadline_and_retained_output() {
-    let fixture = WorkerFixture::start();
+    let fixture = WorkerFixture::start(INSTANCE);
     let task = fixture.tool("bash_run", json!({
         "command": "IFS= read -r data; printf 'out:%s\\n' \"$data\"; printf 'error\\n' >&2; exit 7",
         "waitMs": 0, "keepStdin": true,
@@ -596,7 +527,7 @@ fn hosted_pipe_wait_deadline_and_retained_output() {
 
 #[test]
 fn remote_terminal_rpc_controls_the_model_pty_and_releases_it() {
-    let fixture = WorkerFixture::start();
+    let fixture = WorkerFixture::start(INSTANCE);
     let started = fixture.tool("bash_run", json!({
         "command": "stty -echo; printf 'ready\\n'; IFS= read -r human; printf 'remote:%s\\n' \"$human\"; IFS= read -r model; printf 'model:%s\\n' \"$model\"",
         "tty": true, "waitMs": 20,

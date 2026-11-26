@@ -289,7 +289,7 @@ mod unix {
                     },
                     "context": {
                         "workspace": env.workspace(), "source": "mcp",
-                        "ctxId": "ctx-execution", "requestId": "tmux-execution-run"
+                        "ctxId": "ctx-execution", "requestId": "pty-execution-run"
                     }
                 }
             }),
@@ -341,22 +341,22 @@ mod unix {
             }),
         );
         assert_eq!(bash["message"]["stdout"], "sandbox-bash", "{bash}");
-        let tmux = env.rpc(instance, "tool", &json!({
-            "protocol": "rpc", "type": "request", "id": "sandbox-tmux-run",
+        let task = env.rpc(instance, "tool", &json!({
+            "protocol": "rpc", "type": "request", "id": "sandbox-pty-run",
             "method": "bash_run",
             "message": {
                 "input": { "command": "printf 'sandbox-task\\n'", "waitMs": 3000, "tty": true },
                 "context": {
                     "workspace": env.workspace(), "source": "mcp",
-                    "ctxId": "ctx-sandbox", "requestId": "sandbox-tmux-run"
+                    "ctxId": "ctx-sandbox", "requestId": "sandbox-pty-run"
                 }
             }
         }));
-        assert_eq!(tmux["type"], "reply", "{tmux}");
-        assert_eq!(tmux["message"]["task"]["status"], "0", "{tmux}");
+        assert_eq!(task["type"], "reply", "{task}");
+        assert_eq!(task["message"]["task"]["status"], "0", "{task}");
         assert!(
-            tmux["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "sandbox-task")),
-            "{tmux}"
+            task["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "sandbox-task")),
+            "{task}"
         );
         env.json_command(&["stop", "--instance", instance]);
     }

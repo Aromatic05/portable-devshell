@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/beta-matrix-extended.yml", import.meta.url), "utf8");
-const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "browser", "handoff", "chains", "windows-psmux"];
+const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "browser", "handoff", "chains", "windows-process"];
 
 test("extended beta verification is explicit, not a pull request gate", () => {
     assert.match(workflow, /workflow_dispatch:/u);
@@ -23,10 +23,10 @@ test("extended Testspace commands use private root and always attempt shutdown",
     assert.match(workflow, /pnpm testspace stop/u);
 });
 
-test("Windows PSMUX runtime contracts run natively on x64 and ARM64", () => {
+test("Windows native Process Host runtime contracts run natively on x64 and ARM64", () => {
     assert.match(workflow, /runner: windows-2022/u);
     assert.match(workflow, /runner: windows-11-arm/u);
-    assert.match(workflow, /cargo test --locked -p devshell-worker --test tmux_windows_contract/u);
+    assert.match(workflow, /cargo test --locked -p devshell-worker --test process_windows_contract/u);
     assert.match(workflow, /shell: pwsh/u);
 });
 
@@ -89,9 +89,9 @@ test("browser and long-handoff optional suites use fresh AcceptanceFixture and d
     const browser = step("Real Chromium browser Audit replay and Instance stop-start");
     assert.ok(browser.includes("inputs.suite == 'browser'"));
     assert.ok(browser.includes("pnpm acceptance:web 2>&1 | tee"));
-    const handoff = step("Real 190-second tmux handoff and recovery");
+    const handoff = step("Real 190-second process handoff and recovery");
     assert.ok(handoff.includes("inputs.suite == 'handoff'"));
-    assert.ok(handoff.includes("pnpm acceptance:tmux-handoff 2>&1 | tee"));
+    assert.ok(handoff.includes("pnpm acceptance:process-handoff 2>&1 | tee"));
     assert.match(step("Upload isolated Testspace logs"), /beta-matrix-browser\.log/u);
     assert.match(step("Upload isolated Testspace logs"), /beta-matrix-handoff\.log/u);
     const source = readFileSync(new URL("../acceptance/AcceptanceSupport.mjs", import.meta.url), "utf8");

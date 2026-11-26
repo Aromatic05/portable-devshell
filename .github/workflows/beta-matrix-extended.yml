@@ -147,4 +147,4 @@ jobs:
               shell: pwsh
               run: |
                   Get-Command pwsh | Out-Null
-                  cargo test --locked -p devshell-worker --test process_host_contract -- --nocapture
+                  cargo test --locked -p devshell-worker --test process_windows_contract -- --test-threads=1 --nocapture
