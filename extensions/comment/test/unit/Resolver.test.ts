@@ -373,6 +373,15 @@ test("task_input running result uses the same task continuation guidance", () =>
     });
     assert.deepEqual(codes(hints), ["bash.taskRunning"]);
     assert.match(hints[0]?.text ?? "", /task_input/u);
+
+    const controlled = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: { id: "t1", status: "running", humanControl: true },
+    });
+    assert.deepEqual(codes(controlled), ["bash.humanControl"]);
+    assert.match(controlled[0]?.text ?? "", /human currently controls this terminal/u);
+    assert.match(controlled[0]?.text ?? "", /task_inspect/u);
 });
 
 test("Process Host errors have task-specific recovery guidance", () => {

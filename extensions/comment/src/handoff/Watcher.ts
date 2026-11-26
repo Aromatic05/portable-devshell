@@ -22,6 +22,7 @@ export interface TerminalHandoffWatcherOptions {
 
 interface InstanceWatchState {
     readonly controller: AbortController;
+    lastSeq?: number;
     timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -80,19 +81,36 @@ export class TerminalHandoffWatcher {
     async #runWatch(instance: string, state: InstanceWatchState): Promise<void> {
         while (!this.#closed && !state.controller.signal.aborted) {
             try {
-                const snapshot =
-                    await this.#options.instanceObserve.snapshot(instance);
-                if (this.#closed || state.controller.signal.aborted) return;
+                let fromSeq: number;
+                if (state.lastSeq !== undefined) {
+                    fromSeq = state.lastSeq + 1;
+                } else {
+                    const snapshot =
+                        await this.#options.instanceObserve.snapshot(instance);
+                    if (this.#closed || state.controller.signal.aborted) return;
+                    state.lastSeq = snapshot.lastSeq;
+                    fromSeq = snapshot.lastSeq + 1;
+                }
                 await this.#options.instanceObserve.watchEvents(instance, {
                     eventTypes: [TERMINAL_CONTROL_RELEASED_EVENT],
-                    fromSeq: snapshot.lastSeq + 1,
+                    fromSeq,
                     onEvent: async (event) => {
+                        state.lastSeq = Math.max(
+                            state.lastSeq ?? 0,
+                            event.seq,
+                        );
                         await this.#handleEvent(instance, event);
+                    },
+                    onGap: (gap) => {
+                        state.lastSeq = gap.lastSeq;
                     },
                     signal: state.controller.signal,
                 });
             } catch (error) {
                 if (this.#closed || state.controller.signal.aborted) return;
+                if (isSequenceError(error)) {
+                    state.lastSeq = undefined;
+                }
                 this.#options.onError?.(instance, error);
             }
             if (this.#closed || state.controller.signal.aborted) return;
@@ -111,6 +129,7 @@ export class TerminalHandoffWatcher {
             return;
         const payload = parseReleasePayload(event.data);
         if (payload === undefined) return;
+        const targetWorkspace = normalizeWorkspace(payload.workspace);
         const contexts = await this.#options.contextObserve.list({
             instance,
             status: "active",
@@ -119,9 +138,7 @@ export class TerminalHandoffWatcher {
             ctx.environments.some(
                 (env) =>
                     env.instance === instance &&
-                    (payload.workspace === undefined ||
-                        env.workspace === undefined ||
-                        env.workspace === payload.workspace),
+                    normalizeWorkspace(env.workspace) === targetWorkspace,
             ),
         );
         if (matching.length === 0) return;
@@ -206,5 +223,27 @@ function formatHandoffComment(payload: ControlReleasedPayload): string {
         details.push(`cwd: ${payload.cwd}`);
     }
     const suffix = details.length > 0 ? ` [${details.join(", ")}]` : "";
-    return `[Terminal handoff] Human released control of terminal ${label}${suffix}. Inspect the current screen with task_inspect or resume interaction with task_input.`;
+    return `[Terminal handoff] Human released control of terminal ${label}${suffix}. Inspect the current screen with task_inspect, or send input with task_input (omit any pre-handoff cursor to anchor at the latest output).`;
+}
+
+function normalizeWorkspace(
+    workspace: string | undefined,
+): string | undefined {
+    if (workspace === undefined || workspace.length === 0) return undefined;
+    if (workspace === "/") return "/";
+    const trimmed = workspace.replace(/\/+$/u, "");
+    return trimmed.length === 0 ? "/" : trimmed;
+}
+
+function isSequenceError(error: unknown): boolean {
+    if (error instanceof TypeError) return true;
+    if (typeof error === "object" && error !== null) {
+        const code = (error as { code?: unknown }).code;
+        if (code === "stream.gap" || code === "control.invalidTarget")
+            return true;
+        const message = (error as { message?: unknown }).message;
+        if (typeof message === "string" && /seq|gap/iu.test(message))
+            return true;
+    }
+    return false;
 }
