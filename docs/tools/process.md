@@ -66,6 +66,8 @@ devshell-worker terminal attach <id> --takeover
 
 升级到 Process Host 协议 v2 前，先用旧版本结束现有任务并停止旧 Process Host；只重启 Worker 不会替换 Host。v2 的输出边界和 cursor 不与 v1 混用。
 
-MCP Context 结束不会自动关闭进程。普通调用按 Workspace 作用域访问资源；Stateless 使用独立的无 Workspace 作用域并要求在 `bash_run` 与 `task_manage(command="create")` 中提供绝对 `cwd`。Stateless 不创建 Context 或 durable Wait。
+MCP Context 结束不会自动关闭进程。同一 Instance、同一 Workspace 下，进程是共享资源，不归创建它的 Context 或模型独占：其他具有相应权限的调用者也可列出、读取、写入或关闭该任务。人工接管会阻止模型写入，但模型之间没有输入租约；并行使用时请协调输入，或各自创建终端。
+
+Stateless 使用同一 Instance 下独立的无 Workspace 共享作用域，并要求在 `bash_run` 与 `task_manage(command="create")` 中提供绝对 `cwd`。Stateless 不创建 Context 或 durable Wait。
 
 当普通 Context 的 `bash_run` 同步等待达到 180 秒（`WAIT_HANDOFF_MS = 180000`）而任务仍未结束时，Control 创建 durable Wait（`detached: true`）继续观察，底层 task 继续运行；`task_input` 的同步等待窗口为 120 秒。停止等待与终止进程是两个不同操作。
