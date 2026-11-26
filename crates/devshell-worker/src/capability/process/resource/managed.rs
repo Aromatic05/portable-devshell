@@ -64,6 +64,8 @@ pub(in crate::capability::process) struct Descriptor {
     pub workspace: Option<std::path::PathBuf>,
     pub timed_out: bool,
     pub human_control: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub alternate_screen: bool,
     pub terminal: Option<crate::capability::terminal::TerminalDescriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit: Option<Exit>,
@@ -71,6 +73,10 @@ pub(in crate::capability::process) struct Descriptor {
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<&'static str>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Serialize)]
@@ -225,6 +231,10 @@ impl ManagedProcess {
             workspace: self.workspace.clone(),
             timed_out: self.timed_out.load(Ordering::Acquire),
             human_control: state.active_controller().is_some(),
+            alternate_screen: state
+                .screen
+                .as_ref()
+                .is_some_and(|screen| screen.alternate_screen()),
             terminal: self.terminal_descriptor(state),
             exit,
             error,

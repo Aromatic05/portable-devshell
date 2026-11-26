@@ -1036,6 +1036,8 @@ fn drain_notification_queue(
             "tool.progress" => ("tool", "progress"),
             "terminal.output" => ("terminal", "output"),
             "terminal.exit" => ("terminal", "exit"),
+            "terminal.error" => ("terminal", "error"),
+            "terminal.control" => ("terminal", "control"),
             "devshell.command.open" => ("core", "command.open"),
             "devshell.command.close" => ("core", "command.close"),
             _ => continue,
@@ -1598,6 +1600,61 @@ pub(crate) mod tests {
         let mut replacement = VecDeque::new();
         drain_notification_queue("worker", "host", &mut replacement, || queue.try_pop()).unwrap();
         assert_eq!(replacement.len(), 1);
+    }
+
+    #[test]
+    fn drain_notification_queue_forwards_terminal_control_and_error() {
+        use crate::capability::rpc::notification::WorkerNotificationQueue;
+        let queue = WorkerNotificationQueue::new(64 * 1024);
+        let control_params = serde_json::json!({
+            "terminalId": "term-1",
+            "generation": "gen-1",
+            "humanControl": true
+        });
+        let error_params = serde_json::json!({
+            "terminalId": "term-1",
+            "generation": "gen-1",
+            "message": "pty write failed"
+        });
+        queue
+            .push_json(&serde_json::json!({
+                "method": "terminal.control",
+                "params": control_params
+            }))
+            .unwrap();
+        queue
+            .push_json(&serde_json::json!({
+                "method": "terminal.error",
+                "params": error_params
+            }))
+            .unwrap();
+
+        let mut pending = VecDeque::new();
+        drain_notification_queue("worker", "host", &mut pending, || queue.try_pop()).unwrap();
+        assert_eq!(pending.len(), 2);
+
+        let mut decoder = EnvelopeDecoder::default();
+        let mut envelopes = Vec::new();
+        for item in pending {
+            envelopes.extend(decoder.push(&item.data).unwrap());
+        }
+        assert_eq!(envelopes.len(), 2);
+
+        assert_eq!(envelopes[0].source.port, "terminal");
+        assert_eq!(envelopes[0].dest.port, "terminal");
+        let Packet::Event(ref control_event) = envelopes[0].packet else {
+            panic!("expected event packet");
+        };
+        assert_eq!(control_event.name, "control");
+        assert_eq!(control_event.message.as_ref(), Some(&control_params));
+
+        assert_eq!(envelopes[1].source.port, "terminal");
+        assert_eq!(envelopes[1].dest.port, "terminal");
+        let Packet::Event(ref error_event) = envelopes[1].packet else {
+            panic!("expected event packet");
+        };
+        assert_eq!(error_event.name, "error");
+        assert_eq!(error_event.message.as_ref(), Some(&error_params));
     }
 
     #[cfg(unix)]

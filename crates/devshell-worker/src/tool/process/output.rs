@@ -285,6 +285,7 @@ pub(super) fn collect(
             status,
             pty: descriptor["pty"] == true || descriptor["tty"] == true,
             human_control: (descriptor["humanControl"] == true).then_some(true),
+            alternate_screen: (descriptor["alternateScreen"] == true).then_some(true),
         }),
         cursor: Some(boundary.cursor().encode(id)),
     })

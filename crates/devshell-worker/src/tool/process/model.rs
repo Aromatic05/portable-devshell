@@ -63,6 +63,8 @@ pub struct TaskDescriptor {
     pub pty: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub human_control: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate_screen: Option<bool>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -117,7 +119,34 @@ pub enum BashTermination {
 
 #[cfg(test)]
 mod tests {
-    use super::TaskCursor;
+    use super::{TaskCursor, TaskDescriptor};
+
+    #[test]
+    fn task_descriptor_omits_alternate_screen_when_none_and_serializes_true() {
+        let normal = serde_json::to_value(TaskDescriptor {
+            id: "proc-1".into(),
+            status: "running".into(),
+            pty: true,
+            human_control: None,
+            alternate_screen: None,
+        })
+        .unwrap();
+        assert!(normal.get("alternateScreen").is_none(), "{normal}");
+
+        let alternate = serde_json::to_value(TaskDescriptor {
+            id: "proc-1".into(),
+            status: "running".into(),
+            pty: true,
+            human_control: None,
+            alternate_screen: Some(true),
+        })
+        .unwrap();
+        assert_eq!(
+            alternate.get("alternateScreen"),
+            Some(&serde_json::json!(true)),
+            "{alternate}"
+        );
+    }
 
     #[test]
     fn opaque_cursor_round_trips_and_rejects_malformed_values() {

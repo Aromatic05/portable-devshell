@@ -701,11 +701,43 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
         }),
     );
     assert_eq!(first["termination"], "running", "{first}");
+    assert!(
+        first["task"].get("alternateScreen").is_none(),
+        "normal screen must omit alternateScreen on TaskDescriptor: {first}"
+    );
     let first_stdout = first["stdout"].as_str().unwrap();
     let first_pid = extract_pid(first_stdout, "FIRST-PID:")
         .unwrap_or_else(|| panic!("missing FIRST-PID in {first_stdout:?}"));
-    let cursor = first["cursor"].as_str().unwrap().to_owned();
+    let mut cursor = first["cursor"].as_str().unwrap().to_owned();
     assert!(cursor.starts_with("tc2_"), "{cursor}");
+
+    // Entering alternate screen sets alternateScreen: true on TaskDescriptor.
+    let alt_enter = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf '\\033[?1049hALT-ACTIVE\\n'\n",
+            "cursor": cursor,
+            "waitMs": 2000
+        }),
+    );
+    cursor = alt_enter["cursor"].as_str().unwrap().to_owned();
+    let mut alt_seen = alt_enter["stdout"].as_str().unwrap().contains("ALT-ACTIVE");
+    let mut alt_reply = alt_enter;
+    let alt_deadline = Instant::now() + Duration::from_secs(5);
+    while !alt_seen {
+        assert!(
+            Instant::now() < alt_deadline,
+            "did not observe ALT-ACTIVE: {alt_reply}"
+        );
+        alt_reply = fixture.tool(
+            "task_input",
+            json!({"task": id, "cursor": cursor, "waitMs": 500}),
+        );
+        cursor = alt_reply["cursor"].as_str().unwrap().to_owned();
+        alt_seen = alt_reply["stdout"].as_str().unwrap().contains("ALT-ACTIVE");
+    }
+    assert_eq!(alt_reply["task"]["alternateScreen"], true, "{alt_reply}");
 
     // Exit the interactive shell; persistent terminal must automatically respawn a fresh shell.
     let after_exit = fixture.tool(

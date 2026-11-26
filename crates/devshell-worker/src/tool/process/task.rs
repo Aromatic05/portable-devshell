@@ -27,7 +27,7 @@ struct TaskInputParams {
     /// Task or persistent terminal ID returned by bash_run or task_manage.
     #[schemars(length(min = 1))]
     task: String,
-    /// Raw UTF-8 text to write to a running PTY task/terminal (\r for Enter in TUIs/ConPTY, \n in line shells, \u0003 for Ctrl+C, \u0004 for Ctrl+D). Omit or pass "" to read/poll any pipe or PTY task without writing.
+    /// Raw UTF-8 text to write to a running PTY task/terminal (\r for Enter in TUIs/ConPTY, \n in line shells, \u0003 for Ctrl+C, \u0004 for Ctrl+D, \u001b for Esc, \u001b[A/B/C/D for arrows). Omit or pass "" to read/poll any pipe or PTY task without writing.
     #[serde(default)]
     input: Option<String>,
     /// Opaque cursor returned for this same task. Always pass cursor when polling; omitting it on a read-only poll replays from byte 0 (omitting it when writing input anchors at the current tail).
@@ -70,7 +70,7 @@ impl ToolHandler for TaskInputTool {
                     },
                     "inputHints": {
                         "task": "Task or persistent terminal ID returned by bash_run or task_manage.",
-                        "input": "Raw UTF-8 text to write to a running PTY task/terminal (use \\r for Enter in TUIs/ConPTY or \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D). Omit or pass \"\" to read/poll output from any pipe or PTY task without writing. When writing input without cursor, only output after this input is returned.",
+                        "input": "Raw UTF-8 text to write to a running PTY task/terminal (use \\r for Enter in TUIs/ConPTY, \\n in line-oriented shells, \\u0003 for Ctrl+C, \\u0004 for Ctrl+D, \\u001b for Esc, \\u001b[A/B/C/D for arrows). Omit or pass \"\" to read/poll output from any pipe or PTY task without writing. When writing input without cursor, only output after this input is returned.",
                         "cursor": "Opaque cursor returned for this same task by bash_run, task_manage(create), or a previous task_input call. Always pass cursor when polling; omitting cursor on a read-only poll replays all retained output from byte 0.",
                         "waitMs": "Milliseconds to wait for output or exit (default 5000, max 3600000; context-bound waits cap at 120000ms synchronously, and untilExit waits >= 120000ms detach to durable Wait).",
                         "untilExit": "Set true to wait until a non-persistent task exits rather than returning on new output (invalid for running persistent terminals)."

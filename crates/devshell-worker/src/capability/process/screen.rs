@@ -52,6 +52,10 @@ impl TerminalScreen {
         (cols.get(), rows.get())
     }
 
+    pub fn alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
+    }
+
     pub fn snapshot(&self, seq: u64) -> ScreenSnapshot {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
