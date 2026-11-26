@@ -86,7 +86,7 @@ devshell instance call <instance> <absolute-workspace> <toolName> '<jsonInput>'
 
 它仍经过 Review（含 Approval）→ inbound Rewrite → Target/Execute → outbound Rewrite/Review 与 Audit。Control `call` RPC 不携带 signal/progress，`callStream` 使用 Packet Stream 承载取消和进度；两者不同于内部 Worker RPC。`recording = "caller"` 时 Target 不承担 host Audit。
 
-删除会保留失败的 cleanup debt；`cleanup list` 查看债务，`cleanup retry <instance>` 重试清理，不恢复 instance 注册。Reverse 是 self-managed，Control 删除不会代替远端 owner 的永久清理；需要永久退役时，在远端先 `devshell-worker stop --instance <name>`，再 `devshell-worker retire --instance <name>`，后者会清理该实例的配置、artifact、日志与 tmux runtime。
+删除会保留失败的 cleanup debt；`cleanup list` 查看债务，`cleanup retry <instance>` 重试清理，不恢复 instance 注册。Reverse 是 self-managed，Control 删除不会代替远端 owner 的永久清理；需要永久退役时，在远端先 `devshell-worker stop --instance <name>`，再 `devshell-worker retire --instance <name>`，后者会清理该实例的配置、artifact、日志与 Process Host runtime。
 
 Reverse instance 还有 device code/token 生命周期命令，见 [Reverse Worker](reverse-connections.md)。
 
@@ -109,7 +109,7 @@ devshell tool calls <instance> --before <callId>
 devshell tool calls <instance> --after <callId>
 ```
 
-ToolCall 是跨入口统一的逻辑调用记录。内部为了实现 tmux block、artifact transfer 或兼容路由而产生的子步骤不应伪装成多条用户级 ToolCall。
+ToolCall 是跨入口统一的逻辑调用记录。内部为了实现 process wait、artifact transfer 或兼容路由而产生的子步骤不应伪装成多条用户级 ToolCall。
 
 记录至少用于关联：
 

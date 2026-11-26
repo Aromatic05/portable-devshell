@@ -29,17 +29,18 @@ Windows worker 使用普通 detached 用户进程，不安装 Windows Service，
 
 基础工具包括：
 
-```text
+\`\`\`text
 bash_run
 file 工具组
-tmux 工具组（内嵌 psmux）
+task_read / task_input
+terminal_inspect / terminal_manage
 artifact 工具组
 reverse connection
-```
+\`\`\`
 
-Windows Worker 将 `psmux` 静态链接到 `devshell-worker`，由 Worker 自身以内部分支启动持久化终端后端；用户不需要另行安装 `tmux` 或 `psmux`。后端可用时注册 `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`，支持 persistent pane、managed task、transcript 和 Worker 重启接续。Worker 的本地 Attach Shell 能力与这些 tmux 工具是不同功能，不应混为一谈。
+Windows Worker 使用同一个 binary 的 Process Host 持有普通 Pipe 和原生 ConPTY 资源，不依赖外部终端复用器。模型与人工 Attach 访问同一资源；Worker 重启后仍可接续 Process Host 中运行的任务。
 
-`crates/devshell-worker/tests/tmux_windows_contract.rs` 包含 Windows Pane/Task 持久化和输入等专项测试。当前发布 CI 的 Windows target 主要验证构建与打包，并**没有运行完整 Windows psmux/PowerShell 端到端交互验收**；因此不能以发布资产构建通过宣称 Windows 运行时全部验证成功。
+\`crates/devshell-worker/tests/process_windows_contract.rs\` 是 Windows 原生进程/PTY 专项契约入口。扩展 CI 提供 x64 与 ARM64 Windows runner；构建或交叉编译成功不代表已完成真实 Windows 运行态验收。
 
 ## PowerShell backend
 

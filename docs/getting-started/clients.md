@@ -121,7 +121,7 @@ OpenAI workspace 管理员可能需要先审核/发布自定义 App。后续 MCP
 
 已有 ChatGPT connector 保持原 URL。原先使用裸 URL、但不发送 OpenAI 会话 metadata 的客户端，应改为 `/explicit`；OAuth 客户端换 URL 后需授权新 resource。实例 TOML 不再配置 `contextMode`。详见 [Context](../concepts/context.md)。
 
-`/stateless` 不需要先调用 `environ_info`。直接调用全部 10 个 Bash、File、Tmux 基础工具，提供 Worker 绝对路径；`bash_run` 及创建 pane 时的 `cwd` 必填。搜索、任务与终端后续调用使用 cursor 或 task/pane ID。详见 [MCP](../concepts/mcp.md#context-selector)。
+`/stateless` 不需要先调用 `environ_info`。直接调用全部 9 个 Bash、File、Task、Terminal 基础工具，提供 Worker 绝对路径；`bash_run` 及创建 terminal 时的 `cwd` 必填。搜索、任务与终端后续调用使用 cursor 或 task/terminal ID。详见 [MCP](../concepts/mcp.md#context-selector)。
 
 ## OAuth 与刷新
 

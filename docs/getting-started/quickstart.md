@@ -140,21 +140,20 @@ environ_info(workspace=/absolute/path/on/worker)
 
 `openai-session` 把内部 `ctxId` 隐藏在 model-facing schema 之外；`explicit` Context mode 则让通用 MCP client 显式携带它。详见 [Context](../concepts/context.md)。
 
-使用 `/local-pc/mcp/stateless` 时跳过这一步，直接调用全部 10 个 Bash、File、Tmux 基础工具；路径必须是 Worker 绝对路径，`bash_run` 及创建 pane 时的 `cwd` 必填。该入口不提供 MCP App 或 Context 功能。
+使用 `/local-pc/mcp/stateless` 时跳过这一步，直接调用全部 9 个 Bash、File、Task、Terminal 基础工具；路径必须是 Worker 绝对路径，`bash_run` 及创建 terminal 时的 `cwd` 必填。该入口不提供 MCP App 或 Context 功能。
 
 ## 7. 验证长任务
 
-需要长时间运行或 PTY 的命令使用 `tmux_run`。例如：
+所有命令均使用 `bash_run`；`waitMs` 控制本次调用等待时间，需要终端时设置 `tty: true`。例如：
 
 ```json
 {
     "command": "cargo test",
-    "wait": "block",
-    "timeout": 600000
+    "waitMs": 180000
 }
 ```
 
-当前 MCP transport 使用 request-scoped SSE keepalive；`wait=block` 最多保持同一个 tool call 同步阻塞 180 秒。任务超过 180 秒不会被杀掉，而是转成 durable Wait，由 Workspace 继续跟踪。
+当前 MCP transport 使用 request-scoped SSE keepalive；普通 Context 的 `bash_run` 最多同步等待 180 秒。达到边界时任务继续运行，返回 task ID、cursor，并可转成 durable Wait 由 Workspace 继续跟踪。更短的 `waitMs` 可提前返回，使用 `task_read` 继续读取。
 
 详见 [Process 与终端工具](../tools/process.md) 与 [Workspace](../concepts/workspace.md)。
 

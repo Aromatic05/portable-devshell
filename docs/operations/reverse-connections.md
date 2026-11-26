@@ -55,7 +55,7 @@ devshell-worker stop --instance <name>
 devshell-worker retire --instance <name>
 ```
 
-`retire` 要求 daemon 已停止；它退役 tmux runtime，并删除配置、Artifact 和日志。普通 stop 不等于 retire；删除 Control 上的 Reverse 注册也不会代替这些远端清理步骤。
+`retire` 要求 daemon 已停止；它退役 Process Host runtime，并删除配置、Artifact 和日志。普通 stop 不等于 retire；删除 Control 上的 Reverse 注册也不会代替这些远端清理步骤。
 
 Reverse 状态与 daemon 状态分开：
 
@@ -72,7 +72,7 @@ generation    当前活动 Channel 的正整数（普通重连递增）
 2. Worker 向 `POST /reverse/v1/enroll` 提交 code 和平台元数据；
 3. Control 原子消费 code，返回 instance、controller URL 和新 device token；重复使用、过期或已消费的 code 失败；
 4. Worker 先准备当前二进制，安装到 `~/.devshell/workers/<target>/<sha256>/` 并更新 `~/.devshell/bin/devshell-worker`；
-5. Worker 停止已有 daemon，退役该 instance 的 tmux runtime，再保留原用户配置并更新 Reverse 凭据，以 `0600` 写入配置，启动 daemon。
+5. Worker 停止已有 daemon，退役该 instance 的 Process Host runtime，再保留原用户配置并更新 Reverse 凭据，以 `0600` 写入配置，启动 daemon。
 
 **重新注册会终止已有持久 pane/task runtime**，不同于普通 Worker restart 的接续流程。用户配置、日志和 Artifact 按实现保留；本地安装失败会尝试恢复旧配置与先前运行状态，但不能据此承诺已经退役的 pane/task 恢复。
 
@@ -309,7 +309,7 @@ reqwest 已启用 `socks` feature，所以这些环境变量也可以使用 SOCK
 - `network / tcp` 上真实 HTTP request/response；
 - `process / exec` stdin/stdout；
 - Artifact raw data plane；
-- re-enroll 凭据 promotion、失败保留前驱实际 RPC 可用性及 tmux runtime 退役；
+- re-enroll 凭据 promotion、失败保留前驱实际 RPC 可用性及 Process Host runtime 退役；
 - worker 退出后 instance 回到 offline。
 
 ## 错误码

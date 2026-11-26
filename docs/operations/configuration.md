@@ -13,7 +13,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序使用 Node.js 24 系列或更新版本；内置 Comment/Agent 使用的 Database capability 要求 **Node.js ≥24.12.0**（必须提供 SQLite authorizer 与 defensive API），不能使用任意早期 Node 24。Windows 提供完整 client 和 worker，`bash_run` 使用 PowerShell，持久化 tmux 工具使用 Worker 内嵌的 psmux；本地 Attach Shell 与 tmux 工具分别建模。
+主程序使用 Node.js 24 系列或更新版本；内置 Comment/Agent 使用的 Database capability 要求 **Node.js ≥24.12.0**（必须提供 SQLite authorizer 与 defensive API），不能使用任意早期 Node 24。Windows 提供完整 client 和 worker，`bash_run` 使用 PowerShell，Process Host 使用原生 Pipe/ConPTY，模型任务和人工 Attach 共享进程资源。
 
 ## 配置路径
 
@@ -49,7 +49,7 @@ Windows control 使用当前用户专属 Named Pipe：
 
 因此 macOS 不需要手动设置 `XDG_RUNTIME_DIR`。Windows 不使用 Unix socket；每个 worker instance 使用 `\\.\pipe\devshell-worker-<user>-<instance>`。
 
-Worker 和 tmux/psmux 运行时按 instance 与 workspace 隔离；Unix 使用对应 socket，Windows 使用 Worker Named Pipe 和内嵌 psmux 后端。
+Worker 和 Process Host 按 Instance 隔离；进程资源进一步按 Workspace 或 Stateless 作用域隔离。Unix 使用本地 socket，Windows 使用 Named Pipe 和 ConPTY。
 
 ## 初始化、迁移与升级
 
@@ -236,13 +236,13 @@ timeoutMs = 5000
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
 - instance 配置不包含持久化默认 workspace path。worker 启动与实例生命周期不绑定项目目录；MCP Context 通过 `environ_info` 选择 primary instance 的绝对 workspace。其他 managed instance 由 model-facing `devshell instance list/status` 返回 Context-scoped opaque handle，再通过固定 MCP `environ_remote(command="attach", handle=..., workspace=...)` 附加；`mask` 会在当前 Context 中永久屏蔽该 remote instance，直到 Context 结束；
-- `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Todo/Approval/Wait 交互与自动 re-entry。fresh instance 默认 `false`；旧 version 2/3 instance 迁移时为保持历史行为写成 `true`。设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
+- `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Todo/Approval/Wait 交互与自动 re-entry。fresh instance 默认 `false`；旧 version 2/3 instance 迁移时为保持历史行为写成 `true`。设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/task/terminal runtime primitive；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - MCP Context 模式由请求 URL 选择，不是实例配置开关。已有 version 4 TOML 中的 `contextMode` 在读取时移除，保存后不再输出；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；它是模式路由的基路径，也是 OpenAI 会话别名；
-- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`，`recall` 授权只读的 `recall`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
+- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`，`recall` 授权只读的 `recall`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
 - `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；
@@ -340,7 +340,7 @@ eventBufferSize = 100
 ```text
 实例事件与审计     ~/.devshell/<instance>/control-worker/audit.sqlite3
 worker 配置与状态   ~/.devshell/<instance>/
-tmux 元数据          ~/.devshell/<instance>/tmux/
+Process Host         Instance runtime 目录中的 process endpoint；输出捕获位于 Worker state 目录
 worker 实体          ~/.devshell/workers/<target>/<sha256>/devshell-worker
 各 target 软链       ~/.devshell/bin/devshell-worker-<target>
 本机默认软链          ~/.devshell/bin/devshell-worker

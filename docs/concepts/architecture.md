@@ -264,7 +264,7 @@ Provider / Carrier -> Channel
 
 CLI↔Control 与 Core↔Worker 共享 Endpoint/Envelope/Packet 基础设施，但 Control hello、admission 与业务 port 的权限契约独立。应用 Stream 在 Packet 层复用，不能把它们画成多个 Frame service。
 
-连接断开会使未完成 RPC 的结果 uncertain、不可自动重试；重连建立新连接，不自动 replay ToolCall。必须先检查操作状态再决定是否重新发起请求，不能依赖旧 `worker.rpc` terminal-response cache 保证。self-managed Reverse Worker 不由 Control 启动，删除 Control registration 也不等于清理远端 daemon/tmux 数据。
+连接断开会使未完成 RPC 的结果 uncertain、不可自动重试；重连建立新连接，不自动 replay ToolCall。必须先检查操作状态再决定是否重新发起请求，不能依赖旧 `worker.rpc` terminal-response cache 保证。self-managed Reverse Worker 不由 Control 启动，删除 Control registration 也不等于清理远端 daemon/Process Host 数据。
 
 详见 [Reverse Worker](../operations/reverse-connections.md)。
 

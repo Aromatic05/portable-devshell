@@ -33,15 +33,15 @@ pnpm typecheck
 cargo build --locked --workspace
 pnpm test
 cargo test --locked --workspace
-pnpm test:worker:tmux           # 非 Windows
+pnpm test:worker:process           # 非 Windows
 real Worker smoke
 MCP smoke
-long tmux handoff smoke           # 非 Windows，真实跨过 180s 同步边界
+long process handoff smoke           # 非 Windows，真实跨过 180s 同步边界
 Web browser smoke
 ```
 
 其中 integration smoke 复用同一 prepared worker，不应该以 mock transport 代替最终 Worker 行为。
-长 tmux handoff smoke 也复用 acceptance 自己的临时 Control/Worker fixture；它不会在 CI 内再次启动 Testspace。`pnpm testspace long-smoke` 保留为 Testspace 环境下的同一协议检查。
+长 process handoff smoke 也复用 acceptance 自己的临时 Control/Worker fixture；它不会在 CI 内再次启动 Testspace。`pnpm testspace long-smoke` 保留为 Testspace 环境下的同一协议检查。
 
 ## 分项入口
 
@@ -50,7 +50,7 @@ bash acceptance/run-typecheck.sh
 bash acceptance/run-unit-tests.sh
 bash acceptance/run-real-worker-smoke.sh
 bash acceptance/run-mcp-smoke.sh
-pnpm acceptance:tmux-handoff
+pnpm acceptance:process-handoff
 ```
 
 需要只运行最终 integration 链时，可以直接调用 `run-final-acceptance.mjs --integration-only`。
@@ -92,7 +92,7 @@ windows-arm64
 
 每个目标执行对应 release-asset gate，并上传该提交的候选资产。Linux x64 额外保留完整 acceptance 日志。
 
-Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的构建/打包目标；通用 TypeScript/Rust 正确性由 common job 证明。Windows Worker 虽已内嵌 psmux 并设有 `tmux_windows_contract.rs`，CI 仍未进行完整 Windows Pane/Task/PowerShell runtime 验收。不要把“Windows target 构建成功”描述成已覆盖这些交互测试。
+Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的构建/打包目标；通用 TypeScript/Rust 正确性由 common job 证明。Windows Worker 使用原生 Process Host/ConPTY，专项契约 `process_windows_contract.rs` 由扩展 CI 的 Windows runner 执行；仍需对应版本的实际运行证据。不要把“Windows target 构建成功”描述成已覆盖这些交互测试。
 
 ## Release workflow
 
@@ -139,10 +139,10 @@ instance version 4 中：
 3. App-only Workspace 调用仍能用内部 `ctxId` + capability 定位同一个 Context；
 4. `environ_info` 正常 bootstrap Workspace，`mcpapp_open` 只承担 re-presentation/restoration；
 5. Goal/Todo/Approval/Wait 的 ownership 与 revision fencing 不因 remount/restart 丢失；独立 Ask/Question 功能已退役；
-6. `Stop waiting` 不停止 tmux task；
+6. `Stop waiting` 不停止 process task；
 7. MCP v2 request-scoped SSE keepalive 能让长 `tools/call` 跨过普通 HTTP idle timeout；
-8. `tmux_run(wait=block)` 在 180 秒内可以真实同步返回，超过 180 秒正常 `detached`，task 继续运行；
-9. Control/MCP restart 后 durable Wait 可以恢复，而不会重复执行原 tmux task。
+8. `bash_run(waitMs=180000)` 在 180 秒内可以真实同步返回，超过 180 秒正常 `detached`，task 继续运行；
+9. Control/MCP restart 后 durable Wait 可以恢复，而不会重复执行原 process task。
 10. 新 Instance 的 `[workspace].inlineToolCalls` 默认关闭普通 ToolCall iframe，且不影响手动打开的 Fullscreen Workspace、必要的审批交互或 Audit；显式启用后仅允许受支持工具挂载 Inline 卡片。
 
 ## OAuth / 公网门禁
@@ -174,14 +174,14 @@ instance version 4 中：
 7. Linux/macOS 在没有显式 `XDG_RUNTIME_DIR` 时仍能解析同一用户 Control socket；
 8. 六个原生 target 都有对应应用包和 Worker asset；
 9. Unix 与 Windows 安装脚本及校验文件全部随 Release 发布；
-10. 安装器在开始替换运行态前拒绝从 DevShell 自己的 `bash_run` / `tmux_run` 环境发起自升级，并明确引导用户使用独立终端或 SSH 会话。
+10. 安装器在开始替换运行态前拒绝从 DevShell 自己的 `bash_run` 环境发起自升级，并明确引导用户使用独立终端或 SSH 会话。
 
 ## 文档门禁
 
 发布前还应检查：
 
 - README 与 `docs/README.md` 不包含不存在的相对链接；
-- 不再出现 OpenAI 90 秒 tmux handoff 的旧说明；
+- 不再出现 历史 90 秒 handoff 的旧说明；
 - 不把 `Mcp-Session-Id` 写成 Context identity；
 - 不把 instance version 2 当成当前配置；
 - 不把 `workspace` 写回 instance config；
