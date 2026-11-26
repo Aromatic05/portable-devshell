@@ -51,7 +51,19 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 
 ## 人机协同
 
-同一台 Worker 主机上，通过实例共用的 Worker binary 直接使用：
+支持两种 CLI 入口接入同一套 Process Host 终端资源：
+
+- **Control CLI（跨 `local` / `ssh` / `docker` / `podman` / `reverse` 实例统一入口）**：
+
+```bash
+devshell terminal list <instance> [--all]                        # 列出终端与任务（全局支持 --json）
+devshell terminal create <instance> --workspace . --name dev     # 创建持久终端并立即接管（支持 --detach / --ephemeral / --cwd / --command / --cols / --rows）
+devshell terminal attach <instance> [name|short-id] [--takeover] # 观察模式或 --takeover 接管（仅 1 个活跃 PTY 时可省略目标）
+devshell terminal inspect <instance> [name|short-id]             # 不进入交互模式查看当前 PTY 可见屏幕（全局支持 --json）
+devshell terminal close <instance> [name|short-id]               # 终止任务或持久终端（全局支持 --json）
+```
+
+- **同机 Worker binary（直接连接本机实例）**：
 
 ```bash
 devshell-worker terminal list                                    # TTY 下默认表格展示，--all 看历史，--json 输出原始 JSON
@@ -62,16 +74,19 @@ devshell-worker terminal inspect <name|short-id>                 # 不进入交�
 devshell-worker terminal close <name|short-id>                   # 终止任务或持久终端
 ```
 
-双向接管闭环：
+双向接管与主动交接闭环：
 - **模型创建 → 人类接管**：模型通过 `bash_run(pty: true)` 或 `task_manage(command="create")` 启动后，人类用 `attach` 观察或 `--takeover` 接管。
-- **人类创建 → 模型接管**：人类用 `devshell-worker terminal create --workspace <path> --name <name>` 创建持久终端并先完成登录/MFA/环境初始化，随后按 `Ctrl+] t` 释放控制权退回观察态（或按 `Ctrl+]` / `Ctrl+] d` 脱离），同 Workspace 下的模型即可通过 `task_manage(command="list")`、`task_inspect` 与 `task_input` 直接接手。
+- **人类创建 → 模型接管**：人类用 `devshell terminal create <instance> --workspace <path> --name <name>`（或 `devshell-worker terminal create`）创建持久终端并先完成登录/MFA/环境初始化，随后按 `Ctrl+] t` 释放控制权退回观察态（或按 `Ctrl+]` / `Ctrl+] d` 脱离），同 Workspace 下的模型即可通过 `task_manage(command="list")`、`task_inspect` 与 `task_input` 直接接手。
+- **主动交接通知（`[Terminal handoff]`）**：无论人类通过 `devshell terminal`、`devshell-worker terminal` 还是 TUI `Sessions` 释放控制权，只要运行中 PTY 的 `humanControl` 从 `true` 切回 `false`，Worker 都会推送 `terminal.control` 事件，并向匹配作用域的活跃 Context 投递 `[Terminal handoff]` Comment，主动告知模型当前终端 ID/名称、状态及最新尺寸。
+- **尺寸自动恢复**：人类在接管期间调整了终端尺寸后，释放控制权时 Process Host 会自动将 PTY 恢复到接管前的原始尺寸。
 
 Attach 会话快捷键与行为：
-- `Ctrl+]`（单独按，约 300ms）或 `Ctrl+] d`：脱离 Attach 并释放控制权，不终止进程。
-- `Ctrl+] t`：在会话内实时切换 **观察（OBSERVE）↔ 接管（CONTROL）**，终端标题栏（OSC 0）实时提示当前模式；接管期间模型 `task_input` 写入被拒绝，释放后可立即继续输入。
-- `Ctrl+] ]`：在接管模式下向远端 PTY 发送字面 `Ctrl+]`（`0x1d`）。
+- 按下 `Ctrl+]` 后终端标题栏（OSC 0）立即显示等待提示（`Ctrl+] waiting: d detach · t toggle · ] send ^]`），和弦超时约 `800ms`：
+  - `Ctrl+]`（单独按，等待约 `800ms` 超时）或 `Ctrl+] d`：脱离 Attach 并释放控制权，不终止进程。
+  - `Ctrl+] t`：在会话内实时切换 **观察（OBSERVE）↔ 接管（CONTROL）**，终端标题栏（OSC 0）实时提示当前模式；接管期间模型 `task_input` 写入被拒绝，释放后可立即继续输入。
+  - `Ctrl+] ]`：在接管模式下向远端 PTY 发送字面 `Ctrl+]`（`0x1d`）。
 - 遇到输出突增触发 `stream.gap` 时自动重连并恢复屏幕快照。
-- TUI Sessions 通过 Terminal Stream 使用同一 PTY，进入会话时接管输入。原始 PTY 字节流在连接时的状态恢复之后继续传输。
+- TUI `Sessions` 面板通过 Terminal Stream 使用同一 PTY，常用快捷键：`Enter` 进入接管控制、`o` 进入只读观察、`t` 在观察模式内接管控制、`n` 新建持久终端、`x` 关闭任务/终端、`r` 刷新列表。原始 PTY 字节流在连接时的状态恢复之后继续传输。
 
 ## 生命周期与作用域
 
