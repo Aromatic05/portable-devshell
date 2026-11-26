@@ -78,7 +78,7 @@ impl TerminalBridge {
         let bridge = self.clone();
         let descriptor = descriptor.clone();
         std::thread::spawn(move || {
-            let result = bridge.forward(channel, &descriptor);
+            let result = bridge.forward(channel, &descriptor, from_seq);
             if let Ok(mut subscriptions) = bridge.subscriptions.lock() {
                 subscriptions.remove(&descriptor.terminal_id);
             }
@@ -143,6 +143,7 @@ impl TerminalBridge {
         &self,
         mut channel: LocalIpcStream,
         descriptor: &TerminalDescriptor,
+        mut forwarded_seq: u64,
     ) -> Result<(), String> {
         let first =
             codec::read_response(&mut channel)?.ok_or("terminal stream ended before handshake")?;
@@ -166,6 +167,7 @@ impl TerminalBridge {
                 .as_array()
                 .ok_or("invalid terminal stream frames")?
             {
+                forwarded_seq = frame["seq"].as_u64().ok_or("invalid terminal output sequence")?;
                 self.notifications.push_lossy_json(&json!({
                     "type": "notification", "method": "terminal.output",
                     "params": {
@@ -191,12 +193,7 @@ impl TerminalBridge {
                     .as_u64()
                     .ok_or("invalid terminal latest sequence")?;
                 // A final page can still be followed by more output pages.
-                if page["frames"]
-                    .as_array()
-                    .and_then(|frames| frames.last())
-                    .and_then(|frame| frame["seq"].as_u64())
-                    .is_some_and(|seq| seq < latest)
-                {
+                if forwarded_seq < latest {
                     continue;
                 }
                 self.notifications.push_json(&json!({
@@ -204,6 +201,7 @@ impl TerminalBridge {
                     "params": {
                         "terminalId": descriptor.terminal_id, "generation": descriptor.generation,
                         "version": process["terminal"]["version"],
+                        "latestSeq": latest,
                         "exitCode": process["exit"]["exitCode"].as_i64().unwrap_or(-1),
                         "signal": process["exit"]["signal"].as_i64().unwrap_or(0),
                     }
@@ -217,4 +215,51 @@ impl TerminalBridge {
 
 fn bridge_error(error: impl Into<String>) -> RpcError {
     RpcError::new("terminal.bridgeFailed", error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capability::rpc::response::RpcResponse;
+    use crate::transport::endpoint::channel::LocalIpcListener;
+
+    #[test]
+    fn exit_notification_carries_final_seq_when_queued_output_is_evicted() {
+        let dir = crate::testing::temp_dir();
+        let path = dir.path().join("terminal.sock");
+        let listener = LocalIpcListener::bind(&path).unwrap();
+        let mut writer = LocalIpcStream::connect(&path).unwrap();
+        let reader = listener.accept().unwrap();
+        let queue = Arc::new(WorkerNotificationQueue::new(256));
+        let bridge = TerminalBridge::new(Arc::clone(&queue));
+        let descriptor = serde_json::from_value(json!({
+            "terminalId": "test-terminal", "generation": 1, "version": 1,
+            "cols": 80, "rows": 24, "latestSeq": 7, "state": "running", "createdAtMs": 0
+        })).unwrap();
+        let process = json!({
+            "humanControl": false, "state": "exited", "terminal": {"version": 2},
+            "exit": {"exitCode": 0, "signal": 0}
+        });
+        for result in [
+            json!({"process": {"humanControl": false}}),
+            json!({"process": process, "latestSeq": 9, "frames": [
+                {"seq": 8, "dataBase64": "aGVsbG8="}
+            ]}),
+            json!({"process": process, "latestSeq": 9, "frames": [
+                {"seq": 9, "dataBase64": "d29ybGQ="}
+            ]}),
+        ] {
+            codec::write_response(&mut writer, &RpcResponse::success("stream", result))
+                .unwrap();
+        }
+        drop(writer);
+        bridge.forward(reader, &descriptor, 7).unwrap();
+        assert_eq!(queue.try_pop().unwrap().unwrap(), json!({
+            "type": "notification", "method": "terminal.exit", "params": {
+                "terminalId": "test-terminal", "generation": 1, "version": 2,
+                "latestSeq": 9, "exitCode": 0, "signal": 0
+            }
+        }));
+        assert_eq!(queue.try_pop().unwrap(), None);
+    }
 }

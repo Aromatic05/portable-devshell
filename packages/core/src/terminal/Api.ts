@@ -100,6 +100,7 @@ export type WorkerTerminalNotification =
           params: {
               exitCode: number;
               generation: number;
+              latestSeq: number;
               signal: number;
               terminalId: string;
               version: number;

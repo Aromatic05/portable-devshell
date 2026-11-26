@@ -489,6 +489,61 @@ test("worker terminal backend resyncs mid-session stream.gap via restore snapsho
     assert.deepEqual(frames[2], { data: "after-resync", seq: 3 });
 });
 
+test("worker terminal backend replays output before accepting a reliable exit", async () => {
+    const worker = new FakeWorkerTerminal();
+    worker.latestSeq = 1;
+    let attaches = 0;
+    const port: WorkerTerminalPort = {
+        open: (input) => worker.open(input),
+        attach: async (input) => {
+            attaches += 1;
+            worker.attaches.push(input);
+            if (attaches === 1)
+                return {
+                    replay: [{ dataBase64: Buffer.from("initial").toString("base64"), seq: 1 }],
+                    session: worker.descriptor(),
+                };
+            return {
+                replay: [{ dataBase64: Buffer.from("final").toString("base64"), seq: 2 }],
+                session: { ...worker.descriptor(), latestSeq: 2, state: "exited", version: 2 },
+                exit: { exitCode: 0, signal: 0 },
+            };
+        },
+        write: (input) => worker.write(input),
+        resize: (input) => worker.resize(input),
+        kill: (input) => worker.kill(input),
+        list: () => worker.list(),
+        onNotification: (listener) => worker.onNotification(listener),
+        onConnected: (listener) => worker.onConnected(listener),
+        onDisconnected: (listener) => worker.onDisconnected(listener),
+    };
+    const opened = await new WorkerTerminalBackend({ worker: port }).open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
+    assert.ok("process" in opened);
+    const process = opened.process;
+    const frames: string[] = [];
+    let exited = false;
+    process.onData((data) => frames.push(data));
+    process.onExit(() => { exited = true; });
+    worker.notification?.({
+        method: "terminal.exit",
+        params: {
+            exitCode: 0,
+            generation: 9,
+            latestSeq: 2,
+            signal: 0,
+            terminalId: "remote-terminal",
+            version: 2,
+        },
+    });
+    await waitFor(() => exited);
+    assert.deepEqual(frames, ["initial", "final"]);
+    assert.equal(attaches, 2);
+});
+
 test("worker terminal backend syncs post-release session metadata and version so subsequent kill uses bumped version", async () => {
     const worker = new FakeWorkerTerminal();
     worker.latestSeq = 0;

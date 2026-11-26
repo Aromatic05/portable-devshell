@@ -169,14 +169,17 @@ function parseNotification(
     }
     const version = readInteger(value.version);
     const exitCode = readInteger(value.exitCode);
+    const latestSeq = readInteger(value.latestSeq);
     const signal = readInteger(value.signal);
     return version === undefined ||
+        latestSeq === undefined ||
+        latestSeq < 0 ||
         exitCode === undefined ||
         signal === undefined
         ? undefined
         : {
               method,
-              params: { exitCode, generation, signal, terminalId, version },
+              params: { exitCode, generation, latestSeq, signal, terminalId, version },
           };
 }
 

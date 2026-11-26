@@ -536,6 +536,10 @@ class WorkerTerminalProcess implements TerminalProcess {
             );
             return;
         }
+        if (notification.params.latestSeq > this.#lastSeq) {
+            this.#scheduleResume();
+            return;
+        }
         this.#acceptExit(
             {
                 exitCode: notification.params.exitCode,
