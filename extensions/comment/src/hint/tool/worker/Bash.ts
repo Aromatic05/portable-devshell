@@ -14,7 +14,10 @@ import {
 } from "../../Hint.js";
 import { workerErrorHints } from "../Error.js";
 
-export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
+export function bashResultHints(
+    result: JsonValue,
+    instance?: string,
+): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     const hints: ToolDiagnosticHint[] = [];
@@ -36,7 +39,8 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
             ),
         );
     } else if (termination === "running") {
-        if (asBoolean(asRecord(record.task)?.humanControl) === true) {
+        const task = asRecord(record.task);
+        if (asBoolean(task?.humanControl) === true) {
             hints.push(
                 diagnosticHint(
                     "bash.humanControl",
@@ -44,13 +48,20 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
                 ),
             );
         } else {
+            const taskId = asString(task?.id);
+            const attachGuidance =
+                asBoolean(task?.pty) === true &&
+                instance !== undefined &&
+                taskId !== undefined
+                    ? ` If human intervention is needed, tell the user to run: devshell terminal attach ${instance} ${taskId} --takeover (or open TUI Sessions).`
+                    : "";
             hints.push(
                 diagnosticHint(
                     "bash.taskRunning",
-                    "Continue with task_input (omit input to poll) using the returned task ID and cursor, or stop it with task_manage(command: \"close\", task); the process is still running.",
+                    `Continue with task_input (omit input to poll) using the returned task ID and cursor, or stop it with task_manage(command: "close", task); the process is still running.${attachGuidance}`,
                 ),
             );
-            if (asBoolean(asRecord(record.task)?.alternateScreen) === true) {
+            if (asBoolean(task?.alternateScreen) === true) {
                 hints.push(
                     diagnosticHint(
                         "bash.alternateScreen",

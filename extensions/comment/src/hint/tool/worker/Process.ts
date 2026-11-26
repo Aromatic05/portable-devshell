@@ -39,7 +39,10 @@ export function taskErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
     return processErrorHints(body);
 }
 
-export function taskManageResultHints(result: JsonValue): ToolDiagnosticHint[] {
+export function taskManageResultHints(
+    result: JsonValue,
+    instance?: string,
+): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     if (asBoolean(record.killRequested) === true && asString(record.state) === "running") {
@@ -47,6 +50,20 @@ export function taskManageResultHints(result: JsonValue): ToolDiagnosticHint[] {
             diagnosticHint(
                 "process.closePending",
                 "Termination was requested, but the task is still running. Poll task_manage(command: \"list\") until its state leaves running.",
+            ),
+        ];
+    }
+    const task = asRecord(record.task);
+    const id = task === undefined ? undefined : asString(task.id);
+    if (task !== undefined && id !== undefined) {
+        const target = asString(task.name) ?? id;
+        const attachCmd = instance
+            ? `devshell terminal attach ${instance} ${target} --takeover`
+            : `devshell terminal attach <instance> ${target} --takeover`;
+        return [
+            diagnosticHint(
+                "process.terminalCreated",
+                `Persistent terminal ready. If human intervention (e.g. login/MFA) is needed, tell the user to run: ${attachCmd} (or open TUI Sessions).`,
             ),
         ];
     }

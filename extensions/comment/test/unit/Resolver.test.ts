@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { mergeComments } from "../../src/comment/Merge.ts";
 import type { ToolDiagnosticHint } from "../../src/hint/Hint.ts";
-import { resolveErrorHints, resolveResultHints } from "../../src/hint/Resolver.ts";
+import {
+    resolveErrorHints,
+    resolveResultHints,
+    resolveToolCallHints,
+} from "../../src/hint/Resolver.ts";
 
 function codes(hints: readonly ToolDiagnosticHint[]): string[] {
     return hints.map((hint) => hint.code);
@@ -581,5 +585,77 @@ test("merge keeps user comments first and deduplicates hint codes", () => {
         merged.filter((entry) => entry.startsWith("[bash.nonZeroExit] "))
             .length,
         1,
+    );
+});
+
+test("task_manage create emits process.terminalCreated with exact attach command", () => {
+    const namedHints = resolveResultHints(
+        "task_manage",
+        {
+            task: {
+                id: "term-42",
+                name: "dev-auth",
+                pty: true,
+                status: "running",
+            },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(namedHints), ["process.terminalCreated"]);
+    assert.match(
+        namedHints[0]?.text ?? "",
+        /devshell terminal attach alpha dev-auth --takeover/u,
+    );
+
+    const unnamedHints = resolveToolCallHints({
+        callId: "c1",
+        direction: "outbound",
+        value: {
+            context: { instance: "beta", source: "mcp" },
+            kind: "result",
+            payload: {
+                task: {
+                    id: "term-99",
+                    pty: true,
+                    status: "running",
+                },
+            },
+            toolName: "task_manage",
+        },
+    });
+    assert.deepEqual(codes(unnamedHints), ["process.terminalCreated"]);
+    assert.match(
+        unnamedHints[0]?.text ?? "",
+        /devshell terminal attach beta term-99 --takeover/u,
+    );
+});
+
+test("bash_run running with instance appends attach command for pty=true only", () => {
+    const ptyHints = resolveResultHints(
+        "bash_run",
+        {
+            termination: "running",
+            task: { id: "t-pty", pty: true, status: "running" },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(ptyHints), ["bash.taskRunning"]);
+    assert.match(
+        ptyHints[0]?.text ?? "",
+        /devshell terminal attach alpha t-pty --takeover/u,
+    );
+
+    const pipeHints = resolveResultHints(
+        "bash_run",
+        {
+            termination: "running",
+            task: { id: "t-pipe", pty: false, status: "running" },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(pipeHints), ["bash.taskRunning"]);
+    assert.equal(
+        pipeHints[0]?.text.includes("devshell terminal attach"),
+        false,
     );
 });

@@ -23,6 +23,7 @@ import {
 type ResultResolver = (
     toolName: string,
     result: JsonValue,
+    instance?: string,
 ) => ToolDiagnosticHint[];
 type ErrorResolver = (
     toolName: string,
@@ -30,9 +31,10 @@ type ErrorResolver = (
 ) => ToolDiagnosticHint[];
 
 const resultResolvers: Record<string, ResultResolver> = {
-    bash_run: (_toolName, result) => bashResultHints(result),
-    task_input: (_toolName, result) => bashResultHints(result),
-    task_manage: (_toolName, result) => taskManageResultHints(result),
+    bash_run: (_toolName, result, instance) => bashResultHints(result, instance),
+    task_input: (_toolName, result, instance) => bashResultHints(result, instance),
+    task_manage: (_toolName, result, instance) =>
+        taskManageResultHints(result, instance),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
@@ -65,9 +67,10 @@ function errorResolverFor(toolName: string): ErrorResolver | undefined {
 export function resolveResultHints(
     toolName: string,
     result: JsonValue,
+    instance?: string,
 ): ToolDiagnosticHint[] {
     const resolver = resultResolvers[toolName];
-    return resolver === undefined ? [] : resolver(toolName, result);
+    return resolver === undefined ? [] : resolver(toolName, result, instance);
 }
 
 export function resolveErrorHints(
@@ -95,6 +98,7 @@ export function resolveToolCallHints(
         return resolveResultHints(
             input.value.toolName,
             input.value.payload as JsonValue,
+            input.value.context.instance,
         );
     if (input.value.kind !== "error") return [];
     const body = readErrorBody(input.value.payload as JsonValue);
