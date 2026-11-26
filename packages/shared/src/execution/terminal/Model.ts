@@ -17,6 +17,7 @@ export interface TerminalSessionDescriptor {
     latestSeq: number;
     name?: string;
     persistent?: boolean;
+    pty?: boolean;
     rows: number;
     state: TerminalSessionState;
     terminalId: string;
@@ -31,6 +32,7 @@ export interface TerminalOpenInput {
     name?: string;
     persistent?: boolean;
     rows: number;
+    shell?: string;
     workspace: string;
 }
 

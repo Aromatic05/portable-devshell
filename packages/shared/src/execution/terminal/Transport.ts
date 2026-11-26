@@ -297,6 +297,7 @@ function readTerminalSession(value: unknown): TerminalSessionDescriptor {
         ...(typeof payload.persistent === "boolean"
             ? { persistent: payload.persistent }
             : {}),
+        ...(typeof payload.pty === "boolean" ? { pty: payload.pty } : {}),
         rows: readInteger(payload, "rows"),
         state: readState(payload.state),
         terminalId: readString(payload, "terminalId"),
