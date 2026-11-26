@@ -31,6 +31,7 @@ export class WorkerTerminalBackend implements TerminalBackend {
                 ? {}
                 : { persistent: input.persistent }),
             rows: input.rows,
+            ...(input.shell === undefined ? {} : { shell: input.shell }),
             workspace: input.workspace,
         });
         const process = new WorkerTerminalProcess(
@@ -435,6 +436,13 @@ class WorkerTerminalProcess implements TerminalProcess {
                     ? attached.snapshot.seq + 1
                     : this.#localSeq + 1;
             this.#emitData(attached.snapshot.data, this.#localSeq);
+        } else if (
+            this.#descriptor.pty === false &&
+            attached.replay.length > 0 &&
+            attached.replay[0]!.seq > this.#lastSeq + 1
+        ) {
+            this.#decoder.end();
+            this.#lastSeq = attached.replay[0]!.seq - 1;
         }
         for (const frame of attached.replay)
             this.#acceptOutput(frame.seq, frame.dataBase64);
@@ -588,6 +596,7 @@ function remoteIdentity(
         ...(descriptor.persistent === undefined
             ? {}
             : { persistent: descriptor.persistent }),
+        ...(descriptor.pty === undefined ? {} : { pty: descriptor.pty }),
         recoverable: true,
         rows: descriptor.rows,
         generation: descriptor.generation,
@@ -615,6 +624,7 @@ function metadataFromDescriptor(
         ...(descriptor.persistent === undefined
             ? {}
             : { persistent: descriptor.persistent }),
+        ...(descriptor.pty === undefined ? {} : { pty: descriptor.pty }),
         rows: descriptor.rows,
         version: descriptor.version,
         ...(descriptor.workspace === undefined

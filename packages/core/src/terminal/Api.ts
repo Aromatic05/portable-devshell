@@ -14,6 +14,7 @@ export interface WorkerTerminalDescriptor {
     latestSeq: number;
     name?: string;
     persistent?: boolean;
+    pty?: boolean;
     rows: number;
     state: "running" | "exited";
     terminalId: string;
@@ -28,6 +29,7 @@ export interface WorkerTerminalOpenInput {
     name?: string;
     persistent?: boolean;
     rows: number;
+    shell?: string;
     workspace: string;
 }
 
@@ -155,6 +157,7 @@ export interface TerminalProcessMetadataUpdate {
     humanControl?: boolean;
     name?: string;
     persistent?: boolean;
+    pty?: boolean;
     rows?: number;
     version?: number;
     workspace?: string;
@@ -184,6 +187,7 @@ export interface TerminalBackendOpenInput {
     name?: string;
     persistent?: boolean;
     rows: number;
+    shell?: string;
     workspace: string;
 }
 
@@ -195,6 +199,7 @@ export interface TerminalBackendSessionIdentity {
     humanControl?: boolean;
     name?: string;
     persistent?: boolean;
+    pty?: boolean;
     recoverable?: boolean;
     rows?: number;
     generation: number;
@@ -234,6 +239,7 @@ export interface TerminalOpenRequest {
     name?: string;
     persistent?: boolean;
     rows: number;
+    shell?: string;
     workspace: string;
 }
 

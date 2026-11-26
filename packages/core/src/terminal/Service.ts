@@ -48,6 +48,7 @@ interface TerminalSessionRecord {
     process: TerminalProcess;
     processDisposed: boolean;
     processSubscriptions: Array<() => void>;
+    pty?: boolean;
     replay: Array<TerminalOutputFrame & { bytes: number }>;
     replayBytes: number;
     recoverable: boolean;
@@ -121,6 +122,7 @@ export class TerminalSessionService implements TerminalSessionApi {
                 ? {}
                 : { persistent: request.persistent }),
             rows: request.rows,
+            ...(request.shell === undefined ? {} : { shell: request.shell }),
             workspace: request.workspace,
         });
         if (this.#closed || this.#instanceEpoch(request.instance) !== epoch) {
@@ -198,6 +200,7 @@ export class TerminalSessionService implements TerminalSessionApi {
                             ...(item.persistent === undefined
                                 ? {}
                                 : { persistent: item.persistent }),
+                            ...(item.pty === undefined ? {} : { pty: item.pty }),
                             ...(item.rows === undefined ? {} : { rows: item.rows }),
                             version: item.version,
                             ...(item.workspace === undefined
@@ -278,6 +281,14 @@ export class TerminalSessionService implements TerminalSessionApi {
             takeControl: async () => {
                 if (attachment.detached)
                     throw new Error("Terminal attachment has detached.");
+                if (session.pty === false) {
+                    throw createRemoteError({
+                        code: controlErrorCodes.invalidTarget,
+                        message:
+                            "Pipe tasks are read-only and do not support control takeover.",
+                        retryable: false,
+                    });
+                }
                 if (session.controller === attachment) {
                     return await session.process.restoreSnapshot?.();
                 }
@@ -483,6 +494,7 @@ export class TerminalSessionService implements TerminalSessionApi {
         const humanControl = identity?.humanControl;
         const name = identity?.name ?? fallbackMetadata?.name;
         const persistent = identity?.persistent ?? fallbackMetadata?.persistent;
+        const pty = identity?.pty;
         const workspace = identity?.workspace ?? fallbackMetadata?.workspace;
         const session: TerminalSessionRecord = {
             attachments: new Set(),
@@ -500,6 +512,7 @@ export class TerminalSessionService implements TerminalSessionApi {
             process,
             processDisposed: false,
             processSubscriptions: [],
+            ...(pty === undefined ? {} : { pty }),
             replay: [],
             replayBytes: 0,
             recoverable: identity?.recoverable ?? false,
@@ -549,6 +562,7 @@ export class TerminalSessionService implements TerminalSessionApi {
         if (update.command !== undefined) session.command = update.command;
         if (update.persistent !== undefined)
             session.persistent = update.persistent;
+        if (update.pty !== undefined) session.pty = update.pty;
         if (update.humanControl !== undefined)
             session.humanControl = update.humanControl;
         if (
@@ -861,6 +875,7 @@ function descriptor(session: TerminalSessionRecord): TerminalSessionDescriptor {
         ...(session.persistent === undefined
             ? {}
             : { persistent: session.persistent }),
+        ...(session.pty === undefined ? {} : { pty: session.pty }),
         rows: session.rows,
         state: session.state,
         terminalId: session.terminalId,

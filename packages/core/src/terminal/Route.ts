@@ -65,6 +65,7 @@ export function createTerminalRouteModule(
                         ? {}
                         : { persistent: input.persistent }),
                     rows: input.rows,
+                    ...(input.shell === undefined ? {} : { shell: input.shell }),
                     workspace: input.workspace,
                 })) as unknown as JsonValue;
             },
@@ -119,6 +120,11 @@ export function createTerminalRouteModule(
                     input.generation,
                     input.terminalId,
                 );
+                if (current.pty === false && input.takeover === true) {
+                    throw invalidInput(
+                        "Pipe tasks are read-only and do not support takeover.",
+                    );
+                }
                 let sendTail = Promise.resolve();
                 let terminal = false;
                 let endedFlag = false;
@@ -389,6 +395,7 @@ export function createTerminalRouteModule(
                 });
                 try {
                     const needsObserveSnapshot =
+                        current.pty !== false &&
                         !input.takeover &&
                         input.fromSeq === 0 &&
                         current.latestSeq > 0 &&
@@ -474,6 +481,9 @@ function readOpenInput(value: JsonValue | undefined): TerminalOpenInput {
             ? {}
             : { persistent: payload.persistent }),
         rows: readIntegerField(payload, "rows"),
+        ...(payload.shell === undefined
+            ? {}
+            : { shell: readString(payload.shell, "shell") }),
         workspace: readString(payload.workspace, "workspace"),
     };
 }

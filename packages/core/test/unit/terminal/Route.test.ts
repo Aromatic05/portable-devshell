@@ -574,3 +574,128 @@ test("terminal route ignores controlChanged send when stream has already closed"
         false,
     );
 });
+
+test("terminal route forwards shell on open, rejects takeover on pipe tasks, and skips restoreSnapshot on pipe observe", async () => {
+    let restoreSnapshotCalls = 0;
+    const dataListeners = new Set<(data: string, sourceSeq?: number) => void>();
+    const openInputs: Array<{ shell?: string }> = [];
+    const process: TerminalProcess = {
+        kill() {},
+        onData(listener) {
+            dataListeners.add(listener);
+            return () => dataListeners.delete(listener);
+        },
+        onExit() {
+            return () => undefined;
+        },
+        resize() {},
+        async restoreSnapshot() {
+            restoreSnapshotCalls += 1;
+            return { data: "unexpected", seq: 1 };
+        },
+        write() {},
+    };
+    const sessions = new TerminalSessionService({
+        maxReplayBytes: 6,
+    });
+    const backend = {
+        open: async (input: { shell?: string }) => {
+            openInputs.push({
+                ...(input.shell === undefined ? {} : { shell: input.shell }),
+            });
+            return {
+                identity: {
+                    cols: 80,
+                    generation: 1,
+                    pty: false,
+                    rows: 24,
+                    terminalId: "pipe-route-1",
+                    version: 1,
+                    workspace: "/workspace",
+                },
+                process,
+            };
+        },
+    };
+    const route = createTerminalRouteModule({
+        backend,
+        instance: "alpha",
+        sessions,
+    });
+    const openHandler = route.operations.find((entry) => entry.name === "open");
+    const attach = route.streams?.find((entry) => entry.name === "attach");
+    assert.ok(openHandler);
+    assert.ok(attach);
+
+    const opened = (await openHandler.handle(
+        {
+            id: "open-pipe",
+            name: "open",
+            payload: {
+                cols: 80,
+                rows: 24,
+                shell: "/bin/sh",
+                workspace: "/workspace",
+            },
+        },
+        attachContext("open-pipe"),
+    )) as { generation: number; pty?: boolean; terminalId: string };
+    assert.equal(openInputs[0]?.shell, "/bin/sh");
+    assert.equal(opened.pty, false);
+
+    // Emit enough frames so replay rotates past seq=1.
+    for (const listener of dataListeners) {
+        listener("1111");
+        listener("2222");
+    }
+
+    const takeoverStream = new StreamHarness();
+    await assert.rejects(
+        async () =>
+            await attach.handle(
+                takeoverStream as never,
+                {
+                    id: "attach-pipe-takeover",
+                    name: "attach",
+                    payload: {
+                        fromSeq: 0,
+                        generation: opened.generation,
+                        takeover: true,
+                        terminalId: opened.terminalId,
+                    },
+                },
+                attachContext("attach-pipe-takeover"),
+            ),
+        (error: unknown) =>
+            (error as { code?: string; message?: string }).code ===
+                "control.invalidTarget" &&
+            (error as { message?: string }).message ===
+                "Pipe tasks are read-only and do not support takeover.",
+    );
+
+    const observeStream = new StreamHarness();
+    const observeDone = attach.handle(
+        observeStream as never,
+        {
+            id: "attach-pipe-observe",
+            name: "attach",
+            payload: {
+                fromSeq: 0,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            },
+        },
+        attachContext("attach-pipe-observe"),
+    );
+
+    await waitFor(() =>
+        observeStream.sent.some((msg) => msg.name === "seed") &&
+        observeStream.sent.some((msg) => msg.name === "output"),
+    );
+    assert.equal(restoreSnapshotCalls, 0);
+    const seed = observeStream.sent.find((msg) => msg.name === "seed");
+    assert.equal((seed?.payload as { snapshot?: unknown }).snapshot, undefined);
+
+    await observeStream.close();
+    await observeDone;
+});

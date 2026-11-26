@@ -639,3 +639,57 @@ test("terminal attach with restoreSnapshot allows fromSeq 0 on replay overflow b
         },
     );
 });
+
+test("terminal session forwards shell on open, propagates pty=false, and rejects takeControl on pipe tasks", async () => {
+    const process = new FakeTerminalProcess();
+    const openInputs: Array<{ shell?: string }> = [];
+    const service = new TerminalSessionService();
+    const opened = await service.open({
+        backend: {
+            open: async (input) => {
+                openInputs.push({
+                    ...(input.shell === undefined ? {} : { shell: input.shell }),
+                });
+                return {
+                    identity: {
+                        cols: 80,
+                        generation: 1,
+                        pty: false,
+                        recoverable: true,
+                        rows: 24,
+                        terminalId: "pipe-session-1",
+                        version: 1,
+                        workspace: "/workspace",
+                    },
+                    process,
+                };
+            },
+        },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        shell: "/bin/bash",
+        workspace: "/workspace",
+    });
+
+    assert.equal(openInputs[0]?.shell, "/bin/bash");
+    assert.equal(opened.pty, false);
+    assert.equal(service.get("pipe-session-1").pty, false);
+
+    const attachment = service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        terminalId: opened.terminalId,
+    });
+
+    await assert.rejects(
+        () => attachment.takeControl(),
+        (error: unknown) =>
+            (error as { code?: string; message?: string }).code ===
+                "control.invalidTarget" &&
+            (error as { message?: string }).message ===
+                "Pipe tasks are read-only and do not support control takeover.",
+    );
+    attachment.detach();
+});

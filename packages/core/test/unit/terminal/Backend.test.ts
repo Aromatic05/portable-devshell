@@ -428,6 +428,108 @@ test("worker terminal backend syncs post-release session metadata and version so
     assert.equal(worker.kills[0]?.version, 3);
 });
 
+test("worker terminal backend forwards shell on open, propagates pty=false, and anchors rotated pipe replay", async () => {
+    const openInputs: WorkerTerminalOpenInput[] = [];
+    const metadataListeners = new Set<
+        (notification: WorkerTerminalNotification) => void
+    >();
+    const pipeDescriptor = (version = 1): WorkerTerminalDescriptor => ({
+        cols: 80,
+        createdAtMs: 1,
+        generation: 4,
+        latestSeq: 12,
+        pty: false,
+        rows: 24,
+        state: "running",
+        terminalId: "pipe-task-1",
+        version,
+        workspace: "/workspace",
+    });
+    let attachCalls = 0;
+    const worker: WorkerTerminalPort = {
+        open: async (input) => {
+            openInputs.push(input);
+            return pipeDescriptor();
+        },
+        attach: async () => {
+            attachCalls += 1;
+            if (attachCalls === 1) {
+                return {
+                    replay: [
+                        {
+                            dataBase64: Buffer.from("line-10\n").toString("base64"),
+                            seq: 10,
+                        },
+                        {
+                            dataBase64: Buffer.from("line-11\n").toString("base64"),
+                            seq: 11,
+                        },
+                    ],
+                    session: pipeDescriptor(),
+                };
+            }
+            return {
+                replay: [
+                    {
+                        dataBase64: Buffer.from("line-20\n").toString("base64"),
+                        seq: 20,
+                    },
+                ],
+                session: { ...pipeDescriptor(2), latestSeq: 20 },
+            };
+        },
+        write: async (input) => ({ ...input, accepted: true }),
+        resize: async (input) => ({ ...input, accepted: true }),
+        kill: async () => ({ ...pipeDescriptor(3), state: "exited" }),
+        list: async () => [pipeDescriptor()],
+        onNotification: (listener) => {
+            metadataListeners.add(listener);
+            return () => metadataListeners.delete(listener);
+        },
+        onConnected: () => () => undefined,
+        onDisconnected: () => () => undefined,
+    };
+
+    const backend = new WorkerTerminalBackend({ worker });
+    const opened = await backend.open({
+        cols: 80,
+        rows: 24,
+        shell: "/bin/zsh",
+        workspace: "/workspace",
+    });
+    assert.equal(openInputs[0]?.shell, "/bin/zsh");
+    assert.ok("identity" in opened);
+    assert.equal(opened.identity.pty, false);
+
+    const listed = await backend.listMetadata();
+    assert.equal(listed[0]?.pty, false);
+
+    const frames: Array<{ data: string; seq?: number }> = [];
+    const metadataUpdates: Array<{ pty?: boolean }> = [];
+    opened.process.onData((data, seq) => frames.push({ data, seq }));
+    opened.process.onMetadataChange?.((update) => metadataUpdates.push(update));
+    assert.deepEqual(frames, [
+        { data: "line-10\n", seq: 1 },
+        { data: "line-11\n", seq: 2 },
+    ]);
+
+    // Trigger mid-session resync where frames 12..19 rotated out on pipe task.
+    for (const listener of metadataListeners) {
+        listener({
+            method: "terminal.output",
+            params: {
+                dataBase64: Buffer.from("line-20\n").toString("base64"),
+                generation: 4,
+                seq: 20,
+                terminalId: "pipe-task-1",
+            },
+        });
+    }
+    await waitFor(() => frames.length === 3);
+    assert.deepEqual(frames[2], { data: "line-20\n", seq: 3 });
+    assert.equal(metadataUpdates.at(-1)?.pty, false);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {
