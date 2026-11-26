@@ -553,3 +553,119 @@ test("terminal.attach requires an interactive TTY", async () => {
             /interactive TTY/u.test(error.message),
     );
 });
+
+test("attachControlTerminal detaches cleanly on stdin EOF", async () => {
+    const session = makeSession({ humanControl: true });
+    const h = makeAttachHarness(session);
+
+    const running = attachControlTerminal({
+        initialTakeover: true,
+        session,
+        stderr: h.stderr,
+        stdin: h.stdin,
+        stdout: h.stdout,
+        transport: h.transport,
+    });
+
+    await waitFor(() =>
+        h.stdoutChunks.some((chunk) => chunk.includes("[CONTROL]")),
+    );
+
+    h.stdin.end();
+    await running;
+
+    assert.equal(h.stream.closed, true);
+    assert.equal(h.stdin.listenerCount("end"), 0);
+    assert.equal(h.stdin.listenerCount("close"), 0);
+});
+
+test("terminal.create and terminal.attach print workspace and shortcut banners to stderr", async () => {
+    const session = makeSession({
+        name: "dev-shell",
+        workspace: "/repo/workspace",
+    });
+
+    const createHarness = makeAttachHarness(session);
+    const createContext = {
+        clients: {
+            instance: {
+                listInstances: async () => [
+                    { homeDirectory: "/home/alpha", name: "alpha" },
+                ],
+            },
+            terminal: () => ({
+                ...createHarness.transport,
+                open: async (input: { workspace: string }) => ({
+                    ...session,
+                    workspace: input.workspace,
+                }),
+            }),
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stderr: createHarness.stderr,
+        stdin: createHarness.stdin,
+        stdout: createHarness.stdout,
+        writeJson: () => {},
+        writeRecords: () => {},
+        writeValue: () => {},
+    } as unknown as CliDispatchContext;
+
+    const creating = executeTerminalCommand(
+        {
+            detach: false,
+            ephemeral: false,
+            instance: "alpha",
+            kind: "terminal.create",
+            name: "dev-shell",
+            workspace: "/repo/workspace",
+        },
+        createContext,
+    );
+    await waitFor(() =>
+        createHarness.stdoutChunks.some((chunk) => chunk.includes("[CONTROL]")),
+    );
+    createHarness.stdin.write(Buffer.from([0x1d, 0x64]));
+    await creating;
+
+    assert.equal(
+        createHarness.stderrChunks.join(""),
+        "[created dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha · workspace: /repo/workspace · Ctrl+] t: hand off · Ctrl+] d: detach]\n",
+    );
+
+    const attachHarness = makeAttachHarness(session);
+    const attachContext = {
+        clients: {
+            instance: { listInstances: async () => [] },
+            terminal: () => attachHarness.transport,
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stderr: attachHarness.stderr,
+        stdin: attachHarness.stdin,
+        stdout: attachHarness.stdout,
+        writeJson: () => {},
+        writeRecords: () => {},
+        writeValue: () => {},
+    } as unknown as CliDispatchContext;
+
+    const attaching = executeTerminalCommand(
+        {
+            instance: "alpha",
+            kind: "terminal.attach",
+            takeover: false,
+            target: "dev-shell",
+        },
+        attachContext,
+    );
+    await waitFor(() =>
+        attachHarness.stdoutChunks.some((chunk) => chunk.includes("[OBSERVE]")),
+    );
+    attachHarness.stdin.write(Buffer.from([0x1d, 0x64]));
+    await attaching;
+
+    assert.equal(
+        attachHarness.stderrChunks.join(""),
+        "[attaching dev-shell (process-11111111-2222-3333-4444-555555555555) on alpha (observe) · workspace: /repo/workspace · Ctrl+] t: toggle control · Ctrl+] d: detach]\n",
+    );
+});

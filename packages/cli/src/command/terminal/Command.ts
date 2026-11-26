@@ -68,6 +68,9 @@ export async function executeTerminalCommand(
                 context.writeValue(created, renderCreatedTerminal(created));
                 return true;
             }
+            context.stderr.write(
+                `[created ${formatTargetLabel(created)} on ${command.instance} · workspace: ${workspace} · Ctrl+] t: hand off · Ctrl+] d: detach]\n`,
+            );
             await attachControlTerminal({
                 initialTakeover: true,
                 session: created,
@@ -96,6 +99,9 @@ export async function executeTerminalCommand(
                 (session) => session.state === "running",
             );
             const target = resolveTerminalTarget(sessions, command.target, true);
+            context.stderr.write(
+                `[attaching ${formatTargetLabel(target)} on ${command.instance} (${command.takeover ? "control" : "observe"}) · workspace: ${target.workspace ?? "(unknown)"} · Ctrl+] t: toggle control · Ctrl+] d: detach]\n`,
+            );
             await attachControlTerminal({
                 initialTakeover: command.takeover,
                 session: target,

@@ -206,6 +206,8 @@ export async function attachControlTerminal(
     }
     stdinTty.resume();
     options.stdin.on("data", onStdinData);
+    options.stdin.on("end", detach);
+    options.stdin.on("close", detach);
     process.on("SIGWINCH", onResize);
 
     try {
@@ -318,6 +320,8 @@ export async function attachControlTerminal(
         clearTimeout(chordTimer);
         process.off("SIGWINCH", onResize);
         options.stdin.off("data", onStdinData);
+        options.stdin.off("end", detach);
+        options.stdin.off("close", detach);
         if (typeof stdinTty.setRawMode === "function") {
             stdinTty.setRawMode(wasRaw);
         }
