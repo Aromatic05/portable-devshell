@@ -94,6 +94,8 @@ pub(super) struct ReadInput {
     #[serde(default)]
     pub from_seq: u64,
     #[serde(default)]
+    pub shell_generation: Option<u64>,
+    #[serde(default)]
     pub wait_ms: u64,
 }
 
@@ -101,6 +103,8 @@ pub(super) struct ReadInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CaptureInput {
     pub id: String,
+    #[serde(default)]
+    pub shell_generation: Option<u64>,
     pub channel: OutputChannel,
     pub offset: usize,
     pub limit: usize,
@@ -110,6 +114,8 @@ pub(super) struct CaptureInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WriteInput {
     pub id: String,
+    #[serde(default)]
+    pub shell_generation: Option<u64>,
     pub data_base64: String,
     pub controller: Option<String>,
 }

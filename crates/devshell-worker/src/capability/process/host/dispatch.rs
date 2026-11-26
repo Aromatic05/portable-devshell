@@ -33,7 +33,11 @@ impl Host {
                 }
                 serialize(
                     self.require(&input.id)?
-                        .read(input.from_seq, Duration::from_millis(input.wait_ms))?,
+                        .read(
+                            input.from_seq,
+                            Duration::from_millis(input.wait_ms),
+                            input.shell_generation,
+                        )?,
                 )
             }
             "process.v1.capture" => {
@@ -42,6 +46,7 @@ impl Host {
                     input.channel,
                     input.offset,
                     input.limit,
+                    input.shell_generation,
                 )?)
             }
             "process.v1.input" => {
@@ -52,8 +57,11 @@ impl Host {
                 if data.len() > MAX_INPUT_BYTES {
                     return Err(invalid("input exceeds the input limit"));
                 }
-                self.require(&input.id)?
-                    .input(&data, input.controller.as_deref())?;
+                self.require(&input.id)?.input(
+                    &data,
+                    input.controller.as_deref(),
+                    input.shell_generation,
+                )?;
                 Ok(json!({ "accepted": true }))
             }
             "process.v1.terminalAttach" => {

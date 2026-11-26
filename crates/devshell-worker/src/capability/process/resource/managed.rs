@@ -58,6 +58,7 @@ pub(in crate::capability::process) struct Descriptor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub created_at_ms: u128,
+    pub shell_generation: u64,
     pub state: &'static str,
     pub latest_seq: u64,
     capture: CaptureSnapshot,
@@ -128,6 +129,7 @@ pub(super) struct State {
     pub(super) control_seq: u64,
     pub(super) version: u64,
     pub(super) created_at_ms: u128,
+    pub(super) shell_generation: u64,
     pub(super) completion: Option<Result<Exit, ProcessFailure>>,
 }
 
@@ -225,6 +227,7 @@ impl ManagedProcess {
             cwd: self.cwd.clone(),
             command: self.command.clone(),
             created_at_ms: state.created_at_ms,
+            shell_generation: state.shell_generation,
             state: status,
             latest_seq: state.output.latest_seq(),
             capture: state.captures.snapshot(),
@@ -242,14 +245,23 @@ impl ManagedProcess {
         }
     }
 
-    pub fn read(&self, from_seq: u64, wait: Duration) -> Result<ReadResult, RpcError> {
+    pub fn read(
+        &self,
+        from_seq: u64,
+        wait: Duration,
+        shell_generation: Option<u64>,
+    ) -> Result<ReadResult, RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
+        Self::validate_shell_generation(&state, shell_generation)?;
         let (state, _) = self
             .changed
             .wait_timeout_while(state, wait, |state| {
-                state.completion.is_none() && state.output.latest_seq() <= from_seq
+                state.completion.is_none()
+                    && state.output.latest_seq() <= from_seq
+                    && shell_generation.is_none_or(|expected| state.shell_generation == expected)
             })
             .map_err(lock_error)?;
+        Self::validate_shell_generation(&state, shell_generation)?;
         Ok(ReadResult {
             process: self.describe(&state),
             output: state.output.read_after(from_seq),
@@ -289,8 +301,11 @@ impl ManagedProcess {
         channel: OutputChannel,
         offset: usize,
         limit: usize,
+        shell_generation: Option<u64>,
     ) -> Result<CapturePage, RpcError> {
-        self.state.lock().map_err(lock_error)?
+        let mut state = self.state.lock().map_err(lock_error)?;
+        Self::validate_shell_generation(&state, shell_generation)?;
+        state
             .captures
             .read(channel, offset, limit)
             .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))
@@ -307,9 +322,15 @@ impl ManagedProcess {
 
     // The controller check and input enqueue share the resource lock.
     // Once takeover succeeds, a model cannot enqueue input behind it.
-    pub fn input(&self, data: &[u8], controller: Option<&str>) -> Result<(), RpcError> {
+    pub fn input(
+        &self,
+        data: &[u8],
+        controller: Option<&str>,
+        shell_generation: Option<u64>,
+    ) -> Result<(), RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         Self::authorize_controller(&state, controller)?;
+        Self::validate_shell_generation(&state, shell_generation)?;
         if let Some(completion) = &state.completion {
             return Err(match completion {
                 Ok(_) => RpcError::new(
@@ -319,10 +340,25 @@ impl ManagedProcess {
                 Err(failure) => RpcError::new(failure.code, failure.message.clone()),
             });
         }
-        self.enqueue(data)
+        self.enqueue(data, &state)
     }
 
-    pub(super) fn enqueue(&self, data: &[u8]) -> Result<(), RpcError> {
+    fn validate_shell_generation(
+        state: &State,
+        expected: Option<u64>,
+    ) -> Result<(), RpcError> {
+        if let Some(expected) = expected
+            && state.shell_generation != expected
+        {
+            return Err(RpcError::new(
+                "process.staleCursor",
+                "task cursor belongs to a previous shell instance",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn enqueue(&self, data: &[u8], _state: &State) -> Result<(), RpcError> {
         let stdin_closed = || {
             if self.tty {
                 RpcError::new("process.stdinClosed", "stdin is closed")

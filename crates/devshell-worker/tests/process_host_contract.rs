@@ -653,7 +653,7 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
     assert!(
         created["cursor"]
             .as_str()
-            .is_some_and(|cursor| cursor.starts_with("tc2_")),
+            .is_some_and(|cursor| cursor.starts_with("tc3_")),
         "task_manage(create) must return an initial opaque cursor: {created}"
     );
     let summary = &created["task"];
@@ -709,7 +709,7 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
     let first_pid = extract_pid(first_stdout, "FIRST-PID:")
         .unwrap_or_else(|| panic!("missing FIRST-PID in {first_stdout:?}"));
     let mut cursor = first["cursor"].as_str().unwrap().to_owned();
-    assert!(cursor.starts_with("tc2_"), "{cursor}");
+    assert!(cursor.starts_with("tc3_"), "{cursor}");
 
     // Entering alternate screen sets alternateScreen: true on TaskDescriptor.
     let alt_enter = fixture.tool(
@@ -852,6 +852,95 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
 }
 
 #[test]
+fn persistent_terminal_rejects_stale_cursor_after_shell_respawn() {
+    let fixture = WorkerFixture::start("process-stale-shell-cursor");
+    let created = fixture.tool(
+        "task_manage",
+        json!({
+            "command": "create",
+            "name": "cursor-shell",
+            "cwd": "./",
+            "shell": "/bin/sh"
+        }),
+    );
+    let id = created["task"]["id"].as_str().unwrap().to_owned();
+    let stale_cursor = created["cursor"].as_str().unwrap().to_owned();
+    assert!(stale_cursor.starts_with("tc3_"), "{created}");
+
+    let respawned = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf '\033[?1049h'; exit\n",
+            "waitMs": 1500
+        }),
+    );
+    assert_eq!(respawned["termination"], "running", "{respawned}");
+    let mut fresh_cursor = respawned["cursor"].as_str().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut observed = String::new();
+    loop {
+        let reply = fixture.tool_raw(
+            "task_input",
+            json!({
+                "task": id,
+                "input": "printf 'BEFORE-RESPAWN\n'\n",
+                "cursor": fresh_cursor,
+                "waitMs": 2000
+            }),
+        );
+        if reply["type"] == "reply" {
+            let message = &reply["message"];
+            assert_eq!(message["termination"], "running", "{message}");
+            fresh_cursor = message["cursor"].as_str().unwrap().to_owned();
+            observed.push_str(message["stdout"].as_str().unwrap());
+            if observed.contains("BEFORE-RESPAWN") {
+                break;
+            }
+        }
+        assert!(Instant::now() < deadline, "respawned shell did not respond: {reply}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(observed.contains("BEFORE-RESPAWN"), "{observed:?}");
+
+    for input in [None, Some("printf 'MUST-NOT-RUN\\n'\n")] {
+        let mut request = json!({
+            "task": id,
+            "cursor": stale_cursor,
+            "waitMs": 0
+        });
+        if let Some(input) = input {
+            request["input"] = json!(input);
+        }
+        let rejected = fixture.tool_raw("task_input", request);
+        assert_eq!(rejected["type"], "error", "{rejected}");
+        assert_eq!(rejected["error"]["code"], "process.staleCursor", "{rejected}");
+        assert_eq!(
+            rejected["error"]["message"],
+            "task cursor belongs to a previous shell instance",
+            "{rejected}"
+        );
+    }
+
+    let fresh = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "printf 'AFTER-RESPAWN-OK\\n'\n",
+            "waitMs": 2000
+        }),
+    );
+    assert_eq!(fresh["termination"], "running", "{fresh}");
+    assert!(
+        fresh["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("AFTER-RESPAWN-OK"),
+        "{fresh}"
+    );
+}
+
+#[test]
 fn task_input_opaque_cursor_and_manage_validation() {
     let fixture = WorkerFixture::start("process-cursor-validation");
     let started = fixture.tool(
@@ -863,7 +952,7 @@ fn task_input_opaque_cursor_and_manage_validation() {
     );
     let id = started["task"]["id"].as_str().unwrap().to_owned();
     let cursor1 = started["cursor"].as_str().unwrap().to_owned();
-    assert!(cursor1.starts_with("tc2_"), "{started}");
+    assert!(cursor1.starts_with("tc3_"), "{started}");
 
     // Invalid cursor must fail with tool.invalidArguments.
     let bad_cursor = fixture.tool_raw(

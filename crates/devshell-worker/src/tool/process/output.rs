@@ -28,6 +28,7 @@ struct CapturePage {
 #[serde(rename_all = "camelCase")]
 pub(super) struct OutputBoundary {
     latest_seq: u64,
+    shell_generation: u64,
     capture: CaptureSnapshot,
 }
 
@@ -39,6 +40,7 @@ impl OutputBoundary {
 
     pub(super) fn cursor(&self) -> TaskCursor {
         TaskCursor {
+            generation: Some(self.shell_generation),
             seq: self.latest_seq,
             stdout: self.capture.stdout.stored_bytes,
             stderr: self.capture.stderr.stored_bytes,
@@ -53,6 +55,7 @@ struct CaptureReader {
     offset: usize,
     end: usize,
     pending: std::io::Cursor<Vec<u8>>,
+    shell_generation: Option<u64>,
 }
 
 impl Read for CaptureReader {
@@ -73,6 +76,7 @@ impl Read for CaptureReader {
             self.channel,
             self.offset,
             (self.end - self.offset).min(256 * 1024),
+            self.shell_generation,
         )
         .map_err(|error| io::Error::other(error.message))?;
         let bytes = STANDARD
@@ -95,12 +99,14 @@ fn capture(
     channel: &'static str,
     offset: usize,
     limit: usize,
+    shell_generation: Option<u64>,
 ) -> Result<CapturePage, ToolError> {
     serde_json::from_value(rpc(
         client,
         "process.v1.capture",
         json!({
             "id": id, "channel": channel, "offset": offset, "limit": limit,
+            "shellGeneration": shell_generation,
         }),
     )?)
     .map_err(|error_value| ToolError::new("process.captureFailed", error_value.to_string()))
@@ -118,6 +124,7 @@ fn collect_stream(
     progress: Arc<BashProgress>,
     stream: ArtifactStream,
     progress_stream: BashProgressStream,
+    shell_generation: Option<u64>,
 ) -> Result<(StreamOutput, usize), ToolError> {
     if offset > metadata.stored_bytes {
         return Err(ToolError::new(
@@ -132,6 +139,7 @@ fn collect_stream(
         offset,
         end: metadata.stored_bytes,
         pending: std::io::Cursor::new(Vec::new()),
+        shell_generation,
     };
     let bytes = Arc::new(AtomicUsize::new(0));
     let (draft, warning) = begin_artifact(artifacts, stream);
@@ -185,6 +193,15 @@ pub(super) fn collect(
     // Both stream bounds and latestSeq come from one host state lock. Only read
     // up to those bounds, even if more bytes arrive during capture paging.
     let boundary = OutputBoundary::from_descriptor(&descriptor)?;
+    if cursor
+        .generation
+        .is_some_and(|generation| generation != boundary.shell_generation)
+    {
+        return Err(ToolError::new(
+            "process.staleCursor",
+            "task cursor belongs to a previous shell instance",
+        ));
+    }
     let (mut stdout, stdout_bytes) = collect_stream(
         client,
         artifacts,
@@ -196,6 +213,7 @@ pub(super) fn collect(
         Arc::clone(&progress),
         ArtifactStream::Stdout,
         BashProgressStream::Stdout,
+        cursor.generation,
     )?;
     let (mut stderr, stderr_bytes) = collect_stream(
         client,
@@ -208,6 +226,7 @@ pub(super) fn collect(
         Arc::clone(&progress),
         ArtifactStream::Stderr,
         BashProgressStream::Stderr,
+        cursor.generation,
     )?;
     progress.finish();
     let retain = stdout.is_truncated()

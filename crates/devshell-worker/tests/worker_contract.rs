@@ -891,7 +891,7 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     assert_eq!(wait_expired["message"]["termination"], "running");
     assert_eq!(wait_expired["message"]["waitReason"], "timeout");
     assert!(wait_expired["message"].get("exitCode").is_none());
-    assert!(wait_expired["message"]["cursor"].as_str().is_some_and(|c| c.starts_with("tc2_")));
+    assert!(wait_expired["message"]["cursor"].as_str().is_some_and(|c| c.starts_with("tc3_")));
     let running_id = wait_expired["message"]["task"]["id"].as_str().unwrap();
     let closed = env.rpc(
         instance,

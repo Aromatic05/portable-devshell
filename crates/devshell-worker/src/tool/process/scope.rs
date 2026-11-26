@@ -94,6 +94,7 @@ pub(super) fn wait_for(
     id: &str,
     mut descriptor: Value,
     mut seq: u64,
+    shell_generation: Option<u64>,
     wait_ms: u64,
     until_output: bool,
     kill_on_cancel: bool,
@@ -148,7 +149,10 @@ pub(super) fn wait_for(
             client,
             "process.v1.read",
             json!({
-                "id": id, "fromSeq": seq, "waitMs": slice
+                "id": id,
+                "fromSeq": seq,
+                "shellGeneration": shell_generation,
+                "waitMs": slice
             }),
         )?;
         descriptor = output["process"].clone();

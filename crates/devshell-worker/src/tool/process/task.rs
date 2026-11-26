@@ -105,6 +105,7 @@ impl ToolHandler for TaskInputTool {
 
         let input_to_send = params.input.as_deref().filter(|text| !text.is_empty());
         let wrote_input = input_to_send.is_some();
+        let input_generation = explicit_cursor.and_then(|cursor| cursor.generation);
 
         let (client, descriptor, cursor) = if let Some(input) = input_to_send {
             require_execute(&call)?;
@@ -127,12 +128,20 @@ impl ToolHandler for TaskInputTool {
             // input instead of replaying the entire historical transcript.
             let cursor = match explicit_cursor {
                 Some(cursor) => cursor,
-                None => OutputBoundary::from_descriptor(&descriptor)?.cursor(),
+                None => {
+                    let mut cursor = OutputBoundary::from_descriptor(&descriptor)?.cursor();
+                    cursor.generation = None;
+                    cursor
+                }
             };
             rpc(
                 &client,
                 "process.v1.input",
-                json!({"id": params.task, "dataBase64": STANDARD.encode(input)}),
+                json!({
+                    "id": params.task,
+                    "dataBase64": STANDARD.encode(input),
+                    "shellGeneration": input_generation,
+                }),
             )?;
             (client, descriptor, cursor)
         } else {
@@ -151,6 +160,14 @@ impl ToolHandler for TaskInputTool {
             (client, descriptor, explicit_cursor.unwrap_or_default())
         };
 
+        if let Some(expected) = cursor.generation
+            && descriptor["shellGeneration"].as_u64() != Some(expected)
+        {
+            return Err(ToolError::new(
+                "process.staleCursor",
+                "task cursor belongs to a previous shell instance",
+            ));
+        }
         let started = Instant::now();
         let pre_wait_seq = descriptor["latestSeq"].as_u64().unwrap_or(0);
         let wait_from_seq = if wrote_input {
@@ -164,6 +181,9 @@ impl ToolHandler for TaskInputTool {
         } else {
             0
         };
+        let observation_generation = (!wrote_input)
+            .then_some(cursor.generation)
+            .flatten();
         let progress = Arc::new(BashProgress::new(started, call.progress()));
         progress.emit_initial();
         let descriptor = wait_for(
@@ -172,6 +192,7 @@ impl ToolHandler for TaskInputTool {
             &params.task,
             descriptor,
             wait_from_seq,
+            observation_generation,
             wait_ms,
             until_output,
             false,
@@ -190,7 +211,10 @@ impl ToolHandler for TaskInputTool {
             &self.artifacts,
             &params.task,
             descriptor,
-            cursor,
+            TaskCursor {
+                generation: observation_generation,
+                ..cursor
+            },
             DEFAULT_CAPTURE,
             started,
             progress,

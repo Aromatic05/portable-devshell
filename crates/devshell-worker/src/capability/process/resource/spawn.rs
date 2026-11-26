@@ -151,6 +151,7 @@ impl ManagedProcess {
                 output: OutputJournal::default(),
                 version: 1,
                 created_at_ms: crate::tool::unix_time_millis(),
+                shell_generation: 0,
                 controller: None,
                 control_seq: 0,
                 completion: None,
@@ -181,6 +182,18 @@ impl ManagedProcess {
                 // the old writer thread exits cleanly while concurrent writes
                 // buffer for the new shell instead of failing with stdinClosed.
                 let mut next_input_rx = if will_respawn {
+                    // Advance the shell boundary before exposing the fresh input
+                    // queue. A request carrying the previous cursor must not be
+                    // able to enqueue behind this transition.
+                    {
+                        let mut state = observed
+                            .state
+                            .lock()
+                            .expect("process state lock poisoned");
+                        state.shell_generation += 1;
+                        state.version += 1;
+                        observed.changed.notify_all();
+                    }
                     let (next_tx, next_rx) = mpsc::sync_channel::<Vec<u8>>(32);
                     if let Ok(mut input) = observed.input.lock() {
                         *input = Some(next_tx);
@@ -407,7 +420,7 @@ fn spawn_reader_thread(
                         Vec::new()
                     };
                     if state.active_controller().is_none() && !replies.is_empty() {
-                        let _ = process.enqueue(&replies);
+                        let _ = process.enqueue(&replies, &state);
                     }
                     state.captures.append(channel, &bytes[..n]);
                     state.output.append(channel, &bytes[..n]);
