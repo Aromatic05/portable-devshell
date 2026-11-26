@@ -3,7 +3,9 @@ use super::super::output::{Captures, OutputChannel, OutputJournal, READ_CHUNK};
 use super::super::pty::{default_interactive_shell, spawn_interactive, spawn_managed};
 use super::super::screen::TerminalScreen;
 use super::super::shell::ShellCommand;
-use super::managed::{Control, Exit, ManagedProcess, Reader, SpawnSpec, State, Writer};
+use super::managed::{
+    Control, Exit, ManagedProcess, ProcessFailure, Reader, SpawnSpec, State, Writer,
+};
 use crate::capability::execution::ExecutionConfig;
 use crate::capability::rpc::error::RpcError;
 use crate::instance::sandbox::path::ResolvedPath;
@@ -169,7 +171,8 @@ impl ManagedProcess {
             loop {
                 let exit = current_control
                     .wait()
-                    .map(|(exit_code, signal)| Exit { exit_code, signal });
+                    .map(|(exit_code, signal)| Exit { exit_code, signal })
+                    .map_err(ProcessFailure::io);
                 let will_respawn = observed.persistent
                     && respawn_config.is_some()
                     && !observed.closed.load(Ordering::Acquire);
@@ -214,9 +217,9 @@ impl ManagedProcess {
                             input.take();
                         }
                         let mut state = observed.state.lock().expect("process state lock poisoned");
-                        state.completion = Some(Err(
-                            "persistent terminal shell exited repeatedly".into(),
-                        ));
+                        state.completion = Some(Err(ProcessFailure::task(
+                            "persistent terminal shell exited repeatedly",
+                        )));
                         state.version += 1;
                         observed.changed.notify_all();
                         return;
@@ -295,7 +298,7 @@ impl ManagedProcess {
                                         .lock()
                                         .expect("process state lock poisoned");
                                     state.completion = Some(match failure {
-                                        Some(error) => Err(error),
+                                        Some(error) => Err(ProcessFailure::io(error)),
                                         None => exit,
                                     });
                                     state.version += 1;
@@ -327,7 +330,7 @@ impl ManagedProcess {
                                     .state
                                     .lock()
                                     .expect("process state lock poisoned");
-                                state.completion = Some(Err(error.message));
+                                state.completion = Some(Err(ProcessFailure::io(error.message)));
                                 state.version += 1;
                                 observed.changed.notify_all();
                                 return;
@@ -341,7 +344,7 @@ impl ManagedProcess {
                 }
                 let mut state = observed.state.lock().expect("process state lock poisoned");
                 state.completion = Some(match failure {
-                    Some(error) => Err(error),
+                    Some(error) => Err(ProcessFailure::io(error)),
                     None => exit,
                 });
                 state.version += 1;

@@ -110,8 +110,6 @@ export function bashErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
                     "Verify the shell installation.",
                 ),
             ];
-        case "bash.ioFailed":
-            return [errorHint("bash.ioFailed", "Inspect process I/O state.")];
         case "tool.cancelled":
             return [
                 errorHint(

@@ -864,6 +864,14 @@ fn persistent_terminal_rapid_exit_breaks_respawn_loop() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
+    for input in [json!({"task": id, "waitMs": 0}), json!({"task": id, "input": "\n", "waitMs": 0})] {
+        let reply = fixture.tool_raw("task_input", input);
+        assert_eq!(reply["type"], "error", "{reply}");
+        assert_eq!(reply["error"]["code"], "process.taskFailed", "{reply}");
+        assert_eq!(reply["error"]["message"], "persistent terminal shell exited repeatedly", "{reply}");
+    }
+    let healthy = fixture.tool("bash_run", json!({"command": "printf healthy"}));
+    assert_eq!(healthy["stdout"], "healthy", "{healthy}");
 }
 
 #[test]

@@ -41,7 +41,7 @@ pub(in crate::tool) fn spawn_reader(
         loop {
             let count = reader
                 .read(&mut buffer)
-                .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
+                .map_err(|error| ToolError::new("process.ioFailed", error.to_string()))?;
             if count == 0 {
                 break;
             }

@@ -3,6 +3,7 @@ import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
 const processErrors: Readonly<Record<string, string>> = {
     "process.hostFailed": "The Process Host is unavailable. Inspect the Worker and retry after it is ready.",
+    "process.taskFailed": "The target process failed. Inspect its state and retained output; do not restart the Process Host.",
     "process.notFound": "The task does not exist in this execution scope. Check its task ID and workspace.",
     "process.notTerminal": "This resource has no PTY. Use task_input without input to read non-PTY output.",
     "process.notPipe": "This resource is a PTY, not a pipe. Send terminal input via task_input.",

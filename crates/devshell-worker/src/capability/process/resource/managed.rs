@@ -68,6 +68,8 @@ pub(in crate::capability::process) struct Descriptor {
     exit: Option<Exit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -118,7 +120,28 @@ pub(super) struct State {
     pub(super) controller: Option<ControlOwner>,
     pub(super) version: u64,
     pub(super) created_at_ms: u128,
-    pub(super) completion: Option<Result<Exit, String>>,
+    pub(super) completion: Option<Result<Exit, ProcessFailure>>,
+}
+
+pub(super) struct ProcessFailure {
+    pub(super) code: &'static str,
+    pub(super) message: String,
+}
+
+impl ProcessFailure {
+    pub(super) fn task(message: impl Into<String>) -> Self {
+        Self {
+            code: "process.taskFailed",
+            message: message.into(),
+        }
+    }
+
+    pub(super) fn io(message: impl Into<String>) -> Self {
+        Self {
+            code: "process.ioFailed",
+            message: message.into(),
+        }
+    }
 }
 
 pub(super) struct ControlOwner {
@@ -172,10 +195,15 @@ impl ManagedProcess {
     }
 
     pub(super) fn describe(&self, state: &State) -> Descriptor {
-        let (status, exit, error) = match &state.completion {
-            None => ("running", None, None),
-            Some(Ok(exit)) => ("exited", Some(exit.clone()), None),
-            Some(Err(error)) => ("failed", None, Some(error.clone())),
+        let (status, exit, error, error_code) = match &state.completion {
+            None => ("running", None, None, None),
+            Some(Ok(exit)) => ("exited", Some(exit.clone()), None, None),
+            Some(Err(error)) => (
+                "failed",
+                None,
+                Some(error.message.clone()),
+                Some(error.code),
+            ),
         };
         Descriptor {
             id: self.id.clone(),
@@ -195,6 +223,7 @@ impl ManagedProcess {
             terminal: self.terminal_descriptor(state),
             exit,
             error,
+            error_code,
         }
     }
 
@@ -242,6 +271,9 @@ impl ManagedProcess {
     pub fn input(&self, data: &[u8], controller: Option<&str>) -> Result<(), RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         Self::authorize_controller(&state, controller)?;
+        if let Some(Err(failure)) = &state.completion {
+            return Err(RpcError::new(failure.code, failure.message.clone()));
+        }
         self.enqueue(data)
     }
 

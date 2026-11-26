@@ -20,6 +20,12 @@ function body(
     return { code, message: `${code} happened`, retryable: false, ...extra };
 }
 
+test("a failed task directs the model to the task, not to restart the host", () => {
+    const hints = resolveErrorHints("task_input", body("process.taskFailed"));
+    assert.deepEqual(codes(hints), ["process.taskFailed"]);
+    assert.match(hints[0].text, /target process failed.*do not restart the Process Host/u);
+});
+
 test("bash_run clean success produces no hint", () => {
     const hints = resolveResultHints("bash_run", {
         durationMs: 12,

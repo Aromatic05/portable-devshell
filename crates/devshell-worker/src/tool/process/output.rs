@@ -3,7 +3,7 @@ use super::capture::{
     persist_artifact, render_inline_stream, spawn_reader,
 };
 use super::model::{BashRunOutput, BashTermination, TaskCursor, TaskDescriptor};
-use super::scope::{error, rpc};
+use super::scope::rpc;
 use crate::capability::artifact::{
     result_path::tool_result_path, store::ArtifactStore, types::ArtifactStream,
 };
@@ -85,7 +85,7 @@ fn capture(
             "id": id, "channel": channel, "offset": offset, "limit": limit,
         }),
     )?)
-    .map_err(|error_value| error(error_value.to_string()))
+    .map_err(|error_value| ToolError::new("process.captureFailed", error_value.to_string()))
 }
 
 fn collect_stream(
@@ -101,7 +101,10 @@ fn collect_stream(
 ) -> Result<(StreamOutput, usize, usize, u64), ToolError> {
     let metadata = capture(client, id, channel, offset, 0)?;
     if offset > metadata.stored_bytes {
-        return Err(error("output cursor exceeds retained capture"));
+        return Err(ToolError::new(
+            "process.captureFailed",
+            "output cursor exceeds retained capture",
+        ));
     }
     let reader = CaptureReader {
         client: client.clone(),
@@ -123,7 +126,7 @@ fn collect_stream(
         progress_stream,
     )
     .join()
-    .map_err(|_| error("capture reader panicked"))??;
+    .map_err(|_| ToolError::new("process.ioFailed", "capture reader panicked"))??;
     if metadata.truncated {
         output.truncated = true;
         output.artifact_draft = None;
@@ -151,9 +154,13 @@ pub(super) fn collect(
 ) -> Result<BashRunOutput, ToolError> {
     if descriptor["state"] == "failed" {
         progress.finish();
-        return Err(error(
-            descriptor["error"].as_str().unwrap_or("process failed"),
-        ));
+        let (Some(code), Some(message)) = (
+            descriptor["errorCode"].as_str(),
+            descriptor["error"].as_str(),
+        ) else {
+            return Err(ToolError::new("process.internal", "invalid failed process descriptor"));
+        };
+        return Err(ToolError::new(code, message));
     }
     if progress.has_output() {
         progress.finish();
