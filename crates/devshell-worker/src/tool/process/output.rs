@@ -24,6 +24,8 @@ struct CapturePage {
     stored_bytes: usize,
     truncated: bool,
     data_base64: String,
+    #[serde(default)]
+    latest_seq: u64,
 }
 
 struct CaptureReader {
@@ -96,7 +98,7 @@ fn collect_stream(
     progress: Arc<BashProgress>,
     stream: ArtifactStream,
     progress_stream: BashProgressStream,
-) -> Result<(StreamOutput, usize, usize), ToolError> {
+) -> Result<(StreamOutput, usize, usize, u64), ToolError> {
     let metadata = capture(client, id, channel, offset, 0)?;
     if offset > metadata.stored_bytes {
         return Err(error("output cursor exceeds retained capture"));
@@ -132,6 +134,7 @@ fn collect_stream(
         output,
         metadata.source_bytes.saturating_sub(offset),
         metadata.stored_bytes,
+        metadata.latest_seq,
     ))
 }
 
@@ -152,7 +155,7 @@ pub(super) fn collect(
     }
     let progress = Arc::new(BashProgress::new(started, call.progress()));
     progress.emit_initial();
-    let (mut stdout, stdout_bytes, stdout_end) = collect_stream(
+    let (mut stdout, stdout_bytes, stdout_end, stdout_seq) = collect_stream(
         client,
         artifacts,
         id,
@@ -163,7 +166,7 @@ pub(super) fn collect(
         ArtifactStream::Stdout,
         BashProgressStream::Stdout,
     )?;
-    let (mut stderr, stderr_bytes, stderr_end) = collect_stream(
+    let (mut stderr, stderr_bytes, stderr_end, stderr_seq) = collect_stream(
         client,
         artifacts,
         id,
@@ -252,7 +255,13 @@ pub(super) fn collect(
         }),
         cursor: Some(
             TaskCursor {
-                seq: descriptor["latestSeq"].as_u64().unwrap_or(0),
+                // Advance seq to the latest sequence covered by both stream
+                // captures so output already included here does not trigger a
+                // spurious empty wakeup on the next poll, while never skipping
+                // stdout emitted between the stdout and stderr capture calls.
+                seq: stdout_seq
+                    .min(stderr_seq)
+                    .max(descriptor["latestSeq"].as_u64().unwrap_or(0)),
                 stdout: stdout_end,
                 stderr: stderr_end,
             }

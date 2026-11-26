@@ -47,10 +47,11 @@ struct Capture {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::capability::process) struct CapturePage {
-    source_bytes: usize,
-    stored_bytes: usize,
-    truncated: bool,
-    data_base64: String,
+    pub(in crate::capability::process) source_bytes: usize,
+    pub(in crate::capability::process) stored_bytes: usize,
+    pub(in crate::capability::process) truncated: bool,
+    pub(in crate::capability::process) data_base64: String,
+    pub(in crate::capability::process) latest_seq: u64,
 }
 
 impl Capture {
@@ -102,6 +103,7 @@ impl Capture {
             stored_bytes: self.stored,
             truncated: self.truncated,
             data_base64: STANDARD.encode(bytes),
+            latest_seq: 0,
         })
     }
 }

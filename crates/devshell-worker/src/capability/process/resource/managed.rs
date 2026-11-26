@@ -160,10 +160,6 @@ pub(in crate::capability::process) struct ManagedProcess {
 }
 
 impl ManagedProcess {
-    pub fn is_persistent(&self) -> bool {
-        self.persistent
-    }
-
     pub fn provenance(&self) -> serde_json::Value {
         match &self.provenance {
             Some((command, cwd)) => serde_json::json!({"command": command, "cwd": cwd}),
@@ -222,12 +218,14 @@ impl ManagedProcess {
         offset: usize,
         limit: usize,
     ) -> Result<CapturePage, RpcError> {
-        self.state
-            .lock()
-            .map_err(lock_error)?
+        let mut state = self.state.lock().map_err(lock_error)?;
+        let latest_seq = state.output.latest_seq();
+        let mut page = state
             .captures
             .read(channel, offset, limit)
-            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))
+            .map_err(|error| RpcError::new("process.captureFailed", error.to_string()))?;
+        page.latest_seq = latest_seq;
+        Ok(page)
     }
 
     pub fn wait_done(&self, timeout: Duration) -> Result<bool, RpcError> {
@@ -376,6 +374,7 @@ impl ManagedProcess {
 
     pub fn kill(&self) -> Result<(), RpcError> {
         self.closed.store(true, Ordering::Release);
+        self.changed.notify_all();
         let control = self.control.lock().map_err(lock_error)?.clone();
         control
             .kill()

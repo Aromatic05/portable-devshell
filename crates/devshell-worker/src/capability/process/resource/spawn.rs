@@ -11,7 +11,11 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const RAPID_EXIT_WINDOW: Duration = Duration::from_secs(1);
+const MAX_RAPID_RESPAWN_EXITS: u32 = 5;
+const RESPAWN_RESET_BANNER: &[u8] = b"\x1b[?1049l\x1b[0m\r\n[shell restarted]\r\n";
 
 struct RespawnConfig {
     cwd: ResolvedPath,
@@ -160,14 +164,30 @@ impl ManagedProcess {
         std::thread::spawn(move || {
             let mut current_control = initial_control;
             let mut current_readers = readers;
+            let mut spawned_at = Instant::now();
+            let mut rapid_exits: u32 = 0;
             loop {
                 let exit = current_control
                     .wait()
                     .map(|(exit_code, signal)| Exit { exit_code, signal });
-                // The input endpoint no longer belongs to a live process.
-                if let Ok(mut input) = observed.input.lock() {
-                    input.take();
-                }
+                let will_respawn = observed.persistent
+                    && respawn_config.is_some()
+                    && !observed.closed.load(Ordering::Acquire);
+                // If respawning, install a fresh input channel immediately so
+                // the old writer thread exits cleanly while concurrent writes
+                // buffer for the new shell instead of failing with stdinClosed.
+                let mut next_input_rx = if will_respawn {
+                    let (next_tx, next_rx) = mpsc::sync_channel::<Vec<u8>>(32);
+                    if let Ok(mut input) = observed.input.lock() {
+                        *input = Some(next_tx);
+                    }
+                    Some(next_rx)
+                } else {
+                    if let Ok(mut input) = observed.input.lock() {
+                        input.take();
+                    }
+                    None
+                };
                 // Publish terminal status (or respawn) only after output streams have
                 // drained, so the command's final bytes are never lost.
                 let mut failure = None;
@@ -183,8 +203,35 @@ impl ManagedProcess {
                     }
                 }
 
-                if observed.persistent && !observed.closed.load(Ordering::Acquire) {
-                    if let Some(config) = respawn_config.as_ref() {
+                if will_respawn && !observed.closed.load(Ordering::Acquire) {
+                    if spawned_at.elapsed() < RAPID_EXIT_WINDOW {
+                        rapid_exits = rapid_exits.saturating_add(1);
+                    } else {
+                        rapid_exits = 0;
+                    }
+                    if rapid_exits >= MAX_RAPID_RESPAWN_EXITS {
+                        if let Ok(mut input) = observed.input.lock() {
+                            input.take();
+                        }
+                        let mut state = observed.state.lock().expect("process state lock poisoned");
+                        state.completion = Some(Err(
+                            "persistent terminal shell exited repeatedly".into(),
+                        ));
+                        state.version += 1;
+                        observed.changed.notify_all();
+                        return;
+                    }
+                    if rapid_exits > 0 {
+                        let shift = (rapid_exits - 1).min(4);
+                        let backoff = Duration::from_millis(100u64 << shift);
+                        let state = observed.state.lock().expect("process state lock poisoned");
+                        let _ = observed.changed.wait_timeout_while(state, backoff, |_| {
+                            !observed.closed.load(Ordering::Acquire)
+                        });
+                    }
+                    if !observed.closed.load(Ordering::Acquire)
+                        && let Some(config) = respawn_config.as_ref()
+                    {
                         let (cols, rows) = observed
                             .state
                             .lock()
@@ -201,7 +248,12 @@ impl ManagedProcess {
                         ) {
                             Ok(terminal) => {
                                 let new_control = Arc::new(Control::Pty(terminal.child));
+                                // Preserve state -> control lock order used by resize/kill.
                                 let closed_during_spawn = {
+                                    let mut state = observed
+                                        .state
+                                        .lock()
+                                        .expect("process state lock poisoned");
                                     let mut control_guard = observed
                                         .control
                                         .lock()
@@ -209,11 +261,31 @@ impl ManagedProcess {
                                     if observed.closed.load(Ordering::Acquire) {
                                         true
                                     } else {
+                                        if let Some(screen) = state.screen.as_ref() {
+                                            let (current_cols, current_rows) = screen.size();
+                                            if (current_cols, current_rows) != (cols, rows) {
+                                                let _ =
+                                                    new_control.resize(current_cols, current_rows);
+                                            }
+                                        }
+                                        if let Some(screen) = state.screen.as_mut() {
+                                            let _ = screen.process(RESPAWN_RESET_BANNER);
+                                        }
+                                        state
+                                            .captures
+                                            .append(OutputChannel::Terminal, RESPAWN_RESET_BANNER);
+                                        state
+                                            .output
+                                            .append(OutputChannel::Terminal, RESPAWN_RESET_BANNER);
                                         *control_guard = Arc::clone(&new_control);
+                                        observed.changed.notify_all();
                                         false
                                     }
                                 };
                                 if closed_during_spawn {
+                                    if let Ok(mut input) = observed.input.lock() {
+                                        input.take();
+                                    }
                                     let _ = new_control.kill();
                                     let _ = new_control.wait();
                                     drop(terminal.writer);
@@ -230,10 +302,13 @@ impl ManagedProcess {
                                     observed.changed.notify_all();
                                     return;
                                 }
-                                let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
-                                if let Ok(mut input) = observed.input.lock() {
-                                    *input = Some(input_tx);
-                                }
+                                let input_rx = next_input_rx.take().unwrap_or_else(|| {
+                                    let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
+                                    if let Ok(mut input) = observed.input.lock() {
+                                        *input = Some(input_tx);
+                                    }
+                                    input_rx
+                                });
                                 spawn_writer_thread(terminal.writer, input_rx);
                                 current_readers = vec![spawn_reader_thread(
                                     Arc::clone(&observed),
@@ -241,9 +316,13 @@ impl ManagedProcess {
                                     terminal.reader,
                                 )];
                                 current_control = new_control;
+                                spawned_at = Instant::now();
                                 continue;
                             }
                             Err(error) => {
+                                if let Ok(mut input) = observed.input.lock() {
+                                    input.take();
+                                }
                                 let mut state = observed
                                     .state
                                     .lock()
@@ -257,6 +336,9 @@ impl ManagedProcess {
                     }
                 }
 
+                if let Ok(mut input) = observed.input.lock() {
+                    input.take();
+                }
                 let mut state = observed.state.lock().expect("process state lock poisoned");
                 state.completion = Some(match failure {
                     Some(error) => Err(error),

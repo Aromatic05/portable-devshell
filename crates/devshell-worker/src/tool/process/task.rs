@@ -1,4 +1,4 @@
-use super::model::{BashRunOutput, TaskCursor};
+use super::model::{BashRunOutput, BashTermination, TaskCursor};
 use super::output::collect;
 use super::scope::*;
 use crate::capability::artifact::store::ArtifactStore;
@@ -151,7 +151,7 @@ impl ToolHandler for TaskInputTool {
         )?;
         let reason = if descriptor["state"] != "running" {
             "terminal"
-        } else if until_output && descriptor["latestSeq"].as_u64().unwrap_or(0) > cursor.seq {
+        } else if until_output && descriptor["latestSeq"].as_u64().unwrap_or(0) > wait_from_seq {
             "output"
         } else {
             "timeout"
@@ -172,6 +172,8 @@ impl ToolHandler for TaskInputTool {
 
         #[cfg(unix)]
         if !call.stateless
+            && result.termination == BashTermination::Exited
+            && cursor.stdout == 0
             && !result.stdout_truncated
             && !result.stderr_truncated
             && result.stdout_bytes.saturating_add(result.stderr_bytes)

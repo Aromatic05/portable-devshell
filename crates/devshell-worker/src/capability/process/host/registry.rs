@@ -106,10 +106,14 @@ impl Host {
             ));
         }
         while registry.processes.len() >= MAX_RESOURCES {
-            let Some(index) = registry.order.iter().position(|id| {
-                let process = &registry.processes[id];
-                !process.is_persistent() && process.descriptor().state != "running"
-            }) else {
+            // Live persistent terminals stay in "running" state across shell
+            // respawns, so they are protected automatically. Once explicitly
+            // closed (or permanently failed), their slot becomes reclaimable.
+            let Some(index) = registry
+                .order
+                .iter()
+                .position(|id| registry.processes[id].descriptor().state != "running")
+            else {
                 return Err(RpcError::new(
                     "process.resourceLimit",
                     "all process slots are active",

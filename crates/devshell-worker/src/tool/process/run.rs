@@ -32,7 +32,6 @@ pub(crate) fn run(
             "env": params.env,
             "preparedEnv": true,
             "tty": params.pty,
-            "keepStdin": params.pty,
             "persistent": false,
             "interactive": false,
         }),

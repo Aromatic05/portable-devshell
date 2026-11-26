@@ -283,7 +283,6 @@ impl ToolHandler for TerminalTool {
                                 "interactive": true,
                                 "persistent": true,
                                 "tty": true,
-                                "keepStdin": true,
                                 "name": params.name,
                                 "cwd": params.cwd.unwrap_or_else(|| "./".into()),
                                 "workspace": (!call.stateless).then_some(&call.workspace),

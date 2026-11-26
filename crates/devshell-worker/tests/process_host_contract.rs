@@ -659,13 +659,14 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
         "task_input",
         json!({
             "task": id,
-            "input": "exit\n",
+            "input": "printf '\\033[?1049h'; exit\n",
             "cursor": cursor,
-            "waitMs": 1000
+            "waitMs": 1500
         }),
     );
     assert_eq!(after_exit["termination"], "running", "{after_exit}");
     let mut cursor = after_exit["cursor"].as_str().unwrap().to_owned();
+    let mut respawn_output = after_exit["stdout"].as_str().unwrap().to_owned();
 
     // Send a command to the respawned shell (retry briefly if shell is still initializing).
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -683,7 +684,9 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
             let msg = &reply["message"];
             assert_eq!(msg["termination"], "running", "{msg}");
             cursor = msg["cursor"].as_str().unwrap().to_owned();
-            if let Some(pid) = extract_pid(msg["stdout"].as_str().unwrap(), "SECOND-PID:") {
+            let chunk = msg["stdout"].as_str().unwrap();
+            respawn_output.push_str(chunk);
+            if let Some(pid) = extract_pid(chunk, "SECOND-PID:") {
                 break pid;
             }
         }
@@ -691,12 +694,17 @@ fn persistent_terminal_auto_respawns_after_exit_and_closes_cleanly() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_ne!(first_pid, second_pid, "respawned shell must have a new PID");
+    assert!(
+        respawn_output.contains("[shell restarted]"),
+        "expected respawn reset banner in output: {respawn_output:?}"
+    );
 
     let inspected = fixture.tool("task_inspect", json!({"task": id}));
     assert_eq!(inspected["task"], id);
     assert_eq!(inspected["state"], "running");
     assert_eq!(inspected["cols"], 90);
     assert_eq!(inspected["rows"], 30);
+    assert_eq!(inspected["alternateScreen"], false, "{inspected}");
     assert!(inspected.get("formatted").is_none(), "{inspected}");
     assert!(inspected.get("restore").is_none(), "{inspected}");
     assert!(
@@ -774,4 +782,82 @@ fn task_input_opaque_cursor_and_manage_validation() {
         let response = fixture.tool_raw("task_manage", invalid.clone());
         assert_eq!(response["type"], "error", "{invalid}: {response}");
     }
+}
+
+#[test]
+fn persistent_terminal_rapid_exit_breaks_respawn_loop() {
+    let fixture = WorkerFixture::start("process-respawn-circuit");
+    let created = fixture.tool(
+        "task_manage",
+        json!({
+            "command": "create",
+            "name": "broken-shell",
+            "cwd": "./",
+            "shell": "/bin/false"
+        }),
+    );
+    let id = created["task"]["id"].as_str().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        let listed = fixture.tool("task_manage", json!({"command": "list"}));
+        let entry = listed["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .expect("terminal listed");
+        if entry["state"] == "failed" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "broken persistent shell never tripped circuit breaker: {entry}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn task_input_without_cursor_reports_timeout_when_no_new_output_follows_input() {
+    let fixture = WorkerFixture::start("process-input-timeout-reason");
+    let started = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "stty -echo; printf 'READY\\n'; IFS= read -r line; printf 'GOT:%s\\n' \"$line\"",
+            "pty": true,
+            "waitMs": 300
+        }),
+    );
+    let id = started["task"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(started["termination"], "running", "{started}");
+    assert!(
+        started["stdout"].as_str().unwrap().contains("READY"),
+        "{started}"
+    );
+
+    // Send a character without newline while echo is disabled and cursor is omitted:
+    // latestSeq is already > 0 from READY, yet no new output arrives after input.
+    let no_response = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "a",
+            "waitMs": 200
+        }),
+    );
+    assert_eq!(no_response["termination"], "running", "{no_response}");
+    assert_eq!(no_response["waitReason"], "timeout", "{no_response}");
+
+    let done = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "bc\n",
+            "cursor": no_response["cursor"],
+            "waitMs": 3000,
+            "untilExit": true
+        }),
+    );
+    assert_eq!(done["termination"], "exited", "{done}");
+    assert!(done["stdout"].as_str().unwrap().contains("GOT:abc"), "{done}");
 }

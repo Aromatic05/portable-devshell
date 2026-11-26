@@ -323,23 +323,28 @@ fn is_urgent_tool(method: &str) -> bool {
 }
 
 fn is_task_wait_observation(request: &RpcRequest) -> bool {
+    if request.method != "task_input" {
+        return false;
+    }
     let no_input = match request.params.get("input") {
         None | Some(serde_json::Value::Null) => true,
         Some(serde_json::Value::String(value)) => value.is_empty(),
         Some(_) => false,
     };
-    request.method == "task_input"
-        && no_input
-        && request
-            .params
-            .get("untilExit")
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-        && request
-            .params
-            .get("waitMs")
-            .and_then(serde_json::Value::as_u64)
-            .is_some_and(|wait_ms| wait_ms > 0)
+    if !no_input {
+        return false;
+    }
+    let until_exit = request
+        .params
+        .get("untilExit")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    // task_input defaults waitMs to 5000ms when omitted.
+    let effective_wait_ms = match request.params.get("waitMs") {
+        None | Some(serde_json::Value::Null) => 5_000,
+        Some(value) => value.as_u64().unwrap_or(0),
+    };
+    (until_exit && effective_wait_ms > 0) || effective_wait_ms > 5_000
 }
 
 fn tool_call_class(request: &RpcRequest) -> ToolCallClass {
@@ -415,19 +420,26 @@ mod tests {
         let registry = Arc::new(ActiveToolCallRegistry::new());
         let observations = (0..16)
             .map(|index| {
-                let params = if index % 2 == 0 {
-                    serde_json::json!({
+                let params = match index % 4 {
+                    0 => serde_json::json!({
                         "untilExit": true,
                         "task": format!("task-{index}"),
                         "waitMs": 60_000,
-                    })
-                } else {
-                    serde_json::json!({
+                    }),
+                    1 => serde_json::json!({
                         "untilExit": true,
                         "input": "",
                         "task": format!("task-{index}"),
                         "waitMs": 60_000,
-                    })
+                    }),
+                    2 => serde_json::json!({
+                        "untilExit": true,
+                        "task": format!("task-{index}"),
+                    }),
+                    _ => serde_json::json!({
+                        "task": format!("task-{index}"),
+                        "waitMs": 30_000,
+                    }),
                 };
                 registry
                     .acquire(&RpcRequest::request(

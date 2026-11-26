@@ -146,6 +146,7 @@ impl ManagedProcess {
         self.validate_terminal(&state, &input)?;
         self.closed
             .store(true, std::sync::atomic::Ordering::Release);
+        self.changed.notify_all();
         let control = self.control.lock().map_err(lock_error)?.clone();
         control
             .kill()
