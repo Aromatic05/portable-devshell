@@ -84,3 +84,124 @@ test("Agent edit summary keeps all-success batches successful", () => {
     assert.match(text, /write a.ts applied \+1/u);
     assert.doesNotMatch(text, /error=/u);
 });
+
+test("Agent model tool projection applies _meta.devshell.mcp.inputHints to matching properties", () => {
+    const tools = projectAgentModelTools([
+        {
+            name: "task_input",
+            description: "Send input or read task output",
+            _meta: {
+                devshell: {
+                    mcp: {
+                        inputHints: {
+                            ctxId: "Current Context ID.",
+                            input: "Raw UTF-8 text (use \\r for Enter, \\u0003 for Ctrl+C).",
+                            cursor: "Opaque cursor from bash_run, task_manage(create), or task_input.",
+                        },
+                    },
+                },
+            },
+            inputSchema: {
+                type: "object",
+                properties: {
+                    ctxId: { type: "string", description: "Consumer only" },
+                    task: { type: "string", description: "Original task description" },
+                    input: { type: "string", description: "Stale input doc" },
+                    cursor: { type: "string" },
+                },
+                required: ["ctxId", "task"],
+            },
+        },
+        {
+            name: "file_read",
+            description: "Read files",
+            _meta: {
+                devshell: {
+                    mcp: {
+                        inputHints: {
+                            selector: "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+                        },
+                    },
+                },
+            },
+            inputSchema: {
+                type: "object",
+                properties: {
+                    files: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                path: { type: "string" },
+                                selector: { type: "string", description: "Stale selector doc" },
+                            },
+                        },
+                    },
+                },
+                required: ["files"],
+            },
+        },
+    ]);
+
+    const taskInputSchema = tools[0]?.inputSchema as {
+        properties?: Record<string, { description?: string }>;
+        required?: string[];
+    };
+    assert.equal(taskInputSchema.properties?.ctxId, undefined);
+    assert.deepEqual(taskInputSchema.required, ["task"]);
+    assert.equal(taskInputSchema.properties?.task?.description, "Original task description");
+    assert.equal(
+        taskInputSchema.properties?.input?.description,
+        "Raw UTF-8 text (use \\r for Enter, \\u0003 for Ctrl+C).",
+    );
+    assert.equal(
+        taskInputSchema.properties?.cursor?.description,
+        "Opaque cursor from bash_run, task_manage(create), or task_input.",
+    );
+
+    const fileReadSchema = tools[1]?.inputSchema as {
+        properties?: {
+            files?: {
+                items?: {
+                    properties?: Record<string, { description?: string }>;
+                };
+            };
+        };
+    };
+    assert.equal(
+        fileReadSchema.properties?.files?.items?.properties?.selector?.description,
+        "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+    );
+});
+
+test("Agent bash/task result projection preserves detached, waitMs, and untilExit handoff state", () => {
+    const detachedResult = projectAgentModelToolResult("bash_run", {
+        termination: "running",
+        detached: true,
+        waitMs: 120_000,
+        untilExit: true,
+        waitReason: "timeout",
+        cursor: "cur-1",
+        task: { id: "task-1", status: "running" },
+        stdout: "building...",
+        stderr: "",
+    });
+    assert.match(
+        detachedResult,
+        /^termination=running detached=true waitMs=120000 untilExit=true\b/mu,
+    );
+    assert.match(detachedResult, /waitReason=timeout/u);
+
+    const normalResult = projectAgentModelToolResult("task_input", {
+        termination: "exited",
+        exitCode: 0,
+        detached: false,
+        untilExit: false,
+        durationMs: 42,
+        stdout: "done",
+        stderr: "",
+    });
+    assert.match(normalResult, /^termination=exited exitCode=0 durationMs=42$/mu);
+    assert.doesNotMatch(normalResult, /detached=/u);
+    assert.doesNotMatch(normalResult, /untilExit=/u);
+});

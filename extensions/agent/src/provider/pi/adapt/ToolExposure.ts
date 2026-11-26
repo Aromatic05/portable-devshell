@@ -22,10 +22,12 @@ export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
         if (toolName === "bash_run") return true;
         if (toolName !== "task_manage") return false;
         const result = asRecord(details);
-        // Pi's completion event has no input. Only create returns a task and cursor.
+        // Pi's completion event has no input. Expand when create returns a task
+        // and cursor, or when list returns at least one existing task.
         return (
-            typeof asRecord(result?.task)?.id === "string" &&
-            typeof result?.cursor === "string"
+            (typeof asRecord(result?.task)?.id === "string" &&
+                typeof result?.cursor === "string") ||
+            (Array.isArray(result?.tasks) && result.tasks.length > 0)
         );
     },
     gateway: ["task_manage"],

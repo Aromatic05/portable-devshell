@@ -1,4 +1,7 @@
-import type { ExtensionContext } from "@portable-devshell/extension";
+import type {
+    ExtensionContext,
+    ExtensionJsonValue,
+} from "@portable-devshell/extension";
 import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 
 import type { AgentToolSession } from "./provider/AgentToolSession.js";
@@ -27,11 +30,15 @@ export async function openAgentToolSession(
 }
 
 function adaptWorkerSession(worker: ExtensionWorkerSession): AgentToolSession {
-    const tools = worker.listTools().map((tool) => ({
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        name: tool.name,
-    }));
+    const tools = worker.listTools().map((tool) => {
+        const meta = (tool as { _meta?: ExtensionJsonValue })._meta;
+        return {
+            ...(meta === undefined ? {} : { _meta: meta }),
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            name: tool.name,
+        };
+    });
     return {
         closed: worker.closed,
         target: parseAgentWorkerTarget(

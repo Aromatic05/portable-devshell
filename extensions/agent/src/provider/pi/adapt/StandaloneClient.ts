@@ -156,6 +156,7 @@ export async function openStandaloneDevshellPiToolSession(
             await (await runtime.start()).snapshot;
         const opened = await tool.openSession(requested.workspace);
         const tools = opened.tools.map((tool) => ({
+            ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
             description: tool.description,
             inputSchema: tool.inputSchema,
             name: tool.name,

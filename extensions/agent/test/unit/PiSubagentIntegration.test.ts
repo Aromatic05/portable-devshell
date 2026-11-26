@@ -133,17 +133,17 @@ function terminalResponses(faux: FauxModule) {
             return call("task_manage", terminalCalls[0].input);
         },
         (context: FauxContext) => {
-            assertProcessToolExposure(context, false);
+            assertProcessToolExposure(context, true);
             assert.match(lastToolResultText(context, "task_manage", false), /existing-terminal/u);
             return call("task_manage", terminalCalls[1].input);
         },
         (context: FauxContext) => {
-            assertProcessToolExposure(context, false);
+            assertProcessToolExposure(context, true);
             assert.match(lastToolResultText(context, "task_manage", false), /exited/u);
             return call("task_manage", terminalCalls[2].input);
         },
         (context: FauxContext) => {
-            assertProcessToolExposure(context, false);
+            assertProcessToolExposure(context, true);
             assert.match(lastToolResultText(context, "task_manage", true), /tool\.invalidArguments/u);
             return call("task_manage", terminalCalls[3].input);
         },
@@ -673,7 +673,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
 });
 
 for (const mode of ["embedded", "standalone"] as const) {
-    test(`real Pi ${mode} main exposes terminal tools only after successful create`, async (t) => {
+    test(`real Pi ${mode} main exposes terminal tools when tasks are listed or created`, async (t) => {
         const root = await mkdtemp(join(tmpdir(), "devshell-pi-terminal-integration-"));
         t.after(() => rm(root, { force: true, recursive: true }));
         const agentDir = join(root, "agent");

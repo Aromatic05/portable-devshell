@@ -16,6 +16,10 @@ import type {
 import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
+import {
+    PI_PROCESS_TOOL_DOMAIN,
+    PiToolExposureController,
+} from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/runtime/AgentProcess.ts";
 import {
     parseAgentWorkerTarget,
@@ -416,6 +420,73 @@ test("Pi provider child does not inherit Extension sandbox permission flags", as
         );
         await rm(runtimeDirectory, { force: true, recursive: true });
     }
+});
+
+test("PiToolExposureController expands process tools when task_manage list returns existing tasks", () => {
+    const emitToolEnd = (
+        listeners: Set<(event: unknown) => void>,
+        toolName: string,
+        details: unknown,
+        isError = false,
+    ) => {
+        for (const listener of listeners) {
+            listener({
+                type: "tool_execution_end",
+                toolName,
+                isError,
+                result: { details },
+            });
+        }
+    };
+
+    const createHarness = () => {
+        let active = ["file_read", "bash_run", "task_input", "task_inspect", "task_manage"];
+        const listeners = new Set<(event: unknown) => void>();
+        const controller = new PiToolExposureController(
+            {
+                getActiveToolNames: () => [...active],
+                setActiveToolsByName: (names) => {
+                    active = [...names];
+                },
+                subscribe: (listener) => {
+                    listeners.add(listener);
+                    return () => listeners.delete(listener);
+                },
+            },
+            { process: PI_PROCESS_TOOL_DOMAIN },
+        );
+        return {
+            active: () => [...active],
+            controller,
+            emit: (toolName: string, details: unknown, isError = false) =>
+                emitToolEnd(listeners, toolName, details, isError),
+        };
+    };
+
+    const emptyList = createHarness();
+    assert.deepEqual(emptyList.active(), ["file_read", "bash_run", "task_manage"]);
+    emptyList.emit("task_manage", { tasks: [] });
+    assert.equal(emptyList.controller.isExpanded("process"), false);
+    emptyList.emit("task_manage", { taskId: "t1", state: "exited" });
+    assert.equal(emptyList.controller.isExpanded("process"), false);
+    emptyList.emit("task_manage", { tasks: [{ id: "t1" }] }, true);
+    assert.equal(emptyList.controller.isExpanded("process"), false);
+
+    emptyList.emit("task_manage", { tasks: [{ id: "t1", state: "running" }] });
+    assert.equal(emptyList.controller.isExpanded("process"), true);
+    assert.deepEqual(emptyList.active(), [
+        "file_read",
+        "bash_run",
+        "task_input",
+        "task_inspect",
+        "task_manage",
+    ]);
+    emptyList.controller.close();
+
+    const created = createHarness();
+    created.emit("task_manage", { task: { id: "t2" }, cursor: "c2" });
+    assert.equal(created.controller.isExpanded("process"), true);
+    created.controller.close();
 });
 
 function startOptions(

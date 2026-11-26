@@ -3,6 +3,7 @@ import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type { AgentWorkerTarget } from "../worker/AgentWorkerTarget.js";
 
 export interface AgentToolDefinition {
+    _meta?: ExtensionJsonValue;
     description: string;
     inputSchema: ExtensionJsonValue;
     name: string;

@@ -84,6 +84,7 @@ export function projectAgentModelTools(
                 inputSchema: projectAgentModelInputSchema(
                     tool.name,
                     tool.inputSchema,
+                    tool._meta,
                 ),
                 name: tool.name,
             };
@@ -130,6 +131,7 @@ export function projectAgentModelToolResult(
 function projectAgentModelInputSchema(
     toolName: string,
     schema: ExtensionJsonValue,
+    meta?: ExtensionJsonValue,
 ): ExtensionJsonValue {
     if (!isRecord(schema)) return schema;
     const properties = isRecord(schema.properties)
@@ -148,11 +150,62 @@ function projectAgentModelInputSchema(
               (entry) => typeof entry !== "string" || !hidden.has(entry),
           )
         : undefined;
-    return {
+    const projected: Record<string, ExtensionJsonValue> = {
         ...schema,
         properties,
         ...(required === undefined ? {} : { required }),
     };
+    const hints = readInputHints(meta);
+    return Object.keys(hints).length === 0
+        ? projected
+        : applyInputHints(projected, hints);
+}
+
+function readInputHints(
+    meta: ExtensionJsonValue | undefined,
+): Readonly<Record<string, string>> {
+    if (!isRecord(meta) || !isRecord(meta.devshell) || !isRecord(meta.devshell.mcp)) {
+        return {};
+    }
+    const inputHints = meta.devshell.mcp.inputHints;
+    if (!isRecord(inputHints)) return {};
+    return Object.fromEntries(
+        Object.entries(inputHints).filter(
+            (entry): entry is [string, string] =>
+                typeof entry[1] === "string" && entry[1].length > 0,
+        ),
+    );
+}
+
+function applyInputHints(
+    value: ExtensionJsonValue,
+    hints: Readonly<Record<string, string>>,
+): ExtensionJsonValue {
+    if (Array.isArray(value)) {
+        return value.map((entry) => applyInputHints(entry, hints));
+    }
+    if (!isRecord(value)) return value;
+    const updated: Record<string, ExtensionJsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "properties" && isRecord(entry)) {
+            updated.properties = Object.fromEntries(
+                Object.entries(entry).map(([propertyName, propertySchema]) => {
+                    const recursed = applyInputHints(propertySchema, hints);
+                    const hint = hints[propertyName];
+                    if (hint !== undefined && isRecord(recursed)) {
+                        return [
+                            propertyName,
+                            { ...recursed, description: hint },
+                        ];
+                    }
+                    return [propertyName, recursed];
+                }),
+            );
+            continue;
+        }
+        updated[key] = applyInputHints(entry, hints);
+    }
+    return updated;
 }
 
 function renderAgentModelToolResult(
@@ -278,6 +331,9 @@ function renderBashModelToolResult(
             field("exitCode", value.exitCode),
             field("termSignal", value.termSignal),
             value.timedOut === true ? "timedOut=true" : undefined,
+            value.detached === true ? "detached=true" : undefined,
+            field("waitMs", value.waitMs),
+            value.untilExit === true ? "untilExit=true" : undefined,
             field("durationMs", value.durationMs),
         ]),
     ];
@@ -542,7 +598,7 @@ function isJsonValue(value: unknown): value is ExtensionJsonValue {
 }
 
 function isRecord(
-    value: ExtensionJsonValue,
+    value: ExtensionJsonValue | undefined,
 ): value is Record<string, ExtensionJsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
