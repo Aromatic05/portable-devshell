@@ -39,8 +39,8 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
         for (const worker of workers) { worker.rpc.close(); worker.endpoint.close(); }
         await rm(root, { recursive: true, force: true });
     });
-    const definitions: ToolDefinition[] = ["tmux_run", "tmux_read"].map((name) => ({
-        name, description: name, group: "tmux", requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    const definitions: ToolDefinition[] = ["bash_run", "task_read"].map((name) => ({
+        name, description: name, group: name.split("_")[0]!, requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" },
     }));
     const makeState = (name: string) => {
         const instanceName = asInstanceName(name);
@@ -48,15 +48,17 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
         const audit = createAuditRuntime({ instanceName, filePath: paths.auditDatabaseFile, eventBufferSize: 100 });
         const endpoint = new Endpoint({ host: `${name}-worker` });
         const rpc = new Rpc(endpoint.bind("tool"), {
-            tmux_run: (payload) => {
+            bash_run: (payload) => {
                 workerRuns.push(name);
-                assert.equal((payload as { input: { timeMs: number } }).input.timeMs, WAIT_HANDOFF_MS);
-                return { task: { id: "beta-task", status: "running" }, timedOut: true, timeout: 240_000 };
+                assert.equal((payload as { input: { waitMs: number } }).input.waitMs, WAIT_HANDOFF_MS);
+                return { task: { id: "beta-task", status: "running" }, termination: "running", waitReason: "timeout", waitMs: WAIT_HANDOFF_MS };
             },
-            tmux_read: (payload) => {
+            task_read: (payload) => {
                 workerReads.push(name);
-                assert.equal((payload as { input: { task: string } }).input.task, "beta-task");
-                return { waitReason: "terminal", task: { id: "beta-task", status: "completed" } };
+                const input = (payload as { input: { task: string; untilExit: boolean; timeMs: number } }).input;
+                assert.equal(input.task, "beta-task");
+                assert.equal(input.untilExit, true);
+                return { waitReason: "terminal", termination: "exited", exitCode: 0, task: { id: "beta-task", status: "0" } };
             },
         });
         workers.push({ endpoint, rpc });
@@ -95,9 +97,9 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
     assert.equal(await alpha.task.api.goal.read("ctx-a"), undefined);
     assert.equal((await beta.task.api.goal.read("ctx-a"))?.objective, "Destination goal");
     await beta.refreshTools();
-    const run = await alpha.toolCalls.api.call("alpha", "tmux_run", { wait: "block", timeMs: 240_000 }, context) as Record<string, JsonValue>;
+    const run = await alpha.toolCalls.api.call("alpha", "bash_run", { waitMs: WAIT_HANDOFF_MS }, context) as Record<string, JsonValue>;
     assert.equal(run.detached, true);
-    assert.equal(run.timedOut, undefined);
+    assert.equal(run.waitReason, "timeout");
     await waitResolved;
     assert.deepEqual(workerRuns, ["beta"]);
     assert.deepEqual(workerReads, ["beta"]);
@@ -109,6 +111,6 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
     assert.deepEqual(await alpha.tools.readToolCalls(), []);
     const calls = await beta.tools.readToolCalls();
     assert.deepEqual(calls.map((call) => [call.instance, call.toolName, call.status]), [
-        ["beta", "workspace_goal", "completed"], ["beta", "tmux_run", "completed"],
+        ["beta", "workspace_goal", "completed"], ["beta", "bash_run", "completed"],
     ]);
 });
