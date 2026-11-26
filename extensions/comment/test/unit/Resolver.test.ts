@@ -382,6 +382,27 @@ test("task_input running result uses the same task continuation guidance", () =>
     assert.deepEqual(codes(controlled), ["bash.humanControl"]);
     assert.match(controlled[0]?.text ?? "", /human currently controls this terminal/u);
     assert.match(controlled[0]?.text ?? "", /task_inspect/u);
+
+    const altScreen = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: { id: "t1", status: "running", alternateScreen: true },
+    });
+    assert.deepEqual(codes(altScreen), ["bash.taskRunning", "bash.alternateScreen"]);
+    assert.match(altScreen[1]?.text ?? "", /alternate-screen mode/u);
+    assert.match(altScreen[1]?.text ?? "", /task_inspect/u);
+
+    const controlledAltScreen = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: {
+            id: "t1",
+            status: "running",
+            humanControl: true,
+            alternateScreen: true,
+        },
+    });
+    assert.deepEqual(codes(controlledAltScreen), ["bash.humanControl"]);
 });
 
 test("Process Host errors have task-specific recovery guidance", () => {

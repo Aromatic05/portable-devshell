@@ -50,6 +50,14 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
                     "Continue with task_input (omit input to poll) using the returned task ID and cursor, or stop it with task_manage(command: \"close\", task); the process is still running.",
                 ),
             );
+            if (asBoolean(asRecord(record.task)?.alternateScreen) === true) {
+                hints.push(
+                    diagnosticHint(
+                        "bash.alternateScreen",
+                        "This PTY is currently in alternate-screen mode (full-screen TUI). Use task_inspect to view the clean rendered screen instead of parsing raw ANSI output.",
+                    ),
+                );
+            }
         }
     } else if (termination === "signaled") {
         hints.push(
