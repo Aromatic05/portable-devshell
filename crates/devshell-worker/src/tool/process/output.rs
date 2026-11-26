@@ -147,7 +147,7 @@ fn collect_stream(
     .join()
     .map_err(|_| ToolError::new("process.ioFailed", "capture reader panicked"))??;
     if metadata.truncated {
-        output.truncated = true;
+        output.tail_truncated = true;
         output.artifact_draft = None;
         output.artifact_warning = Some("Process Host capture limit reached".into());
     }
@@ -210,8 +210,8 @@ pub(super) fn collect(
         BashProgressStream::Stderr,
     )?;
     progress.finish();
-    let retain = stdout.truncated
-        || stderr.truncated
+    let retain = stdout.is_truncated()
+        || stderr.is_truncated()
         || stdout.kept.len().saturating_add(stderr.kept.len()) > 4096;
     let retain_stdout = retain && !stdout.kept.is_empty();
     let retain_stderr = retain && !stderr.kept.is_empty();
@@ -268,8 +268,8 @@ pub(super) fn collect(
         stderr: render_inline_stream(&stderr),
         stdout_bytes,
         stderr_bytes,
-        stdout_truncated: stdout.truncated,
-        stderr_truncated: stderr.truncated,
+        stdout_truncated: stdout.is_truncated(),
+        stderr_truncated: stderr.is_truncated(),
         stdout_path: stdout_artifact.as_ref().map(tool_result_path),
         stderr_path: stderr_artifact.as_ref().map(tool_result_path),
         stdout_artifact,

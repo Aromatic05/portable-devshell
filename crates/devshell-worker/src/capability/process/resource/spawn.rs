@@ -240,7 +240,7 @@ impl ManagedProcess {
                             .lock()
                             .ok()
                             .and_then(|state| state.screen.as_ref().map(|screen| screen.size()))
-                            .unwrap_or((80, 24));
+                            .unwrap_or((120, 36));
                         match spawn_interactive(
                             &config.cwd,
                             &config.env,

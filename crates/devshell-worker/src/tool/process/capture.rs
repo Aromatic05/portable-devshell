@@ -12,14 +12,24 @@ use std::time::{Duration, Instant};
 const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
 const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
 const INLINE_TRUNCATION_MARKER: &[u8] = b"\n... [output omitted] ...\n";
+const INLINE_TAIL_TRUNCATION_MARKER: &[u8] =
+    b"\n... [capture limit reached; further output omitted] ...\n";
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 
 pub(in crate::tool) struct StreamOutput {
     pub(in crate::tool) kept: Vec<u8>,
-    pub(in crate::tool) truncated: bool,
+    pub(in crate::tool) middle_truncated: bool,
+    pub(in crate::tool) head_len: usize,
+    pub(in crate::tool) tail_truncated: bool,
     pub(in crate::tool) artifact_draft: Option<ArtifactDraft>,
     pub(in crate::tool) artifact_warning: Option<String>,
+}
+
+impl StreamOutput {
+    pub(in crate::tool) fn is_truncated(&self) -> bool {
+        self.middle_truncated || self.tail_truncated
+    }
 }
 
 pub(in crate::tool) fn spawn_reader(
@@ -37,7 +47,7 @@ pub(in crate::tool) fn spawn_reader(
         let tail_limit = max - head_limit;
         let mut head = Vec::with_capacity(head_limit);
         let mut tail = VecDeque::with_capacity(tail_limit);
-        let mut truncated = false;
+        let mut middle_truncated = false;
         loop {
             let count = reader
                 .read(&mut buffer)
@@ -61,21 +71,24 @@ pub(in crate::tool) fn spawn_reader(
             }
             for byte in &buffer[offset..count] {
                 if tail_limit == 0 {
-                    truncated = true;
+                    middle_truncated = true;
                     continue;
                 }
                 if tail.len() == tail_limit {
                     tail.pop_front();
-                    truncated = true;
+                    middle_truncated = true;
                 }
                 tail.push_back(*byte);
             }
         }
+        let head_len = if middle_truncated { head.len() } else { 0 };
         let mut kept = head;
         kept.extend(tail);
         Ok(StreamOutput {
             kept,
-            truncated,
+            middle_truncated,
+            head_len,
+            tail_truncated: false,
             artifact_draft,
             artifact_warning,
         })
@@ -267,32 +280,61 @@ pub(in crate::tool) fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
         kept.extend_from_slice(&output.kept[..head]);
         kept.extend_from_slice(&output.kept[tail_start..]);
         output.kept = kept;
+        output.middle_truncated = true;
+        output.head_len = head;
     }
-    output.truncated = true;
 }
 
 pub(in crate::tool) fn render_inline_stream(output: &StreamOutput) -> String {
-    if !output.truncated {
-        return String::from_utf8_lossy(&output.kept).to_string();
+    if output.middle_truncated {
+        let split = output.head_len.min(output.kept.len());
+        let head_end = utf8_floor_boundary(&output.kept[..split], split);
+        let tail_start = utf8_ceil_boundary(&output.kept, split);
+        let extra = INLINE_TRUNCATION_MARKER.len()
+            + if output.tail_truncated {
+                INLINE_TAIL_TRUNCATION_MARKER.len()
+            } else {
+                0
+            };
+        let mut rendered = Vec::with_capacity(output.kept.len() + extra);
+        rendered.extend_from_slice(&output.kept[..head_end]);
+        rendered.extend_from_slice(INLINE_TRUNCATION_MARKER);
+        rendered.extend_from_slice(&output.kept[tail_start..]);
+        if output.tail_truncated {
+            rendered.extend_from_slice(INLINE_TAIL_TRUNCATION_MARKER);
+        }
+        return String::from_utf8_lossy(&rendered).to_string();
     }
-    let mid = output.kept.len() / 2;
-    let head_end = utf8_floor_boundary(&output.kept, mid);
-    let tail_start = utf8_ceil_boundary(&output.kept, mid);
-    let mut rendered = Vec::with_capacity(output.kept.len() + INLINE_TRUNCATION_MARKER.len());
-    rendered.extend_from_slice(&output.kept[..head_end]);
-    rendered.extend_from_slice(INLINE_TRUNCATION_MARKER);
-    rendered.extend_from_slice(&output.kept[tail_start..]);
-    String::from_utf8_lossy(&rendered).to_string()
+    if output.tail_truncated {
+        if output.kept.is_empty() {
+            return String::new();
+        }
+        let mut rendered = String::from_utf8_lossy(&output.kept).into_owned();
+        rendered.push_str(std::str::from_utf8(INLINE_TAIL_TRUNCATION_MARKER).unwrap_or_default());
+        return rendered;
+    }
+    String::from_utf8_lossy(&output.kept).to_string()
 }
 
 fn utf8_floor_boundary(bytes: &[u8], mut index: usize) -> usize {
     index = index.min(bytes.len());
-    while index > 0 && (bytes[index] & 0xC0) == 0x80 {
-        index -= 1;
+    if index < bytes.len() {
+        while index > 0 && (bytes[index] & 0xC0) == 0x80 {
+            index -= 1;
+        }
     }
-    if index < bytes.len() && index > 0 {
+    if index > 0 {
         // Ensure the prefix up to `index` does not end with an incomplete multi-byte sequence.
-        let check_start = index.saturating_sub(4);
+        let mut check_start = index;
+        while check_start > 0
+            && index - check_start < 3
+            && (bytes[check_start - 1] & 0xC0) == 0x80
+        {
+            check_start -= 1;
+        }
+        if check_start > 0 && (bytes[check_start - 1] & 0x80) != 0 {
+            check_start -= 1;
+        }
         if let Err(err) = std::str::from_utf8(&bytes[check_start..index])
             && err.error_len().is_none()
         {
@@ -353,7 +395,7 @@ pub(in crate::tool) fn persist_artifact(
     if let Some(warning) = output.artifact_warning.take() {
         warnings.push(format!("{stream_name} artifact unavailable: {warning}"));
     }
-    if !output.truncated && !retain {
+    if !output.is_truncated() && !retain {
         output.artifact_draft.take();
         return None;
     }
@@ -382,17 +424,87 @@ mod tests {
         }
         let mut output = StreamOutput {
             kept,
-            truncated: false,
+            middle_truncated: false,
+            head_len: 0,
+            tail_truncated: false,
             artifact_draft: None,
             artifact_warning: None,
         };
         enforce_inline_rpc_budget(&mut output);
-        assert!(output.truncated);
+        assert!(output.is_truncated());
+        assert!(output.middle_truncated);
         let rendered = render_inline_stream(&output);
         assert!(rendered.contains("... [output omitted] ..."));
         assert!(
             !rendered.contains('\u{FFFD}'),
             "truncation must not split UTF-8 codepoints"
+        );
+    }
+
+    #[test]
+    fn tail_truncation_with_non_empty_bytes_does_not_split_middle() {
+        let output = StreamOutput {
+            kept: b"line1\nline2\nline3".to_vec(),
+            middle_truncated: false,
+            head_len: 0,
+            tail_truncated: true,
+            artifact_draft: None,
+            artifact_warning: None,
+        };
+        let rendered = render_inline_stream(&output);
+        assert_eq!(
+            rendered,
+            "line1\nline2\nline3\n... [capture limit reached; further output omitted] ...\n"
+        );
+        assert!(!rendered.contains("... [output omitted] ..."));
+    }
+
+    #[test]
+    fn tail_truncation_with_empty_bytes_returns_empty_string() {
+        let output = StreamOutput {
+            kept: Vec::new(),
+            middle_truncated: false,
+            head_len: 0,
+            tail_truncated: true,
+            artifact_draft: None,
+            artifact_warning: None,
+        };
+        assert_eq!(render_inline_stream(&output), "");
+    }
+
+    #[test]
+    fn middle_truncation_with_multibyte_utf8_preserves_head_len_boundary() {
+        let head = "你🚀".as_bytes(); // 3 + 4 = 7 bytes
+        let tail = "世A界".as_bytes(); // 3 + 1 + 3 = 7 bytes
+        // Slice head in the middle of 🚀 (keep 3 + 2 = 5 bytes) and tail in the middle of 世 (skip 1 byte)
+        let mut kept = Vec::new();
+        kept.extend_from_slice(&head[..5]);
+        let head_len = kept.len();
+        kept.extend_from_slice(&tail[1..]);
+
+        let output = StreamOutput {
+            kept,
+            middle_truncated: true,
+            head_len,
+            tail_truncated: false,
+            artifact_draft: None,
+            artifact_warning: None,
+        };
+        let rendered = render_inline_stream(&output);
+        assert_eq!(rendered, "你\n... [output omitted] ...\nA界");
+        assert!(
+            !rendered.contains('\u{FFFD}'),
+            "middle truncation must not emit replacement char: {rendered:?}"
+        );
+
+        let both = StreamOutput {
+            tail_truncated: true,
+            ..output
+        };
+        let rendered_both = render_inline_stream(&both);
+        assert_eq!(
+            rendered_both,
+            "你\n... [output omitted] ...\nA界\n... [capture limit reached; further output omitted] ...\n"
         );
     }
 }

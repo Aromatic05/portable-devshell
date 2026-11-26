@@ -269,8 +269,14 @@ impl ManagedProcess {
     pub fn input(&self, data: &[u8], controller: Option<&str>) -> Result<(), RpcError> {
         let state = self.state.lock().map_err(lock_error)?;
         Self::authorize_controller(&state, controller)?;
-        if let Some(Err(failure)) = &state.completion {
-            return Err(RpcError::new(failure.code, failure.message.clone()));
+        if let Some(completion) = &state.completion {
+            return Err(match completion {
+                Ok(_) => RpcError::new(
+                    "process.exited",
+                    "process has already exited; omit input to read retained output",
+                ),
+                Err(failure) => RpcError::new(failure.code, failure.message.clone()),
+            });
         }
         self.enqueue(data)
     }
@@ -403,8 +409,11 @@ impl ManagedProcess {
     }
 
     pub fn kill(&self) -> Result<(), RpcError> {
-        self.closed.store(true, Ordering::Release);
-        self.changed.notify_all();
+        {
+            let _state = self.state.lock().map_err(lock_error)?;
+            self.closed.store(true, Ordering::Release);
+            self.changed.notify_all();
+        }
         let control = self.control.lock().map_err(lock_error)?.clone();
         control
             .kill()

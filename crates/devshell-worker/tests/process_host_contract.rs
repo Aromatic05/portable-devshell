@@ -964,3 +964,111 @@ fn task_input_without_cursor_reports_timeout_when_no_new_output_follows_input() 
     assert_eq!(done["termination"], "exited", "{done}");
     assert!(done["stdout"].as_str().unwrap().contains("GOT:abc"), "{done}");
 }
+
+#[test]
+fn task_input_on_exited_pty_reports_process_exited_and_allows_reads() {
+    let fixture = WorkerFixture::start("process-exited-pty-input");
+    let finished = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "printf 'PTY-DONE\\n'",
+            "pty": true,
+            "waitMs": 5000
+        }),
+    );
+    assert_eq!(finished["termination"], "exited", "{finished}");
+    let id = finished["task"]["id"].as_str().unwrap();
+
+    let denied = fixture.tool_raw(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "hello\n",
+            "waitMs": 0
+        }),
+    );
+    assert_eq!(denied["type"], "error", "{denied}");
+    assert_eq!(denied["error"]["code"], "process.exited", "{denied}");
+    assert_eq!(
+        denied["error"]["message"],
+        "process has already exited; omit input to read retained output",
+        "{denied}"
+    );
+
+    let read_back = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "waitMs": 0
+        }),
+    );
+    assert_eq!(read_back["termination"], "exited", "{read_back}");
+    assert!(
+        read_back["stdout"].as_str().unwrap().contains("PTY-DONE"),
+        "{read_back}"
+    );
+}
+
+#[test]
+fn task_input_settle_cap_returns_promptly_under_continuous_output() {
+    let fixture = WorkerFixture::start("process-settle-cap");
+    let started = fixture.tool(
+        "bash_run",
+        json!({
+            "command": "stty -echo; printf 'READY\\n'; IFS= read -r _; while true; do printf 'tick\\n'; sleep 0.03; done",
+            "pty": true,
+            "waitMs": 500
+        }),
+    );
+    assert_eq!(started["termination"], "running", "{started}");
+    let id = started["task"]["id"].as_str().unwrap();
+
+    let begin = Instant::now();
+    let reply = fixture.tool(
+        "task_input",
+        json!({
+            "task": id,
+            "input": "go\n",
+            "waitMs": 5000
+        }),
+    );
+    let elapsed = begin.elapsed();
+    assert_eq!(reply["termination"], "running", "{reply}");
+    assert_eq!(reply["waitReason"], "output", "{reply}");
+    assert!(
+        reply["stdout"].as_str().unwrap().contains("tick"),
+        "{reply}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(2000),
+        "settle debounce cap should prevent waiting full waitMs (elapsed: {elapsed:?})"
+    );
+}
+
+#[test]
+fn persistent_terminal_closes_promptly_during_respawn_backoff() {
+    let fixture = WorkerFixture::start("process-close-during-backoff");
+    let created = fixture.tool(
+        "task_manage",
+        json!({
+            "command": "create",
+            "name": "backoff-shell",
+            "cwd": "./",
+            "shell": "/bin/false"
+        }),
+    );
+    let id = created["task"]["id"].as_str().unwrap().to_owned();
+    // Wait briefly so at least one rapid exit occurs and the supervisor enters backoff.
+    std::thread::sleep(Duration::from_millis(120));
+
+    let begin = Instant::now();
+    let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));
+    let elapsed = begin.elapsed();
+    assert_eq!(closed["taskId"], id, "{closed}");
+    assert_eq!(closed["killRequested"], true, "{closed}");
+    assert_eq!(closed["state"], "exited", "{closed}");
+    assert!(
+        elapsed < Duration::from_millis(1000),
+        "close should wake up backoff wait promptly (elapsed: {elapsed:?})"
+    );
+}

@@ -103,6 +103,7 @@ pub(super) fn wait_for(
     let deadline = Instant::now() + Duration::from_millis(wait_ms);
     let original_seq = seq;
     let mut settle_deadline: Option<Instant> = None;
+    let mut max_settle_deadline: Option<Instant> = None;
     let mut last_heartbeat = Instant::now();
     loop {
         if call.cancellation.is_cancelled() {
@@ -120,9 +121,12 @@ pub(super) fn wait_for(
             if settle_ms == 0 {
                 return Ok(descriptor);
             }
+            let cap = *max_settle_deadline.get_or_insert_with(|| {
+                (now + Duration::from_millis(settle_ms.saturating_mul(4))).min(deadline)
+            });
             match settle_deadline {
                 None => {
-                    settle_deadline = Some((now + Duration::from_millis(settle_ms)).min(deadline));
+                    settle_deadline = Some((now + Duration::from_millis(settle_ms)).min(cap));
                 }
                 Some(settle_at) if now >= settle_at => {
                     return Ok(descriptor);
@@ -166,12 +170,21 @@ pub(super) fn wait_for(
                 }
             }
         }
+        let last_frame_seq = output["frames"]
+            .as_array()
+            .and_then(|frames| frames.last())
+            .and_then(|frame| frame["seq"].as_u64())
+            .filter(|&frame_seq| frame_seq > seq);
         let next_seq = descriptor["latestSeq"].as_u64().unwrap_or(seq);
-        if next_seq > seq {
-            seq = next_seq;
+        let advanced_seq = last_frame_seq.unwrap_or(next_seq);
+        if advanced_seq > seq {
+            seq = advanced_seq;
             if until_output && settle_ms > 0 && seq > original_seq {
-                settle_deadline =
-                    Some((Instant::now() + Duration::from_millis(settle_ms)).min(deadline));
+                let now = Instant::now();
+                let cap = *max_settle_deadline.get_or_insert_with(|| {
+                    (now + Duration::from_millis(settle_ms.saturating_mul(4))).min(deadline)
+                });
+                settle_deadline = Some((now + Duration::from_millis(settle_ms)).min(cap));
             }
         } else if let Some(progress) = progress
             && last_heartbeat.elapsed() >= PROGRESS_HEARTBEAT_INTERVAL
