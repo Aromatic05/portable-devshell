@@ -10,6 +10,7 @@ import type { EventStreamEnvelope } from "../../client/Stream.js";
 import type {
     TerminalAttachInput,
     TerminalExitEvent,
+    TerminalInspectResult,
     TerminalOpenInput,
     TerminalOpenResult,
     TerminalOutputFrame,
@@ -26,6 +27,10 @@ export interface TerminalAttachment {
     ack(identity: TerminalVersionedIdentity, throughSeq: number): Promise<void>;
     close(): void;
     next(): Promise<TerminalStreamMessage>;
+    sendControl?(
+        takeover: boolean,
+        command: TerminalStreamCommandIdentity,
+    ): Promise<void>;
     sendInput(
         data: string,
         command: TerminalStreamCommandIdentity,
@@ -42,6 +47,9 @@ export interface TerminalTransport {
     get(
         identity: Pick<TerminalVersionedIdentity, "generation" | "terminalId">,
     ): Promise<TerminalSessionDescriptor>;
+    inspect?(
+        identity: Pick<TerminalVersionedIdentity, "generation" | "terminalId">,
+    ): Promise<TerminalInspectResult>;
     kill(
         identity: TerminalVersionedIdentity,
     ): Promise<TerminalSessionDescriptor>;
@@ -61,6 +69,8 @@ export function createTerminalTransport(
             ),
         get: (identity) =>
             port.request<TerminalSessionDescriptor>("get", identity),
+        inspect: (identity) =>
+            port.request<TerminalInspectResult>("inspect", identity),
         kill: (identity) =>
             port.request<TerminalSessionDescriptor>("kill", identity),
         list: () => port.request<TerminalSessionDescriptor[]>("list"),
@@ -121,6 +131,16 @@ class MessageStreamTerminalAttachment implements TerminalAttachment {
                 throughSeq,
                 version: identity.version,
             },
+        });
+    }
+
+    sendControl(
+        takeover: boolean,
+        command: TerminalStreamCommandIdentity,
+    ): Promise<void> {
+        return this.#stream.send({
+            name: "control",
+            payload: { ...command, takeover },
         });
     }
 
@@ -227,6 +247,28 @@ function readTerminalStreamMessage(
             kind: envelope.name,
         };
     }
+    if (envelope.name === "controlChanged") {
+        const session = payload.session;
+        if (session === undefined) return undefined;
+        const snapshot =
+            payload.snapshot === undefined
+                ? undefined
+                : readRecord(payload.snapshot);
+        return {
+            clientSeq: readInteger(payload, "clientSeq"),
+            humanControl: payload.humanControl === true,
+            kind: "controlChanged",
+            session: readTerminalSession(session),
+            ...(snapshot === undefined
+                ? {}
+                : {
+                      snapshot: {
+                          seq: readInteger(snapshot, "seq"),
+                          data: readString(snapshot, "data"),
+                      },
+                  }),
+        };
+    }
     if (envelope.name === "exit") {
         return { event: readTerminalExit(envelope.payload), kind: "exit" };
     }
@@ -237,14 +279,28 @@ function readTerminalSession(value: unknown): TerminalSessionDescriptor {
     const payload = readRecord(value);
     return {
         cols: readInteger(payload, "cols"),
+        ...(typeof payload.command === "string"
+            ? { command: payload.command }
+            : {}),
         createdAt: readString(payload, "createdAt"),
+        ...(typeof payload.cwd === "string" ? { cwd: payload.cwd } : {}),
         generation: readInteger(payload, "generation"),
+        ...(typeof payload.humanControl === "boolean"
+            ? { humanControl: payload.humanControl }
+            : {}),
         instance: readString(payload, "instance"),
         latestSeq: readInteger(payload, "latestSeq"),
+        ...(typeof payload.name === "string" ? { name: payload.name } : {}),
+        ...(typeof payload.persistent === "boolean"
+            ? { persistent: payload.persistent }
+            : {}),
         rows: readInteger(payload, "rows"),
         state: readState(payload.state),
         terminalId: readString(payload, "terminalId"),
         version: readInteger(payload, "version"),
+        ...(typeof payload.workspace === "string"
+            ? { workspace: payload.workspace }
+            : {}),
     };
 }
 

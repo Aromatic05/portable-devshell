@@ -8,25 +8,42 @@ export type TerminalSessionState =
 
 export interface TerminalSessionDescriptor {
     cols: number;
+    command?: string;
     createdAt: string;
+    cwd?: string;
     generation: number;
+    humanControl?: boolean;
     instance: string;
     latestSeq: number;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     state: TerminalSessionState;
     terminalId: string;
     version: number;
+    workspace?: string;
 }
 
 export interface TerminalOpenInput {
     cols: number;
     command?: string;
     cwd?: string;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     workspace: string;
 }
 
 export interface TerminalOpenResult extends TerminalSessionDescriptor {}
+
+export interface TerminalInspectResult {
+    cols: number;
+    cursor: { col: number; row: number };
+    lines: string[];
+    rows: number;
+    seq: number;
+    session: TerminalSessionDescriptor;
+}
 
 export interface TerminalAttachInput {
     fromSeq: number;
@@ -66,6 +83,13 @@ export type TerminalStreamMessage =
           clientSeq: number;
           identity: TerminalVersionedIdentity;
           kind: "inputAccepted" | "resized";
+      }
+    | {
+          clientSeq: number;
+          humanControl: boolean;
+          kind: "controlChanged";
+          session: TerminalSessionDescriptor;
+          snapshot?: { seq: number; data: string };
       }
     | { event: TerminalExitEvent; kind: "exit" }
     | { kind: "closed"; error?: Error; session?: TerminalSessionDescriptor };

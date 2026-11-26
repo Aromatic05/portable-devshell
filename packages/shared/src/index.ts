@@ -43,7 +43,7 @@ export { type ConnectionState, type DaemonState, type EffectiveSecurityMode, typ
 export { readInstanceSnapshot } from "./execution/process/Snapshot.js";
 export { createProcessTransport, PROCESS_PORT, type ProcessStartOptions, type ProcessTransport } from "./execution/process/Transport.js";
 export { ProcessViewModel } from "./execution/process/ViewModel.js";
-export { type TerminalAttachInput, type TerminalOpenInput, type TerminalOutputFrame, type TerminalSessionDescriptor, type TerminalSessionState, type TerminalStreamMessage, type TerminalVersionedIdentity } from "./execution/terminal/Model.js";
+export { type TerminalAttachInput, type TerminalInspectResult, type TerminalOpenInput, type TerminalOutputFrame, type TerminalSessionDescriptor, type TerminalSessionState, type TerminalStreamMessage, type TerminalVersionedIdentity } from "./execution/terminal/Model.js";
 export { createTerminalTransport, type TerminalAttachment, type TerminalTransport } from "./execution/terminal/Transport.js";
 export { bootstrapToolNamespace, isToolCallEvent, type ToolCallFailureStage, type ToolCallProvenance, type ToolCallQuery, type ToolCallSource, type ToolCallStatus, type ToolEvent, toolNamespace, toolSchema } from "./execution/toolcall/Model.js";
 export { resolveToolOutput, toolCallOutcome, toolCallOutput } from "./execution/toolcall/Projection.js";
