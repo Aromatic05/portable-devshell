@@ -54,7 +54,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         /changed from revision/iu, "stale Goal action must fail through the real MCP boundary");
         assert.deepEqual(await readGoal(), paused, "rejected action changed durable state");
         const faultMarker = `${marker}-exit7`;
-        const fault = (await call(client, "bash_run", { ctxId, command: `printf '%s' '${faultMarker}'; printf '%s' '${faultMarker}-stderr' >&2; exit 7`, timeoutMs: 10000 })).structuredContent;
+        const fault = (await call(client, "bash_run", { ctxId, command: `printf '%s' '${faultMarker}'; printf '%s' '${faultMarker}-stderr' >&2; exit 7`, waitMs: 10000 })).structuredContent;
         assert.equal(fault.exitCode, 7);
         assert.equal(fault.stdout, faultMarker);
         assert.equal(fault.stderr, `${faultMarker}-stderr`);
@@ -70,7 +70,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         // Gate completion on a file written by a later *real Worker* bash call.
         // A finite 10-minute guard prevents a failed harness leaving work alive.
         const command = `printf '%s\\n' '${startedMarker}' | tee -a ./effects.txt; n=0; while [ ! -f ./release ]; do n=$((n+1)); [ "$n" -lt 3000 ] || exit 97; sleep 0.2; done; printf '%s\\n' '${doneMarker}' | tee -a ./effects.txt`;
-        record("long-process-starting", { handoffBudgetMs: 180000, timeoutMs: 360000 });
+        record("long-process-starting", { handoffBudgetMs: 180000, waitMs: 360000 });
         const startedAt = Date.now();
         const launch = (await call(client, "bash_run", { ctxId, command, waitMs: 360000 }, 240000)).structuredContent;
         const elapsedMs = Date.now() - startedAt;
@@ -140,9 +140,9 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.equal((await snapshot(client, ctxId)).reentry.directives, undefined, "settled directive must leave the pending projection");
         record("restart-two-attempt-replay-fenced", { receipt: settled, hostDelivery: "simulated-rejected" });
 
-        const release = (await call(client, "bash_run", { ctxId, command: "printf 'release\\n' > ./release", timeoutMs: 10000 })).structuredContent;
+        const release = (await call(client, "bash_run", { ctxId, command: "printf 'release\\n' > ./release", waitMs: 10000 })).structuredContent;
         assert.equal(release.exitCode, 0, "fresh Worker execution after reconnect failed");
-        const completed = (await call(client, "task_read", { ctxId, task: terminalTask, untilExit: true, timeMs: 30000, cursor: launch.cursor }, 45000)).structuredContent;
+        const completed = (await call(client, "task_input", { ctxId, task: terminalTask, untilExit: true, waitMs: 30000, cursor: launch.cursor }, 45000)).structuredContent;
         assert.equal(completed.task?.id, terminalTask);
         assert.equal(completed.task?.status, "0", JSON.stringify(completed));
         assert.match(completed.stdout, new RegExp(doneMarker, "u"));
@@ -209,7 +209,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const diskLogs = disk.filter((row) => row.collection === "logs" && row.value.callId === faultCall.callId).map((row) => row.value);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stdout").map((entry) => entry.message).join(""), faultMarker);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stderr").map((entry) => entry.message).join(""), `${faultMarker}-stderr`);
-        const terminalRead = persistedCalls.find((entry) => entry.toolName === "task_read" && entry.output?.stdout?.includes(doneMarker));
+        const terminalRead = persistedCalls.find((entry) => entry.toolName === "task_input" && entry.output?.stdout?.includes(doneMarker));
         assert.ok(terminalRead, "SQLite must retain the independently verified terminal completion output");
         assert.deepEqual((await readWaitDocument(fixture)).waits.find((entry) => entry.waitId === wait.waitId), finalWait);
         record("sqlite-audit-events-verified", { calls: persistedCalls.length, waitEvents, launchCount: 1, resumeExecutions: 1, attemptExecutions: 1 });

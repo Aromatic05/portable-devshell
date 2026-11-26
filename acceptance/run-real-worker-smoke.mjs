@@ -53,7 +53,7 @@ try {
             "aromatic-pc",
             fixture.workspace,
             "bash_run",
-            JSON.stringify({ command: "pwd", timeoutMs: 30_000 }),
+            JSON.stringify({ command: "pwd", waitMs: 30_000 }),
         ],
         fixture.env,
     );
@@ -73,7 +73,7 @@ try {
             "bash_run",
             JSON.stringify({
                 command: "echo portable-devshell",
-                timeoutMs: 30_000,
+                waitMs: 30_000,
             }),
         ],
         fixture.env,

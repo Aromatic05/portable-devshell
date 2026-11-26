@@ -434,7 +434,7 @@ test("testspace PTY activity uses the unified bash_run wait contract", () => {
                 command: "printf '\\033[32mtestspace pty tick 7\\033[0m\\n'",
                 ctxId: "ctx-test",
                 waitMs: 2000,
-                tty: true,
+                pty: true,
             },
             name: "bash_run",
         },

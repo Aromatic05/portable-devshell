@@ -112,7 +112,7 @@ export async function runTestspaceWorkspaceSmoke({
         // explicit Workspace still shows their audited target and status.
         const command = "printf 'mcpapp-smoke-ok\\n'";
         const shell = await call({ name: "bash_run", arguments: {
-            command, cwd: "./", timeoutMs: 10_000,
+            command, cwd: "./", waitMs: 10_000,
             purpose: "Verify ToolCall history in Workspace",
         } });
         assert.equal(shell.isError, false);
@@ -145,7 +145,7 @@ export async function runTestspaceWorkspaceSmoke({
         const sample = "./mcpapp-semantic-smoke.txt";
         const prepare = await call({ name: "bash_run", arguments: {
             cwd: "./", command: "printf 'widget-marker\\n' > ./mcpapp-semantic-smoke.txt",
-            timeoutMs: 10_000, purpose: "Prepare isolated renderer sample",
+            waitMs: 10_000, purpose: "Prepare isolated renderer sample",
         } });
         assert.equal(prepare.isError, false);
         assert.equal(prepare.structuredContent?.exitCode, 0);

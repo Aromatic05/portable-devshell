@@ -169,7 +169,7 @@ try {
         instance,
         workspace,
         "bash_run",
-        JSON.stringify({ command, timeoutMs: 30_000 }),
+        JSON.stringify({ command, waitMs: 30_000 }),
     ]);
     if (!call.stdout.includes("portable-devshell-client-smoke")) {
         throw new Error(

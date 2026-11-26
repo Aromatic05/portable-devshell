@@ -97,7 +97,7 @@ MCP 按请求选择两个共享 event bus 的 handler：
 - `/<instance>/mcp` 与 `/<instance>/mcp/openai-session`：OpenAI 会话绑定，保留 MCP App 私有能力；裸 URL 仍使用原 OAuth resource。
 - `/<instance>/mcp/agy-session`：agy 对话绑定。只提供会话绑定，不承诺客户端自动唤醒或续跑。
 - `/<instance>/mcp/explicit`：Gemini Web / 通用客户端，显式传递 `ctxId`。
-- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 9 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`task_read`、`task_input`、`task_inspect`、`task_manage`。
+- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 8 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`task_input`、`task_inspect`、`task_manage`。
 
 `tools/list`、`tools/call` 和资源使用同一入口契约，不按 metadata 切换。OAuth audience 按完整 URL 校验。完整模型见 [Context](context.md)。
 
@@ -130,7 +130,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Environment       | `environ_info`、`environ_remote`                                                               |
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
-| Task / Terminal   | `task_input`、`task_read`、`task_inspect`、`task_manage`                           |
+| Task / Terminal   | `task_input`、`task_inspect`、`task_manage`                           |
 | Goal              | `workspace_goal`（最终目标管理）                                                      |
 | Comment           | Comment `mcp.tools` 提供 `progress_report`（面向用户的进度报告）                        |
 | Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |
@@ -194,7 +194,7 @@ bash_run           若仍在启动调用的等待阶段，终止对应进程
 file read/search   在读取/扫描安全点停止
 file_edit          已完成的原子子操作不回滚
 artifact read      停止读取并释放 lease
-task_read          只停止本次等待；已启动 task 继续运行，读取游标互相独立
+task_input         只停止本次等待；已启动 task 继续运行，读取游标互相独立
 ```
 
 取消不是事务回滚协议。durable Wait 的 Stop waiting 仅停止观察，不终止 Process Host 持有的任务。

@@ -42,7 +42,7 @@ inlineToolCalls = false
 
 启用后才提供 Workspace 的展示与自动恢复能力。关闭时回收当前 Instance 的 App presence/capability、Wait recovery 和相关 Goal continuation/re-entry 资格；它不停止 Worker、不删除 Context、不关闭 MCP endpoint，也不移除 bash/file/task/terminal 等基本工具。TUI 的 Instance Config 页面可以修改该设置。
 
-`inlineToolCalls` 默认关闭，只影响普通工具调用的嵌入式结果 UI，**不影响 Fullscreen Workspace、必要的交互 UI 或 Audit**。如需在 Workspace 已启用的 Instance 上展示 Inline，可显式将其设为 `true`；目前仅 `bash_run`、`file_read`、`file_edit`、`artifact_viewImage` 会获得 Inline 资源。尤其 `progress_report`、`environ_info`、`task_read` 等不会创建额外 iframe。历史 ToolCall 的 UI 资源仍可读取。
+`inlineToolCalls` 默认关闭，只影响普通工具调用的嵌入式结果 UI，**不影响 Fullscreen Workspace、必要的交互 UI 或 Audit**。如需在 Workspace 已启用的 Instance 上展示 Inline，可显式将其设为 `true`；目前仅 `bash_run`、`file_read`、`file_edit`、`artifact_viewImage` 会获得 Inline 资源。尤其 `progress_report`、`environ_info`、`task_input` 等不会创建额外 iframe。历史 ToolCall 的 UI 资源仍可读取。
 
 App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知道 `ctxId` 不是授权；审批状态属于 Core，MCP App 只调用经过验证的审批操作。
 
@@ -52,7 +52,7 @@ MCP App 使用官方 MCP Apps SDK，按用途分三类资源：
 
 - **Fullscreen Workspace**：Overview、Activity；Overview 显示当前 Goal、待审批请求、后台 Wait，Activity 显示审计记录。
 - **Inline Interaction**：等待用户处理的 Approval / Wait，不要求打开 Fullscreen。
-- **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `task_read` 的结果在 Activity 中按对应 Task 汇聚。
+- **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `task_input` 的结果在 Activity 中按对应 Task 汇聚。
 
 ToolCall 的完整记录由 Audit 持久化；Activity 在原始 Inline 卡片被 Host 销毁后仍可按需读取输出、图片和 Terminal transcript。普通 ToolCall 的 Inline 输出不依赖 Workspace 的 Live Lease。
 
@@ -94,7 +94,7 @@ waiting
   └── cancelled / consumed
 ```
 
-主要来源是 `bash_run(waitMs >= 180000)`、`task_read` 的长等待和其他需要后台恢复的工作。`detached` 不是 Task 失败，且不会自动停止进程。
+主要来源是 `bash_run(waitMs >= 180000)`、`task_input` 的长等待和其他需要后台恢复的工作。`detached` 不是 Task 失败，且不会自动停止进程。
 
 `bash_run(waitMs >= 180000)` 使用最长 180 秒同步等待窗口，HTTP SSE 每 15 秒发送 keepalive。窗口内 Task 完成则在当前工具调用返回结果；窗口结束后仍在运行则转为 durable handoff，Worker 上的 Task 继续运行，后台 tracker 观察最终结果或超时。
 

@@ -36,7 +36,7 @@ export async function runTestspaceInstanceCreateSmoke({ endpoint, runtimeDirecto
         const bash = async (command) => {
             const result = await client.callTool({
                 name: "bash_run",
-                arguments: { command, ctxId, timeoutMs: 30_000 },
+                arguments: { command, ctxId, waitMs: 30_000 },
             });
             assert.notEqual(result.isError, true, JSON.stringify(result));
             return result.structuredContent ?? {};

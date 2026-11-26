@@ -76,9 +76,9 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
                     cursor: launch.cursor,
                     untilExit: true,
                     task: taskId,
-                    timeMs: FINAL_READ_TIMEOUT_MS,
+                    waitMs: FINAL_READ_TIMEOUT_MS,
                 },
-                name: "task_read",
+                name: "task_input",
             },
             {
                 maxTotalTimeout: FINAL_READ_TIMEOUT_MS + 15_000,
@@ -86,16 +86,16 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             },
         );
         const finalReadMs = Date.now() - readStartedAt;
-        assertToolSuccess(completed, "long wait task_read");
+        assertToolSuccess(completed, "long wait task_input");
         const completion = completed.structuredContent;
         if (readTaskStatus(completion) !== "0") {
             throw new Error(
-                `long wait task_read did not return a successful task: ${JSON.stringify(completion)}`,
+                `long wait task_input did not return a successful task: ${JSON.stringify(completion)}`,
             );
         }
         if (typeof completion?.stdout !== "string" || !completion.stdout.includes(marker)) {
             throw new Error(
-                `long wait task_read missed the completion marker: ${JSON.stringify(completion)}`,
+                `long wait task_input missed the completion marker: ${JSON.stringify(completion)}`,
             );
         }
 

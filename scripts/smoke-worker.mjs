@@ -69,7 +69,6 @@ try {
                 "task_input",
                 "task_inspect",
                 "task_manage",
-                "task_read",
             ]) {
                 if (!names.includes(name)) {
                     throw new Error(
@@ -119,8 +118,7 @@ try {
                 : "printf 'portable-devshell-smoke\\n'";
         const result = await callTool("bash_run", {
             command,
-            maxCaptureBytes: 4096,
-            timeoutMs: 10_000,
+            waitMs: 10_000,
         });
         if (
             result.exitCode !== 0 ||

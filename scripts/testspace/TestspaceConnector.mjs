@@ -28,7 +28,7 @@ export function createSafeAction(name, { ctxId, iteration, goal }) {
                 arguments: {
                     command: `printf 'testspace connector tick ${iteration}\\n'; pwd`,
                     ctxId,
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 name,
             };
@@ -65,7 +65,7 @@ export function createSafeAction(name, { ctxId, iteration, goal }) {
                     command: `printf '\\033[32mtestspace pty tick ${iteration}\\033[0m\\n'`,
                     ctxId,
                     waitMs: 2000,
-                    tty: true,
+                    pty: true,
                 },
                 name: "bash_run",
             };

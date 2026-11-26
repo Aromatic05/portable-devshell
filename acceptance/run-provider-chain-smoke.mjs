@@ -143,7 +143,7 @@ try {
             arguments: {
                 command: `printf x >> '${join(reverseWorkspace, "should-not-run")}'`,
                 ctxId,
-                timeoutMs: 5_000,
+                waitMs: 5_000,
             },
         });
         offlineBlocked = failedCall.isError === true;
@@ -311,7 +311,7 @@ function runWorker(args, allowFailure = false) {
 async function callBash(mcpClient, ctxId, command) {
     const result = await mcpClient.callTool({
         name: "bash_run",
-        arguments: { command, ctxId, timeoutMs: 30_000 },
+        arguments: { command, ctxId, waitMs: 30_000 },
     });
     assert.notEqual(result.isError, true, JSON.stringify(result));
     return result.structuredContent ?? {};
