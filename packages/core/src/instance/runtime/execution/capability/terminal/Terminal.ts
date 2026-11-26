@@ -2,6 +2,7 @@ import type {
     WorkerTerminalAttachResult,
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
+    WorkerTerminalInspectResult,
     WorkerTerminalNotification,
     WorkerTerminalOpenInput,
     WorkerTerminalPort,
@@ -51,6 +52,13 @@ export class WorkerTerminal implements WorkerTerminalPort {
         Awaited<ReturnType<NonNullable<WorkerTerminalPort["control"]>>>
     > {
         return await this.#request("terminal.control", input);
+    }
+
+    async inspect(input: {
+        generation: number;
+        terminalId: string;
+    }): Promise<WorkerTerminalInspectResult> {
+        return await this.#request("terminal.inspect", input);
     }
 
     async write(
@@ -110,7 +118,8 @@ function parseNotification(
     if (
         method !== "terminal.output" &&
         method !== "terminal.exit" &&
-        method !== "terminal.error"
+        method !== "terminal.error" &&
+        method !== "terminal.control"
     )
         return undefined;
     if (typeof params !== "object" || params === null || Array.isArray(params))
@@ -124,6 +133,29 @@ function parseNotification(
         return message === undefined
             ? undefined
             : { method, params: { terminalId, generation, message } };
+    }
+    if (method === "terminal.control") {
+        if (typeof value.humanControl !== "boolean") return undefined;
+        const cols = readInteger(value.cols);
+        const rows = readInteger(value.rows);
+        const version = readInteger(value.version);
+        const name = readString(value.name);
+        const cwd = readString(value.cwd);
+        const workspace = readString(value.workspace);
+        return {
+            method,
+            params: {
+                ...(cols === undefined ? {} : { cols }),
+                ...(cwd === undefined ? {} : { cwd }),
+                generation,
+                humanControl: value.humanControl,
+                ...(name === undefined ? {} : { name }),
+                ...(rows === undefined ? {} : { rows }),
+                terminalId,
+                ...(version === undefined ? {} : { version }),
+                ...(workspace === undefined ? {} : { workspace }),
+            },
+        };
     }
     if (method === "terminal.output") {
         const seq = readInteger(value.seq);

@@ -1,25 +1,43 @@
 import type {
+    TerminalInspectResult,
     TerminalOutputFrame,
     TerminalSessionDescriptor,
 } from "@portable-devshell/shared";
 
 export interface WorkerTerminalDescriptor {
     cols: number;
+    command?: string;
     createdAtMs: number;
+    cwd?: string;
     generation: number;
+    humanControl?: boolean;
     latestSeq: number;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     state: "running" | "exited";
     terminalId: string;
     version: number;
+    workspace?: string;
 }
 
 export interface WorkerTerminalOpenInput {
     cols: number;
     command?: string;
     cwd?: string;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     workspace: string;
+}
+
+export interface WorkerTerminalInspectResult {
+    cols: number;
+    cursor: { col: number; row: number };
+    lines: string[];
+    rows: number;
+    seq: number;
+    session: WorkerTerminalDescriptor;
 }
 
 export interface WorkerTerminalIdentity {
@@ -62,6 +80,20 @@ export type WorkerTerminalNotification =
           };
       }
     | {
+          method: "terminal.control";
+          params: {
+              cols?: number;
+              cwd?: string;
+              generation: number;
+              humanControl: boolean;
+              name?: string;
+              rows?: number;
+              terminalId: string;
+              version?: number;
+              workspace?: string;
+          };
+      }
+    | {
           method: "terminal.exit";
           params: {
               exitCode: number;
@@ -92,6 +124,10 @@ export interface WorkerTerminalPort {
         released?: boolean;
         renewed?: boolean;
     }>;
+    inspect?(input: {
+        generation: number;
+        terminalId: string;
+    }): Promise<WorkerTerminalInspectResult>;
     write(
         input: WorkerTerminalIdentity & { data: string },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
@@ -112,14 +148,31 @@ export interface TerminalProcessExit {
     signal: number;
 }
 
+export interface TerminalProcessMetadataUpdate {
+    cols?: number;
+    command?: string;
+    cwd?: string;
+    humanControl?: boolean;
+    name?: string;
+    persistent?: boolean;
+    rows?: number;
+    version?: number;
+    workspace?: string;
+}
+
 export interface TerminalProcess {
     dispose?(): void;
     acquireControl?(): Promise<TerminalRestore>;
     releaseControl?(): Promise<void>;
+    restoreSnapshot?(): Promise<TerminalRestore | undefined>;
+    inspect?(): Promise<Omit<TerminalInspectResult, "session">>;
     kill(): void | Promise<void>;
     onData(listener: (data: string, sourceSeq?: number) => void): () => void;
     onError?(listener: (error: Error) => void): () => void;
     onExit(listener: (exit: TerminalProcessExit) => void): () => void;
+    onMetadataChange?(
+        listener: (update: TerminalProcessMetadataUpdate) => void,
+    ): () => void;
     resize(cols: number, rows: number): void | Promise<void>;
     write(data: string): void | Promise<void>;
 }
@@ -128,18 +181,26 @@ export interface TerminalBackendOpenInput {
     cols: number;
     command?: string;
     cwd?: string;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     workspace: string;
 }
 
 export interface TerminalBackendSessionIdentity {
     cols?: number;
+    command?: string;
     createdAt?: string;
+    cwd?: string;
+    humanControl?: boolean;
+    name?: string;
+    persistent?: boolean;
     recoverable?: boolean;
     rows?: number;
     generation: number;
     terminalId: string;
     version: number;
+    workspace?: string;
 }
 
 export interface TerminalBackendSession {
@@ -153,6 +214,7 @@ export type TerminalBackendOpenResult =
 export interface TerminalBackend {
     open(input: TerminalBackendOpenInput): Promise<TerminalBackendOpenResult>;
     recover?(known?: ReadonlySet<string>): Promise<TerminalBackendSession[]>;
+    listMetadata?(): Promise<readonly TerminalBackendSessionIdentity[]>;
 }
 
 export interface TerminalSessionRuntimeOptions {
@@ -160,6 +222,7 @@ export interface TerminalSessionRuntimeOptions {
     maxReplayBytes?: number;
     maxTerminalHistory?: number;
     now?: () => Date;
+    onControlReleased?(session: TerminalSessionDescriptor): void | Promise<void>;
 }
 
 export interface TerminalOpenRequest {
@@ -168,6 +231,8 @@ export interface TerminalOpenRequest {
     command?: string;
     cwd?: string;
     instance: string;
+    name?: string;
+    persistent?: boolean;
     rows: number;
     workspace: string;
 }
@@ -186,6 +251,8 @@ export interface TerminalAttachment {
     readonly replay: TerminalOutputFrame[];
     readonly session: TerminalSessionDescriptor;
     detach(): void;
+    releaseControl(): Promise<void>;
+    restoreSnapshot(): Promise<TerminalRestore | undefined>;
     takeControl(): Promise<TerminalRestore | undefined>;
     resize(cols: number, rows: number): Promise<void>;
     write(data: string): Promise<void>;
@@ -199,6 +266,10 @@ export interface TerminalSessionApi {
     ): Promise<TerminalSessionDescriptor[]>;
     attach(request: TerminalAttachRequest): TerminalAttachment;
     get(terminalId: string): TerminalSessionDescriptor;
+    inspect(
+        terminalId: string,
+        generation: number,
+    ): Promise<TerminalInspectResult>;
     assertVersion(
         terminalId: string,
         generation: number,

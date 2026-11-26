@@ -282,6 +282,83 @@ test("worker terminal backend anchors recovered snapshot seq to preserve continu
     ]);
 });
 
+test("worker terminal backend resyncs mid-session stream.gap via restore snapshot without failing session", async () => {
+    const worker = new FakeWorkerTerminal();
+    worker.latestSeq = 1;
+    let attachCalls = 0;
+    const controllable: WorkerTerminalPort = {
+        open: (input) => worker.open(input),
+        attach: async (input) => {
+            attachCalls += 1;
+            worker.attaches.push(input);
+            if (attachCalls === 1) {
+                return {
+                    replay: [
+                        {
+                            dataBase64: Buffer.from("initial").toString("base64"),
+                            seq: 1,
+                        },
+                    ],
+                    session: worker.descriptor(),
+                };
+            }
+            if (!input.restore) {
+                throw Object.assign(new Error("gap"), { code: "stream.gap" });
+            }
+            return {
+                replay: [],
+                session: { ...worker.descriptor(), latestSeq: 50 },
+                snapshot: { data: "\x1bcresynced-at-50", seq: 50 },
+            };
+        },
+        write: (input) => worker.write(input),
+        resize: (input) => worker.resize(input),
+        kill: (input) => worker.kill(input),
+        list: () => worker.list(),
+        onNotification: (listener) => worker.onNotification(listener),
+        onConnected: (listener) => worker.onConnected(listener),
+        onDisconnected: (listener) => worker.onDisconnected(listener),
+    };
+    const backend = new WorkerTerminalBackend({ worker: controllable });
+    const opened = await backend.open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const process = "process" in opened ? opened.process : opened;
+    const frames: Array<{ data: string; seq?: number }> = [];
+    const errors: Error[] = [];
+    process.onData((data, seq) => frames.push({ data, seq }));
+    process.onError?.((error) => errors.push(error));
+    assert.deepEqual(frames, [{ data: "initial", seq: 1 }]);
+
+    // Simulate a lossy drop where frames 2..50 were evicted and seq 51 arrives.
+    worker.notification?.({
+        method: "terminal.output",
+        params: {
+            dataBase64: Buffer.from("dropped-trigger").toString("base64"),
+            generation: 9,
+            seq: 51,
+            terminalId: "remote-terminal",
+        },
+    });
+    await waitFor(() => frames.length === 2);
+    assert.deepEqual(errors, []);
+    // Contiguous localSeq (2) prevents TerminalSessionService from failing the session.
+    assert.deepEqual(frames[1], { data: "\x1bcresynced-at-50", seq: 2 });
+
+    worker.notification?.({
+        method: "terminal.output",
+        params: {
+            dataBase64: Buffer.from("after-resync").toString("base64"),
+            generation: 9,
+            seq: 51,
+            terminalId: "remote-terminal",
+        },
+    });
+    assert.deepEqual(frames[2], { data: "after-resync", seq: 3 });
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {

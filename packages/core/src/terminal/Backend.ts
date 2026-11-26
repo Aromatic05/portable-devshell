@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import { STREAM_GAP_CODE, type TerminalInspectResult } from "@portable-devshell/shared";
 import type {
     WorkerTerminalPort,
     WorkerTerminalDescriptor,
@@ -8,8 +9,10 @@ import type {
     TerminalBackendOpenInput,
     TerminalBackendOpenResult,
     TerminalBackendSession,
+    TerminalBackendSessionIdentity,
     TerminalProcess,
     TerminalProcessExit,
+    TerminalProcessMetadataUpdate,
     TerminalRestore,
 } from "./Api.js";
 
@@ -23,6 +26,10 @@ export class WorkerTerminalBackend implements TerminalBackend {
             cols: input.cols,
             ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+            ...(input.name === undefined ? {} : { name: input.name }),
+            ...(input.persistent === undefined
+                ? {}
+                : { persistent: input.persistent }),
             rows: input.rows,
             workspace: input.workspace,
         });
@@ -56,6 +63,10 @@ export class WorkerTerminalBackend implements TerminalBackend {
             }),
         );
     }
+
+    async listMetadata(): Promise<readonly TerminalBackendSessionIdentity[]> {
+        return (await this.options.worker.list()).map(remoteIdentity);
+    }
 }
 
 class WorkerTerminalProcess implements TerminalProcess {
@@ -64,6 +75,9 @@ class WorkerTerminalProcess implements TerminalProcess {
     >();
     readonly #errorListeners = new Set<(error: Error) => void>();
     readonly #exitListeners = new Set<(exit: TerminalProcessExit) => void>();
+    readonly #metadataListeners = new Set<
+        (update: TerminalProcessMetadataUpdate) => void
+    >();
     readonly #decoder = new StringDecoder("utf8");
     readonly #pendingData: Array<{ data: string; seq: number }> = [];
     readonly #unsubscribeConnected: () => void;
@@ -136,15 +150,11 @@ class WorkerTerminalProcess implements TerminalProcess {
             }
             this.#controller = result.controller;
             this.#startControlHeartbeat();
-            this.#descriptor = result.session;
+            this.#descriptor = { ...result.session, humanControl: true };
+            this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
             try {
                 if (result.snapshot.seq > this.#lastSeq) await this.#resume();
-                const seq =
-                    this.#localSeq - (this.#lastSeq - result.snapshot.seq);
-                if (seq < 0 || result.snapshot.seq > this.#lastSeq)
-                    throw new Error(
-                        "Terminal control snapshot is outside the output boundary.",
-                    );
+                const seq = this.#mapHostSeq(result.snapshot.seq);
                 snapshot = { seq, data: result.snapshot.data };
             } catch (error) {
                 await this.#releaseControl();
@@ -158,6 +168,57 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async releaseControl(): Promise<void> {
         await this.#serialize(async () => await this.#releaseControl());
+    }
+
+    async restoreSnapshot(): Promise<TerminalRestore | undefined> {
+        let snapshot: TerminalRestore | undefined;
+        await this.#serialize(async () => {
+            if (this.#closed) return;
+            const attached = await this.#worker.attach({
+                fromSeq: this.#lastSeq,
+                generation: this.#descriptor.generation,
+                restore: true,
+                terminalId: this.#descriptor.terminalId,
+            });
+            if (this.#closed) return;
+            this.#descriptor = attached.session;
+            this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+            if (attached.snapshot !== undefined) {
+                if (attached.snapshot.seq > this.#lastSeq) {
+                    await this.#applyAttached(attached);
+                }
+                snapshot = {
+                    data: attached.snapshot.data,
+                    seq: this.#mapHostSeq(attached.snapshot.seq),
+                };
+            }
+        });
+        return snapshot;
+    }
+
+    async inspect(): Promise<Omit<TerminalInspectResult, "session">> {
+        if (this.#worker.inspect === undefined) {
+            throw new Error("Worker does not provide terminal inspect.");
+        }
+        const result = await this.#worker.inspect({
+            generation: this.#descriptor.generation,
+            terminalId: this.#descriptor.terminalId,
+        });
+        this.#descriptor = result.session;
+        this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+        return {
+            cols: result.cols,
+            cursor: result.cursor,
+            lines: result.lines,
+            rows: result.rows,
+            seq: result.seq,
+        };
+    }
+
+    #mapHostSeq(hostSeq: number): number {
+        if (hostSeq > this.#lastSeq) return this.#localSeq;
+        const delta = this.#lastSeq - hostSeq;
+        return this.#localSeq >= delta ? this.#localSeq - delta : this.#localSeq;
     }
 
     #startControlHeartbeat(): void {
@@ -192,7 +253,11 @@ class WorkerTerminalProcess implements TerminalProcess {
             generation: this.#descriptor.generation,
             controller,
         });
-        if (this.#controller === controller) this.#controller = undefined;
+        if (this.#controller === controller) {
+            this.#controller = undefined;
+            this.#descriptor = { ...this.#descriptor, humanControl: false };
+            this.#emitMetadata({ humanControl: false });
+        }
     }
 
     async kill(): Promise<void> {
@@ -224,6 +289,13 @@ class WorkerTerminalProcess implements TerminalProcess {
             queueMicrotask(() => listener(exit));
         }
         return () => this.#exitListeners.delete(listener);
+    }
+
+    onMetadataChange(
+        listener: (update: TerminalProcessMetadataUpdate) => void,
+    ): () => void {
+        this.#metadataListeners.add(listener);
+        return () => this.#metadataListeners.delete(listener);
     }
 
     async resize(cols: number, rows: number): Promise<void> {
@@ -307,14 +379,34 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async #resume(): Promise<void> {
         if (this.#closed) return;
-        const attached = await this.#worker.attach({
-            fromSeq: this.#lastSeq,
-            ...(this.#localSeq === 0 && this.#worker.control !== undefined
-                ? { restore: true }
-                : {}),
-            generation: this.#descriptor.generation,
-            terminalId: this.#descriptor.terminalId,
-        });
+        const initialRestore =
+            this.#localSeq === 0 && this.#worker.control !== undefined;
+        let attached;
+        try {
+            attached = await this.#worker.attach({
+                fromSeq: this.#lastSeq,
+                ...(initialRestore ? { restore: true } : {}),
+                generation: this.#descriptor.generation,
+                terminalId: this.#descriptor.terminalId,
+            });
+        } catch (error) {
+            if (!initialRestore && isStreamGapError(error)) {
+                attached = await this.#worker.attach({
+                    fromSeq: this.#lastSeq,
+                    generation: this.#descriptor.generation,
+                    restore: true,
+                    terminalId: this.#descriptor.terminalId,
+                });
+            } else {
+                throw error;
+            }
+        }
+        await this.#applyAttached(attached);
+    }
+
+    async #applyAttached(
+        attached: Awaited<ReturnType<WorkerTerminalPort["attach"]>>,
+    ): Promise<void> {
         if (this.#closed) return;
         if (
             attached.session.terminalId !== this.#descriptor.terminalId ||
@@ -323,17 +415,20 @@ class WorkerTerminalProcess implements TerminalProcess {
             throw new Error("Remote terminal attachment identity changed.");
         }
         this.#descriptor = attached.session;
+        this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
         if (attached.snapshot !== undefined) {
-            // Reset the decoder as well as the terminal. A snapshot is a
-            // complete state seed at an explicit Host sequence boundary; anchor
-            // localSeq at snapshot.seq + 1 so client sequence continuity holds
-            // across Control restarts.
+            // Reset the decoder as well as the terminal. For initial recovery
+            // after a Control restart (localSeq === 0), anchor localSeq at
+            // snapshot.seq + 1 so client sequence continuity holds. For a
+            // mid-session resync after stream.gap (localSeq > 0), advance
+            // localSeq contiguously by 1 so downstream attachments receive the
+            // full screen reset frame without tripping a fatal sequence gap.
             this.#decoder.end();
             this.#lastSeq = attached.snapshot.seq;
-            this.#localSeq = Math.max(
-                this.#localSeq + 1,
-                attached.snapshot.seq + 1,
-            );
+            this.#localSeq =
+                this.#localSeq === 0
+                    ? attached.snapshot.seq + 1
+                    : this.#localSeq + 1;
             this.#emitData(attached.snapshot.data, this.#localSeq);
         }
         for (const frame of attached.replay)
@@ -359,6 +454,39 @@ class WorkerTerminalProcess implements TerminalProcess {
         }
         if (notification.method === "terminal.error") {
             this.#scheduleResume();
+            return;
+        }
+        if (notification.method === "terminal.control") {
+            const update: TerminalProcessMetadataUpdate = {
+                ...(notification.params.cols === undefined
+                    ? {}
+                    : { cols: notification.params.cols }),
+                ...(notification.params.cwd === undefined
+                    ? {}
+                    : { cwd: notification.params.cwd }),
+                humanControl: notification.params.humanControl,
+                ...(notification.params.name === undefined
+                    ? {}
+                    : { name: notification.params.name }),
+                ...(notification.params.rows === undefined
+                    ? {}
+                    : { rows: notification.params.rows }),
+                ...(notification.params.version === undefined
+                    ? {}
+                    : { version: notification.params.version }),
+                ...(notification.params.workspace === undefined
+                    ? {}
+                    : { workspace: notification.params.workspace }),
+            };
+            this.#descriptor = {
+                ...this.#descriptor,
+                ...update,
+                version: Math.max(
+                    this.#descriptor.version,
+                    update.version ?? this.#descriptor.version,
+                ),
+            };
+            this.#emitMetadata(update);
             return;
         }
         if (notification.method === "terminal.output") {
@@ -418,6 +546,10 @@ class WorkerTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#dataListeners]) listener(data, seq);
     }
 
+    #emitMetadata(update: TerminalProcessMetadataUpdate): void {
+        for (const listener of [...this.#metadataListeners]) listener(update);
+    }
+
     #fail(error: Error): void {
         if (this.#closed) return;
         this.#closed = true;
@@ -434,16 +566,65 @@ class WorkerTerminalProcess implements TerminalProcess {
     }
 }
 
-function remoteIdentity(descriptor: WorkerTerminalDescriptor) {
+function remoteIdentity(
+    descriptor: WorkerTerminalDescriptor,
+): TerminalBackendSessionIdentity {
     return {
         cols: descriptor.cols,
+        ...(descriptor.command === undefined
+            ? {}
+            : { command: descriptor.command }),
         createdAt: new Date(descriptor.createdAtMs).toISOString(),
+        ...(descriptor.cwd === undefined ? {} : { cwd: descriptor.cwd }),
+        ...(descriptor.humanControl === undefined
+            ? {}
+            : { humanControl: descriptor.humanControl }),
+        ...(descriptor.name === undefined ? {} : { name: descriptor.name }),
+        ...(descriptor.persistent === undefined
+            ? {}
+            : { persistent: descriptor.persistent }),
         recoverable: true,
         rows: descriptor.rows,
         generation: descriptor.generation,
         terminalId: descriptor.terminalId,
         version: descriptor.version,
+        ...(descriptor.workspace === undefined
+            ? {}
+            : { workspace: descriptor.workspace }),
     };
+}
+
+function metadataFromDescriptor(
+    descriptor: WorkerTerminalDescriptor,
+): TerminalProcessMetadataUpdate {
+    return {
+        cols: descriptor.cols,
+        ...(descriptor.command === undefined
+            ? {}
+            : { command: descriptor.command }),
+        ...(descriptor.cwd === undefined ? {} : { cwd: descriptor.cwd }),
+        ...(descriptor.humanControl === undefined
+            ? {}
+            : { humanControl: descriptor.humanControl }),
+        ...(descriptor.name === undefined ? {} : { name: descriptor.name }),
+        ...(descriptor.persistent === undefined
+            ? {}
+            : { persistent: descriptor.persistent }),
+        rows: descriptor.rows,
+        version: descriptor.version,
+        ...(descriptor.workspace === undefined
+            ? {}
+            : { workspace: descriptor.workspace }),
+    };
+}
+
+function isStreamGapError(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === STREAM_GAP_CODE
+    );
 }
 
 function asError(error: unknown): Error {

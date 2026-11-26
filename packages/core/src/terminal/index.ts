@@ -7,10 +7,13 @@ import type {
     WorkerTerminalPort,
 } from "./Api.js";
 
-export function createTerminalRuntime(worker: WorkerTerminalPort): TerminalRuntime {
+export function createTerminalRuntime(
+    worker: WorkerTerminalPort,
+    options: TerminalSessionRuntimeOptions = {},
+): TerminalRuntime {
     return {
         api: new WorkerTerminalBackend({ worker }),
-        sessions: createTerminalSessionRuntime(),
+        sessions: createTerminalSessionRuntime(options),
     };
 }
 

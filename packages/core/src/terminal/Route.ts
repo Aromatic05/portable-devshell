@@ -60,6 +60,10 @@ export function createTerminalRouteModule(
                         : { command: input.command }),
                     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
                     instance: options.instance,
+                    ...(input.name === undefined ? {} : { name: input.name }),
+                    ...(input.persistent === undefined
+                        ? {}
+                        : { persistent: input.persistent }),
                     rows: input.rows,
                     workspace: input.workspace,
                 })) as unknown as JsonValue;
@@ -81,6 +85,16 @@ export function createTerminalRouteModule(
                     input.terminalId,
                 );
                 return session as unknown as JsonValue;
+            },
+            inspect: async (request) => {
+                await ensureRecovered();
+                const input = readIdentity(request.payload);
+                const session = options.sessions.get(input.terminalId);
+                assertInstance(session.instance, options.instance);
+                return (await options.sessions.inspect(
+                    input.terminalId,
+                    input.generation,
+                )) as unknown as JsonValue;
             },
             kill: async (request) => {
                 await ensureRecovered();
@@ -161,6 +175,33 @@ export function createTerminalRouteModule(
                         throw invalidInput(
                             "Terminal stream identity does not match the attachment.",
                         );
+                    if (event.name === "control") {
+                        const target = options.sessions.get(identity.terminalId);
+                        assertGeneration(
+                            target.generation,
+                            identity.generation,
+                            identity.terminalId,
+                        );
+                        const takeover = payload.takeover === true;
+                        const snapshot = takeover
+                            ? await attachment.takeControl()
+                            : (await attachment.releaseControl(), undefined);
+                        if (snapshot !== undefined) {
+                            lastAckedSeq = Math.max(lastAckedSeq, snapshot.seq);
+                        }
+                        await stream.send({
+                            name: "controlChanged",
+                            payload: {
+                                clientSeq: identity.clientSeq,
+                                humanControl: takeover,
+                                session: options.sessions.get(
+                                    identity.terminalId,
+                                ),
+                                ...(snapshot === undefined ? {} : { snapshot }),
+                            } as unknown as JsonValue,
+                        });
+                        return;
+                    }
                     options.sessions.assertVersion(
                         identity.terminalId,
                         identity.generation,
@@ -306,9 +347,17 @@ export function createTerminalRouteModule(
                         .catch(() => undefined);
                 });
                 try {
+                    const needsObserveSnapshot =
+                        !input.takeover &&
+                        input.fromSeq === 0 &&
+                        current.latestSeq > 0 &&
+                        (attachment.replay.length === 0 ||
+                            attachment.replay[0]!.seq > 1);
                     const snapshot = input.takeover
                         ? await attachment.takeControl()
-                        : undefined;
+                        : needsObserveSnapshot
+                          ? await attachment.restoreSnapshot()
+                          : undefined;
                     if (endedFlag) {
                         attachment.detach();
                         return;
@@ -363,6 +412,12 @@ export function createTerminalRouteModule(
 
 function readOpenInput(value: JsonValue | undefined): TerminalOpenInput {
     const payload = readRecord(value);
+    if (
+        payload.persistent !== undefined &&
+        typeof payload.persistent !== "boolean"
+    ) {
+        throw invalidInput("Terminal persistent must be a boolean.");
+    }
     return {
         cols: readIntegerField(payload, "cols"),
         ...(payload.command === undefined
@@ -371,6 +426,12 @@ function readOpenInput(value: JsonValue | undefined): TerminalOpenInput {
         ...(payload.cwd === undefined
             ? {}
             : { cwd: readString(payload.cwd, "cwd") }),
+        ...(payload.name === undefined
+            ? {}
+            : { name: readString(payload.name, "name") }),
+        ...(payload.persistent === undefined
+            ? {}
+            : { persistent: payload.persistent }),
         rows: readIntegerField(payload, "rows"),
         workspace: readString(payload.workspace, "workspace"),
     };

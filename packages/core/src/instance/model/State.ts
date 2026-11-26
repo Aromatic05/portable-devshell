@@ -110,7 +110,22 @@ export class InstanceState {
                 this.tools.invokeInternal(toolName, input, context, signal),
             paths,
         });
-        this.terminal = createTerminalRuntime(dependencies.terminal);
+        this.terminal = createTerminalRuntime(dependencies.terminal, {
+            onControlReleased: async (session) => {
+                await appendEvent("terminal.controlReleased", {
+                    cols: session.cols,
+                    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+                    generation: session.generation,
+                    ...(session.name === undefined ? {} : { name: session.name }),
+                    releasedAt: new Date().toISOString(),
+                    rows: session.rows,
+                    terminalId: session.terminalId,
+                    ...(session.workspace === undefined
+                        ? {}
+                        : { workspace: session.workspace }),
+                });
+            },
+        });
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
             [workspaceGoalDefinition(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],

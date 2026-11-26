@@ -499,3 +499,91 @@ test("recovered session anchored at snapshot seq serves both resuming clients an
     resumed.detach();
     fresh.detach();
 });
+
+test("terminal session propagates rich metadata and fires onControlReleased once on handoff", async () => {
+    const metadataListeners = new Set<
+        (update: {
+            cols?: number;
+            humanControl?: boolean;
+            rows?: number;
+            version?: number;
+        }) => void
+    >();
+    const released: Array<{
+        cols: number;
+        name?: string;
+        rows: number;
+        terminalId: string;
+    }> = [];
+    const process: TerminalProcess = {
+        kill() {},
+        onData() {
+            return () => undefined;
+        },
+        onExit() {
+            return () => undefined;
+        },
+        onMetadataChange(listener) {
+            metadataListeners.add(listener);
+            return () => metadataListeners.delete(listener);
+        },
+        resize() {},
+        write() {},
+    };
+    const service = new TerminalSessionService({
+        onControlReleased: (session) => {
+            released.push({
+                cols: session.cols,
+                ...(session.name === undefined ? {} : { name: session.name }),
+                rows: session.rows,
+                terminalId: session.terminalId,
+            });
+        },
+    });
+    const opened = await service.open({
+        backend: {
+            open: async () => ({
+                identity: {
+                    cols: 120,
+                    cwd: "./",
+                    generation: 1,
+                    humanControl: false,
+                    name: "dev-server",
+                    persistent: true,
+                    recoverable: true,
+                    rows: 36,
+                    terminalId: "term-handoff",
+                    version: 1,
+                    workspace: "/workspace",
+                },
+                process,
+            }),
+        },
+        cols: 120,
+        instance: "alpha",
+        name: "dev-server",
+        persistent: true,
+        rows: 36,
+        workspace: "/workspace",
+    });
+    assert.equal(opened.name, "dev-server");
+    assert.equal(opened.persistent, true);
+    assert.equal(opened.humanControl, false);
+
+    for (const listener of metadataListeners) {
+        listener({ cols: 60, humanControl: true, rows: 20, version: 2 });
+    }
+    assert.equal(service.get("term-handoff").humanControl, true);
+    assert.equal(released.length, 0);
+
+    for (const listener of metadataListeners) {
+        listener({ cols: 120, humanControl: false, rows: 36, version: 3 });
+    }
+    // Duplicate release notification must not emit a second handoff event.
+    for (const listener of metadataListeners) {
+        listener({ humanControl: false });
+    }
+    assert.deepEqual(released, [
+        { cols: 120, name: "dev-server", rows: 36, terminalId: "term-handoff" },
+    ]);
+});
