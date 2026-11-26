@@ -125,22 +125,46 @@ test("file_edit failure in operation 41 survives server preview and UI truncatio
     expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(25);
 });
 
-test("bash_run and task_inspect render the shared process result contract", async () => {
+test("bash_run, task_input, task_inspect and task_manage render the unified process result contract", async () => {
     let view = await display({ name: "bash_run", isError: false, output: {
-        task: { id: "process-17", status: "running" },
+        task: { id: "process-17", status: "running", pty: true },
         stdout: "building...\n", stderr: "",
         termination: "running", waitReason: "timeout", waitMs: 250,
-    } }, { command: "pnpm build", waitMs: 250 });
+    } }, { command: "pnpm build", waitMs: 250, pty: true });
     expect(view.querySelector(".toolcall-line")?.textContent).toContain("Running");
     expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("building...");
     expect(view.textContent).toContain("running");
     await act(async () => { root?.unmount(); root = undefined; });
     container?.remove();
+    view = await display({ name: "task_input", isError: false, output: {
+        task: { id: "process-17", status: "0", pty: true },
+        stdout: "done\n", stderr: "", exitCode: 0,
+        cursor: "cursor-2", waitReason: "terminal", waitMs: 1000, termination: "exited",
+    } }, { task: "process-17", input: "hello\r", cursor: "cursor-1" });
+    expect(view.querySelector(".tc-info")?.textContent).toContain("process-17");
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("done");
+    expect(view.querySelector(".tc-stats")?.textContent).toContain("Exit0");
+    await act(async () => { root?.unmount(); root = undefined; });
+    container?.remove();
     view = await display({ name: "task_inspect", isError: false, output: {
-        text: "$ vim main.rs\n-- INSERT --", cols: 80, rows: 24,
-    } }, { terminal: "process-17" });
+        task: "process-17", state: "running", humanControl: false, seq: 1,
+        rows: 24, cols: 80, cursorRow: 1, cursorCol: 1, alternateScreen: false,
+        text: "$ vim main.rs\n-- INSERT --",
+    } }, { task: "process-17" });
     expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("INSERT");
     expect(view.textContent).toContain("Terminal snapshot");
+    expect(view.textContent).toContain("80×24");
+    await act(async () => { root?.unmount(); root = undefined; });
+    container?.remove();
+    view = await display({ name: "task_manage", isError: false, output: {
+        tasks: [{
+            id: "process-17", kind: "terminal", persistent: true, pty: true,
+            state: "running", name: "dev-shell", cwd: "/workspace",
+            humanControl: true, createdAtMs: 1234,
+        }],
+    } }, { command: "list" });
+    expect(view.textContent).toContain("dev-shell (process-17)");
+    expect(view.textContent).toContain("human control");
 });
 
 test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {

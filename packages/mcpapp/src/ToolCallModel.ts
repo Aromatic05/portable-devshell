@@ -57,8 +57,7 @@ export const toolTitles: Record<string, string> = {
     file_grep: "Search content",
     file_glob: "Find files",
     file_edit: "Edit files",
-    task_read: "Read task output",
-    task_input: "Send terminal input",
+    task_input: "Task input",
     task_inspect: "Inspect terminal",
     task_manage: "Manage terminals",
     progress_report: "Progress report",
@@ -100,10 +99,14 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
                 ? (total ?? operations.length) + " file operation" + ((total ?? operations.length) === 1 ? "" : "s")
                 : "Apply file changes";
         }
-        case "task_read": return string(args?.task) ?? summary ?? "Task transcript";
-        case "task_input": return string(args?.task) ?? summary ?? "Terminal input";
-        case "task_inspect": return string(args?.terminal) ?? summary ?? "Terminal snapshot";
-        case "task_manage": return string(args?.command) ?? summary ?? "Terminal resources";
+        case "task_input": return string(args?.task) ?? string(record(output?.task)?.id) ?? summary ?? "Task input";
+        case "task_inspect": return string(args?.task) ?? string(output?.task) ?? summary ?? "Terminal snapshot";
+        case "task_manage": {
+            const command = string(args?.command);
+            const detail = string(args?.name) ?? string(args?.task) ??
+                string(record(output?.task)?.id) ?? string(output?.closedTask);
+            return command && detail ? `${command} · ${detail}` : command ?? detail ?? summary ?? "Terminal resources";
+        }
         case "progress_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";
         case "artifact_viewImage": return string(output?.name) ?? string(args?.path) ??
             string(args?.handle) ?? summary ?? "Image";

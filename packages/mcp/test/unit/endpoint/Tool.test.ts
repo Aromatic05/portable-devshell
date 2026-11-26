@@ -214,7 +214,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
                             input: { type: "string" },
                             line: { type: "integer" },
                             task: { type: "string" },
-                            timeMs: { type: "integer" },
+                            waitMs: { type: "integer" },
                         },
                         required: ["task", "input"],
                         type: "object",
@@ -226,7 +226,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
         const canonical = adapter.toMcpTool(processInput, "Send input");
         const model = adapter.toMcpTool(processInput, "Send input", {
-            hiddenInputProperties: ["line", "timeMs"],
+            hiddenInputProperties: ["line", "waitMs"],
             modelFacing: true,
         });
         const canonicalProperties = (
@@ -237,7 +237,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         ).properties;
 
         assert.notEqual(canonicalProperties?.line, undefined);
-        assert.notEqual(canonicalProperties?.timeMs, undefined);
+        assert.notEqual(canonicalProperties?.waitMs, undefined);
         assert.deepEqual(Object.keys(modelProperties ?? {}).sort(), [
             "input",
             "pane",

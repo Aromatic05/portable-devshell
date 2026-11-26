@@ -181,7 +181,7 @@ test(
                 arguments: {
                     command: readRelativeMarkerCommand(workspaceMarker.name),
                     ctxId,
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 name: "bash_run",
             });
@@ -336,7 +336,7 @@ test(
                 arguments: {
                     command: readRelativeMarkerCommand(workspaceMarker.name),
                     ctxId,
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 name: "bash_run",
             });
@@ -381,7 +381,7 @@ test(
             );
 
             const second = await client.callTool({
-                arguments: { command: "pwd", ctxId, timeoutMs: 30_000 },
+                arguments: { command: "pwd", ctxId, waitMs: 30_000 },
                 name: "bash_run",
             });
             assert.equal(
@@ -393,7 +393,7 @@ test(
                 arguments: {
                     command: readRelativeMarkerCommand(workspaceMarker.name),
                     ctxId,
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 name: "bash_run",
             });
@@ -478,7 +478,7 @@ test(
                 arguments: {
                     command: readRelativeMarkerCommand(workspaceMarker.name),
                     ctxId,
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 name: "bash_run",
             });
@@ -701,7 +701,7 @@ test(
                     arguments: {
                         command: readRelativeMarkerCommand(markerName),
                         ctxId,
-                        timeoutMs: 30_000,
+                        waitMs: 30_000,
                     },
                     name: "bash_run",
                 });

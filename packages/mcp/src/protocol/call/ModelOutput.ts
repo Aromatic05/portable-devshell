@@ -26,7 +26,6 @@ const DEFAULT_TOOL_TOKENS: Readonly<Record<string, number>> = {
     file_grep: 4_000,
     file_glob: 2_000,
     file_edit: 2_000,
-    task_read: 4_000,
     task_input: 4_000,
     task_inspect: 4_000,
     task_manage: 1_000,
@@ -79,7 +78,7 @@ export function projectMcpModelOutput(
         content = [];
 
     if (resultBytes(result, content) > budget) {
-        if (toolName === "bash_run" && isRecord(result))
+        if ((toolName === "bash_run" || toolName === "task_input") && isRecord(result))
             result = projectBash(result, budget, content);
         else if (toolName === "file_read" && isRecord(result))
             result = projectFileRead(result, budget, content);
@@ -130,7 +129,7 @@ export function projectMcpModelOutput(
 }
 
 function modelRecoveryHint(toolName: string, output: RecordValue): string | undefined {
-    if (toolName === "bash_run" &&
+    if ((toolName === "bash_run" || toolName === "task_input") &&
         (typeof output.stdoutPath === "string" || typeof output.stderrPath === "string") &&
         (output.stdoutTruncated === true || output.stderrTruncated === true))
         return "Output truncated: use file_read with stdoutPath or stderrPath to retrieve omitted content.";

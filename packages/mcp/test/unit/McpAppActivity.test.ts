@@ -91,16 +91,16 @@ test("Process transcript polls share Task ID with the original command and stay 
     const cards = projectMcpAppActivity([
         call("run", "ctx", "bash_run", 1, {
             input: { command: "pnpm build" },
-            output: { task: { id: "task-42", status: "running" } },
+            output: { task: { id: "task-42", status: "running", pty: false } },
         }),
-        call("poll", "ctx", "task_read", 2, {
-            input: { task: "task-42", line: -30 },
-            output: { task: { id: "task-42", status: "running" }, output: ["building..."] },
+        call("poll", "ctx", "task_input", 2, {
+            input: { task: "task-42", cursor: "cursor-1" },
+            output: { task: { id: "task-42", status: "running", pty: false }, stdout: "building...\n", cursor: "cursor-2" },
         }),
     ], "ctx");
     assert.equal(cards.length, 2);
     assert.deepEqual(cards.map((item) => item.taskId), ["task-42", "task-42"]);
-    assert.equal(cards[0]?.name, "task_read");
+    assert.equal(cards[0]?.name, "task_input");
 });
 
 test("Workspace audit projection preserves semantic operations within bounds and never exposes credentials", () => {

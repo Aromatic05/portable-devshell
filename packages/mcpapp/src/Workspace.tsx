@@ -9,7 +9,7 @@ type Activity = McpAppActivity;
 const emptyTerminal = { stdout: "", stderr: "", loaded: false, loading: false };
 const internalActivity = new Set([
     "environ_info", "progress_report", "workspace_goal",
-    "task_read", "task_input", "task_inspect", "task_manage",
+    "task_input", "task_inspect", "task_manage",
 ]);
 
 function taskTranscript(
@@ -24,32 +24,34 @@ function taskTranscript(
     const latest = record(ordered.at(-1)?.output);
     const stream = (key: "stdout" | "stderr") => {
         let text = retained?.[key] ?? (typeof base[key] === "string" ? base[key] : "");
-        let end = record(base.cursor)?.[key];
+        let prevCursor = typeof base.cursor === "string" ? base.cursor : undefined;
         for (const entry of ordered) {
             const result = record(entry.output);
             const fragment = result?.[key];
-            if (typeof fragment !== "string" || fragment === "") continue;
-            const start = record(record(entry.input)?.cursor)?.[key] ?? 0;
-            const next = record(result?.cursor)?.[key];
-            if (typeof end === "number" && typeof start === "number" && typeof next === "number") {
-                if (next <= end) continue;
-                if (start < end) {
-                    const bytes = new TextEncoder().encode(fragment);
-                    // Redacted/truncated audit previews do not necessarily
-                    // preserve byte offsets. Do not pretend to splice them.
-                    if (bytes.length !== next - start) {
-                        text += "\n[Overlapping task output observation]\n" + fragment;
-                    } else {
-                        text += new TextDecoder().decode(bytes.subarray(end - start));
-                    }
+            const start = record(entry.input)?.cursor;
+            const next = result?.cursor;
+            if (typeof fragment !== "string" || fragment === "") {
+                if (typeof next === "string") prevCursor = next;
+                continue;
+            }
+            if (typeof start === "string") {
+                if (typeof next === "string" && next === prevCursor) continue;
+                if (prevCursor !== undefined && start === prevCursor) {
+                    text += fragment;
+                } else if (prevCursor === undefined && text === "") {
+                    text = fragment;
                 } else {
-                    if (start > end) text += "\n[Output not present in Activity history]\n";
+                    text += "\n[Overlapping task output observation]\n" + fragment;
+                }
+                if (typeof next === "string") prevCursor = next;
+            } else {
+                if (text.length > 0 && fragment.startsWith(text)) {
+                    text = fragment;
+                } else if (text.length === 0 || !text.endsWith(fragment)) {
                     text += fragment;
                 }
-            } else {
-                text += fragment;
+                if (typeof next === "string") prevCursor = next;
             }
-            end = next;
         }
         return retained === undefined ? text.slice(-12_000) : text;
     };
@@ -197,7 +199,7 @@ export function WorkspaceDashboard({ snapshot, renderItem, session, fresh = true
     });
     const pollsByTask = new Map<string, Activity[]>();
     for (const item of history ?? []) {
-        if (item.name !== "task_read" || !item.taskId) continue;
+        if (item.name !== "task_input" || !item.taskId) continue;
         pollsByTask.set(item.taskId, [...(pollsByTask.get(item.taskId) ?? []), item]);
     }
     return <div className="dashboard">

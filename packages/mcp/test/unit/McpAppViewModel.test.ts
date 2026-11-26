@@ -112,7 +112,7 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
     const wait = (waitId: string, ctxId: string): WaitRecord => ({
         waitId, ctxId, callId: waitId, instance: "test" as WaitRecord["instance"],
         createdAt: "", updatedAt: "", status: "detached", source: "mcp",
-        targetId: waitId, toolName: "task_read", result: { stdout: "private-worker-output" },
+        targetId: waitId, toolName: "task_input", result: { stdout: "private-worker-output" },
     });
     const snapshot = projectMcpAppSnapshot({
         ctxId: "ctx-a",

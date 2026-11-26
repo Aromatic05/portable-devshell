@@ -195,11 +195,10 @@ export class McpEndpointCatalog {
 }
 
 const statelessToolDescriptions: Readonly<Record<string, string>> = {
-    bash_run: "Run a shell command in the supplied absolute working directory. waitMs returns a running task without stopping it; tty allocates a PTY. Continue with task_read/task_input. Retained output paths can be passed to file_read.",
-    task_read: "Read a stateless task's output using its task ID and independent cursor.",
-    task_input: "Send literal input or pipe EOF to a stateless task.",
+    bash_run: "Run a shell command in the supplied absolute working directory. waitMs returns a running task without stopping it; pty allocates a PTY. Continue with task_input. Retained output paths can be passed to file_read.",
+    task_input: "Send raw UTF-8 input to a stateless PTY task or omit/empty input to read output using an opaque cursor.",
     task_inspect: "Inspect a stateless PTY screen without consuming its output.",
-    task_manage: "List, create or close stateless process resources; creation requires an absolute cwd.",
+    task_manage: "List, close, or create persistent interactive terminals in stateless mode; creation requires an absolute cwd.",
     file_read: "Read absolute Worker paths or retained bash_run output paths. Use nextSelector to continue a truncated read.",
     file_edit: "Apply one ordered change set using absolute Worker paths. No prior file_read is required; later operations do not execute after a failure.",
     file_glob: "Locate files and directories by absolute Worker paths or globs. Continue a paged traversal with cursor alone.",
@@ -225,8 +224,8 @@ function withBootstrapPresentation(
     toolCallResourceUriForTool: ((toolName: string) => string | undefined) | undefined,
 ): ToolDefinition {
     if (!isModelFacingTool(tool)) return tool;
-    // A transcript poll is part of bash_run, not another presentation.
-    if (tool.name === "task_read") return tool;
+    // Task input/output polling continues an existing task, not another presentation.
+    if (tool.name === "task_input") return tool;
     const meta = asRecord(tool._meta);
     const ui = asRecord(meta.ui);
     // A tool's own MCP App binding always takes precedence.

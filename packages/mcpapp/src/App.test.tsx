@@ -847,11 +847,11 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
                     target: "git status --short", output: { exitCode: 0, stdoutBytes: 12, stderrBytes: 8 } },
                     { callId: "call-2", name: "bash_run", state: "completed", at: "2026-10-12T16:01:00Z",
                         taskId: "task-1", target: "pnpm build", summary: "exit 0",
-                        output: { task: { id: "task-1", status: "running" }, stdout: "Starting build\n", termination: "running", cursor: { seq: 1, stdout: 15, stderr: 0 } } },
-                    { callId: "call-3", name: "task_read", state: "completed", at: "2026-10-12T16:02:00Z",
+                        output: { task: { id: "task-1", status: "running", pty: false }, stdout: "Starting build\n", termination: "running", cursor: "cursor-1" } },
+                    { callId: "call-3", name: "task_input", state: "completed", at: "2026-10-12T16:02:00Z",
                         taskId: "task-1", target: "task-1",
-                        input: { task: "task-1", cursor: { seq: 0, stdout: 0, stderr: 0 } },
-                        output: { task: { id: "task-1", status: "0" }, stdout: "Starting build\nBuild complete\n", termination: "exited", cursor: { seq: 2, stdout: 30, stderr: 0 } } },
+                        input: { task: "task-1", cursor: "cursor-1" },
+                        output: { task: { id: "task-1", status: "0", pty: false }, stdout: "Build complete\n", termination: "exited", cursor: "cursor-2" } },
                     { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
             }), { status: 200 }));
         }

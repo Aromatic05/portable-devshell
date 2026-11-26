@@ -191,7 +191,7 @@ import { tmpdir } from "node:os";
                 const workerBash = instance.listTools().find((tool) => tool.name === "bash_run");
                 const workerBashSchema = workerBash?.inputSchema as Record<string, unknown>;
                 assert.equal(bash?.description, workerBash?.description);
-                assert.match(bash?.description ?? "", /task_read/u);
+                assert.match(bash?.description ?? "", /task_input/u);
                 assert.deepEqual(
                     Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) =>
                         !["$schema", "properties", "required", "title"].includes(key))),
@@ -204,7 +204,7 @@ import { tmpdir } from "node:os";
                 );
                 assert.equal((bash?.inputSchema.required as string[]).includes("ctxId"), true);
                 for (const name of [
-                    "task_read", "task_input", "task_inspect", "task_manage",
+                    "task_input", "task_inspect", "task_manage",
                     "file_glob", "file_grep",
                 ]) {
                     const tool = tools.find((entry) => entry.name === name);
@@ -217,6 +217,7 @@ import { tmpdir } from "node:os";
                 }
                 for (const retired of [
                     "file_find", "file_info", "file_search",
+                    "task_read",
                     "tmux_run", "tmux_read", "tmux_input", "tmux_inspect", "tmux_manage",
                 ]) {
                     assert.equal(tools.some((tool) => tool.name === retired), false, retired);
@@ -342,7 +343,7 @@ import { tmpdir } from "node:os";
         request.params.arguments = {
             ...(request.params.arguments ?? {}),
             ctxId,
-            timeoutMs: 30_000,
+            waitMs: 30_000,
         };
         return request as JsonValue;
     }
@@ -430,29 +431,27 @@ import { tmpdir } from "node:os";
                     const tools = await listTools();
                     const names = new Set(tools.map((tool) => tool.name));
                     for (const name of [
-                        "bash_run", "task_read", "task_input",
+                        "bash_run", "task_input",
                         "task_inspect", "task_manage",
                     ]) assert.equal(names.has(name), true, name);
                     for (const name of [
+                        "task_read",
                         "tmux_run", "tmux_read", "tmux_input",
                         "tmux_inspect", "tmux_manage",
                     ]) assert.equal(names.has(name), false, name);
 
                     const bash = tools.find((tool) => tool.name === "bash_run");
-                    const taskRead = tools.find((tool) => tool.name === "task_read");
                     const taskInput = tools.find((tool) => tool.name === "task_input");
                     const terminalManage = tools.find((tool) => tool.name === "task_manage");
                     assert.ok(bash);
-                    assert.ok(taskRead);
                     assert.ok(taskInput);
                     assert.ok(terminalManage);
-                    assert.match(bash.description ?? "", /task_read/u);
+                    assert.match(bash.description ?? "", /task_input/u);
                     assert.match(bash.description ?? "", /waitMs/u);
-                    assert.equal(bash.inputSchema.properties?.timeoutMs?.minimum, 1);
                     assert.equal(bash.inputSchema.properties?.waitMs?.minimum, 0);
-                    assert.equal(bash.inputSchema.properties?.tty?.type, "boolean");
-                    assert.notEqual(taskRead.inputSchema.properties?.cursor, undefined);
-                    assert.equal(taskRead.inputSchema.properties?.untilExit?.type, "boolean");
+                    assert.equal(bash.inputSchema.properties?.pty?.type, "boolean");
+                    assert.notEqual(taskInput.inputSchema.properties?.cursor, undefined);
+                    assert.equal(taskInput.inputSchema.properties?.untilExit?.type, "boolean");
                     assert.equal(taskInput.inputSchema.required?.includes("task"), true);
                     assert.ok((taskInput.inputSchema.properties?.input?.type as string[]).includes("string"));
                     assert.notEqual(terminalManage.inputSchema.properties?.command, undefined);
@@ -462,7 +461,7 @@ import { tmpdir } from "node:os";
     );
 
     test(
-        "MCP bash_run starts one PTY that task_input and task_read continue",
+        "MCP bash_run starts one PTY that task_input continues",
         realWorkerTestOptions(workerBinaryPath),
         async () => {
             await withProcessHarness(
@@ -473,7 +472,7 @@ import { tmpdir } from "node:os";
                         ? '[Console]::WriteLine("READY"); $value = [Console]::ReadLine(); [Console]::WriteLine("received:$value")'
                         : "stty -echo; printf 'READY\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"";
                     const started = await callTool("reused-process-call", "bash_run", {
-                        command, ctxId, tty: true, waitMs: 50,
+                        command, ctxId, pty: true, waitMs: 50,
                     });
                     assert.equal(started.error, undefined, JSON.stringify(started));
                     const task = readString(started.result?.structuredContent?.task?.id, "task id");
@@ -486,18 +485,14 @@ import { tmpdir } from "node:os";
                     assert.ok(listed.result?.structuredContent?.tasks?.some((entry) => entry.id === task));
 
                     const inspected = await callTool("reused-process-call", "task_inspect", {
-                        ctxId, terminal: task,
+                        ctxId, task,
                     });
                     assert.equal(inspected.error, undefined, JSON.stringify(inspected));
 
-                    const input = await callTool("reused-process-call", "task_input", {
+                    const finished = await callTool("reused-process-call", "task_input", {
                         ctxId, task, input: "hello\r",
-                    });
-                    assert.equal(input.error, undefined, JSON.stringify(input));
-
-                    const finished = await callTool("reused-process-call", "task_read", {
-                        ctxId, task, cursor: started.result?.structuredContent?.cursor ?? {},
-                        timeMs: 10_000, untilExit: true,
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
                     });
                     assert.equal(finished.error, undefined, JSON.stringify(finished));
                     assert.equal(finished.result?.structuredContent?.exitCode, 0);
@@ -512,7 +507,7 @@ import { tmpdir } from "node:os";
     );
 
     test(
-        "MCP bash_run waitMs is a soft wait and task_read resumes from an independent cursor",
+        "MCP bash_run waitMs is a soft wait and task_input resumes from an independent cursor",
         realWorkerTestOptions(workerBinaryPath),
         async () => {
             await withProcessHarness(
@@ -531,22 +526,23 @@ import { tmpdir } from "node:os";
                     assert.match(started.result?.structuredContent?.stdout ?? "", /EARLY/u);
                     const task = readString(started.result?.structuredContent?.task?.id, "task id");
 
-                    const finished = await callTool("soft-wait-read", "task_read", {
-                        ctxId, task, cursor: started.result?.structuredContent?.cursor ?? {},
-                        timeMs: 10_000, untilExit: true,
+                    const finished = await callTool("soft-wait-read", "task_input", {
+                        ctxId, task,
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
                     });
                     assert.equal(finished.error, undefined, JSON.stringify(finished));
                     assert.equal(finished.result?.structuredContent?.waitReason, "terminal");
                     assert.notEqual(finished.result?.structuredContent?.task?.status, "running");
                     assert.match(finished.result?.structuredContent?.stdout ?? "", /LATE/u);
                     assert.doesNotMatch(finished.result?.structuredContent?.stdout ?? "", /EARLY/u);
-                    const replay = await callTool("independent-read", "task_read", { ctxId, task });
+                    const replay = await callTool("independent-read", "task_input", { ctxId, task });
                     assert.equal(replay.error, undefined, JSON.stringify(replay));
                     assert.match(replay.result?.structuredContent?.stdout ?? "", /EARLY[\s\S]*LATE/u);
 
                     const records = await readToolCalls();
                     assert.equal(records.filter((record) => record.toolName === "bash_run").length, 1);
-                    assert.equal(records.filter((record) => record.toolName === "task_read").length, 2);
+                    assert.equal(records.filter((record) => record.toolName === "task_input").length, 2);
                 },
             );
         },
@@ -563,12 +559,12 @@ import { tmpdir } from "node:os";
                     const created = await callTool("terminal-create", "task_manage", {
                         ctxId, command: "create",
                         shell: process.platform === "win32"
-                            ? "powershell.exe -NoLogo -NoProfile"
-                            : "exec bash --noprofile --norc -i",
+                            ? "powershell.exe"
+                            : "/bin/bash",
                     });
                     assert.equal(created.error, undefined, JSON.stringify(created));
-                    const task = readString(created.result?.structuredContent?.id, "terminal id");
-                    assert.equal(created.result?.structuredContent?.state, "running");
+                    const task = readString(created.result?.structuredContent?.task?.id, "terminal id");
+                    assert.equal(created.result?.structuredContent?.task?.state, "running");
                     const renewed = await createContext();
                     const input = await callTool("terminal-write", "task_input", {
                         ctxId: renewed, task, input: process.platform === "win32"
@@ -576,11 +572,11 @@ import { tmpdir } from "node:os";
                             : "printf '%s%s\\n' 'TERMINAL-' 'ALIVE'\r",
                     });
                     assert.equal(input.error, undefined, JSON.stringify(input));
-                    let stdout = "";
-                    let cursor = { seq: 0, stdout: 0, stderr: 0 };
+                    let stdout = input.result?.structuredContent?.stdout ?? "";
+                    let cursor = input.result?.structuredContent?.cursor;
                     for (let i = 0; i < 30 && !stdout.includes("TERMINAL-ALIVE"); i++) {
-                        const page = await callTool("terminal-read", "task_read", {
-                            ctxId: renewed, task, cursor, timeMs: 1000,
+                        const page = await callTool("terminal-read", "task_input", {
+                            ctxId: renewed, task, ...(cursor === undefined ? {} : { cursor }), waitMs: 1000,
                         });
                         assert.equal(page.error, undefined, JSON.stringify(page));
                         stdout += page.result?.structuredContent?.stdout ?? "";
@@ -588,16 +584,16 @@ import { tmpdir } from "node:os";
                     }
                     assert.match(stdout, /TERMINAL-ALIVE/u);
                     const inspected = await callTool("terminal-screen", "task_inspect", {
-                        ctxId: renewed, terminal: task,
+                        ctxId: renewed, task,
                     });
                     assert.equal(inspected.error, undefined, JSON.stringify(inspected));
                     assert.match(inspected.result?.structuredContent?.text ?? "", /TERMINAL-ALIVE/u);
                     const closed = await callTool("terminal-close", "task_manage", {
-                        ctxId: renewed, command: "close", id: task,
+                        ctxId: renewed, command: "close", task,
                     });
                     assert.equal(closed.error, undefined, JSON.stringify(closed));
-                    const finished = await callTool("terminal-final", "task_read", {
-                        ctxId: renewed, task, timeMs: 10000, untilExit: true,
+                    const finished = await callTool("terminal-final", "task_input", {
+                        ctxId: renewed, task, waitMs: 10000, untilExit: true,
                     });
                     assert.equal(finished.error, undefined, JSON.stringify(finished));
                     assert.equal(finished.result?.structuredContent?.waitReason, "terminal");
@@ -627,28 +623,7 @@ import { tmpdir } from "node:os";
                     assert.match(result.result?.structuredContent?.stdout ?? "", /EARLY[\s\S]*LATE/u);
                     const records = await readToolCalls();
                     assert.equal(records.filter((record) => record.toolName === "bash_run").length, 1);
-                    assert.equal(records.filter((record) => record.toolName === "task_read").length, 0);
-                },
-            );
-        },
-    );
-
-    test(
-        "MCP hard timeout terminates the process while waitMs does not",
-        realWorkerTestOptions(workerBinaryPath),
-        async () => {
-            await withProcessHarness(
-                "aromatic-mcp-process-hard-timeout",
-                async ({ callTool, createContext }) => {
-                    const ctxId = await createContext();
-                    const result = await callTool("hard-timeout", "bash_run", {
-                        command: process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30",
-                        ctxId, waitMs: 5_000, timeoutMs: 250,
-                    });
-                    assert.equal(result.error, undefined, JSON.stringify(result));
-                    assert.equal(result.result?.structuredContent?.termination, "timeout");
-                    assert.equal(result.result?.structuredContent?.timedOut, true);
-                    assert.notEqual(result.result?.structuredContent?.task?.status, "running");
+                    assert.equal(records.filter((record) => record.toolName === "task_input").length, 0);
                 },
             );
         },
@@ -671,9 +646,10 @@ import { tmpdir } from "node:os";
                     assert.equal(started.error, undefined, JSON.stringify(started));
                     const task = readString(started.result?.structuredContent?.task?.id, "task id");
                     const refreshedContext = await createContext();
-                    const result = await callTool("context-task-read", "task_read", {
-                        ctxId: refreshedContext, task, cursor: started.result?.structuredContent?.cursor ?? {},
-                        timeMs: 10_000, untilExit: true,
+                    const result = await callTool("context-task-read", "task_input", {
+                        ctxId: refreshedContext, task,
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
                     });
                     assert.equal(result.error, undefined, JSON.stringify(result));
                     assert.match(result.result?.structuredContent?.stdout ?? "", /CONTEXT-REFRESHED/u);
@@ -684,6 +660,8 @@ import { tmpdir } from "node:os";
 
     interface ToolStructuredContent {
         id?: string;
+        closedTask?: string;
+        accepted?: boolean;
         text?: string;
         ctxId?: string;
         state?: string;
@@ -694,8 +672,8 @@ import { tmpdir } from "node:os";
         waitReason?: string;
         waitMs?: number;
         timedOut?: boolean;
-        cursor?: { seq: number; stdout: number; stderr: number };
-        task?: { id?: string; status?: string };
+        cursor?: string;
+        task?: { id?: string; status?: string; state?: string; pty?: boolean };
         tasks?: Array<{ id?: string; state?: string }>;
     }
 

@@ -34,7 +34,7 @@ const contextModeInstructions = {
     "openai-session": "Call environ_info with the user's absolute workspace path before other tools. The client session binds the Context automatically; do not pass ctxId.",
     "agy-session": "Call environ_info with the user's absolute workspace path before other tools. The client conversation binds the Context automatically; do not pass ctxId. Results are available as text; no MCP App.",
     explicit: "Call environ_info with the user's absolute workspace path. Retain the returned ctxId and pass it to subsequent context-bound tools. No MCP App.",
-    stateless: "Call bash_run, file_read, file_edit, file_glob, file_grep and task_read, task_input, task_inspect, task_manage directly using absolute Worker paths. bash_run and task_manage create require absolute cwd. Use returned cursors and task or terminal IDs for follow-up calls. No workspace initialization or ctxId.",
+    stateless: "Call bash_run, file_read, file_edit, file_glob, file_grep and task_input, task_inspect, task_manage directly using absolute Worker paths. bash_run and task_manage create require absolute cwd. Use returned cursors and task IDs for follow-up calls. No workspace initialization or ctxId.",
 } as const;
 
 function requiresStreamingResponse(body: JsonValue): boolean {

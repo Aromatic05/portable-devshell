@@ -173,8 +173,8 @@ test("routing fields are injected into strict worker schema union branches", () 
                 },
                 Close: {
                     additionalProperties: false,
-                    properties: { command: { const: "close" }, id: { type: "string" } },
-                    required: ["command", "id"],
+                    properties: { command: { const: "close" }, task: { type: "string" } },
+                    required: ["command", "task"],
                     type: "object",
                 },
             },
@@ -459,11 +459,11 @@ async function rewrittenEndpoint(
                     changes.push(["ready", target]);
                     changes.push(["workspace", target, finalWorkspace]);
                     changes.push(["event", target, request.value.toolName, request.value.context]);
-                    if (["bash_run", "task_read"].includes(request.value.toolName)) {
+                    if (["bash_run", "task_input"].includes(request.value.toolName)) {
                         changes.push(["internal", target, request.value.toolName, request.value.context]);
                     }
                     return await request.transformResult?.({
-                        task: { id: "final-task", status: "0" },
+                        task: { id: "final-task", status: "0", pty: false },
                         termination: "exited", exitCode: 0, stdout: "ready", stderr: "",
                         waitReason: "terminal",
                     }, request.callId) ?? {};
@@ -491,8 +491,8 @@ async function rewrittenEndpoint(
                     toolName,
                     payload: (toolName === "bash_run"
                         ? { command: "rewritten", waitMs: 180000 }
-                        : toolName === "task_read"
-                            ? { task: "final-task", timeMs: 120000, untilExit: true }
+                        : toolName === "task_input"
+                            ? { task: "final-task", waitMs: 120000, untilExit: true }
                             : toolName === "file_read" ? { files: [{ path: "rewritten" }] } : {}) as JsonValue,
                     context: {
                         ...value.context,
@@ -508,7 +508,7 @@ async function rewrittenEndpoint(
     const definitions = [
         bashTool,
         fileReadTool,
-        { ...bashTool, group: "task", name: "task_read" },
+        { ...bashTool, group: "task", name: "task_input" },
         { ...bashTool, group: "ext", name: "ext_original" },
         { ...bashTool, group: "ext", name: "ext_final" },
     ];
@@ -518,7 +518,7 @@ async function rewrittenEndpoint(
             tools: [
                 bashTool,
                 fileReadTool,
-                { ...bashTool, group: "task", name: "task_read" },
+                { ...bashTool, group: "task", name: "task_input" },
             ],
         }),
         endpointTools,
@@ -603,7 +603,7 @@ for (const remote of [true, false]) {
     });
 }
 
-for (const name of ["bash_run", "task_read"]) {
+for (const name of ["bash_run", "task_input"]) {
     test(`${name} adapts final rewritten input and finishes against final Context`, async () => {
         const h = await rewrittenEndpoint(name, true);
         await h.endpoint.callTool(
@@ -612,7 +612,7 @@ for (const name of ["bash_run", "task_read"]) {
                 ctxId: h.original.ctxId,
                 ...(name === "bash_run"
                     ? { command: "original", waitMs: 180000 }
-                    : { task: "original-task", timeMs: 120000, untilExit: true }),
+                    : { task: "original-task", waitMs: 120000, untilExit: true }),
                 purpose: "process",
             },
             context,
@@ -621,7 +621,7 @@ for (const name of ["bash_run", "task_read"]) {
             h.inputs[0],
             name === "bash_run"
                 ? { command: "rewritten", waitMs: 180000 }
-                : { task: "final-task", timeMs: 120000, untilExit: true },
+                : { task: "final-task", waitMs: 120000, untilExit: true },
         );
         const internal = h.changes.find(
             (change) => change[0] === "internal",
@@ -632,7 +632,7 @@ for (const name of ["bash_run", "task_read"]) {
     });
 }
 
-for (const name of ["bash_run", "ext_original", "task_read"]) {
+for (const name of ["bash_run", "ext_original", "task_input"]) {
     test(`${name} rejected review leaves accepted MCP state untouched`, async () => {
         const h = await rewrittenEndpoint(name, true, true);
         await assert.rejects(
@@ -641,7 +641,7 @@ for (const name of ["bash_run", "ext_original", "task_read"]) {
                 {
                 ctxId: h.original.ctxId,
                     ...(name === "bash_run" ? { command: "original", waitMs: 180000 }
-                        : name === "task_read" ? { task: "original-task", timeMs: 120000 } : {}),
+                        : name === "task_input" ? { task: "original-task", waitMs: 120000 } : {}),
                     purpose: "rejected",
                 },
                 context,

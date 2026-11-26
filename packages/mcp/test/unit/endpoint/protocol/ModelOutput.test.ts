@@ -209,19 +209,46 @@ test("file_edit explicitly accounts for omitted applied operations", () => {
 });
 
 test("cursor-consuming results are never silently replaced with a preview", () => {
-    const process = { task: { id: "task-1", status: "running" },
-        stdout: "line".repeat(3_000), stderr: "", cursor: { seq: 1, stdout: 12_000, stderr: 0 }, termination: "running" };
     const glob = { entries: Array.from({ length: 200 }, (_, i) => ({
         path: `path/${i}`, type: "file",
     })), nextCursor: "after-200" };
-    assert.equal(projectMcpModelOutput("task_read", process), process);
     assert.equal(projectMcpModelOutput("file_glob", glob), glob);
+});
+
+test("task_input large output is projected by projectBash and gets recovery hint", () => {
+    const original = {
+        task: { id: "task-1", status: "0", pty: false },
+        stdout: "BEGIN\n" + "中".repeat(7_000) + "\nEND",
+        stderr: "WARNING\n" + "界".repeat(2_000),
+        stdoutBytes: 21_010,
+        stderrBytes: 6_008,
+        stdoutPath: "/.devshell/tool-results/task-1/stdout",
+        stderrPath: "/.devshell/tool-results/task-1/stderr",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        cursor: "cursor-2",
+        waitReason: "terminal",
+        waitMs: 1_000,
+        termination: "exited",
+        exitCode: 0,
+    };
+    const projected = projectMcpModelOutput("task_input", original);
+    const output = data(projected);
+    assert.equal(size(projected) <= 4_000 * 3, true);
+    assert.equal(output.stdoutPath, original.stdoutPath);
+    assert.equal(output.stderrPath, original.stderrPath);
+    assert.equal(output.stdoutTruncated, true);
+    assert.equal(output.stderrTruncated, true);
+    assert.equal((output.stdout as string).startsWith("BEGIN"), true);
+    assert.equal((output.stdout as string).endsWith("END"), true);
+    assert.equal((output.stdout as string).includes("\uFFFD"), false);
+    assert.match(String((output.comment as string[] | undefined)?.[0]), /stdoutPath or stderrPath/u);
 });
 
 test("model budgets allow caller-selected sizes without tool-specific minimums", () => {
     assert.doesNotThrow(() => validateMcpModelOutputBudget({
         maxTokens: 3_000,
-        byTool: { task_read: 256, file_glob: 512 },
+        byTool: { task_input: 256, file_glob: 512 },
     }));
     assert.doesNotThrow(() => validateMcpModelOutputBudget({
         maxTokens: 40_000,
@@ -261,7 +288,7 @@ test("Control MCP modelOutput survives draft normalization and update patches", 
     assert.doesNotThrow(() => validateConfigSemantics({
         ...next,
         instances: [],
-        mcp: { ...next.mcp, modelOutput: { byTool: { task_read: 2_000 } } },
+        mcp: { ...next.mcp, modelOutput: { byTool: { task_input: 2_000 } } },
     }));
     const cleared = normalizeConfigGlobalDraft({
         mcp: applyConfigMcpPatch(next.mcp, parseConfigMcpPatch({ modelOutput: null })),

@@ -25,14 +25,18 @@ function OutlineView({ text }: { text: string }): ReactNode {
         })}</ul>;
 }
 
-function ShellView({ input, result }: ToolCallPresentation): ReactNode {
+function ShellView({ name, input, result }: ToolCallPresentation): ReactNode {
     const args = record(input);
     const output = record(result?.output);
     const stdout = string(output?.stdout);
     const stderr = string(output?.stderr);
+    const task = string(args?.task) ?? string(record(output?.task)?.id);
+    const hasInput = typeof args?.input === "string" && args.input.length > 0;
     return <div className="tc-view">
-        {string(args?.command) && <div className="tc-command"><span aria-hidden="true">$</span>
-            <code>{string(args?.command)}</code></div>}
+        {name === "task_input"
+            ? <InfoStrip>Task: {task ?? "task"}{hasInput ? " · input sent" : ""}</InfoStrip>
+            : string(args?.command) && <div className="tc-command"><span aria-hidden="true">$</span>
+                <code>{string(args?.command)}</code></div>}
         {string(args?.cwd) && <InfoStrip>Directory: {string(args?.cwd)}</InfoStrip>}
         <KeySummary output={output} />
         {stdout && <Terminal text={stdout} title="stdout"
@@ -44,7 +48,7 @@ function ShellView({ input, result }: ToolCallPresentation): ReactNode {
             ? <Notice>Loading retained terminal output…</Notice>
             : (number(output?.stdoutBytes) ?? 0) > 0 || (number(output?.stderrBytes) ?? 0) > 0
                     ? <Notice>Retained terminal output is unavailable or has expired.</Notice>
-                    : <Notice>Command produced no terminal output.</Notice>)}
+                    : <Notice>{name === "task_input" ? "No new terminal output." : "Command produced no terminal output."}</Notice>)}
         {output?.stdoutTruncated === true || output?.stderrTruncated === true
             ? <Notice tone="warning">Output was truncated by the tool.</Notice> : null}
         {string(output?.termination) && <InfoStrip>Termination: {string(output?.termination)}</InfoStrip>}
@@ -173,15 +177,53 @@ function warnings(output: Item | undefined): ReactNode {
         {string(item.message) ?? string(item.code) ?? "Terminal warning"}</Notice>);
 }
 
+function taskSummaryText(task: Item): string {
+    const id = string(task.id) ?? "task";
+    const name = string(task.name);
+    const label = name ? `${name} (${id})` : id;
+    const parts = [
+        label,
+        string(task.kind),
+        string(task.state),
+        task.pty === true ? "pty" : undefined,
+        task.persistent === true ? "persistent" : undefined,
+        task.humanControl === true ? "human control" : undefined,
+        number(task.exitCode) !== undefined ? `exit ${number(task.exitCode)}` : undefined,
+    ].filter(Boolean);
+    return parts.join(" · ");
+}
+
 function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
     const args = record(input);
     const output = record(result?.output);
     const tasks = entries(output?.tasks);
+    const createdTask = record(output?.task);
+    const closedTask = string(output?.closedTask);
+    if (name === "task_inspect") {
+        const task = string(output?.task) ?? string(args?.task);
+        const rows = number(output?.rows);
+        const cols = number(output?.cols);
+        const info = [
+            task,
+            string(output?.state),
+            rows !== undefined && cols !== undefined ? `${cols}×${rows}` : undefined,
+            output?.humanControl === true ? "human control" : undefined,
+            output?.alternateScreen === true ? "alternate screen" : undefined,
+        ].filter(Boolean).join(" · ");
+        return <div className="tc-view">
+            {info && <InfoStrip>{info}</InfoStrip>}
+            {string(output?.text) && <Terminal title="Terminal snapshot" text={string(output?.text)!} />}
+            {warnings(output)}
+        </div>;
+    }
     return <div className="tc-view">
-        {name === "task_input" && <InfoStrip>Input sent to {string(args?.task) ?? "task"}</InfoStrip>}
-        {string(output?.text) && <Terminal title="Terminal snapshot" text={string(output?.text)!} />}
-        {tasks.map((task, index) => <InfoStrip key={index}>{string(task.id)} · {string(task.state)}{task.humanControl === true ? " · human control" : ""}</InfoStrip>)}
-        {name === "task_manage" && tasks.length === 0 && <ValueRows value={output ?? {}} />}
+        {tasks.map((task, index) => <InfoStrip key={index}>{taskSummaryText(task)}</InfoStrip>)}
+        {Array.isArray(output?.tasks) && tasks.length === 0 && <Notice>No active tasks.</Notice>}
+        {createdTask && <InfoStrip>{taskSummaryText(createdTask)}</InfoStrip>}
+        {createdTask && <ValueRows value={createdTask} />}
+        {closedTask && <InfoStrip>Closed task {closedTask}{output?.accepted === false ? " (not accepted)" : ""}</InfoStrip>}
+        {name === "task_manage" && !Array.isArray(output?.tasks) && !createdTask && !closedTask &&
+            <ValueRows value={output ?? {}} />}
         {warnings(output)}
     </div>;
 }
@@ -245,8 +287,7 @@ const renderers: Record<string, Renderer> = {
     file_grep: SearchView,
     file_glob: GlobView,
     file_edit: EditView,
-    task_read: ShellView,
-    task_input: ProcessView,
+    task_input: ShellView,
     task_inspect: ProcessView,
     task_manage: ProcessView,
     progress_report: ReportView,
@@ -262,7 +303,7 @@ export function ToolCallDetails(view: ToolCallPresentation): ReactNode {
     // Old audit entries may lack typed output. Preserve the recorded text
     // without treating a debugging dump as the primary display for new calls.
     if (view.result?.output === undefined && view.detail) {
-        if (view.name === "bash_run" || view.name === "task_read")
+        if (view.name === "bash_run" || view.name === "task_input")
             return <Terminal text={view.detail} title="Recorded output" />;
         if (view.name === "file_read" || view.name === "file_grep")
             return <CodeLines text={view.detail} />;
