@@ -179,7 +179,6 @@ export class WaitService {
     }
 
     async #monitor(waitId: string, signal: AbortSignal): Promise<void> {
-        let cursor: string | undefined;
         for (;;) {
             if (signal.aborted) return;
             const record = this.#records.get(waitId);
@@ -191,7 +190,6 @@ export class WaitService {
                         untilExit: true,
                         task: record.targetId,
                         waitMs: WAIT_SYNC_MS,
-                        ...(cursor === undefined ? {} : { cursor }),
                     },
                     {
                         ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
@@ -203,10 +201,7 @@ export class WaitService {
                     signal,
                 );
                 if (signal.aborted) return;
-                if (readString(result, "waitReason") !== "terminal") {
-                    cursor = readString(result, "cursor") ?? cursor;
-                    continue;
-                }
+                if (readString(result, "waitReason") !== "terminal") continue;
                 await this.#settleObserved(waitId, "resolved", { result }, signal);
                 return;
             } catch (error) {

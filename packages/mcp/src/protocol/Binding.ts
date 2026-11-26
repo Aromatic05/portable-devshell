@@ -310,6 +310,8 @@ function isCorrectableToolError(code: string): boolean {
         code.startsWith("file.invalid") ||
         code === "file.unreadRange" ||
         code === "file.patchAmbiguous" ||
+        code === "bash.invalidCwd" ||
+        code === "bash.invalidCommand" ||
         code === "process.invalidCwd";
 }
 

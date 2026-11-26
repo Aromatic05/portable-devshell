@@ -310,7 +310,7 @@ test("WaitService persists detached task and resolves it through native task_inp
     await restored.close();
 });
 
-test("WaitService.#monitor passes waitMs: WAIT_SYNC_MS and advances cursor across polls", async (t) => {
+test("WaitService.#monitor repeats full untilExit polls with WAIT_SYNC_MS until terminal", async (t) => {
     const root = await createTestTempDirectory("wait-cursor");
     const filePath = join(root, "waits.json");
     const calls: Array<{ toolName: string; input: JsonValue }> = [];
@@ -380,7 +380,6 @@ test("WaitService.#monitor passes waitMs: WAIT_SYNC_MS and advances cursor acros
                 untilExit: true,
                 task: "task-cursor",
                 waitMs: WAIT_SYNC_MS,
-                cursor: "tc1_step1",
             },
         },
         {
@@ -389,7 +388,6 @@ test("WaitService.#monitor passes waitMs: WAIT_SYNC_MS and advances cursor acros
                 untilExit: true,
                 task: "task-cursor",
                 waitMs: WAIT_SYNC_MS,
-                cursor: "tc1_step2",
             },
         },
     ]);
