@@ -9,6 +9,7 @@ export type SharedTerminalMode = "observe" | "control";
 export interface SharedTerminalSnapshot {
     instance?: string;
     active?: TerminalSessionDescriptor;
+    creating?: { name: string };
     mode?: SharedTerminalMode;
     sessions: readonly TerminalSessionDescriptor[];
     selectedIndex: number;
@@ -118,9 +119,40 @@ export class TuiSharedTerminalList {
     }
     enter(mode: SharedTerminalMode = "control"): TerminalSessionDescriptor | undefined {
         const active = this.#snapshot.sessions[this.#snapshot.selectedIndex];
-        if (active !== undefined)
-            this.#update({ ...this.#snapshot, active, error: undefined, mode });
+        if (active !== undefined) {
+            const effectiveMode = active.pty === false ? "observe" : mode;
+            this.#update({
+                ...this.#snapshot,
+                active,
+                creating: undefined,
+                error: undefined,
+                mode: effectiveMode,
+            });
+        }
         return active;
+    }
+    beginCreate(): void {
+        this.#update({
+            ...this.#snapshot,
+            creating: { name: "" },
+            error: undefined,
+        });
+    }
+    updateCreateName(name: string): void {
+        if (this.#snapshot.creating === undefined) return;
+        this.#update({
+            ...this.#snapshot,
+            creating: { name },
+            error: undefined,
+        });
+    }
+    cancelCreate(): void {
+        if (this.#snapshot.creating === undefined) return;
+        this.#update({
+            ...this.#snapshot,
+            creating: undefined,
+            error: undefined,
+        });
     }
     setMode(mode: SharedTerminalMode): void {
         if (this.#snapshot.active === undefined) return;
@@ -140,14 +172,31 @@ export class TuiSharedTerminalList {
     async create(
         cols: number,
         rows: number,
+        name?: string,
     ): Promise<TerminalSessionDescriptor | undefined> {
         const instance = this.#snapshot.instance;
         if (instance === undefined || this.#operations.open === undefined)
             return undefined;
+        const trimmedName = name?.trim();
+        if (
+            trimmedName !== undefined &&
+            trimmedName.length > 0 &&
+            !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(trimmedName)
+        ) {
+            this.#update({
+                ...this.#snapshot,
+                error: "Session name must start with a letter or digit and use only letters, digits, '.', '_', or '-' (max 64 chars).",
+                loading: false,
+            });
+            return undefined;
+        }
         this.#update({ ...this.#snapshot, loading: true, error: undefined });
         try {
             const created = await this.#operations.open(instance, {
                 cols,
+                ...(trimmedName !== undefined && trimmedName.length > 0
+                    ? { name: trimmedName }
+                    : {}),
                 persistent: true,
                 rows,
             });
@@ -158,6 +207,7 @@ export class TuiSharedTerminalList {
             this.#update({
                 ...this.#snapshot,
                 active: created,
+                creating: undefined,
                 error: undefined,
                 loading: false,
                 mode: "control",
@@ -218,7 +268,12 @@ export class TuiSharedTerminalList {
         }
     }
     leave(): void {
-        this.#update({ ...this.#snapshot, active: undefined, mode: undefined });
+        this.#update({
+            ...this.#snapshot,
+            active: undefined,
+            creating: undefined,
+            mode: undefined,
+        });
     }
     dispose(): void {
         ++this.#revision;

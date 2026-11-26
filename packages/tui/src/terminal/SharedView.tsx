@@ -20,10 +20,11 @@ function sessionLabel(session: TerminalSessionDescriptor): string {
 function formatSessionRow(session: TerminalSessionDescriptor): string {
     const parts: string[] = [sessionLabel(session)];
     const badges: string[] = [];
+    if (session.pty === false) badges.push("pipe");
     if (session.persistent) badges.push("persistent");
     if (session.humanControl) badges.push("CONTROL");
     if (badges.length > 0) parts.push(`[${badges.join(" · ")}]`);
-    parts.push(`${session.cols}x${session.rows}`);
+    if (session.pty !== false) parts.push(`${session.cols}x${session.rows}`);
     const detail =
         session.command !== undefined && session.command.length > 0
             ? session.command
@@ -54,13 +55,19 @@ export function TuiComponentSharedTerminals(props: {
         () => props.source.getSnapshot(),
     );
     if (state.active !== undefined) {
-        const mode = state.mode ?? "control";
-        const modeBadge = mode === "observe" ? "[OBSERVE]" : "[CONTROL]";
+        const isPipe = state.active.pty === false;
+        const mode = isPipe ? "observe" : (state.mode ?? "control");
+        const modeBadge = isPipe
+            ? "[PIPE]"
+            : mode === "observe"
+              ? "[OBSERVE]"
+              : "[CONTROL]";
         const headerTitle = `session · ${props.instance ?? "no instance"} · ${sessionLabel(state.active)} ${modeBadge}`;
-        const baseControls =
-            mode === "observe"
-                ? "read-only · t take control · q/Esc back · Ctrl+] sidebar"
-                : "Ctrl+] release & sidebar";
+        const baseControls = isPipe
+            ? "read-only log · q/Esc back · Ctrl+] sidebar"
+            : mode === "observe"
+              ? "read-only · t take control · q/Esc back · Ctrl+] sidebar"
+              : "Alt+o release to observe · Ctrl+] sidebar";
         const headerControls =
             state.error !== undefined && state.error.length > 0
                 ? `error: ${state.error} · ${baseControls}`
@@ -78,23 +85,34 @@ export function TuiComponentSharedTerminals(props: {
             />
         );
     }
-    const available = Math.max(0, props.rows - 2);
+    const headerRows =
+        1 +
+        (state.creating !== undefined ? 1 : 0) +
+        (state.error !== undefined || state.creating === undefined ? 1 : 0);
+    const available = Math.max(0, props.rows - headerRows);
     const start = Math.max(0, state.selectedIndex - available + 1);
     return (
         <Box flexDirection="column" height={props.rows} overflow="hidden">
             <Text bold color={props.focused ? "cyan" : undefined}>
                 Sessions · {props.instance ?? "no instance"}
             </Text>
-            <Text
-                color={state.error === undefined ? undefined : "red"}
-                dimColor={state.error === undefined}
-                wrap="truncate-end"
-            >
-                {state.error ??
-                    (state.loading
-                        ? "Loading sessions…"
-                        : "↑/↓ select · Enter control · o observe · n new · x close · r refresh · Ctrl+] sidebar")}
-            </Text>
+            {state.creating === undefined ? null : (
+                <Text color="yellow" wrap="truncate-end">
+                    {`New persistent shell name (optional, Enter create, Esc cancel): ${state.creating.name}█`}
+                </Text>
+            )}
+            {state.error !== undefined || state.creating === undefined ? (
+                <Text
+                    color={state.error === undefined ? undefined : "red"}
+                    dimColor={state.error === undefined}
+                    wrap="truncate-end"
+                >
+                    {state.error ??
+                        (state.loading
+                            ? "Loading sessions…"
+                            : "↑/↓ select · Enter control · o observe · n new · x close · r refresh · Ctrl+] sidebar")}
+                </Text>
+            ) : null}
             {state.sessions.length === 0 && !state.loading ? (
                 <Text dimColor>
                     No running PTY sessions (press n to create a persistent

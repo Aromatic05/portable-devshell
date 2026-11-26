@@ -45,6 +45,7 @@ function trailingPartialMarkerLength(value: string): number {
 
 export type TuiTerminalInputAction =
     | { data: string; type: "data" }
+    | { type: "control.release" }
     | { type: "focus.leave" }
     | { type: "source.toggle" }
     | { data: string; type: "paste" }
@@ -98,6 +99,8 @@ export function projectTuiTerminalInputFrame(
     if (frame.type === "mouse" || frame.type === "paste") return frame;
     if (frame.data === FOCUS_LEAVE) return { type: "focus.leave" };
     if (frame.data === SOURCE_TOGGLE) return { type: "source.toggle" };
+    if (frame.data === "\u001Bo" || frame.data === "\u001BO")
+        return { type: "control.release" };
     const scroll = SCROLL_SEQUENCES.get(frame.data);
     if (scroll !== undefined) return { direction: scroll, type: "scroll" };
     return { data: frame.data, type: "data" };

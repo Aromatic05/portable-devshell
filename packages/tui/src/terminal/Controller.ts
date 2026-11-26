@@ -209,11 +209,13 @@ export class TuiTerminalController {
     async #attachShared(mode: SharedTerminalMode): Promise<void> {
         const session = this.#options.sharedTerminals.enter(mode);
         if (session === undefined) return;
+        const effectiveMode =
+            this.#options.sharedTerminals.getSnapshot().mode ?? mode;
         await this.#options.terminal.start({
             columns: this.#columns,
             rows: this.#rows,
             command: {
-                args: [session.terminalId, mode],
+                args: [session.terminalId, effectiveMode],
                 command: session.instance,
             },
             instance: session.instance,
@@ -221,10 +223,11 @@ export class TuiTerminalController {
         this.syncFocus();
     }
 
-    async #createShared(): Promise<void> {
+    async #createShared(name?: string): Promise<void> {
         const created = await this.#options.sharedTerminals.create(
             this.#columns,
             this.#rows,
+            name,
         );
         if (created === undefined) return;
         await this.#options.terminal.start({
@@ -241,6 +244,27 @@ export class TuiTerminalController {
 
     async #closeShared(): Promise<void> {
         await this.#options.sharedTerminals.closeSelected();
+    }
+
+    async #releaseSharedControl(): Promise<void> {
+        const snapshot = this.#options.sharedTerminals.getSnapshot();
+        const active = snapshot.active;
+        if (
+            active === undefined ||
+            snapshot.mode !== "control" ||
+            this.#options.setSharedControl === undefined
+        )
+            return;
+        try {
+            await this.#options.setSharedControl(
+                active.instance,
+                active.terminalId,
+                false,
+            );
+            this.#options.sharedTerminals.setMode("observe");
+        } catch (error) {
+            this.#options.sharedTerminals.setError(readErrorMessage(error));
+        }
     }
 
     async #takeSharedControl(): Promise<void> {
@@ -354,6 +378,8 @@ export class TuiTerminalController {
             if (!focused) {
                 if (action.type === "data" || action.type === "paste") {
                     this.#options.writeAppInput(action.data);
+                } else if (action.type === "control.release") {
+                    this.#options.writeAppInput("\u001Bo");
                 } else if (action.type === "mouse") {
                     this.#options.enqueueInput(
                         async () => await this.#options.handleAppMouse(action),
@@ -365,15 +391,61 @@ export class TuiTerminalController {
                 tab === "sessions" &&
                 this.#options.sharedTerminals.getSnapshot().active === undefined
             ) {
+                const list = this.#options.sharedTerminals;
+                const creating = list.getSnapshot().creating;
+                if (creating !== undefined) {
+                    if (action.type === "data") {
+                        if (action.data === "\r" || action.data === "\n") {
+                            this.#options.enqueueInput(() =>
+                                this.#createShared(
+                                    list.getSnapshot().creating?.name,
+                                ),
+                            );
+                        } else if (action.data === "\u001B") {
+                            list.cancelCreate();
+                        } else if (
+                            action.data === "\x7f" ||
+                            action.data === "\b"
+                        ) {
+                            list.updateCreateName(creating.name.slice(0, -1));
+                        } else if (/^[A-Za-z0-9._-]+$/u.test(action.data)) {
+                            list.updateCreateName(
+                                (creating.name + action.data).slice(0, 64),
+                            );
+                        } else if (!action.data.startsWith("\u001B")) {
+                            let currentName = creating.name;
+                            for (const ch of action.data) {
+                                if (ch === "\r" || ch === "\n") {
+                                    list.updateCreateName(currentName);
+                                    this.#options.enqueueInput(() =>
+                                        this.#createShared(
+                                            list.getSnapshot().creating?.name,
+                                        ),
+                                    );
+                                    break;
+                                }
+                                if (ch === "\x7f" || ch === "\b") {
+                                    currentName = currentName.slice(0, -1);
+                                    list.updateCreateName(currentName);
+                                } else if (/^[A-Za-z0-9._-]$/u.test(ch)) {
+                                    currentName = (currentName + ch).slice(
+                                        0,
+                                        64,
+                                    );
+                                    list.updateCreateName(currentName);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 if (action.type === "data") {
-                    const list = this.#options.sharedTerminals;
                     if (action.data === "\u001B[A" || action.data === "k")
                         list.move(-1);
                     else if (action.data === "\u001B[B" || action.data === "j")
                         list.move(1);
                     else if (action.data === "r") void list.refresh();
-                    else if (action.data === "n")
-                        this.#options.enqueueInput(() => this.#createShared());
+                    else if (action.data === "n") list.beginCreate();
                     else if (action.data === "x")
                         this.#options.enqueueInput(() => this.#closeShared());
                     else if (action.data === "o")
@@ -404,9 +476,18 @@ export class TuiTerminalController {
             ) {
                 if (action.type === "data") {
                     if (action.data === "t") {
-                        this.#options.enqueueInput(() =>
-                            this.#takeSharedControl(),
-                        );
+                        if (
+                            this.#options.sharedTerminals.getSnapshot().active
+                                ?.pty === false
+                        ) {
+                            this.#options.sharedTerminals.setError(
+                                "Pipe tasks are read-only",
+                            );
+                        } else {
+                            this.#options.enqueueInput(() =>
+                                this.#takeSharedControl(),
+                            );
+                        }
                     } else if (action.data === "q" || action.data === "\u001B") {
                         this.#leaveShared();
                         void this.#options.sharedTerminals.refresh();
@@ -419,6 +500,21 @@ export class TuiTerminalController {
                         async () => await this.handleMouse(action),
                     );
                 }
+                continue;
+            }
+            if (action.type === "control.release") {
+                const shared = this.#options.sharedTerminals.getSnapshot();
+                if (
+                    tab === "sessions" &&
+                    shared.active !== undefined &&
+                    shared.mode === "control"
+                ) {
+                    this.#options.enqueueInput(() =>
+                        this.#releaseSharedControl(),
+                    );
+                    continue;
+                }
+                this.#options.terminal.writeInput("\u001Bo");
                 continue;
             }
             if (action.type === "data")
