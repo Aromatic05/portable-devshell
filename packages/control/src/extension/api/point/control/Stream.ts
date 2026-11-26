@@ -41,6 +41,9 @@ export const controlStreamsSandboxCodec: ExtensionSandboxPointCodec = {
                 send: async (message) => {
                     await context.requestInterface("stream.send", message as unknown as ExtensionJsonValue);
                 },
+                write: async (bytes) => {
+                    await context.requestInterface("stream.write", Buffer.from(bytes).toString("base64"));
+                },
                 close: async (payload) => {
                     await context.requestInterface("stream.close", payload);
                 },
@@ -84,6 +87,11 @@ function createStreamSandboxBinding(
                 async request(operation, input) {
                     if (operation === "stream.send") {
                         await stream.send(readStreamMessage(input));
+                        return undefined;
+                    }
+                    if (operation === "stream.write") {
+                        if (typeof input !== "string") throw new TypeError("Control stream bytes are invalid.");
+                        await stream.write(Buffer.from(input, "base64"));
                         return undefined;
                     }
                     if (operation === "stream.close") {

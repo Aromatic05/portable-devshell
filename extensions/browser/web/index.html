@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Browser</title></head>
+<body>
+<header>
+  <strong>Browser</strong>
+  <label>Instance <select id="instance"></select></label>
+  <label>Profile <select id="profile"></select></label>
+  <button id="open">Open / attach</button><button id="detach">Detach viewer</button>
+  <button id="close">Close browser</button><button id="settings">Manage</button>
+</header>
+<nav aria-label="Browser navigation"><button id="back" aria-label="Go back">←</button><button id="forward" aria-label="Go forward">→</button><button id="refresh" aria-label="Reload">↻</button><form id="navigate"><input id="url" aria-label="URL" placeholder="https://example.com"><button>Go</button></form></nav>
+<nav aria-label="Browser tabs"><select id="tabs" aria-label="Tabs"></select><button id="newtab">New tab</button><button id="closetab">Close tab</button></nav>
+<main><div id="viewport"><canvas id="screen" aria-label="Remote browser"></canvas><textarea id="keyboard" aria-label="Remote browser text input" autocomplete="off" spellcheck="false"></textarea></div><div id="status" role="status">Select a profile and open the browser.</div></main>
+<dialog id="management">
+  <div class="dialog-header"><h2>Browser management</h2><button id="settings-close">Close</button></div>
+  <section><h3>Runtime</h3><div id="runtime-status"></div><div class="controls"><select id="bundles" aria-label="Installed runtime bundles"></select><button id="runtime-use">Install selected runtime on instance</button></div><small>Import the distributed runtime directory using <code>devshell browser runtime install &lt;instance&gt; &lt;directory&gt;</code>.</small></section>
+  <section><h3>Profile</h3><div class="controls"><input id="new-profile" placeholder="Profile name" aria-label="New profile name"><button id="create">Create</button><button id="delete-profile">Delete selected profile</button></div></section>
+  <section><h3>Credentials</h3><div id="credentials"></div><div class="controls"><input id="credential-file" type="file" accept=".env,text/plain" aria-label="Credential dotenv file"><button id="credential-import">Import / replace</button><button id="credential-clear">Clear</button></div><small>Credential changes apply when this profile is next opened. Values are not displayed.</small></section>
+  <section><h3>Browser output files</h3><button id="files-refresh">Refresh</button><div id="files"></div></section>
+  <section><h3>Activity</h3><div class="controls"><button id="actions">Actions</button><button id="requests">Requests</button></div><div id="activity"></div></section>
+  <div id="management-status" role="status"></div>
+</dialog>
+<script type="module" src="./index.ts"></script>
+</body>
+</html>

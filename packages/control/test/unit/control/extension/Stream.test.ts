@@ -50,12 +50,13 @@ test("sandbox stream bridge forwards ordered frames, cancellation, and send fail
     let closed = false;
     await proxied({
         send: async (message) => { messages.push(message); if (messages.length === 2) controller.abort(); },
+        write: async () => { throw new Error("Unexpected binary stream write."); },
         close: async () => { closed = true; },
     }, { payload: { fromSeq: 1 } }, context);
     assert.deepEqual(messages.map((message) => message.name), ["seed", "event"]);
     assert.equal(closed, true);
     const failure = new Error("socket write failed");
-    await assert.rejects(async () => await proxied({ send: async () => { throw failure; }, close: async () => {} },
+    await assert.rejects(async () => await proxied({ send: async () => { throw failure; }, write: async () => { throw new Error("Unexpected binary stream write."); }, close: async () => {} },
         { payload: { fromSeq: 1 } }, { ...context, signal: new AbortController().signal }), failure);
 });
 
@@ -92,7 +93,7 @@ test("seeded instance observation resumes after the seed and preserves initial g
         runtime: () => runtime,
     });
     const messages: ControlStreamMessage[] = [];
-    await createMessageSubscriptionBinding(capability)({ send: async (message) => { messages.push(message); }, close: async () => {} },
+    await createMessageSubscriptionBinding(capability)({ send: async (message) => { messages.push(message); }, write: async () => { throw new Error("Unexpected binary stream write."); }, close: async () => {} },
         { payload: { fromSeq: 1 } },
         { destination: "dev", peer: "cli", requestId: "request", signal: new AbortController().signal });
     assert.equal(nextFromSeq, 4);

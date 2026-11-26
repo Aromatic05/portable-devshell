@@ -18,7 +18,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { createAuditRuntime } from "../../audit/index.js";
-import type { InstanceEventPort } from "../Api.js";
+import type { InstanceEventPort, WorkerExecProcessInput } from "../Api.js";
 import type {
     WorkerEnvironment,
     WorkerInstance,
@@ -148,6 +148,10 @@ export class Instance {
 
     get artifact(): WorkerArtifactApi {
         return this.#worker.execution.artifact;
+    }
+
+    openWorkerProcess(input: WorkerExecProcessInput, signal?: AbortSignal) {
+        return this.#worker.execution.tunnel.execProcess(input, signal);
     }
 
     get environment(): WorkerEnvironment {

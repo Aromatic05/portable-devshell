@@ -27,6 +27,7 @@ import type {
 import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession,
+    ExtensionWorkerProcessCapability,
 } from "@portable-devshell/extension/worker";
 import type {
     ExtensionArtifactCapability,
@@ -386,6 +387,7 @@ function createContext(): ExtensionContext {
             toolCallHistory: createToolCallHistoryCapability,
             workerDelegate: () => createWorkerCapability("workerDelegate"),
             workerExecute: () => createWorkerCapability("workerExecute"),
+            workerProcesses: createWorkerProcessCapability,
         },
     );
     const register: ExtensionContext["register"] = (point, id, binding) => {
@@ -873,6 +875,29 @@ function createWorkerCapability(
             return Object.freeze(session);
         },
     });
+}
+
+function createWorkerProcessCapability(): ExtensionWorkerProcessCapability {
+    return {
+        async start(input, signal) {
+            const processId = await requestCapability("workerProcesses.start", input, { signal }) as string;
+            return {
+                async read() {
+                    const result = await requestCapability("workerProcesses.read", { processId });
+                    return typeof result === "string" ? Buffer.from(result, "base64") : undefined;
+                },
+                async write(bytes) {
+                    await requestCapability("workerProcesses.write", { processId, data: Buffer.from(bytes).toString("base64") });
+                },
+                async finish() {
+                    await requestCapability("workerProcesses.finish", { processId });
+                },
+                async close() {
+                    await requestCapability("workerProcesses.close", { processId });
+                },
+            };
+        },
+    };
 }
 
 function pendingProcessEvent(processId: string): PendingProcessEvents {

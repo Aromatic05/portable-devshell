@@ -27,6 +27,7 @@ import { ExtensionAssetCapabilityControl } from "./asset/index.js";
 import { ExtensionDatabaseCapabilityControl } from "./database/index.js";
 import { ExtensionInstanceEventPublishCapabilityControl } from "./instance/index.js";
 import { ExtensionProcessCapabilityControl } from "./process/index.js";
+import { ExtensionWorkerProcessControl } from "./worker/Process.js";
 import { projectExtensionCapabilities } from "./Projection.js";
 import {
     ExtensionToolCallHistoryCapabilityControl,
@@ -54,6 +55,7 @@ export interface ExtensionCapabilityAssemblerOptions {
     }) => ExtensionArtifactCapability;
     assetsFactory?: (input: {
         allowed: boolean;
+        runtimeAssets: boolean;
         dataDirectory: string;
         extensionId: string;
         generation: string;
@@ -111,6 +113,7 @@ export interface ExtensionCapabilitySet {
     toolCallHistory: ToolCallHistoryCapability;
     workerDelegate: ExtensionWorkerRuntime;
     workerExecute: ExtensionWorkerRuntime;
+    workerProcesses: ExtensionWorkerProcessControl;
 }
 
 export class ExtensionCapabilityAssembler {
@@ -182,6 +185,7 @@ export class ExtensionCapabilityAssembler {
         const assets =
             this.#options.assetsFactory?.({
                 allowed: manifest.capabilities.includes("assets"),
+                runtimeAssets: manifest.capabilities.includes("worker.process"),
                 dataDirectory: input.dataDirectory,
                 extensionId,
                 generation,
@@ -250,6 +254,12 @@ export class ExtensionCapabilityAssembler {
             generation,
         });
         cleanups.push(() => processes.closeAll());
+        const workerProcesses = new ExtensionWorkerProcessControl({
+            allowed: manifest.capabilities.includes("worker.process"),
+            extensionId,
+            instances: this.#options.instances,
+        });
+        cleanups.push(() => workerProcesses.closeAll());
         const contextCapabilities = projectExtensionCapabilities(
             manifest.capabilities,
             {
@@ -265,6 +275,7 @@ export class ExtensionCapabilityAssembler {
                 toolCallHistory: () => toolCallHistory,
                 workerDelegate: () => workerDelegate,
                 workerExecute: () => workerExecute,
+                workerProcesses: () => workerProcesses,
             },
         );
         return {
@@ -281,6 +292,7 @@ export class ExtensionCapabilityAssembler {
             toolCallHistory,
             workerDelegate,
             workerExecute,
+            workerProcesses,
         };
     }
 }

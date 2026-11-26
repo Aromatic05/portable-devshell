@@ -159,6 +159,10 @@ export class ControlExtensionRouteService {
                             signal.throwIfAborted();
                             await stream.send(message);
                         },
+                        write: async (bytes) => {
+                            signal.throwIfAborted();
+                            await stream.write(bytes);
+                        },
                         close: async (payload) => await stream.close(payload),
                     },
                     { ...(request.payload === undefined ? {} : { payload: request.payload }) },

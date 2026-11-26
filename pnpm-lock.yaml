@@ -92,6 +92,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/extension
 
+  extensions/browser:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+    devDependencies:
+      '@portable-devshell/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      vite:
+        specifier: ^8.3.0
+        version: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0)
+
   extensions/comment:
     dependencies:
       '@portable-devshell/extension':

@@ -135,6 +135,7 @@ export interface WorkerExecProcessInput {
     executable: string;
     args?: readonly string[];
     cwd?: string;
+    owned?: boolean;
 }
 
 export interface WorkerCommandInteractiveSession {

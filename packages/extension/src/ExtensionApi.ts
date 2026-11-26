@@ -26,6 +26,7 @@ import type { ExtensionProcessCapability } from "./domain/process.js";
 import type {
     ExtensionWorkerDelegateCapability,
     ExtensionWorkerExecuteCapability,
+    ExtensionWorkerProcessCapability,
 } from "./domain/worker.js";
 
 export interface ExtensionErrorOptions {
@@ -88,6 +89,7 @@ export interface ExtensionCapabilities {
     /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
     readonly workerDelegate?: ExtensionWorkerDelegateCapability;
     readonly workerExecute?: ExtensionWorkerExecuteCapability;
+    readonly workerProcesses?: ExtensionWorkerProcessCapability;
 }
 
 export interface ExtensionContext {

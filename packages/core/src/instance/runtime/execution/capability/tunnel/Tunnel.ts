@@ -41,16 +41,16 @@ export class WorkerTunnel {
         const protocol = new Stream(
             await this.#endpoint.connect(this.#workerHost, port, signal),
         );
-        const stream = await protocol.open(name, input);
+        let stream: MessageStream;
+        try {
+            stream = await protocol.open(name, input, signal);
+        } catch (error) {
+            protocol.close();
+            throw error;
+        }
         const close = () => protocol.close();
         stream.onClose(close);
         stream.onCancel(close);
-        if (signal !== undefined)
-            signal.addEventListener(
-                "abort",
-                () => void stream.cancel({ message: String(signal.reason) }),
-                { once: true },
-            );
         return stream;
     }
 }

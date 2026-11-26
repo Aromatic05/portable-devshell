@@ -1,0 +1,19 @@
+{
+    "name": "@portable-devshell/browser-extension",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "dependencies": {
+        "@portable-devshell/extension": "workspace:*"
+    },
+    "devDependencies": {
+        "@portable-devshell/shared": "workspace:*",
+        "vite": "^8.3.0"
+    },
+    "scripts": {
+        "build": "tsc -b && vite build --config web/vite.config.ts && node scripts/package.mjs",
+        "prepare-runtime": "node scripts/prepare-runtime.mjs",
+        "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
+        "package-product": "pnpm build && node scripts/package-product.mjs"
+    }
+}

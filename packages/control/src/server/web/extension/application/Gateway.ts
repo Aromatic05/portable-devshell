@@ -269,6 +269,8 @@ export class ExtensionWebGateway {
 
     #returnPath(value: string): string {
         const url = new URL(value, "http://localhost");
+        if (pathMatchesPrefix(url.pathname, this.#basePath))
+            return url.pathname + url.search;
         const suffix =
             url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+/, "")}`;
         return `${this.#basePath}${suffix}${url.search}`;
@@ -286,6 +288,8 @@ function parseMountedRequest(
     basePath: string,
 ): ExtensionWebRequestTarget | undefined {
     const parsed = new URL(value, "http://localhost");
+    if (pathMatchesPrefix(parsed.pathname, basePath))
+        return parseFullRequest(value, basePath);
     return parseExtensionSuffix(`${parsed.pathname}${parsed.search}`, basePath);
 }
 

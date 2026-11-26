@@ -14,6 +14,8 @@ struct ExecMetadata {
     #[serde(default)]
     args: Vec<String>,
     cwd: Option<String>,
+    #[serde(default)]
+    owned: bool,
 }
 
 pub struct ExecService {
@@ -23,6 +25,7 @@ pub struct ExecService {
     stderr_summary: Arc<Mutex<Vec<u8>>>,
     stderr_thread: Option<JoinHandle<()>>,
     finished: bool,
+    owned: bool,
 }
 
 impl ExecService {
@@ -42,6 +45,20 @@ impl ExecService {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        if metadata.owned {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
+                command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+            }
+        }
 
         let mut child = command
             .spawn()
@@ -84,12 +101,16 @@ impl ExecService {
             stderr_summary,
             stderr_thread: Some(stderr_thread),
             finished: false,
+            owned: metadata.owned,
         })
     }
 
     pub fn reset(&mut self) {
         self.stdin.take();
         if !self.finished {
+            if self.owned {
+                let _ = crate::daemon::process::platform::terminate_process_group(self.child.id() as i32, true);
+            }
             let _ = self.child.kill();
             let _ = self.child.wait();
             self.finished = true;
@@ -112,6 +133,19 @@ impl ExecService {
     pub fn poll_status(&mut self) -> Result<bool, String> {
         if self.finished {
             return Ok(true);
+        }
+        #[cfg(unix)]
+        if self.owned {
+            use nix::libc;
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let observed = unsafe { libc::waitid(libc::P_PID, self.child.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+            if observed != 0 {
+                return Err(format!("process.exec wait failed: {}", std::io::Error::last_os_error()));
+            }
+            if unsafe { info.si_pid() } == 0 {
+                return Ok(false);
+            }
+            crate::daemon::process::platform::terminate_process_group(self.child.id() as i32, true)?;
         }
         let Some(status) = self
             .child
