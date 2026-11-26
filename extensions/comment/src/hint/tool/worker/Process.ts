@@ -1,5 +1,6 @@
-import type { RemoteErrorBody } from "@portable-devshell/shared";
-import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
+import type { JsonValue, RemoteErrorBody } from "@portable-devshell/shared";
+import { diagnosticHint, errorHint, type ToolDiagnosticHint } from "../../Hint.js";
+import { asBoolean, asRecord, asString } from "../Value.js";
 
 const processErrors: Readonly<Record<string, string>> = {
     "process.hostFailed": "The Process Host is unavailable. Inspect the Worker and retry after it is ready.",
@@ -7,7 +8,8 @@ const processErrors: Readonly<Record<string, string>> = {
     "process.notFound": "The task does not exist in this execution scope. Check its task ID and workspace.",
     "process.notTerminal": "This resource has no PTY. Use task_input without input to read non-PTY output.",
     "process.notPipe": "This resource is a PTY, not a pipe. Send terminal input via task_input.",
-    "process.stdinClosed": "The process input stream is closed. Use task_manage(command: \"close\", task) to stop a running non-PTY task, or start a new command with pty: true if interactive input is required.",
+    "process.exited": "The target process has already exited. Omit input in task_input to read retained output, or start a new command with bash_run.",
+    "process.stdinClosed": "The process input stream is closed (either the task is non-PTY or has already exited). Omit input in task_input to read retained output, use task_manage(command: \"close\", task) to stop a running non-PTY task, or start a new command with pty: true if interactive input is required.",
     "process.inputBusy": "The input queue is full. Wait for the process to consume input before retrying.",
     "process.captureFailed": "Process output capture failed. Inspect the process and Worker storage state.",
     "process.resourceLimit": "The Process Host has no free resource slots. Finish or close an existing process before starting another.",
@@ -23,4 +25,30 @@ const processErrors: Readonly<Record<string, string>> = {
 export function processErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
     const message = processErrors[body.code];
     return message === undefined ? [] : [errorHint(body.code, message)];
+}
+
+export function taskErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
+    if (body.code === "tool.cancelled") {
+        return [
+            errorHint(
+                "tool.cancelled",
+                "Cancelled; inspect task state and retained output before retrying.",
+            ),
+        ];
+    }
+    return processErrorHints(body);
+}
+
+export function taskManageResultHints(result: JsonValue): ToolDiagnosticHint[] {
+    const record = asRecord(result);
+    if (record === undefined) return [];
+    if (asBoolean(record.killRequested) === true && asString(record.state) === "running") {
+        return [
+            diagnosticHint(
+                "process.closePending",
+                "Termination was requested, but the task is still running. Poll task_manage(command: \"list\") until its state leaves running.",
+            ),
+        ];
+    }
+    return [];
 }

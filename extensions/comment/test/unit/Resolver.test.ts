@@ -398,6 +398,32 @@ test("Process Host errors have task-specific recovery guidance", () => {
         codes(resolveErrorHints("task_input", body("process.notPipe"))),
         ["process.notPipe"],
     );
+    const exited = resolveErrorHints("task_input", body("process.exited"));
+    assert.deepEqual(codes(exited), ["process.exited"]);
+    assert.match(exited[0]?.text ?? "", /already exited/u);
+    assert.deepEqual(
+        codes(resolveErrorHints("task_manage", body("tool.invalidArguments"))),
+        ["tool.invalidArguments"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("task_input", body("tool.cancelled"))),
+        ["tool.cancelled"],
+    );
+    const closePending = resolveResultHints("task_manage", {
+        taskId: "process-1",
+        killRequested: true,
+        state: "running",
+    });
+    assert.deepEqual(codes(closePending), ["process.closePending"]);
+    assert.match(closePending[0]?.text ?? "", /task_manage\(command: "list"\)/u);
+    assert.deepEqual(
+        resolveResultHints("task_manage", {
+            taskId: "process-1",
+            killRequested: true,
+            state: "exited",
+        }),
+        [],
+    );
 });
 
 test("task_input uses the shared Bash result status for successful and failed tasks", () => {

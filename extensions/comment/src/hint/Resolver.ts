@@ -1,12 +1,16 @@
 import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
-import { crossToolErrorHints } from "./tool/Error.js";
+import { crossToolErrorHints, workerErrorHints } from "./tool/Error.js";
 import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./tool/control/Artifact.js";
 import { instanceErrorHints } from "./tool/control/Instance.js";
 import { bashErrorHints, bashResultHints } from "./tool/worker/Bash.js";
-import { processErrorHints } from "./tool/worker/Process.js";
+import {
+    processErrorHints,
+    taskErrorHints,
+    taskManageResultHints,
+} from "./tool/worker/Process.js";
 import {
     fileEditResultHints,
     fileErrorHints,
@@ -28,6 +32,7 @@ type ErrorResolver = (
 const resultResolvers: Record<string, ResultResolver> = {
     bash_run: (_toolName, result) => bashResultHints(result),
     task_input: (_toolName, result) => bashResultHints(result),
+    task_manage: (_toolName, result) => taskManageResultHints(result),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
@@ -47,7 +52,7 @@ const instanceTools = new Set([
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
     if (toolName === "bash_run") return (_name, body) => [...bashErrorHints(body), ...processErrorHints(body)];
     if (["task_input", "task_inspect", "task_manage"].includes(toolName))
-        return (_name, body) => processErrorHints(body);
+        return (_name, body) => [...taskErrorHints(body), ...workerErrorHints(body)];
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);
     if (artifactControlTools.has(toolName))
