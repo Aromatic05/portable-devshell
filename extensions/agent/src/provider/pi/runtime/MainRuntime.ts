@@ -75,10 +75,6 @@ export class PiMainRuntime {
         this.#subagents.notifyMainInput();
     }
 
-    observeToolResult(toolName: string, isError: boolean): void {
-        this.#toolExposure?.observeToolResult(toolName, isError);
-    }
-
     async close(): Promise<void> {
         await this.#subagents.close();
         this.#toolExposure?.close();

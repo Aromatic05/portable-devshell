@@ -22,6 +22,7 @@ import {
 import { projectAgentModelTools } from "../../../builtin/provider/AgentToolProjection.js";
 import type { DevshellPiToolSession } from "./Bridge.js";
 import type { DevshellPiTarget } from "./Target.js";
+import type { PiToolExposureSurface } from "./ToolExposure.js";
 import { PiMainRuntime } from "../runtime/MainRuntime.js";
 import { PI_SDK_ENTRYPOINT_ENV } from "../runtime/Provider.js";
 import { PiSdkLoader, type PiModelLike } from "../runtime/Sdk.js";
@@ -75,11 +76,7 @@ export function createStandaloneDevshellPiExtension(
                 );
                 main.bindMain(
                     () => mainState,
-                    {
-                        getActiveToolNames: () => pi.getActiveTools(),
-                        setActiveToolsByName: (toolNames) =>
-                            pi.setActiveTools([...toolNames]),
-                    },
+                    createStandalonePiToolExposureSurface(pi),
                 );
             });
             pi.on("before_agent_start", (_event, context) => {
@@ -91,9 +88,6 @@ export function createStandaloneDevshellPiExtension(
             pi.on("input", () => {
                 main.notifyMainInput();
             });
-            pi.on("tool_result", (event) => {
-                main.observeToolResult(event.toolName, event.isError === true);
-            });
             pi.on("session_shutdown", async () => {
                 await main.close();
                 await session.close();
@@ -103,6 +97,16 @@ export function createStandaloneDevshellPiExtension(
             await session.close();
             throw error;
         }
+    };
+}
+
+export function createStandalonePiToolExposureSurface(
+    pi: ExtensionAPI,
+): PiToolExposureSurface {
+    return {
+        getActiveToolNames: () => pi.getActiveTools(),
+        setActiveToolsByName: (toolNames) => pi.setActiveTools([...toolNames]),
+        subscribe: (listener) => pi.on("tool_execution_end", listener),
     };
 }
 

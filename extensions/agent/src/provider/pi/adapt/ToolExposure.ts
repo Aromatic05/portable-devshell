@@ -6,7 +6,7 @@ export interface PiToolExposureSurface {
 
 export interface PiToolExposureDomain {
     readonly expanded: readonly string[];
-    readonly expandOnTools?: readonly string[];
+    readonly expandOnResult?: (toolName: string, details: unknown) => boolean;
     readonly gateway: readonly string[];
 }
 
@@ -18,7 +18,16 @@ export const PI_PROCESS_TOOL_NAMES = Object.freeze([
 
 export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
     expanded: PI_PROCESS_TOOL_NAMES,
-    expandOnTools: ["bash_run"],
+    expandOnResult(toolName: string, details: unknown) {
+        if (toolName === "bash_run") return true;
+        if (toolName !== "task_manage") return false;
+        const result = asRecord(details);
+        // Pi's completion event has no input. Only create returns a task and cursor.
+        return (
+            typeof asRecord(result?.task)?.id === "string" &&
+            typeof result?.cursor === "string"
+        );
+    },
     gateway: ["task_manage"],
 });
 
@@ -65,14 +74,6 @@ export class PiToolExposureController {
         this.#unsubscribe = undefined;
     }
 
-    observeToolResult(toolName: string, isError: boolean): void {
-        if (isError) return;
-        for (const [name, domain] of Object.entries(this.#domains)) {
-            if (domain.expandOnTools?.includes(toolName) === true)
-                this.setExpanded(name, true);
-        }
-    }
-
     #apply(): void {
         const tools = new Set(this.#baseTools);
         for (const [name, domain] of Object.entries(this.#domains)) {
@@ -89,10 +90,15 @@ export class PiToolExposureController {
         const event = asRecord(value);
         if (
             event?.type !== "tool_execution_end" ||
-            typeof event.toolName !== "string"
+            typeof event.toolName !== "string" ||
+            event.isError !== false
         )
             return;
-        this.observeToolResult(event.toolName, event.isError === true);
+        const details = asRecord(event.result)?.details;
+        for (const [name, domain] of Object.entries(this.#domains)) {
+            if (domain.expandOnResult?.(event.toolName, details) === true)
+                this.setExpanded(name, true);
+        }
     }
 }
 function asRecord(value: unknown): Record<string, unknown> | undefined {

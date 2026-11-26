@@ -14,11 +14,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { createDevshellPiExtension, type DevshellPiToolSession } from "../../src/provider/pi/adapt/Bridge.ts";
+import { createStandalonePiToolExposureSurface } from "../../src/provider/pi/adapt/StandaloneClient.ts";
 import {
     PI_PROCESS_TOOL_DOMAIN,
     PiToolExposureController,
 } from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProfileCatalog } from "../../src/provider/pi/profile/Loader.ts";
+import { PiMainRuntime } from "../../src/provider/pi/runtime/MainRuntime.ts";
 import {
     PiSubagentRuntime,
     type PiAgentProfileCatalogLike,
@@ -88,6 +90,73 @@ function effectiveToolNames(context: FauxContext): Set<string> {
         }
     }
     return names;
+}
+
+function assertProcessToolExposure(context: FauxContext, expanded: boolean): void {
+    const names = effectiveToolNames(context);
+    assert.equal(names.has("task_manage"), true);
+    assert.equal(names.has("task_input"), expanded);
+    assert.equal(names.has("task_inspect"), expanded);
+}
+
+function lastToolResultText(context: FauxContext, toolName: string, isError: boolean): string {
+    const result = context.messages.map(record).reverse().find((message) => message?.role === "toolResult");
+    assert.ok(result);
+    assert.equal(result.toolName, toolName);
+    assert.equal(result.isError, isError);
+    assert.ok(Array.isArray(result.content));
+    const text = record(result.content[0])?.text;
+    assert.ok(typeof text === "string");
+    return text;
+}
+
+const existingTerminal = "existing-terminal";
+const terminalId = "terminal-integration";
+const terminalCursor = "terminal-cursor";
+const terminalInput = "printf TERMINAL_ECHO\n";
+const terminalCalls = [
+    { name: "task_manage", input: { command: "list" } },
+    { name: "task_manage", input: { command: "close", task: existingTerminal } },
+    { name: "task_manage", input: { command: "create", task: existingTerminal } },
+    { name: "task_manage", input: { command: "create" } },
+    { name: "task_input", input: { task: terminalId, cursor: terminalCursor, input: terminalInput } },
+] as const;
+
+function terminalResponses(faux: FauxModule) {
+    const call = (name: string, input: Record<string, unknown>) => faux.fauxAssistantMessage(
+        faux.fauxToolCall(name, input),
+        { stopReason: "toolUse" },
+    );
+    return [
+        (context: FauxContext) => {
+            assertProcessToolExposure(context, false);
+            return call("task_manage", terminalCalls[0].input);
+        },
+        (context: FauxContext) => {
+            assertProcessToolExposure(context, false);
+            assert.match(lastToolResultText(context, "task_manage", false), /existing-terminal/u);
+            return call("task_manage", terminalCalls[1].input);
+        },
+        (context: FauxContext) => {
+            assertProcessToolExposure(context, false);
+            assert.match(lastToolResultText(context, "task_manage", false), /exited/u);
+            return call("task_manage", terminalCalls[2].input);
+        },
+        (context: FauxContext) => {
+            assertProcessToolExposure(context, false);
+            assert.match(lastToolResultText(context, "task_manage", true), /tool\.invalidArguments/u);
+            return call("task_manage", terminalCalls[3].input);
+        },
+        (context: FauxContext) => {
+            assertProcessToolExposure(context, true);
+            const created = JSON.parse(lastToolResultText(context, "task_manage", false));
+            return call("task_input", { task: created.task.id, cursor: created.cursor, input: terminalInput });
+        },
+        (context: FauxContext) => {
+            assert.match(lastToolResultText(context, "task_input", false), /TERMINAL_ECHO/u);
+            return faux.fauxAssistantMessage("TERMINAL_DONE");
+        },
+    ];
 }
 
 function lastUserText(context: FauxContext): string {
@@ -188,10 +257,25 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
                     ],
                 };
             }
-            if (name === "task_manage" && record(input)?.command === "list") {
-                return {
-                    tasks: [{ id: "task-integration", kind: "task", persistent: false, pty: true, state: "running" }],
-                };
+            if (name === "task_manage") {
+                const args = record(input);
+                const terminal = { kind: "terminal", persistent: true, pty: true, state: "running" };
+                switch (args?.command) {
+                    case "list":
+                        return { tasks: [{ ...terminal, id: existingTerminal }] };
+                    case "close":
+                        return { taskId: args.task, killRequested: true, state: "exited" };
+                    case "create":
+                        if (args.task !== undefined) {
+                            throw Object.assign(new Error("create does not accept task"), {
+                                code: "tool.invalidArguments",
+                            });
+                        }
+                        return { task: { ...terminal, id: terminalId }, cursor: terminalCursor };
+                }
+            }
+            if (name === "task_input") {
+                return { stdout: "TERMINAL_ECHO", stderr: "", termination: "running" };
             }
             if (name === "bash_run") {
                 return {
@@ -405,24 +489,8 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
             /Agent already exists/u,
         );
 
-        faux.appendResponses([
-            (context) => {
-                const names = effectiveToolNames(context);
-                assert.equal(names.has("bash_run"), true);
-                assert.equal(names.has("task_input"), false);
-                return fauxModule.fauxAssistantMessage(
-                    fauxModule.fauxToolCall("bash_run", { command: "child-task", waitMs: 0 }),
-                    { stopReason: "toolUse" },
-                );
-            },
-            (context) => {
-                const names = effectiveToolNames(context);
-                assert.equal(names.has("task_input"), true);
-                assert.equal(names.has("task_inspect"), true);
-                assert.equal(names.has("task_manage"), true);
-                return fauxModule.fauxAssistantMessage("CHILD_PROCESS_DONE");
-            },
-        ]);
+        const beforeTerminalCalls = toolCalls.length;
+        faux.appendResponses(terminalResponses(fauxModule));
         await toolByName(subagents, "agent_interact").execute("interact-process", {
             agent: "reviewer",
             interrupt: false,
@@ -435,16 +503,9 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         const childProcessAgents = childProcess.agents as Array<Record<string, unknown>>;
         assert.equal(
             record(childProcessAgents[0]?.lastTurn)?.result,
-            "CHILD_PROCESS_DONE",
+            "TERMINAL_DONE",
         );
-        assert.equal(
-            toolCalls.some(
-                (call) =>
-                    call.name === "bash_run" &&
-                    record(call.input)?.command === "child-task",
-            ),
-            true,
-        );
+        assert.deepEqual(toolCalls.slice(beforeTerminalCalls), terminalCalls);
 
         let managedBlockStarted!: () => void;
         const managedBlock = new Promise<void>((resolve) => {
@@ -610,3 +671,84 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process e
         await rm(root, { force: true, recursive: true });
     }
 });
+
+for (const mode of ["embedded", "standalone"] as const) {
+    test(`real Pi ${mode} main exposes terminal tools only after successful create`, async (t) => {
+        const root = await mkdtemp(join(tmpdir(), "devshell-pi-terminal-integration-"));
+        t.after(() => rm(root, { force: true, recursive: true }));
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "workspace");
+        await mkdir(agentDir);
+        await mkdir(cwd);
+
+        const fauxModule = await loadFauxModule();
+        const faux = fauxModule.fauxProvider({ tokensPerSecond: 1_000_000 });
+        const modelRuntime = await ModelRuntime.create({
+            allowModelNetwork: false,
+            authPath: join(agentDir, "auth.json"),
+            modelsPath: join(agentDir, "models.json"),
+        });
+        modelRuntime.registerNativeProvider(faux.provider as never);
+        const model = modelRuntime.getModel("faux", "faux-1");
+        assert.ok(model);
+
+        const toolCalls: Array<{ name: string; input: unknown }> = [];
+        const main = new PiMainRuntime({
+            agentDir,
+            gui: { attach: (session) => session.sessionId, detach() {} },
+            localCwd: cwd,
+            modelRuntime: modelRuntime as never,
+            sdk: {
+                DefaultResourceLoader,
+                ModelRuntime,
+                SessionManager,
+                SettingsManager,
+                createAgentSession,
+                getAgentDir: () => agentDir,
+            } as never,
+            tools: createToolSession(toolCalls),
+        });
+        const mainState = () => ({ model, running: false });
+        const settingsManager = SettingsManager.create(cwd, agentDir);
+        const resourceLoader = new DefaultResourceLoader({
+            agentDir,
+            cwd,
+            extensionFactories: [{
+                factory: async (pi) => {
+                    await main.extension()(pi);
+                    if (mode === "standalone") {
+                        pi.on("session_start", () => {
+                            main.bindMain(mainState, createStandalonePiToolExposureSurface(pi));
+                        });
+                    }
+                },
+                hidden: true,
+                name: "portable-devshell-terminal-integration",
+            }],
+            settingsManager,
+        });
+        await resourceLoader.reload();
+        const { session } = await createAgentSession({
+            agentDir,
+            cwd,
+            model,
+            modelRuntime,
+            noTools: "builtin",
+            resourceLoader,
+            sessionManager: SessionManager.create(cwd, join(root, "sessions")),
+            settingsManager,
+        });
+        try {
+            if (mode === "embedded") main.bindMain(mainState, session);
+            await session.bindExtensions({});
+            faux.setResponses(terminalResponses(fauxModule));
+
+            await session.prompt("exercise persistent terminal exposure");
+            assert.deepEqual(toolCalls, terminalCalls);
+            assert.equal(session.getLastAssistantText(), "TERMINAL_DONE");
+        } finally {
+            await main.close();
+            session.dispose();
+        }
+    });
+}
