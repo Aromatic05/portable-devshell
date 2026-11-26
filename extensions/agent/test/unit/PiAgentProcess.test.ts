@@ -487,6 +487,24 @@ test("PiToolExposureController expands process tools when task_manage list retur
     created.emit("task_manage", { task: { id: "t2" }, cursor: "c2" });
     assert.equal(created.controller.isExpanded("process"), true);
     created.controller.close();
+
+    const handoff = createHarness();
+    handoff.emit("file_read", { comment: ["unrelated note"] });
+    assert.equal(handoff.controller.isExpanded("process"), false);
+    handoff.emit("file_read", {
+        comment: [
+            "[Terminal handoff] Human released control of terminal p1. Inspect the current screen with task_inspect, or send input with task_input (omit any pre-handoff cursor to anchor at the latest output).",
+        ],
+    });
+    assert.equal(handoff.controller.isExpanded("process"), true);
+    assert.deepEqual(handoff.active(), [
+        "file_read",
+        "bash_run",
+        "task_input",
+        "task_inspect",
+        "task_manage",
+    ]);
+    handoff.controller.close();
 });
 
 function startOptions(

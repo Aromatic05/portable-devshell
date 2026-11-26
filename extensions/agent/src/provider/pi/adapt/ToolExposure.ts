@@ -19,9 +19,19 @@ export const PI_PROCESS_TOOL_NAMES = Object.freeze([
 export const PI_PROCESS_TOOL_DOMAIN: PiToolExposureDomain = Object.freeze({
     expanded: PI_PROCESS_TOOL_NAMES,
     expandOnResult(toolName: string, details: unknown) {
+        const result = asRecord(details);
+        if (
+            Array.isArray(result?.comment) &&
+            result.comment.some(
+                (entry) =>
+                    typeof entry === "string" &&
+                    entry.includes("[Terminal handoff]"),
+            )
+        ) {
+            return true;
+        }
         if (toolName === "bash_run") return true;
         if (toolName !== "task_manage") return false;
-        const result = asRecord(details);
         // Pi's completion event has no input. Expand when create returns a task
         // and cursor, or when list returns at least one existing task.
         return (
