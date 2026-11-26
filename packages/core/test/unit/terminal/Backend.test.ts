@@ -728,7 +728,8 @@ test("worker terminal backend resyncs mid-session stream.gap via restore snapsho
     assert.deepEqual(frames[2], { data: "after-resync", seq: 3 });
 });
 
-test("worker terminal backend replays output before accepting a reliable exit", async () => {
+test("a final exit recovers missing output after one transient attachment failure", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const worker = new FakeWorkerTerminal();
     worker.latestSeq = 1;
     let attaches = 0;
@@ -742,6 +743,7 @@ test("worker terminal backend replays output before accepting a reliable exit", 
                     replay: [{ dataBase64: Buffer.from("initial").toString("base64"), seq: 1 }],
                     session: worker.descriptor(),
                 };
+            if (attaches === 2) throw new Error("attach temporarily unavailable");
             return {
                 replay: [{ dataBase64: Buffer.from("final").toString("base64"), seq: 2 }],
                 session: { ...worker.descriptor(), latestSeq: 2, state: "exited", version: 2 },
@@ -763,10 +765,9 @@ test("worker terminal backend replays output before accepting a reliable exit", 
     });
     assert.ok("process" in opened);
     const process = opened.process;
-    const frames: string[] = [];
-    let exited = false;
-    process.onData((data) => frames.push(data));
-    process.onExit(() => { exited = true; });
+    const events: Array<string | TerminalProcessExit> = [];
+    process.onData((data) => events.push(data));
+    process.onExit((exit) => events.push(exit));
     worker.notification?.({
         method: "terminal.exit",
         params: {
@@ -778,9 +779,13 @@ test("worker terminal backend replays output before accepting a reliable exit", 
             version: 2,
         },
     });
-    await waitFor(() => exited);
-    assert.deepEqual(frames, ["initial", "final"]);
+    await setImmediate();
     assert.equal(attaches, 2);
+    assert.deepEqual(events, ["initial"]);
+    t.mock.timers.tick(100);
+    await setImmediate();
+    assert.equal(attaches, 3);
+    assert.deepEqual(events, ["initial", "final", { exitCode: 0, signal: 0 }]);
 });
 
 test("worker terminal backend syncs post-release session metadata and version so subsequent kill uses bumped version", async () => {

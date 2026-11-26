@@ -108,6 +108,7 @@ class WorkerTerminalProcess implements TerminalProcess {
     #controlHeartbeat?: ReturnType<typeof setInterval>;
     #operationTail = Promise.resolve();
     #resumeTail = Promise.resolve();
+    #finalResumeRetry?: ReturnType<typeof setTimeout>;
 
     constructor(
         worker: WorkerTerminalPort,
@@ -125,6 +126,8 @@ class WorkerTerminalProcess implements TerminalProcess {
         });
         this.#unsubscribeDisconnected = worker.onDisconnected(() => {
             this.#connectionEpoch++;
+            clearTimeout(this.#finalResumeRetry);
+            this.#finalResumeRetry = undefined;
             // Invalidate the local attachment, not the remote ownership state.
             this.#clearController();
         });
@@ -399,29 +402,43 @@ class WorkerTerminalProcess implements TerminalProcess {
         await current;
     }
 
-    #scheduleResume(): void {
+    #scheduleResume(retryFinal = false): void {
+        const epoch = this.#connectionEpoch;
         const current = this.#resumeTail.then(async () => {
             await this.#serialize(async () => {
-                await this.#resume(true);
+                if (this.#closed || epoch !== this.#connectionEpoch) return;
+                const resumed = await this.#resume(true);
+                if (
+                    !resumed && retryFinal && !this.#closed &&
+                    epoch === this.#connectionEpoch && this.#finalResumeRetry === undefined
+                ) {
+                    // Exit may be the last notification; give its replay one
+                    // more attempt even if the live stream stays quiet.
+                    this.#finalResumeRetry = setTimeout(() => {
+                        this.#finalResumeRetry = undefined;
+                        this.#scheduleResume();
+                    }, 100);
+                    this.#finalResumeRetry.unref?.();
+                }
             });
         });
         this.#resumeTail = current.catch((error: unknown) => {
-            this.#fail(asError(error));
+            if (epoch === this.#connectionEpoch) this.#fail(asError(error));
         });
     }
 
-    async #resume(background = false): Promise<void> {
-        if (this.#closed) return;
+    async #resume(background = false): Promise<boolean> {
+        if (this.#closed) return true;
         let attached;
         try {
             attached = await this.#attachForResume();
         } catch (error) {
-            // A failed subscription is not evidence that the PTY died. Leave
-            // the next attempt to another connection or notification.
-            if (background && isTemporaryAttachError(error)) return;
+            // A failed subscription is not evidence that the PTY died.
+            if (background && isTemporaryAttachError(error)) return false;
             throw error;
         }
         await this.#applyAttached(attached);
+        return true;
     }
 
     async #attachForResume(): ReturnType<WorkerTerminalPort["attach"]> {
@@ -543,7 +560,7 @@ class WorkerTerminalProcess implements TerminalProcess {
             return;
         }
         if (notification.params.latestSeq > this.#lastSeq) {
-            this.#scheduleResume();
+            this.#scheduleResume(true);
             return;
         }
         this.#acceptExit(
@@ -642,6 +659,8 @@ class WorkerTerminalProcess implements TerminalProcess {
     }
 
     #disposeSubscriptions(): void {
+        clearTimeout(this.#finalResumeRetry);
+        this.#finalResumeRetry = undefined;
         clearInterval(this.#controlHeartbeat);
         this.#controlHeartbeat = undefined;
         this.#unsubscribeConnected();
