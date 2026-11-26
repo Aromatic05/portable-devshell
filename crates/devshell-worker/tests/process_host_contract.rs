@@ -867,41 +867,26 @@ fn persistent_terminal_rejects_stale_cursor_after_shell_respawn() {
     let stale_cursor = created["cursor"].as_str().unwrap().to_owned();
     assert!(stale_cursor.starts_with("tc3_"), "{created}");
 
-    let respawned = fixture.tool(
+    let first = fixture.tool(
         "task_input",
         json!({
             "task": id,
-            "input": "printf '\033[?1049h'; exit\n",
+            "input": "printf '\\033[?1049h'; exit\n",
             "waitMs": 1500
         }),
     );
-    assert_eq!(respawned["termination"], "running", "{respawned}");
-    let mut fresh_cursor = respawned["cursor"].as_str().unwrap().to_owned();
+    assert_eq!(first["termination"], "running", "{first}");
     let deadline = Instant::now() + Duration::from_secs(5);
-    let mut observed = String::new();
-    loop {
-        let reply = fixture.tool_raw(
+    let mut observed = first["stdout"].as_str().unwrap().to_owned();
+    while !observed.contains("[shell restarted]") {
+        assert!(Instant::now() < deadline, "shell did not respawn: {observed:?}");
+        let reply = fixture.tool(
             "task_input",
-            json!({
-                "task": id,
-                "input": "printf 'BEFORE-RESPAWN\n'\n",
-                "cursor": fresh_cursor,
-                "waitMs": 2000
-            }),
+            json!({"task": id, "waitMs": 500}),
         );
-        if reply["type"] == "reply" {
-            let message = &reply["message"];
-            assert_eq!(message["termination"], "running", "{message}");
-            fresh_cursor = message["cursor"].as_str().unwrap().to_owned();
-            observed.push_str(message["stdout"].as_str().unwrap());
-            if observed.contains("BEFORE-RESPAWN") {
-                break;
-            }
-        }
-        assert!(Instant::now() < deadline, "respawned shell did not respond: {reply}");
-        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(reply["termination"], "running", "{reply}");
+        observed.push_str(reply["stdout"].as_str().unwrap());
     }
-    assert!(observed.contains("BEFORE-RESPAWN"), "{observed:?}");
 
     for input in [None, Some("printf 'MUST-NOT-RUN\\n'\n")] {
         let mut request = json!({

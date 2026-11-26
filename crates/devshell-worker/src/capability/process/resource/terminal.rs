@@ -136,7 +136,7 @@ impl ManagedProcess {
         }
         let state = self.state.lock().map_err(lock_error)?;
         self.validate_terminal(&state, &input)?;
-        self.enqueue(data)?;
+        self.enqueue(data, &state)?;
         Ok(accepted(&input, state.version))
     }
 
