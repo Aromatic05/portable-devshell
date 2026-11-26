@@ -15,7 +15,7 @@ import {
 
 import { createDevshellPiExtension, type DevshellPiToolSession } from "../../src/provider/pi/adapt/Bridge.ts";
 import {
-    PI_TMUX_TOOL_DOMAIN,
+    PI_PROCESS_TOOL_DOMAIN,
     PiToolExposureController,
 } from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProfileCatalog } from "../../src/provider/pi/profile/Loader.ts";
@@ -161,11 +161,11 @@ async function pollToolUntilIdle(
 function createToolSession(callLog: Array<{ name: string; input: unknown }>): DevshellPiToolSession {
     const definitions = [
         ["file_read", { type: "object", properties: { files: { type: "array" } }, required: ["files"] }],
-        ["tmux_run", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
-        ["tmux_read", { type: "object", properties: { task: { type: "string" } }, required: ["task"] }],
-        ["tmux_input", { type: "object", properties: { task: { type: "string" }, text: { type: "string" } }, required: ["task", "text"] }],
-        ["tmux_inspect", { type: "object", properties: {} }],
-        ["tmux_manage", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
+        ["bash_run", { type: "object", properties: { command: { type: "string" }, waitMs: { type: "number" }, tty: { type: "boolean" } }, required: ["command"] }],
+        ["task_read", { type: "object", properties: { task: { type: "string" } }, required: ["task"] }],
+        ["task_input", { type: "object", properties: { task: { type: "string" }, input: { type: "string" }, eof: { type: "boolean" } }, required: ["task"] }],
+        ["terminal_inspect", { type: "object", properties: { terminal: { type: "string" } }, required: ["terminal"] }],
+        ["terminal_manage", { type: "object", properties: { command: { type: "string" } }, required: ["command"] }],
     ] as const;
     const modelTools = definitions.map(([name, inputSchema]) => ({
         description: `${name} test tool`,
@@ -189,15 +189,16 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
                     ],
                 };
             }
-            if (name === "tmux_manage" && record(input)?.command === "list") {
+            if (name === "terminal_manage" && record(input)?.command === "list") {
                 return {
-                    panes: [{ id: "%0", name: "main", status: "idle" }],
+                    tasks: [{ id: "task-integration", state: "running", tty: true }],
                 };
             }
-            if (name === "tmux_run") {
+            if (name === "bash_run") {
                 return {
-                    output: ["started"],
-                    pane: { id: "%0", name: "main" },
+                    stdout: "started", stderr: "",
+                    termination: "running", waitReason: "timeout",
+                    cursor: { seq: 1, stdout: 7, stderr: 0 },
                     task: { id: "task-integration", status: "running" },
                 };
             }
@@ -207,7 +208,7 @@ function createToolSession(callLog: Array<{ name: string; input: unknown }>): De
     } as unknown as DevshellPiToolSession;
 }
 
-test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux exposure end to end", async () => {
+test("real Pi runtime executes Profile/Subagent and state-driven Agent/Process exposure end to end", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-pi-subagent-integration-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -320,7 +321,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
             expanded: PI_SUBAGENT_TOOL_NAMES,
             gateway: ["agent_spawn"],
         },
-        tmux: PI_TMUX_TOOL_DOMAIN,
+        process: PI_PROCESS_TOOL_DOMAIN,
     });
     exposureRef.current = mainExposure;
 
@@ -328,15 +329,15 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
         const initial = new Set(main.getActiveToolNames());
         assert.equal(initial.has("agent_spawn"), true);
         assert.equal(initial.has("agent_poll"), false);
-        assert.equal(initial.has("tmux_run"), true);
-        assert.equal(initial.has("tmux_read"), false);
+        assert.equal(initial.has("bash_run"), true);
+        assert.equal(initial.has("task_read"), false);
 
         faux.setResponses([
             (context) => {
                 const names = effectiveToolNames(context);
                 assert.equal(names.has("agent_spawn"), false);
-                assert.equal(names.has("tmux_run"), true);
-                assert.equal(names.has("tmux_read"), false);
+                assert.equal(names.has("bash_run"), true);
+                assert.equal(names.has("task_read"), false);
                 return fauxModule.fauxAssistantMessage(
                     fauxModule.fauxToolCall("file_read", {
                         files: [{ path: "./marker.txt", view: "content" }],
@@ -408,39 +409,39 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
         faux.appendResponses([
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("tmux_run"), true);
-                assert.equal(names.has("tmux_read"), false);
+                assert.equal(names.has("bash_run"), true);
+                assert.equal(names.has("task_read"), false);
                 return fauxModule.fauxAssistantMessage(
-                    fauxModule.fauxToolCall("tmux_run", { command: "child-task" }),
+                    fauxModule.fauxToolCall("bash_run", { command: "child-task", waitMs: 0 }),
                     { stopReason: "toolUse" },
                 );
             },
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("tmux_read"), true);
-                assert.equal(names.has("tmux_input"), true);
-                assert.equal(names.has("tmux_manage"), true);
+                assert.equal(names.has("task_read"), true);
+                assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("terminal_manage"), true);
                 return fauxModule.fauxAssistantMessage("CHILD_TMUX_DONE");
             },
         ]);
-        await toolByName(subagents, "agent_interact").execute("interact-tmux", {
+        await toolByName(subagents, "agent_interact").execute("interact-process", {
             agent: "reviewer",
             interrupt: false,
-            message: "exercise child tmux",
+            message: "exercise child process",
         });
-        const childTmux = await pollToolUntilIdle(
+        const childProcess = await pollToolUntilIdle(
             subagents,
             "/root/main/reviewer",
         );
-        const childTmuxAgents = childTmux.agents as Array<Record<string, unknown>>;
+        const childProcessAgents = childProcess.agents as Array<Record<string, unknown>>;
         assert.equal(
-            record(childTmuxAgents[0]?.lastTurn)?.result,
+            record(childProcessAgents[0]?.lastTurn)?.result,
             "CHILD_TMUX_DONE",
         );
         assert.equal(
             toolCalls.some(
                 (call) =>
-                    call.name === "tmux_run" &&
+                    call.name === "bash_run" &&
                     record(call.input)?.command === "child-task",
             ),
             true,
@@ -574,25 +575,25 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
         faux.appendResponses([
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("tmux_run"), true);
-                assert.equal(names.has("tmux_read"), false);
+                assert.equal(names.has("bash_run"), true);
+                assert.equal(names.has("task_read"), false);
                 return fauxModule.fauxAssistantMessage(
-                    fauxModule.fauxToolCall("tmux_run", { command: "sleep 1" }),
+                    fauxModule.fauxToolCall("bash_run", { command: "sleep 1", waitMs: 0 }),
                     { stopReason: "toolUse" },
                 );
             },
             (context) => {
                 const names = effectiveToolNames(context);
-                assert.equal(names.has("tmux_read"), true);
-                assert.equal(names.has("tmux_input"), true);
-                assert.equal(names.has("tmux_manage"), true);
+                assert.equal(names.has("task_read"), true);
+                assert.equal(names.has("task_input"), true);
+                assert.equal(names.has("terminal_manage"), true);
                 return fauxModule.fauxAssistantMessage("MAIN_TMUX_DONE");
             },
         ]);
-        await main.prompt("exercise tmux exposure");
-        assert.equal(toolCalls.some((call) => call.name === "tmux_run"), true);
-        assert.equal(main.getActiveToolNames().includes("tmux_read"), true);
-        assert.equal(main.getActiveToolNames().includes("tmux_manage"), true);
+        await main.prompt("exercise process exposure");
+        assert.equal(toolCalls.some((call) => call.name === "bash_run"), true);
+        assert.equal(main.getActiveToolNames().includes("task_read"), true);
+        assert.equal(main.getActiveToolNames().includes("terminal_manage"), true);
 
         await assert.rejects(
             toolByName(subagents, "agent_spawn").execute("spawn-fork", {

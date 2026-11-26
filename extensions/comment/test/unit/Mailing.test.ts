@@ -249,7 +249,7 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
     const call = (toolName: string, command = "pwd") => ({
         callId: "first-work", direction: "inbound" as const,
         value: { kind: "call" as const, toolName,
-            payload: toolName === "tmux_input" ? { task: "task-1", input: command } : { command },
+            payload: toolName === "task_input" ? { task: "task-1", input: command } : { command },
             context: { ...target, source: "mcp" as const } },
     });
     const invocation = {} as never;
@@ -260,14 +260,14 @@ test("Auto Memory binds only on the first regular ToolCall and remains stable un
         ["bash_run", "devshell memory init explicit-name; pwd"],
         ["bash_run", "cd /testspace/workspace && devshell memory inherit old-name"],
         ["bash_run", "printf ready; devshell memory init explicit-name\npwd"],
-        ["tmux_run", "devshell memory init explicit-name && pwd"],
-        ["tmux_input", "devshell memory inherit old-name\n"],
+        ["bash_run", "devshell memory init explicit-name && pwd"],
+        ["task_input", "devshell memory inherit old-name\n"],
     ]) {
         await hook(call(toolName!, command!) as never, invocation);
         assert.deepEqual(await mailing.status(target), {});
     }
-    await hook({ ...call("tmux_input"), value: {
-        ...call("tmux_input").value,
+    await hook({ ...call("task_input"), value: {
+        ...call("task_input").value,
         payload: { pane: "persistent-pane", input: "devshell memory init explicit-pane\n" },
     } } as never, invocation);
     assert.deepEqual(await mailing.status(target), {});

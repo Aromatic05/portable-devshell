@@ -6,6 +6,7 @@ import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./tool/control/Artifact.js";
 import { instanceErrorHints } from "./tool/control/Instance.js";
 import { bashErrorHints, bashResultHints } from "./tool/worker/Bash.js";
+import { processErrorHints } from "./tool/worker/Process.js";
 import {
     fileEditResultHints,
     fileErrorHints,
@@ -44,7 +45,9 @@ const instanceTools = new Set([
 ]);
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
-    if (toolName === "bash_run") return (_name, body) => bashErrorHints(body);
+    if (toolName === "bash_run") return (_name, body) => [...bashErrorHints(body), ...processErrorHints(body)];
+    if (["task_read", "task_input", "terminal_inspect", "terminal_manage"].includes(toolName))
+        return (_name, body) => processErrorHints(body);
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);
     if (artifactControlTools.has(toolName))

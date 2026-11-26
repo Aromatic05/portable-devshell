@@ -23,7 +23,12 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const exitCode = asNumber(record.exitCode);
     const termSignal = asNumber(record.termSignal);
 
-    if (termination === "timeout" || asBoolean(record.timedOut) === true) {
+    if (asBoolean(record.detached) === true) {
+        hints.push(diagnosticHint(
+            "bash.waitDetached",
+            "The synchronous wait window ended. The process is still running; continue with task_read using the returned task ID and cursor.",
+        ));
+    } else if (termination === "timeout" || asBoolean(record.timedOut) === true) {
         hints.push(
             errorHint(
                 "bash.timeout",

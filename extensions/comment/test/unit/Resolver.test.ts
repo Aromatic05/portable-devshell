@@ -336,113 +336,73 @@ test("file_edit literal diff body is rejected with a scolding hint", () => {
     assert.match(hints[0]?.text ?? "", /literal content/u);
 });
 
-test("tmux_run block timeout keeps the task running and is not a failure", () => {
-    const hints = resolveResultHints("tmux_run", {
-        observationReset: false,
-        output: [],
+test("bash_run soft wait returns a running task without treating it as failure", () => {
+    const hints = resolveResultHints("bash_run", {
+        termination: "running",
+        waitReason: "timeout",
+        waitMs: 250,
         task: { id: "t1", status: "running" },
-        warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }],
     });
-    assert.deepEqual(codes(hints), ["tmux.blockTimeout"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/u);
+    assert.deepEqual(codes(hints), ["bash.taskRunning"]);
+    assert.match(hints[0]?.text ?? "", /task_read/u);
 });
 
-test("tmux_run running task without block timeout yields a task-running diagnostic", () => {
-    const hints = resolveResultHints("tmux_run", {
-        observationReset: false,
-        output: [],
-        task: { id: "t1", status: "running" },
-        warnings: [],
-    });
-    assert.deepEqual(codes(hints), ["tmux.taskRunning"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/u);
-});
-
-test("tmux_run detached handoff stays valid without Workspace recovery", () => {
-    const hints = resolveResultHints("tmux_run", {
+test("bash_run durable handoff directs the model to the independent task cursor", () => {
+    const hints = resolveResultHints("bash_run", {
         detached: true,
+        termination: "running",
         task: { id: "t1", status: "running" },
+        cursor: { seq: 4, stdout: 12, stderr: 0 },
     });
-    assert.deepEqual(codes(hints), ["tmux.runDetached"]);
-    assert.match(hints[0]?.text ?? "", /returned task id/iu);
-    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
-    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
+    assert.deepEqual(codes(hints), ["bash.waitDetached"]);
+    assert.match(hints[0]?.text ?? "", /task_read/u);
+    assert.match(hints[0]?.text ?? "", /cursor/u);
 });
 
-test("tmux_read detached handoff stays valid without Workspace recovery", () => {
-    const hints = resolveResultHints("tmux_read", {
-        detached: true,
+test("task_read running result uses the same task continuation guidance", () => {
+    const hints = resolveResultHints("task_read", {
+        termination: "running",
+        waitReason: "timeout",
         task: { id: "t1", status: "running" },
     });
-    assert.deepEqual(codes(hints), ["tmux.readDetached"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
-    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
+    assert.deepEqual(codes(hints), ["bash.taskRunning"]);
+    assert.match(hints[0]?.text ?? "", /task_read/u);
 });
 
-test("tmux_run interrupted wait tells the model the task is still running", () => {
-    const hints = resolveResultHints("tmux_run", {
-        interrupted: true,
-        task: { id: "t1", status: "running" },
-    });
-    assert.deepEqual(codes(hints), ["tmux.runInterrupted"]);
-    assert.match(hints[0]?.text ?? "", /user stopped waiting/iu);
-    assert.match(hints[0]?.text ?? "", /still running/iu);
-});
-
-test("tmux task terminal status distinguishes success, failure, and unknown", () => {
+test("Process Host errors have task-specific recovery guidance", () => {
     assert.deepEqual(
-        resolveResultHints("tmux_read", {
+        codes(resolveErrorHints("task_input", body("process.controlOwned"))),
+        ["process.controlOwned"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("task_read", body("process.notFound"))),
+        ["process.notFound"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("terminal_manage", body("process.resourceLimit"))),
+        ["process.resourceLimit"],
+    );
+});
+
+test("task_read uses the shared Bash result status for successful and failed tasks", () => {
+    assert.deepEqual(
+        resolveResultHints("task_read", {
             task: { status: "0" },
-            warnings: [],
+            exitCode: 0,
+            termination: "exited",
+            stdout: "ok",
+            stderr: "",
         }),
         [],
     );
-    assert.deepEqual(
-        resolveResultHints("tmux_run", { task: { status: "0" } }),
-        [],
-    );
-    assert.deepEqual(
-        codes(
-            resolveResultHints("tmux_read", {
-                task: { status: "3" },
-                warnings: [],
-            }),
-        ),
-        ["tmux.taskFailed"],
-    );
-    assert.deepEqual(
-        codes(
-            resolveResultHints("tmux_read", {
-                task: { status: "unknown" },
-                warnings: [],
-            }),
-        ),
-        ["tmux.taskStatusUnknown"],
-    );
-});
-
-test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
-    const hints = resolveErrorHints(
-        "tmux_run",
-        body("tmux.taskStartUnconfirmed"),
-    );
-    assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
-});
-
-test("tmux cwd errors preserve their diagnostic code", () => {
-    assert.deepEqual(
-        codes(resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))),
-        ["tmux.invalidCwd"],
-    );
-});
-
-test("tmux_manage list full capacity is a diagnostic, not a list failure", () => {
-    const hints = resolveResultHints("tmux_manage", {
-        capacity: { max: 4, used: 4 },
-        panes: [],
-        warnings: [],
+    const failed = resolveResultHints("task_read", {
+        task: { status: "3" },
+        exitCode: 3,
+        termination: "exited",
+        stdout: "",
+        stderr: "failure",
     });
-    assert.deepEqual(codes(hints), ["tmux.capacityFull"]);
+    assert.deepEqual(codes(failed), ["bash.nonZeroExit"]);
 });
 
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {

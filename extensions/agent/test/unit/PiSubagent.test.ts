@@ -31,11 +31,11 @@ class FakeSession implements PiSessionLike {
     aborted = 0;
     #activeTools = [
         "file_read",
-        "tmux_input",
-        "tmux_inspect",
-        "tmux_manage",
-        "tmux_read",
-        "tmux_run",
+        "task_input",
+        "terminal_inspect",
+        "terminal_manage",
+        "task_read",
+        "bash_run",
     ];
     #streaming = false;
     #turn?: ReturnType<typeof deferred>;

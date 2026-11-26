@@ -27,7 +27,7 @@ test("Agent model tool results retain Comment advice and user instructions", () 
         ["file_read", { files: [{ path: "example.ts", view: "content", content: "1:hello", nextSelector: "2" }] }],
         ["bash_run", { stdout: "ok", stderr: "", exitCode: 0 }],
         ["file_edit", { operations: [{ action: "patch", path: "example.ts", status: "applied" }] }],
-        ["tmux_read", { task: { id: "task-1", status: "0" }, output: ["done"] }],
+        ["task_read", { task: { id: "task-1", status: "0" }, stdout: "done", stderr: "", termination: "exited", exitCode: 0 }],
     ];
     for (const [toolName, value] of results) {
         const text = projectAgentModelToolResult(toolName, { ...value, comment });
@@ -50,7 +50,7 @@ test("Agent tool result truncation reserves Comment ahead of long output", () =>
 });
 
 test("Agent success renderers do not swallow a structured tool error", () => {
-    for (const toolName of ["bash_run", "tmux_read", "tmux_run", "file_edit"]) {
+    for (const toolName of ["bash_run", "task_read", "task_input", "file_edit"]) {
         const text = projectAgentModelToolResult(toolName, {
             error: { code: "file.unreadRange", message: "read coverage required", retryable: true },
             comment: ["[file.unreadRange] Read the missing source lines."],
