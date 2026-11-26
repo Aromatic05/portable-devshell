@@ -139,6 +139,8 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
 class ControllableWorkerTerminal extends FakeWorkerTerminal {
     readonly controls: Array<Parameters<NonNullable<WorkerTerminalPort["control"]>>[0]> = [];
     controller?: string;
+    acquireGate?: Promise<void>;
+    releaseError?: Error;
     #nextController = 0;
 
     override descriptor(): WorkerTerminalDescriptor {
@@ -157,6 +159,7 @@ class ControllableWorkerTerminal extends FakeWorkerTerminal {
             return { renewed: true };
         }
         if (input.controller !== undefined) {
+            if (this.releaseError !== undefined) throw this.releaseError;
             if (this.controller === input.controller) this.controller = undefined;
             return { released: true, session: this.descriptor() };
         }
@@ -169,6 +172,7 @@ class ControllableWorkerTerminal extends FakeWorkerTerminal {
         const controller = `ctrl-${++this.#nextController}`;
         this.controller = controller;
         const session = this.descriptor();
+        await this.acquireGate;
         return { controller, session, snapshot: { seq: session.latestSeq, data: "screen" } };
     };
 }
@@ -183,14 +187,39 @@ async function openControllable(worker: ControllableWorkerTerminal) {
     return opened.process;
 }
 
-test("worker terminal backend drops stale control after disconnect and can reacquire", async () => {
+test("disconnect clears the attachment without announcing a remote handoff before reconnect", async (t) => {
     const worker = new ControllableWorkerTerminal();
-    const process = await openControllable(worker);
-    await process.acquireControl!();
-    worker.disconnected?.(new Error("transport closed"));
+    const released: string[] = [];
+    const service = new TerminalSessionService({
+        onControlReleased(session) { released.push(session.terminalId); },
+    });
+    t.after(() => service.close());
+    const opened = await service.open({
+        backend: new WorkerTerminalBackend({ worker }),
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+    const attach = () => service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        terminalId: opened.terminalId,
+    });
+    const previous = attach();
+    const next = attach();
+    await previous.takeControl();
+    worker.disconnected!(new Error("transport closed"));
+    assert.deepEqual(released, []);
+    assert.equal(service.get(opened.terminalId).humanControl, true);
+
     worker.controller = undefined;
-    await process.acquireControl!();
-    await process.write("pwd\r");
+    worker.connected!();
+    await setImmediate();
+    assert.deepEqual(released, [opened.terminalId]);
+    await next.takeControl();
+    await next.write("pwd\r");
     assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
 });
 
@@ -211,6 +240,59 @@ test("worker terminal backend drops stale control on an authoritative release no
     await process.acquireControl!();
     await process.write("pwd\r");
     assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+});
+
+test("a delayed release notification does not clear the new controller", async () => {
+    const worker = new ControllableWorkerTerminal();
+    const process = await openControllable(worker);
+    await process.acquireControl!();
+    await process.releaseControl!();
+    await process.acquireControl!();
+    worker.notification!({
+        method: "terminal.control",
+        params: { ...worker.descriptor(), humanControl: false },
+    });
+    await process.write("pwd\r");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+    assert.equal(worker.controls.at(-1)?.renew, true);
+    await process.releaseControl!();
+});
+
+test("a takeover response from the disconnected transport cannot install an old token", async () => {
+    const worker = new ControllableWorkerTerminal();
+    const process = await openControllable(worker);
+    let resolveAcquire!: () => void;
+    worker.acquireGate = new Promise<void>((resolve) => {
+        resolveAcquire = resolve;
+    });
+    const acquiring = process.acquireControl!();
+    await Promise.resolve();
+    assert.equal(worker.controller, "ctrl-1");
+    worker.disconnected!(new Error("transport closed"));
+    worker.controller = undefined;
+    worker.connected!();
+    resolveAcquire();
+    await assert.rejects(acquiring, /lease was lost during takeover/u);
+    await process.acquireControl!();
+    await process.write("pwd\r");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+    await process.releaseControl!();
+});
+
+test("failed takeover recovery leaves no local token even if release also fails", async () => {
+    const worker = new ControllableWorkerTerminal();
+    const process = await openControllable(worker);
+    const resumeFailure = new Error("resume failed");
+    worker.latestSeq = 2;
+    worker.attachErrors.push(resumeFailure);
+    worker.releaseError = new Error("release failed");
+    await assert.rejects(process.acquireControl!(), (error) => error === resumeFailure);
+    worker.controller = undefined;
+    worker.releaseError = undefined;
+    await process.acquireControl!();
+    await process.write("pwd\r");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+    await process.releaseControl!();
 });
 
 const openAttachInput = {
