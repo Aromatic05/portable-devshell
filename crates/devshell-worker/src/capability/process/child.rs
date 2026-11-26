@@ -37,11 +37,11 @@ impl ExitLatch {
 }
 
 #[cfg(unix)]
-fn observe_exit(child: &Child, blocking: bool) -> std::io::Result<bool> {
+fn observe_exit(child: &Child) -> std::io::Result<bool> {
     use nix::libc;
 
     // Keep the group leader unreaped until all group-directed cleanup is done.
-    let options = libc::WEXITED | libc::WNOWAIT | if blocking { 0 } else { libc::WNOHANG };
+    let options = libc::WEXITED | libc::WNOWAIT;
     loop {
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
         let result =
@@ -56,21 +56,10 @@ fn observe_exit(child: &Child, blocking: bool) -> std::io::Result<bool> {
     }
 }
 
-pub fn exited_without_reaping(child: &mut Child) -> std::io::Result<bool> {
-    #[cfg(unix)]
-    {
-        observe_exit(child, false)
-    }
-    #[cfg(windows)]
-    {
-        Ok(child.try_wait()?.is_some())
-    }
-}
-
 pub(super) fn wait_until_exit(child: &mut Child) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        observe_exit(child, true).map(|_| ())
+        observe_exit(child).map(|_| ())
     }
     #[cfg(windows)]
     {

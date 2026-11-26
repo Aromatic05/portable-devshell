@@ -20,7 +20,6 @@ const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 // Model-facing MCP projections are smaller than the Worker capture budget.
 // Retain the original streams before any protocol-side presentation trimming.
-const RECOVERY_OUTPUT_BYTES: usize = 4 * 1024;
 
 pub struct BashRunTool {
     name: ToolName,

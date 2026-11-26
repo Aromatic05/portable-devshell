@@ -16,7 +16,6 @@ use crate::capability::rpc::notification::WorkerNotificationQueue;
 use crate::capability::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::capability::terminal::TerminalManager;
 use crate::daemon::process::WorkerRuntimeContext;
-use crate::daemon::process::registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
 use crate::instance::sandbox::SecurityPolicy;
 use crate::instance::storage::ExtensionResourceStore;
@@ -28,7 +27,6 @@ pub fn register_control_handlers(
     config: WorkerConfig,
     runtime: WorkerRuntimeContext,
     shutdown_requested: Arc<AtomicBool>,
-    active_processes: Arc<ActiveProcessRegistry>,
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
@@ -176,7 +174,7 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "worker.stop".to_string(),
-        host::lifecycle::stop::handler(shutdown_requested, active_processes, active_tool_calls),
+        host::lifecycle::stop::handler(shutdown_requested, active_tool_calls),
     );
     handlers.insert("worker.ping".to_string(), host::lifecycle::ping::handler());
     handlers.insert(

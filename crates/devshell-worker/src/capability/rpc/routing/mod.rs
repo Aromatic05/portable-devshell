@@ -22,7 +22,6 @@ use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
 use crate::capability::terminal::TerminalManager;
 use crate::daemon::process::WorkerRuntimeContext;
-use crate::daemon::process::registry::ActiveProcessRegistry;
 use crate::instance::{InstanceName, WorkerConfig};
 use crate::instance::sandbox::{SecurityPolicy, build_security_policy};
 use crate::instance::storage::{ExtensionResourceStore, InstancePaths};
@@ -33,7 +32,6 @@ const STATELESS_CONTEXT_ID: &str = "57a7e1e5-5000-8000-8000-000000000000";
 
 pub struct RpcRouter {
     instance: InstanceName,
-    active_processes: Arc<ActiveProcessRegistry>,
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     control_handlers: HashMap<String, Arc<dyn ControlHandler>>,
     tools: Arc<ToolRegistry>,
@@ -52,7 +50,6 @@ impl RpcRouter {
         receives: Arc<ArtifactReceiveStore>,
         resources: Arc<ExtensionResourceStore>,
     ) -> Self {
-        let active_processes = Arc::new(ActiveProcessRegistry::new());
         let active_tool_calls = Arc::new(ActiveToolCallRegistry::new());
         let shutdown_requested = Arc::new(AtomicBool::new(false));
         let policy = build_security_policy(runtime.security_mode.clone());
@@ -70,7 +67,6 @@ impl RpcRouter {
             config,
             runtime.clone(),
             Arc::clone(&shutdown_requested),
-            Arc::clone(&active_processes),
             Arc::clone(&active_tool_calls),
             Arc::clone(&tools),
             Arc::clone(&policy),
@@ -85,7 +81,6 @@ impl RpcRouter {
 
         Self {
             instance: runtime.instance,
-            active_processes,
             active_tool_calls,
             control_handlers,
             tools,
@@ -214,8 +209,6 @@ impl RpcRouter {
             operation_id: operation_id.clone(),
             source: context.and_then(|value| value.source.clone()),
             policy: Arc::clone(&self.policy),
-            process_registry: Arc::clone(&self.active_processes)
-                as Arc<dyn crate::tool::ToolProcessRegistry>,
             cancellation,
             progress: tool_progress_emitter(operation_id, Arc::clone(&self.notifications)),
         })

@@ -1,6 +1,5 @@
 pub mod lifecycle;
 pub(crate) mod platform;
-pub mod registry;
 #[cfg(windows)]
 use std::ffi::OsStr;
 use std::fs;

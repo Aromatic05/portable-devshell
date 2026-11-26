@@ -41,19 +41,8 @@ pub struct ToolCall {
     pub operation_id: String,
     pub source: Option<String>,
     pub policy: Arc<dyn SecurityPolicy>,
-    pub process_registry: Arc<dyn ToolProcessRegistry>,
     pub cancellation: ToolCancellation,
     pub progress: ToolProgressEmitter,
-}
-
-/// A registered process group is released when its RAII guard is dropped.
-pub trait ToolProcessGuard: Send {
-    fn terminate_process_group(&self, force: bool) -> Result<(), String>;
-}
-
-/// Process lifetime port supplied by the Worker runtime.
-pub trait ToolProcessRegistry: Send + Sync {
-    fn register(self: Arc<Self>, process_group: i32) -> Result<Box<dyn ToolProcessGuard>, String>;
 }
 
 impl ToolCall {
