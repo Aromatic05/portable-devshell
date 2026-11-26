@@ -179,3 +179,56 @@ test("SharedView renders state.error in header while state.active is set", async
     assert.match(plain, /error: takeover busy/u);
     assert.match(plain, /\[OBSERVE\]/u);
 });
+
+test("SharedView renders workspace alongside command or when command/cwd are absent", async () => {
+    const list = new TuiSharedTerminalList(async () => [
+        {
+            ...terminal("sess-cmd", "alpha"),
+            command: "/bin/bash",
+            workspace: "/repo/a",
+        },
+        {
+            ...terminal("sess-ws", "alpha"),
+            workspace: "/repo/b",
+        },
+    ]);
+    await list.bind("alpha");
+
+    const output = new PassThrough();
+    Object.assign(output, { columns: 120 });
+    let text = "";
+    output.on("data", (chunk) => {
+        text += chunk.toString();
+    });
+    const view = render(
+        createElement(TuiComponentSharedTerminals, {
+            columns: 120,
+            rows: 10,
+            focused: true,
+            instance: "alpha",
+            source: list,
+            terminal: {
+                getSnapshot: () => ({
+                    ...new TuiTerminalBuffer({ columns: 80, rows: 10 }).getSnapshot(),
+                    status: "running" as const,
+                }),
+                subscribe: () => () => undefined,
+            },
+            onGraphicsVisibility() {},
+        }),
+        {
+            stdout: output as unknown as WriteStream,
+            debug: true,
+            patchConsole: false,
+            exitOnCtrlC: false,
+        },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    view.cleanup();
+    output.destroy();
+    list.dispose();
+
+    const plain = stripVTControlCharacters(text);
+    assert.match(plain, /\/bin\/bash · \/repo\/a/u);
+    assert.match(plain, /80x24 · \/repo\/b/u);
+});

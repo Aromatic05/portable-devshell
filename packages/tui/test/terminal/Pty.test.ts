@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TerminalAttachment, TerminalSessionDescriptor, TerminalStreamMessage, TerminalVersionedIdentity } from "@portable-devshell/shared";
+import {
+    STREAM_GAP_CODE,
+    type TerminalAttachment,
+    type TerminalSessionDescriptor,
+    type TerminalStreamMessage,
+    type TerminalVersionedIdentity,
+} from "@portable-devshell/shared";
 import type { TerminalStreamCommandIdentity } from "@portable-devshell/shared/testing";
 import {
     TuiControlTerminalPtyFactory,
@@ -514,6 +520,59 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         stream.push({ kind: "output", frame: { data: "still-alive", seq: 1 } });
         await waitFor(() => output.includes("still-alive"));
         pty.kill();
+    });
+
+    test("control terminal PTY caps stream.gap reconnects and fails cleanly", async () => {
+        const session: TerminalSessionDescriptor = {
+            cols: 80,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            instance: "alpha",
+            latestSeq: 0,
+            rows: 24,
+            state: "running",
+            terminalId: "terminal-gap",
+            version: 1,
+        };
+        let attachCount = 0;
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                attachCount += 1;
+                const stream = new FakeAttachment();
+                stream.push({ kind: "seed", session: { ...session } });
+                const gapError = Object.assign(new Error("stream gap"), {
+                    code: STREAM_GAP_CODE,
+                });
+                stream.push({ kind: "closed", error: gapError });
+                return stream.asTerminalAttachment();
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const pty = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        }).create("alpha")("ignored", [], {
+            columns: 80,
+            environment: {},
+            rows: 24,
+        });
+        const output: string[] = [];
+        const exits: number[] = [];
+        pty.onData((data) => output.push(data));
+        pty.onExit((event) => exits.push(event.exitCode));
+
+        await waitFor(() => exits.length === 1);
+        assert.equal(attachCount, 6);
+        assert.deepEqual(exits, [1]);
+        assert.equal(
+            output.some((line) => line.includes("stream gap")),
+            true,
+        );
     });
 }
 

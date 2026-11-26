@@ -14,6 +14,8 @@ import type {
 } from "../emulation/Model.js";
 
 const OPERATION_ACK_TIMEOUT_MS = 30_000;
+const MAX_GAP_RECONNECTS = 5;
+const GAP_WINDOW_MS = 2_000;
 
 export type TuiControlTerminalClient = Pick<
     TerminalTransport,
@@ -142,6 +144,8 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     #clientSeq = 0;
     #closed = false;
     #exited = false;
+    #gapCount = 0;
+    #gapWindowStart = Date.now();
     #operationTail = Promise.resolve();
     #stream?: TerminalAttachment;
     #takeover: boolean;
@@ -387,7 +391,11 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                     this.#pending.size === 0
                 ) {
                     const identity = this.#readIdentity();
-                    if (identity !== undefined && identity.state === "running") {
+                    if (
+                        identity !== undefined &&
+                        identity.state === "running" &&
+                        this.#allowGapReconnect()
+                    ) {
                         await this.#attachStream(identity);
                         return;
                     }
@@ -400,7 +408,10 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 const identity = this.#requireIdentity();
                 if (frame.seq <= identity.latestSeq) continue;
                 if (frame.seq !== identity.latestSeq + 1) {
-                    if (this.#pending.size === 0) {
+                    if (
+                        this.#pending.size === 0 &&
+                        this.#allowGapReconnect()
+                    ) {
                         stream.close();
                         this.#stream = undefined;
                         await this.#attachStream(identity);
@@ -480,6 +491,16 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         clearTimeout(pending.timer);
         this.#pending.delete(clientSeq);
         pending.resolve();
+    }
+
+    #allowGapReconnect(): boolean {
+        const now = Date.now();
+        if (now - this.#gapWindowStart > GAP_WINDOW_MS) {
+            this.#gapWindowStart = now;
+            this.#gapCount = 0;
+        }
+        this.#gapCount += 1;
+        return this.#gapCount <= MAX_GAP_RECONNECTS;
     }
 
     #requireIdentity(): StoredTerminalIdentity {

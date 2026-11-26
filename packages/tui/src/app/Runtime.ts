@@ -821,6 +821,18 @@ export class TuiRuntime {
 
     #selectedContextId(instance: string): string | undefined {
         const state = this.store.getState();
+        const cursor = state.interaction.sidebarCursor;
+        if (
+            cursor?.kind === "context" &&
+            this.domains.context.state.contexts.some(
+                (context) =>
+                    context.ctxId === cursor.id &&
+                    context.status === "active" &&
+                    context.environments.some((env) => env.instance === instance),
+            )
+        ) {
+            return cursor.id;
+        }
         const auditRoute =
             state.ui.routeStacks[tuiRouteContextKey("audit", instance)]?.at(-1);
         if (

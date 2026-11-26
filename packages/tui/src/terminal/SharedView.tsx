@@ -29,6 +29,13 @@ function formatSessionRow(session: TerminalSessionDescriptor): string {
             ? session.command
             : session.cwd;
     if (detail !== undefined && detail.length > 0) parts.push(detail);
+    if (
+        session.workspace !== undefined &&
+        session.workspace.length > 0 &&
+        session.workspace !== detail
+    ) {
+        parts.push(session.workspace);
+    }
     return parts.join(" · ");
 }
 
