@@ -194,9 +194,9 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
     test("McpToolSchemaAdapter hides metadata-selected fields only from model-facing schema", () => {
         const adapter = new McpToolSchemaAdapter();
-        const tmuxInput: ToolDefinition = {
+        const processInput: ToolDefinition = {
             ...bashRun,
-            name: "tmux_input",
+            name: "task_input",
             inputSchema: {
                 $defs: {
                     Pane: {
@@ -224,8 +224,8 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             },
         };
 
-        const canonical = adapter.toMcpTool(tmuxInput, "Send input");
-        const model = adapter.toMcpTool(tmuxInput, "Send input", {
+        const canonical = adapter.toMcpTool(processInput, "Send input");
+        const model = adapter.toMcpTool(processInput, "Send input", {
             hiddenInputProperties: ["line", "timeMs"],
             modelFacing: true,
         });
@@ -454,7 +454,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         const adapter = new McpToolSchemaAdapter();
         const source: ToolDefinition = {
             ...bashRun,
-            name: "tmux_run",
+            name: "bash_run",
             inputSchema: {
                 type: "object",
                 properties: {

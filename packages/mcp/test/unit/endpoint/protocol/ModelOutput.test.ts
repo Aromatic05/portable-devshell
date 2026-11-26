@@ -209,19 +209,19 @@ test("file_edit explicitly accounts for omitted applied operations", () => {
 });
 
 test("cursor-consuming results are never silently replaced with a preview", () => {
-    const tmux = { task: { id: "task-1", status: "running" },
-        output: ["line".repeat(3_000)] };
+    const process = { task: { id: "task-1", status: "running" },
+        stdout: "line".repeat(3_000), stderr: "", cursor: { seq: 1, stdout: 12_000, stderr: 0 }, termination: "running" };
     const glob = { entries: Array.from({ length: 200 }, (_, i) => ({
         path: `path/${i}`, type: "file",
     })), nextCursor: "after-200" };
-    assert.equal(projectMcpModelOutput("tmux_read", tmux), tmux);
+    assert.equal(projectMcpModelOutput("task_read", process), process);
     assert.equal(projectMcpModelOutput("file_glob", glob), glob);
 });
 
 test("model budgets allow caller-selected sizes without tool-specific minimums", () => {
     assert.doesNotThrow(() => validateMcpModelOutputBudget({
         maxTokens: 3_000,
-        byTool: { tmux_read: 256, file_glob: 512 },
+        byTool: { task_read: 256, file_glob: 512 },
     }));
     assert.doesNotThrow(() => validateMcpModelOutputBudget({
         maxTokens: 40_000,
@@ -261,7 +261,7 @@ test("Control MCP modelOutput survives draft normalization and update patches", 
     assert.doesNotThrow(() => validateConfigSemantics({
         ...next,
         instances: [],
-        mcp: { ...next.mcp, modelOutput: { byTool: { tmux_read: 2_000 } } },
+        mcp: { ...next.mcp, modelOutput: { byTool: { task_read: 2_000 } } },
     }));
     const cleared = normalizeConfigGlobalDraft({
         mcp: applyConfigMcpPatch(next.mcp, parseConfigMcpPatch({ modelOutput: null })),

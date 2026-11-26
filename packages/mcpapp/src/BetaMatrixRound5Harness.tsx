@@ -82,7 +82,7 @@ export function snapshot(ctxId = "ctx-a", instance = "alpha", cursor = 11): McpA
         primary: { id: "approval-a", title: "Approval required", actions: [
             { id: "approve", label: "Approve" }, { id: "deny", label: "Deny" },
         ] },
-        background: [{ id: "wait-a", title: "Long build", badge: "Wait · active", detail: "task-tmux-a" }],
+        background: [{ id: "wait-a", title: "Long build", badge: "Wait · active", detail: "task-process-a" }],
     } };
 }
 export function recovery(state = snapshot(), intent: "goal-resume" | "goal-retry" = "goal-resume") {

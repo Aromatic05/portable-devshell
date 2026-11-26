@@ -12,17 +12,47 @@ const internalActivity = new Set([
     "task_read", "task_input", "terminal_inspect", "terminal_manage",
 ]);
 
-function taskTranscript(item: Activity, reads: readonly Activity[]): unknown {
+function taskTranscript(
+    item: Activity,
+    reads: readonly Activity[],
+    retained?: { stdout: string; stderr: string },
+): unknown {
     const base = record(item.output) ?? {};
-    if (item.name !== "bash_run" || reads.length === 0) return item.output;
-    // Audit is immutable. Build the current terminal from the available
-    // recorded output fragments, not from another long-running HTTP watcher.
-    const ordered = [item, ...reads].sort((a, b) => a.at.localeCompare(b.at));
+    if (item.name !== "bash_run" || reads.length === 0)
+        return retained === undefined ? item.output : { ...base, ...retained };
+    const ordered = [...reads].sort((a, b) => a.at.localeCompare(b.at));
     const latest = record(ordered.at(-1)?.output);
-    const stream = (key: "stdout" | "stderr") => ordered.map((entry) => {
-        const value = record(entry.output)?.[key];
-        return typeof value === "string" ? value : "";
-    }).join("").slice(-12_000);
+    const stream = (key: "stdout" | "stderr") => {
+        let text = retained?.[key] ?? (typeof base[key] === "string" ? base[key] : "");
+        let end = record(base.cursor)?.[key];
+        for (const entry of ordered) {
+            const result = record(entry.output);
+            const fragment = result?.[key];
+            if (typeof fragment !== "string" || fragment === "") continue;
+            const start = record(record(entry.input)?.cursor)?.[key] ?? 0;
+            const next = record(result?.cursor)?.[key];
+            if (typeof end === "number" && typeof start === "number" && typeof next === "number") {
+                if (next <= end) continue;
+                if (start < end) {
+                    const bytes = new TextEncoder().encode(fragment);
+                    // Redacted/truncated audit previews do not necessarily
+                    // preserve byte offsets. Do not pretend to splice them.
+                    if (bytes.length !== next - start) {
+                        text += "\n[Overlapping task output observation]\n" + fragment;
+                    } else {
+                        text += new TextDecoder().decode(bytes.subarray(end - start));
+                    }
+                } else {
+                    if (start > end) text += "\n[Output not present in Activity history]\n";
+                    text += fragment;
+                }
+            } else {
+                text += fragment;
+            }
+            end = next;
+        }
+        return retained === undefined ? text.slice(-12_000) : text;
+    };
     return { ...base, ...latest, stdout: stream("stdout"), stderr: stream("stderr"), task: record(latest?.task) ?? base.task };
 }
 
@@ -91,9 +121,8 @@ function ActivityCard({ item, reads, session }: {
         ? undefined : "exit " + item.exitCode), item.name === "bash_run" && reads.length
         ? reads.length + " transcript reads" : undefined].filter(Boolean).join(" · ");
     const output = isShell && session ? {
-        ...record(item.output),
+        ...record(taskTranscript(item, reads, terminal.loaded ? { stdout: terminal.stdout, stderr: terminal.stderr } : undefined)),
         activityRetained: true,
-        ...(terminal.loaded ? { stdout: terminal.stdout, stderr: terminal.stderr } : {}),
         ...(terminal.loading ? { activityStatus: "loading" } : {}),
         ...(terminal.error ? { activityError: terminal.error } : {}),
     } : isImage && session ? {

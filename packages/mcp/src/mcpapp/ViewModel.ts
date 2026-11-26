@@ -103,7 +103,7 @@ export function projectMcpAppSnapshot(input: {
         ...(goals[0] === undefined ? {} : { goal: goals[0] }),
         tasks: [],
         background: waits.map((wait) => ({
-            kind: "tmux", status: wait.status, targetId: wait.targetId,
+            kind: "process", status: wait.status, taskId: wait.targetId,
             detachedAt: wait.createdAt,
         })),
     });

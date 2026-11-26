@@ -68,7 +68,7 @@ test("MCP App watch recovers a resolved Wait with no delivered Audit event", asy
             return { lastSeq: 10, waits: [{
                 waitId: "wait-a", ctxId: "ctx-a", callId: "call-a",
                 instance: "test", source: "mcp", targetId: "task-a",
-                toolName: "tmux_run", createdAt: "", updatedAt: "", status,
+                toolName: "bash_run", createdAt: "", updatedAt: "", status,
             }] };
         },
     });
@@ -112,7 +112,7 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
     const wait = (waitId: string, ctxId: string): WaitRecord => ({
         waitId, ctxId, callId: waitId, instance: "test" as WaitRecord["instance"],
         createdAt: "", updatedAt: "", status: "detached", source: "mcp",
-        targetId: waitId, toolName: "tmux_read", result: { stdout: "private-worker-output" },
+        targetId: waitId, toolName: "task_read", result: { stdout: "private-worker-output" },
     });
     const snapshot = projectMcpAppSnapshot({
         ctxId: "ctx-a",
@@ -129,6 +129,9 @@ test("MCP App ViewModel isolates Context approvals, waits, and Context-owned goa
     assert.equal(snapshot.presentation.pendingApprovals, 2);
     assert.deepEqual(snapshot.presentation.work.map((entry) => entry.id), ["allowed-goal"]);
     assert.deepEqual(snapshot.presentation.background.map((entry) => entry.id), ["allowed-wait"]);
+    assert.deepEqual((snapshot.modelContext.structuredContent as { portableDevshellMcpApp: { background: unknown[] } }).portableDevshellMcpApp.background, [
+        { kind: "process", taskId: "allowed-wait", status: "detached", detachedAt: "" },
+    ]);
     assert.deepEqual(snapshot.presentation.primary?.actions.map((action) => action.id), ["approve", "deny"]);
     assert.deepEqual(snapshot.presentation.work[0]?.actions.map((action) => action.id), ["goal-pause", "goal-stop"]);
     assert.equal(snapshot.presentation.work[0]?.actions[0]?.expectedRevision, 1);

@@ -543,7 +543,7 @@ test("Inline bootstraps private capability before tool result and handles approv
                 { id: "deny", label: "Deny", confirmation: { message: "Reject?" } },
             ] },
             work: [{ id: "goal-inline", title: "Long-running Goal" }],
-            background: [{ id: "wait-inline", title: "tmux_run", badge: "Wait · pending" }],
+            background: [{ id: "wait-inline", title: "bash_run", badge: "Wait · pending" }],
         },
     };
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -827,6 +827,11 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
         if (url.includes("/activity?")) {
             activityRequests.push({ url, auth: new Headers(init?.headers).get("Authorization") });
             const first = url.includes("fromSeq=1");
+            if (url.includes("callId=call-2")) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    callId: "call-2", stdout: "Starting build\n", stderr: "",
+                }), { status: 200 }));
+            }
             return Promise.resolve(new Response(JSON.stringify({
                 callId: "call-1",
                 stdout: first ? "main\n" : "latest\n",
@@ -840,12 +845,13 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
                 activity: [{ callId: "call-1", name: "bash_run", state: "completed",
                     exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
                     target: "git status --short", output: { exitCode: 0, stdoutBytes: 12, stderrBytes: 8 } },
-                    { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
+                    { callId: "call-2", name: "bash_run", state: "completed", at: "2026-10-12T16:01:00Z",
                         taskId: "task-1", target: "pnpm build", summary: "exit 0",
-                        output: { task: { id: "task-1", status: "running" }, output: ["Starting build"] } },
-                    { callId: "call-3", name: "tmux_read", state: "completed", at: "2026-10-12T16:02:00Z",
+                        output: { task: { id: "task-1", status: "running" }, stdout: "Starting build\n", termination: "running", cursor: { seq: 1, stdout: 15, stderr: 0 } } },
+                    { callId: "call-3", name: "task_read", state: "completed", at: "2026-10-12T16:02:00Z",
                         taskId: "task-1", target: "task-1",
-                        output: { task: { id: "task-1", status: "0" }, output: ["Build complete"] } },
+                        input: { task: "task-1", cursor: { seq: 0, stdout: 0, stderr: 0 } },
+                        output: { task: { id: "task-1", status: "0" }, stdout: "Starting build\nBuild complete\n", termination: "exited", cursor: { seq: 2, stdout: 30, stderr: 0 } } },
                     { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
             }), { status: 200 }));
         }
@@ -898,7 +904,8 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     expect(container!.textContent).not.toContain("1 transcript reads");
     await act(async () => { container!.querySelectorAll<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")[1]?.click(); });
     expect(container!.textContent).toContain("1 transcript reads");
-    expect(container!.querySelectorAll(".dashboard-timeline li")[1]?.querySelector(".tc-terminal pre")?.textContent).toContain("Build complete");
+    await vi.waitFor(() => expect(activityRequests.some((request) => request.url.includes("callId=call-2"))).toBe(true));
+    expect(container!.querySelectorAll(".dashboard-timeline li")[1]?.querySelector(".tc-terminal pre")?.textContent).toBe("Starting build\nBuild complete\n");
     const internal = Array.from(container!.querySelectorAll(".workspace-setting"))
         .find((item) => item.textContent?.includes("Include polling"))?.querySelector("input");
     await act(async () => { internal?.click(); });

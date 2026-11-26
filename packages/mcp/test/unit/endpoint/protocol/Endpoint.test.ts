@@ -229,14 +229,14 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     );
 });
 
-test("tmux_run does not render a Workspace App", () => {
+test("bash_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
         tools: [
             {
-                description: "Run one tmux task",
-                group: "tmux",
+                description: "Run one process task",
+                group: "bash",
                 inputSchema: { type: "object" },
-                name: "tmux_run",
+                name: "bash_run",
                 outputSchema: { type: "object" },
                 requiredCapabilities: [],
             },
@@ -249,7 +249,7 @@ test("tmux_run does not render a Workspace App", () => {
         toolSource: harness.toolRegistry,
     })
         .listTools()
-        .find((entry) => entry.name === "tmux_run");
+        .find((entry) => entry.name === "bash_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
     assert.equal(meta?.["openai/outputTemplate"], undefined);

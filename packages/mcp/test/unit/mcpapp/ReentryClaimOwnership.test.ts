@@ -17,7 +17,7 @@ function delivery(fixture: Fixture, actions = fixture.actions, dispatch: Dispatc
         actions, context: { resolve: fixture.contexts.resolve }, instance: "local",
         dispatch: { async callTool(_name, payload) {
             return await dispatch(payload, () => fixture.native.api.call("local", "mcpapp_reentry", payload, {
-                ctxId: fixture.context.ctxId, workspace: "/repo", source: "mcp",
+                ctxId: fixture.context.ctxId, workspace: fixture.workspace, source: "mcp",
             }));
         } },
         view: { async snapshot() { return {
@@ -213,7 +213,7 @@ test("Reentry lost report reply after Goal commit recovers after both stores res
         const stop = installMcpAppReentry(native.hooks, { goal } as never);
         try {
             const call = delivery(fixture, restarted, (input) => native.api.call("local", "mcpapp_reentry", input, {
-                ctxId: fixture.context.ctxId, workspace: "/repo", source: "mcp",
+                ctxId: fixture.context.ctxId, workspace: fixture.workspace, source: "mcp",
             }));
             assert.equal((await goal.read(fixture.context.ctxId))?.continuationCount, 1);
             assert.deepEqual(await call({ action: "report", outcome: "rejected" }), { reported: false });

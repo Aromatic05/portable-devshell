@@ -35,10 +35,10 @@ test("Workspace history projects useful cards for every audited tool, isolating 
             output: { files: [{ path: "/etc/os-release", content: "1:NAME=Arch Linux\n2:ID=arch" }] } }),
         call("d", "ctx-target", "custom_plugin", 4, { input: { target: "remote-machine" },
             output: { result: { private_key: "must-not-display", ok: true } } }),
-        call("e", "ctx-target", "tmux_run", 5, { status: "running", input: { command: "pnpm build" } }),
+        call("e", "ctx-target", "bash_run", 5, { status: "running", input: { command: "pnpm build" } }),
     ];
     const cards = projectMcpAppActivity(items, "ctx-target");
-    assert.deepEqual(cards.map((item) => item.name), ["tmux_run", "custom_plugin", "file_read", "bash_run"]);
+    assert.deepEqual(cards.map((item) => item.name), ["bash_run", "custom_plugin", "file_read", "bash_run"]);
     assert.equal(cards[0]?.state, "running");
     assert.equal(cards[0]?.target, "pnpm build");
     assert.match(cards[2]?.detail ?? "", /1:NAME=Arch Linux\n2:ID=arch/u);
@@ -87,20 +87,20 @@ test("Workspace activity preserves all 50 metadata cards when full detail return
     assert.ok(cards.some((item) => item.detail?.includes("visible")));
 });
 
-test("Tmux transcript polls share Task ID with the original command and stay audited", () => {
+test("Process transcript polls share Task ID with the original command and stay audited", () => {
     const cards = projectMcpAppActivity([
-        call("run", "ctx", "tmux_run", 1, {
+        call("run", "ctx", "bash_run", 1, {
             input: { command: "pnpm build" },
             output: { task: { id: "task-42", status: "running" } },
         }),
-        call("poll", "ctx", "tmux_read", 2, {
+        call("poll", "ctx", "task_read", 2, {
             input: { task: "task-42", line: -30 },
             output: { task: { id: "task-42", status: "running" }, output: ["building..."] },
         }),
     ], "ctx");
     assert.equal(cards.length, 2);
     assert.deepEqual(cards.map((item) => item.taskId), ["task-42", "task-42"]);
-    assert.equal(cards[0]?.name, "tmux_read");
+    assert.equal(cards[0]?.name, "task_read");
 });
 
 test("Workspace audit projection preserves semantic operations within bounds and never exposes credentials", () => {

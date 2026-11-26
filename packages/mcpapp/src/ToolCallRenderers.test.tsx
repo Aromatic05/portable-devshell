@@ -125,22 +125,22 @@ test("file_edit failure in operation 41 survives server preview and UI truncatio
     expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(25);
 });
 
-test("tmux_run and tmux_inspect use tasks, panes, transcript and wait semantics", async () => {
-    let view = await display({ name: "tmux_run", isError: false, output: {
-        task: { id: "task-17", status: "running" }, pane: { id: "pane-1", name: "build" },
-        output: ["building...\n"], timedOut: true,
-    } }, { command: "pnpm build", wait: "block" });
+test("bash_run and terminal_inspect render the shared process result contract", async () => {
+    let view = await display({ name: "bash_run", isError: false, output: {
+        task: { id: "process-17", status: "running" },
+        stdout: "building...\n", stderr: "",
+        termination: "running", waitReason: "timeout", waitMs: 250,
+    } }, { command: "pnpm build", waitMs: 250 });
     expect(view.querySelector(".toolcall-line")?.textContent).toContain("Running");
     expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("building...");
-    expect(view.textContent).toContain("wait timed out");
+    expect(view.textContent).toContain("running");
     await act(async () => { root?.unmount(); root = undefined; });
     container?.remove();
-    view = await display({ name: "tmux_inspect", isError: false, output: {
-        panes: [{ id: "pane-1", name: "editor", status: "ready", cwd: "/repo",
-            lines: ["$ vim main.rs", "-- INSERT --"] }],
-    } });
-    expect(view.querySelector(".tc-pane .tc-terminal pre")?.textContent).toContain("INSERT");
-    expect(view.textContent).toContain("/repo");
+    view = await display({ name: "terminal_inspect", isError: false, output: {
+        text: "$ vim main.rs\n-- INSERT --", cols: 80, rows: 24,
+    } }, { terminal: "process-17" });
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("INSERT");
+    expect(view.textContent).toContain("Terminal snapshot");
 });
 
 test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import test from "node:test";
 import { betaReentry } from "../../support/BetaReentry.ts";
 import { McpAppActionStore } from "../../../src/mcpapp/ActionStore.ts";
@@ -18,7 +19,9 @@ test("round3 Reentry rejects another principal or same-principal foreign Context
     const fixture = await betaReentry();
     try {
         await assert.rejects(fixture.call({ action: "claim" }, "attacker"), { code: "mcp.contextInvalid" });
-        const foreign = await fixture.contexts.registry.create({ principal: "owner", environments: [{ instance: "local", workspace: "/other" }] });
+        const foreignWorkspace = String(fixture.workspace) + "/other";
+        await mkdir(foreignWorkspace, { recursive: true });
+        const foreign = await fixture.contexts.registry.create({ principal: "owner", environments: [{ instance: "local", workspace: foreignWorkspace }] });
         await assert.rejects(fixture.call({ action: "claim", ctxId: foreign.ctxId }), /not owned/u);
         await assert.rejects(fixture.call({ action: "claim", sourceId: "another-goal" }), /not owned/u);
         assert.equal(fixture.executions(), 0);
