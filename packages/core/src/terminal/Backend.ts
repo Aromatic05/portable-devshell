@@ -277,7 +277,9 @@ class WorkerTerminalProcess implements TerminalProcess {
     async #releaseControl(): Promise<void> {
         const controller = this.#controller;
         if (controller === undefined) return;
-        this.#clearController();
+        // The caller has already relinquished its attachment. Do not notify
+        // Service of involuntary loss and clear a takeover queued behind it.
+        this.#clearController(false);
         const epoch = this.#connectionEpoch;
         const result = await this.#worker.control?.({
             terminalId: this.#descriptor.terminalId,
@@ -651,12 +653,12 @@ class WorkerTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#errorListeners]) listener(error);
     }
 
-    #clearController(): void {
+    #clearController(notify = true): void {
         const hadController = this.#controller !== undefined;
         this.#controller = undefined;
         clearInterval(this.#controlHeartbeat);
         this.#controlHeartbeat = undefined;
-        if (!hadController) return;
+        if (!hadController || !notify) return;
         for (const listener of [...this.#controlLostListeners]) listener();
     }
 

@@ -223,6 +223,39 @@ test("disconnect clears the attachment without announcing a remote handoff befor
     assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
 });
 
+test("detaching during takeover cannot release the attachment queued behind it", async (t) => {
+    const worker = new ControllableWorkerTerminal();
+    const service = new TerminalSessionService();
+    t.after(() => service.close());
+    const opened = await service.open({
+        backend: new WorkerTerminalBackend({ worker }),
+        cols: 80, rows: 24, instance: "alpha", workspace: "/workspace",
+    });
+    const attach = () => service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        terminalId: opened.terminalId,
+    });
+    const previous = attach();
+    const next = attach();
+    let resolveAcquire!: () => void;
+    worker.acquireGate = new Promise<void>((resolve) => {
+        resolveAcquire = resolve;
+    });
+    const abandoned = previous.takeControl();
+    await setImmediate();
+    assert.equal(worker.controller, "ctrl-1");
+    previous.detach();
+    const acquiring = next.takeControl();
+    resolveAcquire();
+    await assert.rejects(abandoned, /attachment detached during takeover/u);
+    await acquiring;
+    await next.write("pwd\r");
+    assert.equal(worker.controller, "ctrl-2");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+});
+
 test("worker terminal backend drops stale control on an authoritative release notification", async () => {
     const worker = new ControllableWorkerTerminal();
     const process = await openControllable(worker);

@@ -303,7 +303,8 @@ export class TerminalSessionService implements TerminalSessionApi {
                 try {
                     const snapshot = await session.process.acquireControl?.();
                     if (attachment.detached) {
-                        await session.process.releaseControl?.();
+                        if (session.controller === undefined || session.controller === attachment)
+                            await session.process.releaseControl?.();
                         throw new Error(
                             "Terminal attachment detached during takeover.",
                         );
