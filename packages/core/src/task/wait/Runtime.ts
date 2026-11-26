@@ -1,9 +1,10 @@
-import type {
-    JsonValue,
-    ToolCallHookValue,
-    ToolCallHooks,
-    ToolCallRewriteInput,
-    WaitDetachInput,
+import {
+    RemoteError,
+    type JsonValue,
+    type ToolCallHookValue,
+    type ToolCallHooks,
+    type ToolCallRewriteInput,
+    type WaitDetachInput,
 } from "@portable-devshell/shared";
 import type { WaitApi } from "../Api.js";
 import { WAIT_HANDOFF_MS, WAIT_SYNC_MS } from "./index.js";
@@ -32,14 +33,35 @@ export async function rewriteWaitToolCall(
     const { value } = input;
     if (input.direction === "inbound" && value.kind === "call" && value.context.contextMode !== "stateless")
         return rewriteInbound(value);
-    if (input.direction === "outbound" && value.context.contextMode !== "stateless") {
-        const targetId = detachedTarget(value);
-        if (targetId !== undefined) {
-            await wait.detach(detachInput(input.callId, targetId, value));
-            if (isHandoff(value)) return presentHandoff(value);
-        }
+    if (input.direction !== "outbound" || value.kind !== "result" || value.context.contextMode === "stateless")
+        return value;
+    const output = record(value.payload);
+    const targetId = record(output?.task)?.id;
+    if (output === undefined || typeof targetId !== "string" || !isHandoff(value.toolName, output))
+        return value;
+
+    try {
+        await wait.detach(detachInput(input.callId, targetId, value));
+    } catch (error) {
+        // The task is already running; failure to register its observer must
+        // not discard the result needed to continue polling it.
+        const code = error instanceof RemoteError &&
+            (error.code === "wait.commitUncertain" || error.code === "wait.commitDurabilityUnconfirmed")
+            ? error.code
+            : "wait.registrationFailed";
+        const { detached: _detached, ...running } = output;
+        return {
+            ...value,
+            payload: {
+                ...running,
+                waitError: {
+                    code,
+                    message: "Durable Wait registration was not confirmed. Continue with task_input using the returned task ID and cursor; do not repeat the original call.",
+                },
+            },
+        };
     }
-    return value;
+    return { ...value, payload: { ...output, detached: true } };
 }
 
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
@@ -58,31 +80,17 @@ function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
     return value;
 }
 
-function isHandoff(value: ToolCallHookValue): boolean {
-    if (value.kind !== "result") return false;
-    const output = record(value.payload);
-    if (output?.termination !== "running" || output.waitReason !== "timeout")
+function isHandoff(toolName: string, output: Record<string, JsonValue>): boolean {
+    if (output.termination !== "running" || output.waitReason !== "timeout")
         return false;
-    if (value.toolName === "bash_run")
+    if (toolName === "bash_run")
         return (milliseconds(output.waitMs) ?? 0) >= WAIT_HANDOFF_MS;
-    if (value.toolName === "task_input")
+    if (toolName === "task_input")
         return (
             output.untilExit === true &&
             (milliseconds(output.waitMs) ?? 0) >= WAIT_SYNC_MS
         );
     return false;
-}
-
-function presentHandoff(value: ToolCallHookValue): ToolCallHookValue {
-    return { ...value, payload: { ...record(value.payload)!, detached: true } };
-}
-
-function detachedTarget(value: ToolCallHookValue): string | undefined {
-    if (value.kind !== "result") return undefined;
-    const output = record(value.payload);
-    const task = record(output?.task);
-    if (typeof task?.id !== "string") return undefined;
-    return isHandoff(value) ? task.id : undefined;
 }
 
 function detachInput(
