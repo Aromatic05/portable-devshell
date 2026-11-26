@@ -172,6 +172,7 @@ export interface TerminalProcess {
     kill(): void | Promise<void>;
     onData(listener: (data: string, sourceSeq?: number) => void): () => void;
     onError?(listener: (error: Error) => void): () => void;
+    onControlLost?(listener: () => void): () => void;
     onExit(listener: (exit: TerminalProcessExit) => void): () => void;
     onMetadataChange?(
         listener: (update: TerminalProcessMetadataUpdate) => void,

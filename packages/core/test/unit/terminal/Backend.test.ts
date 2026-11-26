@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRemoteError } from "@portable-devshell/shared";
 
 import {
     WorkerTerminalBackend,
@@ -131,6 +132,83 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 }
+
+class ControllableWorkerTerminal extends FakeWorkerTerminal {
+    readonly controls: Array<Parameters<NonNullable<WorkerTerminalPort["control"]>>[0]> = [];
+    controller?: string;
+    #nextController = 0;
+
+    override descriptor(): WorkerTerminalDescriptor {
+        return { ...super.descriptor(), humanControl: this.controller !== undefined };
+    }
+
+    control: NonNullable<WorkerTerminalPort["control"]> = async (input) => {
+        this.controls.push(input);
+        if (input.renew) {
+            if (this.controller !== input.controller)
+                throw createRemoteError({
+                    code: "process.controlOwned",
+                    message: "terminal input is controlled by another participant",
+                    retryable: false,
+                });
+            return { renewed: true };
+        }
+        if (input.controller !== undefined) {
+            if (this.controller === input.controller) this.controller = undefined;
+            return { released: true, session: this.descriptor() };
+        }
+        if (this.controller !== undefined)
+            throw createRemoteError({
+                code: "process.controlOwned",
+                message: "terminal input is controlled by another participant",
+                retryable: false,
+            });
+        const controller = `ctrl-${++this.#nextController}`;
+        this.controller = controller;
+        const session = this.descriptor();
+        return { controller, session, snapshot: { seq: session.latestSeq, data: "screen" } };
+    };
+}
+
+async function openControllable(worker: ControllableWorkerTerminal) {
+    const opened = await new WorkerTerminalBackend({ worker }).open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
+    assert.ok("process" in opened);
+    return opened.process;
+}
+
+test("worker terminal backend drops stale control after disconnect and can reacquire", async () => {
+    const worker = new ControllableWorkerTerminal();
+    const process = await openControllable(worker);
+    await process.acquireControl!();
+    worker.disconnected?.(new Error("transport closed"));
+    worker.controller = undefined;
+    await process.acquireControl!();
+    await process.write("pwd\r");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+});
+
+test("worker terminal backend drops stale control on an authoritative release notification", async () => {
+    const worker = new ControllableWorkerTerminal();
+    const process = await openControllable(worker);
+    await process.acquireControl!();
+    worker.controller = undefined;
+    worker.notification?.({
+        method: "terminal.control",
+        params: {
+            generation: 9,
+            humanControl: false,
+            terminalId: "remote-terminal",
+            version: 2,
+        },
+    });
+    await process.acquireControl!();
+    await process.write("pwd\r");
+    assert.equal(worker.writes.at(-1)?.controller, "ctrl-2");
+});
 
 const openAttachInput = {
     fromSeq: 0,

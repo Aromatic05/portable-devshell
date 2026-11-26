@@ -65,6 +65,10 @@ interface TerminalAttachmentRecord {
     onOutput(frame: TerminalOutputFrame): void;
 }
 
+interface TerminalControlLifecycleProcess extends TerminalProcess {
+    onControlLost?(listener: () => void): () => void;
+}
+
 export class TerminalSessionService implements TerminalSessionApi {
     readonly #idFactory: () => string;
     readonly #instanceEpochs = new Map<string, number>();
@@ -528,6 +532,14 @@ export class TerminalSessionService implements TerminalSessionApi {
                 this.#append(session, data, sourceSeq),
             ),
         );
+        const unsubscribeControlLost = (
+            process as TerminalControlLifecycleProcess
+        ).onControlLost?.(() => {
+            session.controller = undefined;
+        });
+        if (unsubscribeControlLost !== undefined) {
+            session.processSubscriptions.push(unsubscribeControlLost);
+        }
         const unsubscribeMetadata = process.onMetadataChange?.((update) =>
             this.#applyMetadata(session, update),
         );
@@ -550,6 +562,8 @@ export class TerminalSessionService implements TerminalSessionApi {
         session: TerminalSessionRecord,
         update: TerminalProcessMetadataUpdate,
     ): void {
+        if (update.version !== undefined && update.version < session.version)
+            return;
         const wasControlled = session.humanControl === true;
         if (update.cols !== undefined) session.cols = update.cols;
         if (update.rows !== undefined) session.rows = update.rows;
@@ -563,6 +577,7 @@ export class TerminalSessionService implements TerminalSessionApi {
         if (update.persistent !== undefined)
             session.persistent = update.persistent;
         if (update.pty !== undefined) session.pty = update.pty;
+        if (update.humanControl === false) session.controller = undefined;
         if (update.humanControl !== undefined)
             session.humanControl = update.humanControl;
         if (

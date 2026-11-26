@@ -81,6 +81,7 @@ class WorkerTerminalProcess implements TerminalProcess {
         (data: string, sourceSeq?: number) => void
     >();
     readonly #errorListeners = new Set<(error: Error) => void>();
+    readonly #controlLostListeners = new Set<() => void>();
     readonly #exitListeners = new Set<(exit: TerminalProcessExit) => void>();
     readonly #metadataListeners = new Set<
         (update: TerminalProcessMetadataUpdate) => void
@@ -117,8 +118,9 @@ class WorkerTerminalProcess implements TerminalProcess {
             if (!this.#closed) this.#scheduleResume();
         });
         this.#unsubscribeDisconnected = worker.onDisconnected(() => {
-            // The remote PTY remains owned by the worker process. Reattach after the
-            // next authenticated reverse channel activation instead of fabricating exit.
+            // A remote control lease is tied to this transport. The worker releases
+            // it when the control stream closes, so never retain the old token.
+            this.#clearController();
         });
     }
 
@@ -161,6 +163,8 @@ class WorkerTerminalProcess implements TerminalProcess {
             this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
             try {
                 if (result.snapshot.seq > this.#lastSeq) await this.#resume();
+                if (this.#controller !== result.controller)
+                    throw new Error("Terminal control lease was lost during takeover.");
                 const seq = this.#mapHostSeq(result.snapshot.seq);
                 snapshot = { seq, data: result.snapshot.data };
             } catch (error) {
@@ -242,8 +246,8 @@ class WorkerTerminalProcess implements TerminalProcess {
                     renew: true,
                 })
                 .catch((error: unknown) => {
-                    if (this.#controller === controller)
-                        this.#fail(asError(error));
+                    if (this.#controller === controller && isControlLeaseLost(error))
+                        this.#clearController();
                 });
         }, 10_000);
         this.#controlHeartbeat.unref?.();
@@ -255,11 +259,18 @@ class WorkerTerminalProcess implements TerminalProcess {
         const controller = this.#controller;
         if (controller === undefined || this.#worker.control === undefined)
             return;
-        const result = await this.#worker.control({
-            terminalId: this.#descriptor.terminalId,
-            generation: this.#descriptor.generation,
-            controller,
-        });
+        let result: Awaited<ReturnType<NonNullable<WorkerTerminalPort["control"]>>>;
+        try {
+            result = await this.#worker.control({
+                terminalId: this.#descriptor.terminalId,
+                generation: this.#descriptor.generation,
+                controller,
+            });
+        } catch (error) {
+            if (this.#controller === controller && isControlLeaseLost(error))
+                this.#clearController();
+            throw error;
+        }
         if (this.#controller === controller) {
             this.#controller = undefined;
             if (result?.session !== undefined) {
@@ -292,6 +303,11 @@ class WorkerTerminalProcess implements TerminalProcess {
     onError(listener: (error: Error) => void): () => void {
         this.#errorListeners.add(listener);
         return () => this.#errorListeners.delete(listener);
+    }
+
+    onControlLost(listener: () => void): () => void {
+        this.#controlLostListeners.add(listener);
+        return () => this.#controlLostListeners.delete(listener);
     }
 
     onExit(listener: (exit: TerminalProcessExit) => void): () => void {
@@ -476,6 +492,7 @@ class WorkerTerminalProcess implements TerminalProcess {
             return;
         }
         if (notification.method === "terminal.control") {
+            if (!notification.params.humanControl) this.#clearController();
             const update: TerminalProcessMetadataUpdate = {
                 ...(notification.params.cols === undefined
                     ? {}
@@ -576,6 +593,17 @@ class WorkerTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#errorListeners]) listener(error);
     }
 
+    #clearController(): void {
+        const hadController = this.#controller !== undefined;
+        this.#controller = undefined;
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
+        if (!hadController) return;
+        this.#descriptor = { ...this.#descriptor, humanControl: false };
+        this.#emitMetadata({ humanControl: false });
+        for (const listener of [...this.#controlLostListeners]) listener();
+    }
+
     #disposeSubscriptions(): void {
         clearInterval(this.#controlHeartbeat);
         this.#controlHeartbeat = undefined;
@@ -637,6 +665,15 @@ function metadataFromDescriptor(
             ? {}
             : { workspace: descriptor.workspace }),
     };
+}
+
+function isControlLeaseLost(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "process.controlOwned"
+    );
 }
 
 function isStreamGapError(error: unknown): boolean {
