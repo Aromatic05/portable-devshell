@@ -171,6 +171,29 @@ export class McpEndpointBinding {
         server.setRequestHandler("tools/call", async (request, ctx) => {
             try {
                 const requestMeta = readRequestMeta(request.params._meta);
+                const progressToken = readProgressToken(requestMeta);
+                let progressSeq = 0;
+                let progressTail = Promise.resolve();
+                const onProgress = progressToken === undefined
+                    ? undefined
+                    : (payload: JsonValue) => {
+                          const progress = ++progressSeq;
+                          const message = formatProgressMessage(payload);
+                          progressTail = progressTail
+                              .then(() =>
+                                  ctx.mcpReq.notify({
+                                      method: "notifications/progress",
+                                      params: {
+                                          progressToken,
+                                          progress,
+                                          ...(message === undefined
+                                              ? {}
+                                              : { message }),
+                                      },
+                                  }),
+                              )
+                              .catch(() => undefined);
+                      };
                 const context = {
                     principal: readPrincipal(ctx.http?.authInfo),
                     ...(requestMeta === undefined ? {} : { requestMeta }),
@@ -181,7 +204,9 @@ export class McpEndpointBinding {
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
                     ctx.mcpReq.signal,
+                    onProgress,
                 );
+                await progressTail;
                 return toCallToolResult(projectMcpModelOutput(
                     request.params.name,
                     result,
@@ -211,6 +236,37 @@ function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     if (typeof meta !== "object" || meta === null || Array.isArray(meta))
         return undefined;
     return meta as Record<string, unknown>;
+}
+
+function readProgressToken(
+    meta: Record<string, unknown> | undefined,
+): string | number | undefined {
+    const token = meta?.progressToken;
+    return typeof token === "string" || typeof token === "number"
+        ? token
+        : undefined;
+}
+
+function formatProgressMessage(payload: JsonValue): string | undefined {
+    if (typeof payload === "string") {
+        const trimmed = payload.trim();
+        return trimmed.length > 0 ? trimmed.slice(0, 200) : undefined;
+    }
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload))
+        return undefined;
+    if (typeof payload.message === "string" && payload.message.trim().length > 0)
+        return payload.message.trim().slice(0, 200);
+    if (payload.termination === "running") {
+        const parts: string[] = ["running"];
+        if (typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs))
+            parts.push(`${Math.round(payload.durationMs / 1000)}s`);
+        if (typeof payload.stdoutBytes === "number" && payload.stdoutBytes > 0)
+            parts.push(`${payload.stdoutBytes} stdout bytes`);
+        if (typeof payload.stderrBytes === "number" && payload.stderrBytes > 0)
+            parts.push(`${payload.stderrBytes} stderr bytes`);
+        return parts.join(", ");
+    }
+    return undefined;
 }
 
 function toRequestId(value: unknown): string | undefined {

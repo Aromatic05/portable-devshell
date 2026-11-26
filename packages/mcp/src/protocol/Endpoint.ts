@@ -111,13 +111,21 @@ export class McpEndpoint {
         toolName: string, input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<McpEndpointResult> {
         const hideContext = this.contextMode !== "explicit" && !isAppOnlyInteractionTool(toolName);
         if (hideContext && this.contextMode !== "stateless") input = withoutContextId(input);
         const adapter = this.#appEnabled() ? this.#toolAdapter : undefined;
         const intercepted = await adapter?.call(toolName, input, requestContext, signal);
         if (intercepted !== undefined) return intercepted;
-        const executed = await this.#dispatch.callTool(toolName, input, requestContext, signal);
+        const executed = await this.#dispatch.callTool(
+            toolName,
+            input,
+            requestContext,
+            signal,
+            undefined,
+            onProgress,
+        );
         const result = !hideContext ? executed : executed instanceof McpNativeToolResult
             ? new McpNativeToolResult({ ...executed, structuredContent: withoutContextId(executed.structuredContent) })
             : withoutContextId(executed);
