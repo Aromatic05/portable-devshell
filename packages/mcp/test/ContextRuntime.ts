@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -453,7 +453,7 @@ const testEnvironment: EnvironmentTransport = {
         return { directory: "/skills" };
     },
     async prepareWorkspace(workspace) {
-        await mkdir(join(workspace, "tmp"), { recursive: true });
+        // This is a remote Worker fixture; workspace paths are virtual.
         return {
             projectMemoryAgentFile: `${workspace}/AGENTS.md`,
             projectMemoryDirectory: workspace,
