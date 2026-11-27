@@ -209,6 +209,7 @@ impl RpcRouter {
             ctx_id: ctx_id.unwrap_or("ctx-worker-default").to_string(),
             operation_id: operation_id.clone(),
             wait_handoff: !stateless && context.and_then(|value| value.wait_handoff) == Some(true),
+            task_creation_id: context.and_then(|value| value.task_creation_id.clone()),
             source: context.and_then(|value| value.source.clone()),
             policy: Arc::clone(&self.policy),
             cancellation,

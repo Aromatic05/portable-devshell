@@ -1071,3 +1071,29 @@ test("applied file edit with a failed Goal commit exposes its result and forbids
     assert.deepEqual(harness.audit, ["requested", "queued", "running", "failed"]);
     harness.runtime.close();
 });
+
+test("late cancellation of a confirmed Worker creation closes the undisclosed task", async () => {
+    const controller = new AbortController();
+    const id = "process-00000000-0000-4000-8000-000000000001";
+    const harness = createHarness("instance-a", {
+        async invoke(toolName, input): Promise<JsonValue> {
+            if (toolName === "task_manage") {
+                assert.deepEqual(input, { command: "close", task: id });
+                return { taskId: id, killRequested: true, state: "exited" };
+            }
+            assert.equal(toolName, "bash_run");
+            controller.abort();
+            return { task: { id, status: "running" }, termination: "running" };
+        },
+    });
+    await assert.rejects(harness.runtime.api.call(
+        asInstanceName("instance-a"), "bash_run", { command: "sleep 1" }, context, controller.signal,
+    ), (error: unknown) => {
+        const body = toRemoteErrorBody(error);
+        assert.equal(body?.code, "core.toolCallCancelled");
+        assert.equal((body?.details as Record<string, JsonValue>).taskId, id);
+        assert.equal(body?.retryable, false);
+        return true;
+    });
+    assert.deepEqual(harness.invoked.map((call) => call.toolName), ["bash_run", "task_manage"]);
+});

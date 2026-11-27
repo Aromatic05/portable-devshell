@@ -338,7 +338,7 @@ impl ToolHandler for TerminalTool {
                             }
                         }
                         let client = ProcessHostClient::ensure(&self.instance).map_err(error)?;
-                        let id = format!("process-{}", uuid::Uuid::new_v4());
+                        let id = call.creation_task_id()?;
                         let (created, _lease) = spawn(
                             &client,
                             &call,

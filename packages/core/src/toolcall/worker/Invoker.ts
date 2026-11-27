@@ -4,6 +4,8 @@ import {
     Rpc,
     createRemoteError,
     runtimeErrorCodes,
+    toRemoteErrorBody,
+    TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -61,6 +63,11 @@ export class WorkerToolInvoker {
             });
 
         const operationId = context?.operationId ?? randomUUID();
+        const command = isRecord(input) ? input.command : undefined;
+        const createsTask = toolName === "bash_run" || (toolName === "task_manage" && command === "create");
+        const taskCreationId = createsTask ? `process-${randomUUID()}` : undefined;
+        const awaitCancellationReply = createsTask || toolName === "task_input" ||
+            (toolName === "task_manage" && command === "close");
         const connection = await this.#endpoint.connect(
             this.#workerHost,
             "tool",
@@ -84,11 +91,23 @@ export class WorkerToolInvoker {
             return (await rpc.request(
                 toolName,
                 {
-                    context: { ...(context ?? {}), operationId },
+                    context: {
+                        ...(context ?? {}), operationId,
+                        ...(taskCreationId === undefined ? {} : { taskCreationId }),
+                    },
                     input,
                 },
                 signal,
+                { awaitCancellationReply },
             )) as JsonValue;
+        } catch (error) {
+            const body = toRemoteErrorBody(error);
+            if (taskCreationId !== undefined && body?.code === TRANSPORT_RPC_RESULT_UNCERTAIN_CODE)
+                throw createRemoteError({
+                    ...body, cause: error, retryable: false,
+                    details: { taskId: taskCreationId, taskStart: "unknown" },
+                });
+            throw error;
         } finally {
             off?.();
             events.close();

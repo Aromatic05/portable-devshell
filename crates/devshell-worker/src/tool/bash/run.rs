@@ -108,7 +108,7 @@ impl ToolHandler for BashRunTool {
             }
             params.env = effective_env;
         }
-        let task_id = format!("process-{}", uuid::Uuid::new_v4());
+        let task_id = call.creation_task_id()?;
         let requested_path = match params.env.get("PATH") {
             Some(Some(value)) => Some(value.as_str()),
             Some(None) => Some(""),

@@ -223,24 +223,21 @@ export class InstanceState {
         const handoff = isWaitHandoffCandidate(value);
         const { waitHandoff: _waitHandoff, ...context } = value.context;
         if (handoff) await this.task.beginWaitCall(request.callId);
-        try {
-            return await this.tools.target().dispatch({
-                ...request,
-                execute,
-                value: {
-                    ...value,
-                    context: handoff ? { ...context, waitHandoff: true } : context,
-                },
-                hooks: {
-                    review: (input) => request.hooks.review(input),
-                    rewrite: async (input) => rewriteWaitToolCall({
-                        ...input, value: await request.hooks.rewrite(input),
-                    }, this.task.api.wait),
-                },
-            });
-        } finally {
-            if (handoff) await this.task.finishWaitCall(request.callId);
-        }
+        return await this.tools.target().dispatch({
+            ...request,
+            execute,
+            ...(handoff ? { finalize: () => this.task.finishWaitCall(request.callId) } : {}),
+            value: {
+                ...value,
+                context: handoff ? { ...context, waitHandoff: true } : context,
+            },
+            hooks: {
+                review: (input) => request.hooks.review(input),
+                rewrite: async (input) => rewriteWaitToolCall({
+                    ...input, value: await request.hooks.rewrite(input),
+                }, this.task.api.wait),
+            },
+        });
     }
 
     target(): ToolCallTarget {

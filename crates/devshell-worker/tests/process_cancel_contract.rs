@@ -316,3 +316,19 @@ fn terminal_spawn_ack_without_a_summary_still_returns_the_requested_handle() {
     assert_eq!(response["error"]["code"], "process.hostFailed", "{response}");
     assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed"}));
 }
+
+#[test]
+fn worker_honors_preallocated_creation_identity() {
+    let fixture = WorkerFixture::start("process-preallocated");
+    let id = format!("process-{}", uuid::Uuid::new_v4());
+    let response = fixture.env.rpc("process-preallocated", "tool", &json!({
+        "protocol": "rpc", "type": "request", "id": "preallocated", "method": "bash_run",
+        "message": {
+            "context": {"workspace": fixture.env.protocol_workspace(), "taskCreationId": id},
+            "input": {"command": "printf identity"},
+        },
+    }));
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["task"]["id"], id);
+    assert_eq!(response["message"]["stdout"], "identity");
+}

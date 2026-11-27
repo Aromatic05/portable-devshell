@@ -85,6 +85,8 @@ export interface ToolCallDispatchRequest {
     /** Rejected inbound Review, audited by the owning Instance target. */
     readonly rejection?: RemoteErrorBody;
     readonly execute?: ToolCallExecutor;
+    /** Destination-local lifecycle finalization, before the terminal result is returned. */
+    readonly finalize?: () => Promise<void>;
     readonly hooks: ToolCallHookSequenceApi;
     readonly invocationInput?: (
         input: JsonValue,

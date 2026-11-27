@@ -80,12 +80,40 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     async dispatch(request: ToolCallDispatchRequest): Promise<JsonValue> {
         const execution: { task?: TaskCreationEvidence } = {};
         try {
-            const result = await this.#dispatch(request, execution);
+            let result: JsonValue;
+            try {
+                result = await this.#dispatch(request, execution);
+            } finally {
+                await request.finalize?.();
+            }
             assertTaskDelivery(execution.task, result, request.callId);
+            if (request.signal?.aborted && execution.task?.worker && execution.task.completed)
+                throw createRemoteError({
+                    code: runtimeErrorCodes.toolCallCancelled,
+                    message: "Task creation was cancelled before its result was returned.",
+                    retryable: false,
+                });
             return result;
         } catch (error) {
-            if (execution.task === undefined) throw error;
-            throw preserveTaskError(error, execution.task);
+            const task = execution.task;
+            if (task === undefined) throw error;
+            // The Worker may have completed its last cancellation check before
+            // the cancel packet arrived. Its raw reply is still authoritative.
+            // Until Core returns the result, Core owns late cancellation cleanup.
+            if (request.signal?.aborted && task.worker && task.completed && task.running) {
+                try {
+                    await this.#toolInvoker.invoke("task_manage", { command: "close", task: task.id },
+                        executionContext(request.value.context));
+                } catch (cleanup) {
+                    error = createRemoteError({
+                        code: runtimeErrorCodes.toolCallCancelled,
+                        message: "Task creation was cancelled; termination could not be confirmed.",
+                        cause: cleanup,
+                        retryable: false,
+                    });
+                }
+            }
+            throw preserveTaskError(error, task);
         }
     }
 
@@ -295,8 +323,21 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     if (createsTask) {
                         const native = isPresentedToolCallResult(result);
                         const id = taskResultId(native ? result.result : result);
-                        if (id !== undefined)
-                            execution.task = { id, start: "confirmed", completed: true, native };
+                        if (id !== undefined) {
+                            const task = record(record(native ? result.result : result)?.task);
+                            const state = task?.status ?? task?.state;
+                            execution.task = {
+                                id, start: "confirmed", completed: true, native,
+                                worker: execute === undefined,
+                                running: state !== "exited" && state !== "failed" && state !== "signaled",
+                            };
+                            if (signal?.aborted && execute === undefined)
+                                throw createRemoteError({
+                                    code: runtimeErrorCodes.toolCallCancelled,
+                                    message: "Task creation was cancelled before its result was returned.",
+                                    retryable: false,
+                                });
+                        }
                     }
                     appliedEdit = hookValue.toolName === "file_edit" && hasAppliedFileEdit(result);
                     return result;
@@ -306,7 +347,8 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         const id = details?.taskId;
                         const start = details?.taskStart;
                         if (typeof id === "string" && id.length > 0 && (start === "confirmed" || start === "unknown"))
-                            execution.task = { id, start, completed: false, native: false };
+                            execution.task = { id, start, completed: false, native: false,
+                                worker: execute === undefined, running: false };
                     }
                     throw error;
                 } finally {
@@ -600,6 +642,8 @@ interface TaskCreationEvidence {
     readonly start: "confirmed" | "unknown";
     readonly completed: boolean;
     readonly native: boolean;
+    readonly worker: boolean;
+    readonly running: boolean;
 }
 
 function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {

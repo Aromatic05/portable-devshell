@@ -344,6 +344,7 @@ mod tests {
                 ctx_id: "ctx".into(),
                 operation_id: "call".into(),
                 wait_handoff: false,
+                task_creation_id: None,
                 source: source.map(str::to_string),
                 policy: Arc::new(DisabledSecurityPolicy),
                 cancellation: ToolCancellation::default(),
