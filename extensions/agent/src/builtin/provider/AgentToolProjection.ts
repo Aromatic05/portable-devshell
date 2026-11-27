@@ -119,22 +119,48 @@ export function projectAgentModelToolResult(
         ? value.comment.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
         : [];
     // Preserve instructions before clipping routine output, but reserve the
-    // task creation handle even when instructions exhaust the result budget.
+    // task recovery metadata even when instructions exhaust the result budget.
     const advice = comments.length === 0 ? "" : `comment:\n${comments.join("\n")}\n`;
     const task = rendered.length + advice.length > MAX_MODEL_TOOL_RESULT_CHARACTERS
-        ? retainedTaskHandle(projectionName, value) : "";
+        ? retainedProcessRecovery(projectionName, value) : "";
     const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - task.length - advice.length;
     return remaining <= 0
         ? `${task}${advice}[tool result omitted: comment exceeds the result budget]`
-        : `${task}${advice}${limitModelToolResult(rendered, remaining)}`;
+        : `${advice}${task}${limitModelToolResult(rendered, remaining)}`;
 }
 
-function retainedTaskHandle(toolName: string, value: ExtensionJsonValue): string {
-    if ((toolName !== "bash_run" && toolName !== "task_manage") || !isRecord(value)) return "";
+function retainedProcessRecovery(toolName: string, value: ExtensionJsonValue): string {
+    if ((toolName !== "bash_run" && toolName !== "task_input" && toolName !== "task_manage") || !isRecord(value))
+        return "";
     const details = isRecord(value.error) && isRecord(value.error.details) ? value.error.details : undefined;
-    if (typeof details?.taskId === "string" && (details.taskStart === "confirmed" || details.taskStart === "unknown"))
-        return `taskId=${details.taskId} taskStart=${details.taskStart}. Inspect the task; do not repeat the creation call.\n`;
-    return isRecord(value.task) && typeof value.task.id === "string" ? `taskId=${value.task.id}\n` : "";
+    if (typeof details?.taskId === "string") {
+        if (details.taskStart === "confirmed" || details.taskStart === "unknown")
+            return `taskId=${details.taskId} taskStart=${details.taskStart}. Inspect the task; do not repeat the creation call.\n`;
+        return [
+            `taskId=${details.taskId}`,
+            typeof details.cursor === "string" ? `cursor=${JSON.stringify(details.cursor)}` : undefined,
+            "Observe the existing task with task_input; omit input to avoid replaying side effects.",
+        ].filter((line) => line !== undefined).join("\n") + "\n";
+    }
+    const task = isRecord(value.task) ? value.task : undefined;
+    const id = task?.id ?? value.taskId;
+    if (typeof id !== "string") return "";
+    return [
+        `taskId=${id}`,
+        field("status", task?.status ?? task?.state ?? value.state),
+        field("termination", value.termination),
+        field("exitCode", value.exitCode),
+        field("termSignal", value.termSignal),
+        field("waitReason", value.waitReason),
+        value.detached === true ? "detached=true" : undefined,
+        value.killRequested === true ? "killRequested=true" : undefined,
+        typeof value.cursor === "string" ? `cursor=${JSON.stringify(value.cursor)}` : undefined,
+        typeof value.stdoutPath === "string" ? `stdoutRecovery=${value.stdoutPath}` : undefined,
+        typeof value.stderrPath === "string" ? `stderrRecovery=${value.stderrPath}` : undefined,
+        ...(typeof value.cursor === "string"
+            ? ["Observe the existing task with task_input; omit input to avoid replaying side effects."]
+            : []),
+    ].filter((line) => line !== undefined).join("\n") + "\n";
 }
 
 function projectAgentModelInputSchema(

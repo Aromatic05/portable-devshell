@@ -328,3 +328,22 @@ test("control tool session exposes canonical workspace and releases the connecti
     );
     assert.deepEqual(released, ["pi-connection"]);
 });
+
+test("control tool route retains cancelled task observation's resume boundary", async () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const cursor = "tc3_resume";
+    const handle = callHandler(async () => {
+        throw createRemoteError({
+            code: "core.toolCallCancelled", message: "cancelled", retryable: false,
+            details: { taskId, cursor, stdoutTail: "private output" },
+        });
+    });
+    const result = await handle({
+        id: "resume", name: "call",
+        payload: { input: { task: taskId }, toolName: "task_input", workspace: "/workspace" },
+    }, routeContext("resume")) as { error: unknown };
+    assert.deepEqual(result.error, {
+        code: "core.toolCallCancelled", message: "cancelled", retryable: false,
+        details: { taskId, cursor },
+    });
+});

@@ -304,3 +304,25 @@ test("model projection preserves successful and failed creation handles when com
             details: { taskId, taskStart: "confirmed" } },
     }), new RegExp(`^taskId=${taskId} taskStart=confirmed.*do not repeat the creation call`, "u"));
 });
+
+test("task observation keeps its cursor and terminal outcome when comments consume the result budget", () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const cursor = "tc3_resume";
+    const comment = ["x".repeat(13_000)];
+    const text = projectAgentModelToolResult("task_input", {
+        task: { id: taskId, status: "exited" }, cursor, termination: "exited",
+        exitCode: 0, waitReason: "terminal", stdoutPath: "/.devshell/tool-results/example/stdout", comment,
+    });
+    assert.match(text, /^taskId=process-/u);
+    assert.ok(text.includes('cursor="tc3_resume"'));
+    assert.ok(text.includes("termination=exited"));
+    assert.ok(text.includes("exitCode=0"));
+    assert.ok(text.includes("stdoutRecovery=/.devshell/tool-results/example/stdout"));
+    const cancelled = projectAgentModelToolResult("task_input", {
+        error: { code: "core.toolCallCancelled", message: "cancelled", retryable: false,
+            details: { taskId, cursor } }, comment,
+    });
+    assert.match(cancelled, /^taskId=process-/u);
+    assert.ok(cancelled.includes('cursor="tc3_resume"'));
+    assert.ok(cancelled.includes("omit input"));
+});
