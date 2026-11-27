@@ -100,7 +100,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             // The Worker may have completed its last cancellation check before
             // the cancel packet arrived. Its raw reply is still authoritative.
             // Until Core returns the result, Core owns late cancellation cleanup.
-            if (request.signal?.aborted && task.worker && task.completed && task.running) {
+            if (request.signal?.aborted && task.worker && task.start === "confirmed" && task.running) {
                 try {
                     await this.#toolInvoker.invoke("task_manage", { command: "close", task: task.id },
                         executionContext(request.value.context));
@@ -346,9 +346,15 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         const details = record(toRemoteErrorBody(error)?.details);
                         const id = details?.taskId;
                         const start = details?.taskStart;
-                        if (typeof id === "string" && id.length > 0 && (start === "confirmed" || start === "unknown"))
+                        if (typeof id === "string" && id.length > 0 && (start === "confirmed" || start === "unknown")) {
+                            // An output/serialization failure after spawn does not establish exit.
+                            // Reuse the confirmed identity for late cancellation unless the
+                            // Worker already observed a terminal state or requested termination.
                             execution.task = { id, start, completed: false, native: false,
-                                worker: execute === undefined, running: false };
+                                worker: execute === undefined,
+                                running: start === "confirmed" && details?.killRequested !== true &&
+                                    details?.state !== "exited" && details?.state !== "failed" };
+                        }
                     }
                     throw error;
                 } finally {
