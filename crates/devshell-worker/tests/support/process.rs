@@ -79,18 +79,3 @@ impl WorkerFixture {
         }
     }
 }
-
-impl Drop for WorkerFixture {
-    fn drop(&mut self) {
-        let _ = self
-            .env
-            .std_command()
-            .args(["stop", "--instance", self.instance])
-            .output();
-        let _ = self
-            .env
-            .std_command()
-            .args(["retire", "--instance", self.instance])
-            .output();
-    }
-}

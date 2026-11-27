@@ -48,6 +48,7 @@ import {
     terminalPrintCommand,
     terminalSizeProbeCommand,
 } from "../../../../../test/TestPlatformSupport.ts";
+import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import {
     startLoopbackHttpProxy,
@@ -187,24 +188,36 @@ test(
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
         let workerStdout = "";
         let workerStderr = "";
+        const environment: NodeJS.ProcessEnv = {
+            ...process.env,
+            HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
+            PORTABLE_DEVSHELL_HOME: join(homeDirectory, ".devshell"),
+            XDG_RUNTIME_DIR: xdgRuntimeDir,
+        };
+        delete environment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+        delete environment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+        delete environment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 
         t.after(async () => {
-            const worker = workerRef.value;
-            if (
-                worker !== undefined &&
-                worker.exitCode === null &&
-                worker.signalCode === null
-            ) {
-                worker.kill("SIGTERM");
-                await waitForExit(worker);
-            }
-            await server.stop();
-            await routeProxy.close();
-            await proxy.close();
-            restoreWindowsIdentity();
-            await rm(homeDirectory, { force: true, recursive: true });
-            await rm(xdgRuntimeDir, { force: true, recursive: true });
-            await rm(workspace, { force: true, recursive: true });
+            await cleanupInOrder(
+                async () => {
+                    const worker = workerRef.value;
+                    if (worker !== undefined && worker.exitCode === null && worker.signalCode === null) {
+                        worker.kill("SIGTERM");
+                        await waitForExit(worker);
+                    }
+                },
+                () => runWorkerCommand(["stop", "--instance", "reverse-test"], environment, workspace),
+                () => runWorkerCommand(["retire", "--instance", "reverse-test"], environment, workspace),
+                () => server.stop(),
+                () => routeProxy.close(),
+                () => proxy.close(),
+                restoreWindowsIdentity,
+                () => rm(homeDirectory, { force: true, recursive: true }),
+                () => rm(xdgRuntimeDir, { force: true, recursive: true }),
+                () => rm(workspace, { force: true, recursive: true }),
+            );
         });
 
         await mkdir(paths.controlHomeDir, { recursive: true });
@@ -266,12 +279,9 @@ test(
         await pointProxyAtControlMcp(proxy, server.socketPath);
         const worker = spawn(workerBinary!, [], {
             env: {
-                ...process.env,
+                ...environment,
                 DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
                 DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
-                HOME: homeDirectory,
-                USERPROFILE: homeDirectory,
-                XDG_RUNTIME_DIR: xdgRuntimeDir,
             },
             stdio: ["pipe", "pipe", "pipe"],
         });
@@ -640,12 +650,7 @@ test(
 
         // T1: disconnected Reverse + live daemon. `start` must wait until
         // Control returns Ready without restarting the daemon.
-        const startEnvironment = {
-            ...process.env,
-            HOME: homeDirectory,
-            USERPROFILE: homeDirectory,
-            XDG_RUNTIME_DIR: xdgRuntimeDir,
-        };
+        const startEnvironment = environment;
         const beforeRestart = JSON.parse(runWorkerCommand(
             ["status", "--instance", "reverse-test"], startEnvironment, workspace,
         ).stdout) as { pid: number };
@@ -926,21 +931,17 @@ test(
         delete workerEnvironment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 
         t.after(async () => {
-            runWorkerCommand(
-                ["stop", "--instance", "reverse-reenroll"],
-                workerEnvironment,
-                workspace,
-                true,
+            await cleanupInOrder(
+                () => runWorkerCommand(["stop", "--instance", "reverse-reenroll"], workerEnvironment, workspace),
+                () => runWorkerCommand(["retire", "--instance", "reverse-reenroll"], workerEnvironment, workspace),
+                () => server.stop(),
+                () => proxy.close(),
+                () => rm(controlHome, { force: true, recursive: true }),
+                () => rm(controlRuntime, { force: true, recursive: true }),
+                () => rm(workerHome, { force: true, recursive: true }),
+                () => rm(workerRuntime, { force: true, recursive: true }),
+                () => rm(workspace, { force: true, recursive: true }),
             );
-            await server.stop();
-            await proxy.close();
-            await Promise.all([
-                rm(controlHome, { force: true, recursive: true }),
-                rm(controlRuntime, { force: true, recursive: true }),
-                rm(workerHome, { force: true, recursive: true }),
-                rm(workerRuntime, { force: true, recursive: true }),
-                rm(workspace, { force: true, recursive: true }),
-            ]);
         });
 
         await mkdir(paths.controlHomeDir, { recursive: true });
@@ -1117,6 +1118,7 @@ function runWorkerCommand(
         cwd,
         encoding: "utf8",
         env: environment,
+        timeout: 45_000,
         windowsHide: true,
     });
     if (result.error !== undefined) throw result.error;

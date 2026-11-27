@@ -115,7 +115,10 @@ impl Drop for Fixture {
         if !retired {
             let _ = self.child.kill();
         }
-        let _ = self.child.wait();
+        if let Err(error) = support::wait_child(&mut self.child, Duration::from_secs(15)) {
+            if std::thread::panicking() { eprintln!("retire test Process Host: {error}"); }
+            else { panic!("retire test Process Host: {error}"); }
+        }
     }
 }
 
@@ -413,7 +416,6 @@ struct LocalAttach {
 
 impl LocalAttach {
     fn start(env: &TestEnv, task: &str) -> Self {
-        use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let opened = nix::pty::openpty(
             Some(&nix::pty::Winsize {
@@ -425,6 +427,16 @@ impl LocalAttach {
             None,
         )
         .unwrap();
+        // Match the production Unix PTY descriptor ownership. Other concurrently
+        // launched test Workers must not inherit either end of this terminal.
+        for fd in [&opened.master, &opened.slave] {
+            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC)).unwrap();
+        }
+        let master = std::fs::File::from(opened.master);
+        let flags = nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_GETFL).unwrap();
+        nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_SETFL(
+            nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK,
+        )).unwrap();
         let slave = opened.slave;
         let mut command = env.std_command();
         command
@@ -442,16 +454,7 @@ impl LocalAttach {
             });
         }
         let child = command.spawn().unwrap();
-        let master = std::fs::File::from(opened.master);
-        // Bound the read deadline without blocking on the attached terminal.
-        unsafe {
-            let fd = master.as_raw_fd();
-            let flags = nix::libc::fcntl(fd, nix::libc::F_GETFL);
-            assert_ne!(
-                nix::libc::fcntl(fd, nix::libc::F_SETFL, flags | nix::libc::O_NONBLOCK),
-                -1
-            );
-        }
+        drop(command);
         Self {
             child,
             master,
@@ -510,7 +513,9 @@ impl Drop for LocalAttach {
     fn drop(&mut self) {
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
-            let _ = self.child.wait();
+            if let Err(error) = support::wait_child(&mut self.child, Duration::from_secs(5)) {
+                eprintln!("stop test attach client: {error}");
+            }
         }
     }
 }

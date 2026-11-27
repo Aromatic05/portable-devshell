@@ -202,20 +202,16 @@ try {
 
     stage("stop worker");
     runWorker(["stop", "--instance", instance]);
-    process.stdout.write("worker smoke passed\n");
 } catch (error) {
     await reportFailure(error);
     throw error;
 } finally {
-    spawnSync(worker, ["stop", "--instance", instance], {
-        cwd: workspace,
-        env,
-        stdio: "ignore",
-        timeout: 10_000,
-        windowsHide: true,
-    });
+    stage("retire test Process Host");
+    runWorker(["stop", "--instance", instance]);
+    runWorker(["retire", "--instance", instance]);
     await rm(root, { force: true, recursive: true });
 }
+process.stdout.write("worker smoke passed\n");
 
 function terminalPrintCommand(marker) {
     if (!/^[A-Za-z0-9._-]{2,128}$/u.test(marker)) {
