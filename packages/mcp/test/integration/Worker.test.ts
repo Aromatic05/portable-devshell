@@ -309,10 +309,10 @@ import { tmpdir } from "node:os";
                     assert.deepEqual(manageProperties.command?.enum, [
                         "list", "create", "close",
                     ]);
-                    assert.deepEqual(manageProperties.scope?.anyOf, [
-                        { enum: ["workspace", "instance"], type: "string" },
-                        { type: "null" },
+                    assert.deepEqual(manageProperties.scope?.enum, [
+                        "workspace", "instance",
                     ]);
+                    assert.equal(manageProperties.scope?.anyOf, undefined);
                 }
                 for (const name of [
                     "file_glob",

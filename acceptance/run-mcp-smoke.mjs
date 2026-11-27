@@ -71,7 +71,8 @@ try {
             },
         },
     );
-    assert.deepEqual(toolCall.body.result?.content, []);
+    assert.equal(JSON.parse(toolCall.body.result?.content?.[0]?.text ?? "{}").stdout,
+        toolCall.body.result?.structuredContent?.stdout);
     const output = String(
         toolCall.body.result?.structuredContent?.stdout ?? "",
     );

@@ -29,7 +29,7 @@ export async function deliverMcpAppReentry(
         (action === "report" && !["accepted", "rejected", "uncertain"].includes(String(outcome))))
         throw new Error("Invalid MCP App recovery request.");
     const context = await ports.context.resolve({
-        ctxId, instance: ports.instance, principal: request.principal, touch: false,
+        ctxId, instance: ports.instance, principal: request.principal, touch: true,
     });
     const environment = context.environments.find((entry) => entry.instance === ports.instance);
     if (context.status !== "active" || environment === undefined)

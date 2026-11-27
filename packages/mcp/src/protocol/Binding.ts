@@ -49,16 +49,19 @@ export class McpEndpointBinding {
     readonly #streamNodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #endpoint: McpEndpoint;
+    readonly #explicitFallback?: McpEndpoint;
     readonly #modelOutput: McpModelOutputBudget;
 
     constructor(
         endpoint: McpEndpoint,
         serverVersion = "0.0.0",
         modelOutput: McpModelOutputBudget = {},
+        explicitFallback?: McpEndpoint,
     ) {
         validateMcpModelOutputBudget(modelOutput);
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
+        this.#explicitFallback = explicitFallback;
         this.#modelOutput = modelOutput;
         // Per-request modes share a bus so subscriptions and tool calls
         // remain on the same notification stream across both handlers.
@@ -66,13 +69,15 @@ export class McpEndpointBinding {
         const common = {
             bus,
             keepAliveMs: 15_000,
-            legacy: "reject" as const,
+            // Keep the 2026 stateless envelope path while serving earlier
+            // handshake revisions through the SDK's Streamable HTTP fallback.
+            legacy: "stateless" as const,
         };
-        this.#handler = createMcpHandler(() => this.#createServer(), {
+        this.#handler = createMcpHandler(({ era }) => this.#createServer(era), {
             ...common,
             responseMode: "auto",
         });
-        this.#streamHandler = createMcpHandler(() => this.#createServer(), {
+        this.#streamHandler = createMcpHandler(({ era }) => this.#createServer(era), {
             ...common,
             // The Node adapter flushes headers with the first body frame.
             // Send a prompt heartbeat even if a long call emits no progress.
@@ -97,9 +102,16 @@ export class McpEndpointBinding {
             : this.#nodeHandler)(request, response, body);
     }
 
-    #createServer(): Server {
-        const resources = this.#endpoint.listResources();
-        const appResources = this.#endpoint.hasAppResources();
+    #selectEndpoint(meta: Record<string, unknown> | undefined, fallback: McpEndpoint): McpEndpoint {
+        return hasOpenaiSession(meta) ? this.#endpoint : this.#explicitFallback ?? fallback;
+    }
+
+    #createServer(era: "legacy" | "modern"): Server {
+        const endpoint = era === "legacy"
+            ? this.#explicitFallback ?? this.#endpoint
+            : this.#endpoint;
+        const resources = endpoint.listResources();
+        const appResources = endpoint.hasAppResources();
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -122,7 +134,7 @@ export class McpEndpointBinding {
             }));
 
             server.setRequestHandler("resources/read", async (request) => {
-                const content = await this.#endpoint.readResource(
+                const content = await endpoint.readResource(
                     request.params.uri,
                 );
                 if (content === undefined) {
@@ -146,10 +158,11 @@ export class McpEndpointBinding {
             });
         }
 
-        server.setRequestHandler("tools/list", async () => {
+        server.setRequestHandler("tools/list", async (request) => {
             try {
+                const requestEndpoint = this.#selectEndpoint(readRequestMeta(request.params?._meta), endpoint);
                 return {
-                    tools: this.#endpoint.listTools().map(toProtocolTool),
+                    tools: requestEndpoint.listTools().map(toProtocolTool),
                 };
             } catch (error) {
                 throw toMcpError(error);
@@ -164,7 +177,8 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(ctx.mcpReq.id),
                 };
-                const result = await this.#endpoint.callTool(
+                const requestEndpoint = this.#selectEndpoint(requestMeta, endpoint);
+                const result = await requestEndpoint.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
@@ -174,7 +188,8 @@ export class McpEndpointBinding {
                     request.params.name,
                     result,
                     this.#modelOutput,
-                ));
+                    requestEndpoint.contextMode === "explicit",
+                ), requestEndpoint.contextMode === "explicit");
             } catch (error) {
                 throw toMcpError(error);
             }
@@ -200,6 +215,11 @@ function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
     return meta as Record<string, unknown>;
 }
 
+function hasOpenaiSession(meta: Record<string, unknown> | undefined): boolean {
+    const session = meta?.["openai/session"];
+    return typeof session === "string" && session.length > 0;
+}
+
 function toRequestId(value: unknown): string | undefined {
     if (typeof value === "string") {
         return value;
@@ -212,17 +232,24 @@ function toRequestId(value: unknown): string | undefined {
     return undefined;
 }
 
-function toCallToolResult(result: McpEndpointResult) {
+function toCallToolResult(result: McpEndpointResult, explicit: boolean) {
+    const structured = result instanceof McpNativeToolResult
+        ? result.structuredContent : result;
+    const originalContent = result instanceof McpNativeToolResult
+        ? result.content : [];
+    const content = explicit && originalContent.length === 0
+        ? [{ type: "text" as const, text: JSON.stringify(structured) }]
+        : originalContent;
     if (result instanceof McpNativeToolResult) {
         return {
             ...(result._meta === undefined ? {} : { _meta: result._meta }),
-            content: result.content,
+            content,
             isError: result.isError,
             structuredContent: result.structuredContent,
         };
     }
     return {
-        content: [],
+        content,
         isError: false,
         structuredContent: result,
     };

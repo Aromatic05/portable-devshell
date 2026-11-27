@@ -38,6 +38,7 @@ export interface McpControlModuleOptions {
     http: McpHttpAccess;
     instances: InstanceRegistry;
     toolRegistry: ToolCallRegistry;
+    requestLogger?: (line: string) => void;
 }
 
 export class McpControlModule {
@@ -52,6 +53,7 @@ export class McpControlModule {
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpServer;
     readonly #toolRegistry: ToolCallRegistry;
+    readonly #requestLogger?: (line: string) => void;
     readonly #contextRecords?: () => Promise<ContextRecord[]>;
     readonly #contextChanges?: ContextChangeSource;
     #unsubscribeContexts?: () => void;
@@ -63,6 +65,7 @@ export class McpControlModule {
         this.#http = options.http;
         this.#controlPaths = options.controlPaths;
         this.#toolRegistry = options.toolRegistry;
+        this.#requestLogger = options.requestLogger;
         this.#runtimeState = new McpServer({
             context: options.context,
             endpoint: options.endpoint,
@@ -102,6 +105,7 @@ export class McpControlModule {
             http: this.#http,
             toolProvenance: this.toolProvenance,
             toolSource: this.#toolRegistry,
+            requestLogger: this.#requestLogger,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
         this.#subscribeContexts();
@@ -129,6 +133,7 @@ export class McpControlModule {
             http: this.#http,
             toolProvenance: this.toolProvenance,
             toolSource: this.#toolRegistry,
+            requestLogger: this.#requestLogger,
             mcpAppLeaseFile: this.#controlPaths.mcpAppLeasesFile,
         });
         const previous = this.#host;

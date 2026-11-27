@@ -101,21 +101,16 @@ export class McpEndpointDispatch {
         const appOnlyInteraction = isAppOnlyInteractionTool(toolName);
         const provenanceInput = readMcpProvenanceInput(input);
         input = provenanceInput.input;
-        const touchContext = !isPassiveWorkspaceRead(toolName);
         const resolvedContext = appOnlyInteraction
             ? await this.#resolveAppOnlyContext(
                   input,
                   requestContext,
-                  !isPassiveWorkspaceRead(toolName),
               )
             : await this.#contextSelector.resolve(
                   this.#context,
                   input,
                   requestContext,
                   {
-                      allowExpired:
-                          touchContext &&
-                          !this.#contextSelector.requiresExplicitContextId,
                       touch: false,
                   },
               );
@@ -135,7 +130,6 @@ export class McpEndpointDispatch {
                 ctxId: resolvedContext.record.ctxId,
                 instance: routed.instance,
                 principal: requestContext.principal,
-                renewExpired: touchContext,
                 touch: false,
             });
         }
@@ -188,13 +182,11 @@ export class McpEndpointDispatch {
         provenance: ToolCallProvenance,
     ): Promise<McpAcceptedCall> {
         const { instance, ctxId } = value.context;
-        const touchContext = !isPassiveWorkspaceRead(value.toolName);
         await this.#context.resolve({
             ctxId: ctxId!,
             instance,
             principal: requestContext.principal,
-            renewExpired: touchContext,
-            touch: touchContext,
+            touch: true,
         });
         const workspaceAdvice: string[] = [];
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {
@@ -226,13 +218,13 @@ export class McpEndpointDispatch {
     async #resolveAppOnlyContext(
         input: JsonValue,
         requestContext: McpEndpointCallContext,
-        touch: boolean,
     ): Promise<{ input: JsonValue; record: ContextRecord }> {
         const contextInput = readMcpContextInput(input);
         const record = await this.#context.resolve({
             ctxId: contextInput.ctxId,
+            instance: this.#instanceName,
             principal: requestContext.principal,
-            touch,
+            touch: true,
         });
         return { input: contextInput.input, record };
     }
@@ -246,14 +238,6 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "mcpapp_watch" ||
         toolName === "mcpapp_reentry" ||
         toolName === "mcpapp_action"
-    );
-}
-
-function isPassiveWorkspaceRead(toolName: string): boolean {
-    return (
-        toolName === "mcpapp_reconnect" ||
-        toolName === "mcpapp_snapshot" ||
-        toolName === "mcpapp_watch"
     );
 }
 

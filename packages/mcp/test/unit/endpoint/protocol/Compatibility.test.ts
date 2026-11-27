@@ -112,7 +112,7 @@ test("legacy instance Context attachment tools are strictly rejected", async () 
     await assertStrictlyRejected(["instance_connect", "instance_start"]);
 });
 
-test("legacy 2025 protocol negotiation is strictly rejected by the modern binding", async () => {
+test("legacy 2025 protocol negotiation is supported by the dual-era binding", async () => {
     const binding = new McpEndpointBinding(
         createTestMcpEndpoint({ instanceName: "demo" }),
     );
@@ -134,11 +134,12 @@ test("legacy 2025 protocol negotiation is strictly rejected by the modern bindin
             { "mcp-method": "initialize", "mcp-protocol-version": "2025-11-25" },
         );
 
-        assert.equal(response.status, 400);
-        assert.equal(response.body.result, undefined);
-        assert.equal(response.body.error?.code, -32022);
-        assert.deepEqual(response.body.error?.data?.supported, ["2026-07-28"]);
-        assert.equal(response.body.error?.data?.requested, "2025-11-25");
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error, undefined);
+        assert.equal(
+            (response.body.result as { protocolVersion?: string } | undefined)?.protocolVersion,
+            "2025-11-25",
+        );
     } finally {
         await server.close();
     }

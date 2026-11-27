@@ -126,7 +126,7 @@ export class McpAppCall {
             requestId.length < 16 || requestId.length > 128 ||
             (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0)))
             throw new Error("Invalid MCP App action request.");
-        const context = await this.#contexts.resolve({ ctxId, principal: requestContext.principal, touch: false });
+        const context = await this.#contexts.resolve({ ctxId, instance: this.#instance, principal: requestContext.principal, touch: true });
         if (context.status !== "active" || !context.environments.some((entry) => entry.instance === this.#instance))
             throw new Error("MCP App Context is unavailable.");
         const key = createHash("sha256")

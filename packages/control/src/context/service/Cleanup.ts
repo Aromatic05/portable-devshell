@@ -24,6 +24,10 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         this.#runtime = options.runtime;
     }
 
+    async withContext<Result>(ctxId: string, operation: () => Promise<Result>): Promise<Result> {
+        return await this.#run(ctxId, operation);
+    }
+
     async reconcile(ctxId?: string): Promise<void> {
         if (ctxId === undefined) {
             // Startup reconciliation is maintenance, not a prerequisite for
@@ -79,19 +83,18 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 failures.push(error);
             }
         };
-        const terminalReason =
-            terminal.status === "disabled" ? "disabled" : "expired";
-
-        const retired = await this.#registry.listRetiredEnvironmentInstances(terminal.ctxId);
-        // Start every attachment notification before awaiting any callback, so a
-        // concurrent reload cannot redirect later attachments to a new runtime.
-        await Promise.all(terminal.environments.filter(({ instance }) => !retired.includes(instance)).map(
-            async ({ instance }) => cleanup(async () => {
-                const event = { ctxId: terminal.ctxId, instance, reason: terminalReason } as const;
-                await this.#environmentRetired?.(event);
-                await this.#registry.settleEnvironmentRetirement(event);
-            }),
-        ));
+        if (terminal.status === "disabled") {
+            const retired = await this.#registry.listRetiredEnvironmentInstances(terminal.ctxId);
+            // Explicit disable retires business state; TTL collection only
+            // releases resources and must leave ongoing work intact.
+            await Promise.all(terminal.environments.filter(({ instance }) => !retired.includes(instance)).map(
+                async ({ instance }) => cleanup(async () => {
+                    const event = { ctxId: terminal.ctxId, instance, reason: "disabled" } as const;
+                    await this.#environmentRetired?.(event);
+                    await this.#registry.settleEnvironmentRetirement(event);
+                }),
+            ));
+        }
 
         for (const environment of terminal.environments) {
             if (environment.workspace !== undefined) {
@@ -129,7 +132,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,
-                `Context ${terminal.ctxId} was ${terminalReason}, but cleanup was incomplete.`,
+                `Context ${terminal.ctxId} resource cleanup was incomplete.`,
             );
         }
     }
@@ -159,7 +162,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                     if (instance !== undefined && cleanup.instance !== instance)
                         continue;
                     // Ledger reads/writes are not remote cleanup failures.
-                    const contexts = await this.#registry.list();
+                    const contexts = await this.#registry.list({ status: "active" });
                     let cleaned: boolean;
                     try {
                         cleaned = await this.#cleanup(id, cleanup, contexts, target);
@@ -247,7 +250,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         return true;
     }
 
-    async #run(ctxId: string, operation: () => Promise<void>): Promise<void> {
+    async #run<Result>(ctxId: string, operation: () => Promise<Result>): Promise<Result> {
         const previous = this.#transactions.get(ctxId) ?? Promise.resolve();
         const current = previous.then(operation, operation);
         const completion = current.then(
@@ -256,7 +259,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         );
         this.#transactions.set(ctxId, completion);
         try {
-            await current;
+            return await current;
         } finally {
             if (this.#transactions.get(ctxId) === completion)
                 this.#transactions.delete(ctxId);

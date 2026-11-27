@@ -192,7 +192,6 @@ test("worker calls resolve Context and preserve the shared presentation", async 
 
     assert.deepEqual(resolutions, [
         {
-            acceptExpired: false,
             ctxId: "ctx-alpha",
             principal: "user-alpha",
             touch: false,
@@ -201,7 +200,6 @@ test("worker calls resolve Context and preserve the shared presentation", async 
             ctxId: "ctx-alpha",
             instance: "alpha",
             principal: "user-alpha",
-            renewExpired: true,
             touch: true,
         },
     ]);

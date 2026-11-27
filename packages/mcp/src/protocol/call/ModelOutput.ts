@@ -56,13 +56,18 @@ export function projectMcpModelOutput(
     toolName: string,
     original: McpEndpointResult,
     policy: McpModelOutputBudget = {},
+    mirrorStructuredText = false,
 ): McpEndpointResult {
     // App-only tools exchange UI state and capabilities, not model tool output.
     if (toolName.startsWith("mcpapp_")) return original;
     const maximum = policy.maxTokens ?? DEFAULT_MAX_TOKENS;
     const configured = policy.byTool?.[toolName] ??
         policy.defaultTokens ?? DEFAULT_TOOL_TOKENS[toolName] ?? DEFAULT_TOKENS;
-    const budget = Math.min(configured, maximum) * TOKEN_BYTES;
+    // The explicit MCP response mirrors structuredContent as text when no
+    // presentation text exists. Both copies share the same model budget.
+    const mirrored = mirrorStructuredText &&
+        (!(original instanceof McpNativeToolResult) || original.content.length === 0);
+    const budget = Math.floor(Math.min(configured, maximum) * TOKEN_BYTES / (mirrored ? 2 : 1));
     const native = original instanceof McpNativeToolResult;
     let result = native ? original.structuredContent : original;
     let content: CallToolResult["content"] = native ? original.content : [];

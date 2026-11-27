@@ -76,7 +76,7 @@ environ_info(workspace=<absolute worker path>)
 
 开始。它一次完成：
 
-1. 创建、恢复或续租 Context；
+1. 创建 Context 或恢复其工作区资源；
 2. 在当前 instance 上 prepare workspace；
 3. 建立/更新 environment attachment；
 4. 通过 Worker Resource Host 准备并返回 managed Skill collection 路径，同时返回平台、project memory、temporary directory 等环境信息；
@@ -132,9 +132,11 @@ Instance 删除先持久化清理债务并撤销正常访问，再解除 Context
 
 人工检查清理债务使用 `devshell instance cleanup list`，重试使用 `devshell instance cleanup retry <instance>`；重试只恢复清理，不重新注册已删除 instance。
 
-活动调用会刷新租约。external-bound Context 在普通活动时可以续租同一个内部 Context；显式模式也可以通过 CLI 续租。
+TTL 是 Control 的闲置资源回收依据，不是模型工具的有效期。`expired` 表示资源可以被 GC；它不意味着 Context 身份、workspace 关联或业务状态失效。所有模型工具和 MCP App 动作都会自动刷新活动时间；如果运行时资源已被回收，Control 按原有 Context 身份与 workspace 绑定恢复资源，模型无须显式续期或重试 `environ_info`。`disabled` 仍表示显式终止，不能自动恢复。
 
-Control 会压缩 terminal Context 历史，但不会为了限制历史数量而驱逐 active Context。
+GC 结清实例引用与 Alert 等清理债务后，将完整的过期 Context 记录从 `contexts.json` 和运行时 Map 移除。最小的权威绑定（`ctxId`、principal、external bindings、instance/workspace 及 remote mask/handle）保存在同目录的 `contexts.json.identity.sqlite3`，按 `ctxId` 或 Host 会话绑定按需查询并重建；不会在每次工具调用时扫描归档。运行时资源恢复还会重新建立 Worker 引用、临时目录和 Alert lease。
+
+最小身份绑定与可回收的运行时资源生命周期不同：彻底删除绑定本身后，只有旧 `ctxId` 的普通工具请求无法安全推断 principal 或原 workspace。显式 `disable` 保持原有不可恢复语义；Control 只压缩这类终止历史，不把普通 TTL 到期当作终止。
 
 CLI 管理入口：
 

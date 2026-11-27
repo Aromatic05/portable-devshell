@@ -60,7 +60,7 @@ test("missing instance returns 404", async () => {
     }
 });
 
-test("legacy initialize is strictly rejected while server/discover negotiates the modern protocol", async () => {
+test("published handshake revisions initialize, list and call tools alongside modern discovery", async () => {
     const host = createHost();
     await host.start();
 
@@ -68,20 +68,65 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
         const port = requireTcpPort(host.server.address);
         const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
 
-        const legacy = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                accept: "application/json, text/event-stream",
-                "content-type": "application/json",
-            },
-            body: JSON.stringify(await readFixture("mcp-initialize.json")),
-        });
-        assert.equal(legacy.status, 400);
-        const legacyError = parseMcpHttpResponse<{
-            error?: { code?: number; data?: { supported?: string[] } };
-        }>(await legacy.text());
-        assert.equal(legacyError.error?.code, -32022);
-        assert.deepEqual(legacyError.error?.data?.supported, ["2026-07-28"]);
+        for (const protocolVersion of ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]) {
+            const legacy = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "initialize",
+                    params: {
+                        protocolVersion,
+                        capabilities: {},
+                        clientInfo: { name: "compatibility-client", version: "1" },
+                    },
+                }),
+            });
+            assert.equal(legacy.status, 200, `initialize ${protocolVersion}`);
+            const init = parseMcpHttpResponse<{
+                result?: { protocolVersion?: string };
+            }>(await legacy.text());
+            assert.equal(init.result?.protocolVersion, protocolVersion);
+            assert.equal(legacy.headers.get("mcp-session-id"), null);
+
+            const legacyTools = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": protocolVersion,
+                },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+            });
+            assert.equal(legacyTools.status, 200, `tools/list ${protocolVersion}`);
+            const listing = parseMcpHttpResponse<{ result?: { tools?: Array<{ name: string }> } }>(
+                await legacyTools.text(),
+            );
+            assert.equal(listing.result?.tools?.some((tool) => tool.name === "bash_run"), true);
+
+            const legacyCall = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": protocolVersion,
+                },
+                body: JSON.stringify({
+                    jsonrpc: "2.0", id: 3, method: "tools/call",
+                    params: { name: "environ_info", arguments: { workspace: "/workspace" } },
+                }),
+            });
+            assert.equal(legacyCall.status, 200, `tools/call ${protocolVersion}`);
+            const called = parseMcpHttpResponse<{ error?: unknown; result?: unknown }>(
+                await legacyCall.text(),
+            );
+            assert.equal(called.error, undefined, `tools/call ${protocolVersion}`);
+            assert.notEqual(called.result, undefined, `tools/call ${protocolVersion}`);
+        }
 
         const discovery = await discoverModern(endpoint);
         assert.equal(discovery.status, 200);
@@ -96,6 +141,195 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
         assert.equal(discovery.headers.get("mcp-session-id"), null);
     } finally {
         await host.stop();
+    }
+});
+
+test("MCP request diagnostics record pre-auth rejection and successful 2025 discovery without secrets", async () => {
+    const entries: Array<Record<string, unknown>> = [];
+    const host = createHost({
+        auth: { enabled: true, provider: "token", token: "private-test-token" },
+        requestLogger: (line) => entries.push(JSON.parse(line) as Record<string, unknown>),
+    });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const headers = {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+            "mcp-protocol-version": "2025-11-25",
+        };
+        const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+        const denied = await fetch(`${endpoint}?secret=query-must-not-be-logged`, {
+            method: "POST",
+            headers: { ...headers, authorization: "Bearer invalid-test-token" },
+            body: request,
+        });
+        assert.equal(denied.status, 401);
+        await denied.text();
+
+        const allowed = await fetch(endpoint, {
+            method: "POST",
+            headers: { ...headers, authorization: "Bearer private-test-token" },
+            body: request,
+        });
+        assert.equal(allowed.status, 200);
+        await allowed.text();
+
+        const received = entries.filter((entry) => entry.event === "received");
+        const finished = entries.filter((entry) => entry.event === "finished");
+        assert.equal(received.length, 2);
+        assert.equal(finished.length, 2);
+        assert.equal(finished[0]?.requestId, received[0]?.requestId);
+        assert.equal(finished[0]?.status, 401);
+        assert.equal(finished[0]?.auth, "rejected");
+        assert.equal(finished[1]?.requestId, received[1]?.requestId);
+        assert.equal(finished[1]?.status, 200);
+        assert.equal(finished[1]?.auth, "accepted");
+        assert.equal(finished[1]?.rpcMethod, "tools/list");
+        assert.equal(finished[1]?.protocolVersion, "2025-11-25");
+        assert.equal(JSON.stringify(entries).includes("private-test-token"), false);
+        assert.equal(JSON.stringify(entries).includes("invalid-test-token"), false);
+        assert.equal(JSON.stringify(entries).includes("query-must-not-be-logged"), false);
+    } finally {
+        await host.stop();
+    }
+});
+
+test("non-OpenAI clients use explicit Context while OpenAI session tools stay bound", async () => {
+    const workspace = await createTestTempDirectory("mcp-context-fallback");
+    const host = createHost({ contextMode: "openai-session", contextTools: true });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const legacyRpc = async (id: number, method: string, params: Record<string, unknown>) => {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                    "mcp-protocol-version": "2025-11-25",
+                },
+                body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+            });
+            assert.equal(response.status, 200, method);
+            return parseMcpHttpResponse<{ error?: unknown; result?: {
+                capabilities?: Record<string, unknown>;
+                content?: Array<{ type?: string; text?: string }>;
+                structuredContent?: { ctxId?: string };
+                tools?: Array<{ name: string; inputSchema?: {
+                    required?: string[]; properties?: Record<string, unknown>;
+                }; outputSchema?: { properties?: Record<string, unknown> }; _meta?: Record<string, unknown> }>;
+            } }>(await response.text());
+        };
+        const init = await legacyRpc(1, "initialize", {
+            protocolVersion: "2025-11-25", capabilities: {},
+            clientInfo: { name: "standard-mcp", version: "1" },
+        });
+        assert.equal(init.result?.capabilities?.extensions, undefined);
+        const listed = await legacyRpc(2, "tools/list", {});
+        const bash = listed.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.ok(bash?.inputSchema?.required?.includes("ctxId"));
+        for (const name of ["environ_info", "environ_remote"]) {
+            const bootstrap = listed.result?.tools?.find((tool) => tool.name === name);
+            assert.equal(bootstrap?.inputSchema?.properties?.ctxId, undefined);
+            assert.notEqual(bootstrap?.inputSchema?.required?.includes("ctxId"), true);
+        }
+        assert.notEqual(
+            listed.result?.tools?.find((tool) => tool.name === "environ_info")
+                ?.outputSchema?.properties?.ctxId, undefined,
+        );
+        assert.equal(bash?._meta?.["openai/outputTemplate"], undefined);
+        assert.equal(listed.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
+        const remoteHelp = await legacyRpc(30, "tools/call", {
+            name: "environ_remote", arguments: { command: "help" },
+        });
+        assert.equal(remoteHelp.error, undefined);
+        const info = await legacyRpc(3, "tools/call", {
+            name: "environ_info", arguments: { workspace },
+        });
+        const ctxId = (JSON.parse(info.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId;
+        assert.ok(typeof ctxId === "string", JSON.stringify(info));
+        assert.match(ctxId, /^ctx-/u);
+        assert.equal(info.result?.structuredContent?.ctxId, ctxId);
+        const resumed = await legacyRpc(4, "tools/call", {
+            name: "environ_info", arguments: { ctxId },
+        });
+        assert.equal(resumed.result?.structuredContent?.ctxId, ctxId);
+        const executed = await legacyRpc(5, "tools/call", {
+            name: "bash_run", arguments: { ctxId, command: "pwd" },
+        });
+        assert.equal(executed.error, undefined);
+        assert.equal(JSON.parse(executed.result?.content?.[0]?.text ?? "{}").stdout, "ok\n");
+        const remote = await host.contexts.registry.referenceInstance(ctxId, "remote-test");
+        assert.ok(remote);
+        const masked = await legacyRpc(31, "tools/call", {
+            name: "environ_remote", arguments: { command: "mask", handle: remote.handle },
+        });
+        assert.equal(masked.error, undefined, JSON.stringify(masked));
+        assert.equal(masked.result?.structuredContent?.ctxId, ctxId);
+
+        const legacySessionTools = await legacyRpc(6, "tools/list", {
+            _meta: { "openai/session": "chat-using-legacy-wire" },
+        });
+        const legacySessionBash = legacySessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(legacySessionBash?.inputSchema?.required?.includes("ctxId"), true);
+        const legacySessionInfo = await legacyRpc(7, "tools/call", {
+            name: "environ_info", arguments: { workspace },
+            _meta: { "openai/session": "chat-using-legacy-wire" },
+        });
+        assert.equal(legacySessionInfo.result?.structuredContent?.ctxId, undefined);
+        assert.equal(legacySessionInfo.result?.content?.length, 0);
+
+        const modernList = await postModern(endpoint, "modern-list", "tools/list");
+        assert.equal(modernList.status, 200);
+        const modernTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
+            name: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] };
+        }> } }>(await modernList.text());
+        const modernBash = modernTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(modernBash?.inputSchema?.properties?.ctxId, undefined);
+        assert.equal(modernBash?.inputSchema?.required?.includes("ctxId"), true);
+        const modernSessionList = await postModern(endpoint, "modern-session-list", "tools/list", {
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(modernSessionList.status, 200);
+        const sessionTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
+            name: string; inputSchema?: { required?: string[] };
+        }> } }>(await modernSessionList.text());
+        const sessionBash = sessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.notEqual(sessionBash?.inputSchema?.required?.includes("ctxId"), true);
+        const openaiInfo = await postModern(endpoint, "openai-info", "tools/call", {
+            name: "environ_info", arguments: { workspace },
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(openaiInfo.status, 200);
+        const openaiResult = parseMcpHttpResponse<{ result?: {
+            content?: Array<{ text?: string }>;
+            structuredContent?: { ctxId?: string };
+        } }>(await openaiInfo.text());
+        assert.equal(openaiResult.result?.structuredContent?.ctxId, undefined);
+        assert.equal(openaiResult.result?.content?.length, 0);
+        const openaiCall = await postModern(endpoint, "openai-call", "tools/call", {
+            name: "bash_run", arguments: { command: "pwd" },
+            _meta: { "openai/session": "chat-session-one" },
+        });
+        assert.equal(openaiCall.status, 200);
+        assert.equal(parseMcpHttpResponse<{ error?: unknown }>(await openaiCall.text()).error, undefined);
+        const standardModern = await postModern(endpoint, "standard-modern", "tools/call", {
+            name: "environ_info", arguments: { workspace },
+        });
+        assert.equal(standardModern.status, 200);
+        const standardResult = parseMcpHttpResponse<{ result?: {
+            content?: Array<{ text?: string }>;
+            structuredContent?: { ctxId?: string };
+        } }>(await standardModern.text());
+        assert.ok(standardResult.result?.structuredContent?.ctxId?.startsWith("ctx-"));
+        assert.equal(
+            (JSON.parse(standardResult.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId,
+            standardResult.result?.structuredContent?.ctxId,
+        );
+    } finally {
+        await host.stop();
+        await rm(workspace, { force: true, recursive: true });
     }
 });
 
@@ -500,23 +734,36 @@ async function readFixture(name: string): Promise<JsonValue> {
 
 function createHost(overrides?: {
     auth?: McpAuthConfig;
+    contextMode?: "explicit" | "openai-session";
+    contextTools?: boolean;
     listenPort?: number;
     publicBaseUrl?: string;
+    requestLogger?: (line: string) => void;
     storageDir?: string;
     tools?: ToolCallApi;
 }): McpHost {
     return new McpHost({
         listenHost: "127.0.0.1",
         listenPort: overrides?.listenPort ?? 0,
-        tools: overrides?.tools ?? createHttpToolCallApi(),
+        tools: overrides?.contextTools === true ? undefined : overrides?.tools ?? createHttpToolCallApi(),
+        ...(overrides?.contextTools !== true ? {} : {
+            resolveTarget: () => ({
+                async dispatch(request) {
+                    if (request.execute !== undefined)
+                        return await request.execute(
+                            request.callId, request.value.payload, request.value, request.signal,
+                        ) as JsonValue;
+                    return { exitCode: 0, stderr: "", stdout: "ok\n" };
+                },
+            }),
+        }),
         publicBaseUrl: overrides?.publicBaseUrl,
+        requestLogger: overrides?.requestLogger,
         storageDir: overrides?.storageDir,
-        instances: [
-            createInstance(
-                "demo",
-                overrides?.auth ?? { enabled: false, provider: "none" },
-            ),
-        ],
+        instances: [{
+            ...createInstance("demo", overrides?.auth ?? { enabled: false, provider: "none" }),
+            contextMode: overrides?.contextMode,
+        }],
     });
 }
 

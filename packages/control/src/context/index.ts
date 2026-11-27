@@ -39,6 +39,6 @@ export function createContextRuntime(
         api: service,
         initialize: async () => await service.initialize(),
         reconcile: async () => await service.reconcile(),
-        close: () => {},
+        close: () => registry.close(),
     };
 }

@@ -113,14 +113,21 @@ export class McpEndpointCatalog {
                 : withMcpProvenance(modelTool);
         const modelFacing = isModelFacingTool(provenanceTool);
         const contextualTool =
-            this.#contextSelector.requiresExplicitContextId || !modelFacing
+            this.#contextSelector.requiresExplicitContextId &&
+            isBootstrapTool(provenanceTool.name)
+                ? provenanceTool
+                : this.#contextSelector.requiresExplicitContextId || !modelFacing
                 ? withMcpContextId(
                       provenanceTool,
                       modelFacing
                           ? undefined
                           : "Internal Context ID carried by the MCP App.",
                   )
-                : provenanceTool;
+                : withMcpContextId(
+                      provenanceTool,
+                      "Context ID returned by environ_info. Required when the client does not supply openai/session metadata.",
+                      false,
+                  );
         const exposed = isBootstrapTool(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);
@@ -136,6 +143,7 @@ export class McpEndpointCatalog {
                 preserveInputDescriptions: mcpToolPreserveInputDescriptions(
                     exposed._meta,
                 ),
+                exposeContextOutput: exposed.name === "environ_info",
             },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);

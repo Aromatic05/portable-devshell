@@ -25,6 +25,30 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
         this.#runtime = options.runtime;
     }
 
+    async recover(ctxId: string, instance: string): Promise<void> {
+        const stored = await this.#registry.resolveEnvironment(ctxId, instance);
+        if (stored === undefined) return;
+        await this.#runtime(instance).acquireReference(ctxId);
+        try {
+            if (stored.workspace !== undefined) {
+                await this.ensurePrepared(ctxId, instance, stored.workspace);
+                await this.#workerEnvironment(instance).touchAlerts(stored.workspace);
+            }
+        } catch (error) {
+            try {
+                await this.#runtime(instance).releaseReference(ctxId);
+            } catch (releaseError) {
+                await this.#registry.recordEnvironmentCleanup(ctxId, {
+                    instance,
+                    kind: "instance_reference",
+                });
+                throw new AggregateError([error, releaseError],
+                    `Context ${ctxId} recovery failed and its Worker reference could not be released.`);
+            }
+            throw error;
+        }
+    }
+
     async prepareLocal(
         ctxId: string,
         instance: string,

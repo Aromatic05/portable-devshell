@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import express, { type Express } from "express";
 import type { AuthInfo } from "@modelcontextprotocol/server";
@@ -28,6 +29,7 @@ export class McpProtocolRoute {
     readonly #http: McpHttpRoute;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #publicBaseUrl?: string;
+    readonly #requestLogger?: (line: string) => void;
     readonly #releases = new Map<string, () => void>();
     #active = false;
 
@@ -36,11 +38,13 @@ export class McpProtocolRoute {
         options: {
             oauth?: McpOAuthProtectedResource;
             publicBaseUrl?: string;
+            requestLogger?: (line: string) => void;
         } = {},
     ) {
         this.#http = http;
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
+        this.#requestLogger = options.requestLogger;
     }
 
     /** Each Protocol Route generation owns its Endpoint, extension registry and Binding. */
@@ -49,6 +53,23 @@ export class McpProtocolRoute {
         path: string,
         serverVersion?: string,
     ): void {
+        const explicitFallback = options.contextMode === "openai-session"
+            ? new McpEndpoint({
+                  ...options,
+                  contextMode: "explicit",
+                  extensions: new McpExtensionRegistry(
+                      options.extensions?.filter((extension) => extension.id !== "mcpapp"),
+                  ),
+                  toolAdapter: undefined,
+                  toolSource: {
+                      list: (instance) => options.toolSource.list(instance)
+                          .filter((entry) => !entry.definition.name.startsWith("mcpapp_")),
+                      get: (instance, name) => name.startsWith("mcpapp_")
+                          ? undefined
+                          : options.toolSource.get(instance, name),
+                  },
+              })
+            : undefined;
         const binding = new McpEndpointBinding(
             new McpEndpoint({
                 ...options,
@@ -56,6 +77,7 @@ export class McpProtocolRoute {
             }),
             serverVersion,
             options.modelOutput,
+            explicitFallback,
         );
         this.register({
             auth: options.auth ?? { enabled: false, provider: "none" },
@@ -218,6 +240,46 @@ export class McpProtocolRoute {
                         next();
                         return;
                     }
+                    const requestId = randomUUID();
+                    const startedAt = performance.now();
+                    const httpMethod = request.method ?? "UNKNOWN";
+                    const version = traceField(request.headers["mcp-protocol-version"]);
+                    let rpcMethod = "unknown";
+                    let authenticated = false;
+                    let inputError: string | undefined;
+                    let finished = false;
+                    const report = (event: "received" | "finished") => {
+                        try {
+                            this.#requestLogger?.(JSON.stringify({
+                                event,
+                                requestId,
+                                instance: binding.instanceName,
+                                httpMethod,
+                                path: requestPath,
+                                protocolVersion: version,
+                                ...(event === "finished" ? {
+                                    rpcMethod,
+                                    auth: authenticated ? "accepted" : response.statusCode === 401 || response.statusCode === 403 ? "rejected" : "not_completed",
+                                    status: response.statusCode,
+                                    durationMs: Math.round(performance.now() - startedAt),
+                                    ...(inputError === undefined ? {} : { error: inputError }),
+                                    completed: response.writableFinished,
+                                } : {}),
+                            }));
+                        } catch {
+                            // Diagnostics must not affect MCP requests.
+                        }
+                    };
+                    report("received");
+                    const finishReport = () => {
+                        if (finished) return;
+                        finished = true;
+                        response.off("finish", finishReport);
+                        response.off("close", finishReport);
+                        report("finished");
+                    };
+                    response.once("finish", finishReport);
+                    response.once("close", finishReport);
                     if (released) {
                         respond(response, 503, { error: "MCP generation no longer accepts requests" });
                         return;
@@ -226,7 +288,9 @@ export class McpProtocolRoute {
                     // including OAuth verification, body parsing and SSE.
                     this.#accept(response);
                     const dispatch = () => {
-                        void this.#dispatch(binding, request, response).catch((error: unknown) => {
+                        authenticated = true;
+                        void this.#dispatch(binding, request, response, (method) => { rpcMethod = method; }).catch((error: unknown) => {
+                            inputError = error instanceof McpHttpInputError ? "invalid_input" : "internal_error";
                             if (response.destroyed) return;
                             if (response.headersSent) {
                                 response.end();
@@ -283,10 +347,17 @@ export class McpProtocolRoute {
         binding: McpEndpointBinding,
         request: IncomingMessage,
         response: ServerResponse,
+        recordMethod: (method: string) => void,
     ): Promise<void> {
         const body = await readJsonBody(request);
+        recordMethod(traceField(body !== null && typeof body === "object" && !Array.isArray(body) ? body.method : undefined));
         await binding.handleRequest(request, response, body);
     }
+}
+
+function traceField(value: unknown): string {
+    const input = Array.isArray(value) ? value[0] : value;
+    return typeof input === "string" && /^[a-zA-Z0-9_./-]{1,96}$/u.test(input) ? input : "unknown";
 }
 
 function setAuth(request: IncomingMessage, auth: AuthInfo): void {

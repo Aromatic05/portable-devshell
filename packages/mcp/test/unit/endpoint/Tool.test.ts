@@ -450,4 +450,72 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         assert.equal(schema.$defs?.FileRequest?.properties?.view?.default, "auto");
         assert.equal(schema.$defs?.View, undefined);
     });
+    test("MCP model schema simplifies optional nullable enums without altering required nulls or object references", () => {
+        const adapter = new McpToolSchemaAdapter();
+        const source: ToolDefinition = {
+            ...bashRun,
+            name: "tmux_run",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    wait: {
+                        anyOf: [{ $ref: "#/$defs/WaitMode" }, { type: "null" }],
+                    },
+                    scope: {
+                        anyOf: [{ type: "string", enum: ["workspace", "instance"] }, { type: "null" }],
+                    },
+                    mode: {
+                        anyOf: [{ $ref: "#/$defs/Mode" }, { type: "null" }],
+                    },
+                    requiredNullable: {
+                        anyOf: [{ $ref: "#/$defs/WaitMode" }, { type: "null" }],
+                    },
+                    complex: {
+                        anyOf: [{ $ref: "#/$defs/Complex" }, { type: "null" }],
+                    },
+                    nested: { $ref: "#/$defs/Nested" },
+                },
+                required: ["requiredNullable"],
+                $defs: {
+                    WaitMode: {
+                        oneOf: [
+                            { type: "string", enum: ["block"] },
+                            { type: "string", enum: ["nonblock"] },
+                        ],
+                    },
+                    Mode: { type: "string", enum: ["auto", "manual"] },
+                    Complex: { type: "object", properties: { id: { type: "string" } } },
+                    Nested: {
+                        type: "object",
+                        properties: {
+                            mode: { anyOf: [{ $ref: "#/$defs/Mode" }, { type: "null" }] },
+                        },
+                    },
+                },
+            },
+        };
+        const canonical = adapter.toMcpTool(source, "Run task");
+        const model = adapter.toMcpTool(source, "Run task", { modelFacing: true });
+        const original = canonical.inputSchema as Record<string, Record<string, JsonValue>>;
+        const schema = model.inputSchema as Record<string, Record<string, JsonValue>>;
+        const props = schema.properties as Record<string, Record<string, JsonValue>>;
+        assert.deepEqual((original.properties.wait as Record<string, JsonValue>).anyOf, [
+            { $ref: "#/$defs/WaitMode" }, { type: "null" },
+        ]);
+        assert.deepEqual(props.wait, { type: "string", enum: ["block", "nonblock"] });
+        assert.deepEqual(props.scope, { type: "string", enum: ["workspace", "instance"] });
+        assert.deepEqual(props.mode, { type: "string", enum: ["auto", "manual"] });
+        assert.deepEqual(props.requiredNullable.anyOf, [
+            { type: "string", enum: ["block", "nonblock"] }, { type: "null" },
+        ]);
+        assert.deepEqual(props.complex.anyOf, [
+            { $ref: "#/$defs/Complex" }, { type: "null" },
+        ]);
+        const defs = schema.$defs as Record<string, Record<string, JsonValue>>;
+        const nested = defs.Nested.properties as Record<string, JsonValue>;
+        assert.deepEqual(nested.mode, { type: "string", enum: ["auto", "manual"] });
+        assert.equal(defs.WaitMode, undefined);
+        assert.equal(defs.Mode, undefined);
+        assert.notEqual(defs.Complex, undefined);
+    });
 }

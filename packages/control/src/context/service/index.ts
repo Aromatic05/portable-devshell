@@ -64,27 +64,31 @@ export class ContextService {
                 retryable: false,
             });
 
-        let record = await this.registry.lookup(ctxId, { principal });
-        if (record.status === "disabled")
-            return await this.registry.validate(ctxId, { principal });
-        if (record.status === "expired") {
-            if (input.renewExpired === true)
-                record = await this.registry.renewForPrincipal(ctxId, {
-                    principal,
-                });
-            else if (input.acceptExpired !== true)
+        return await this.cleanup.withContext(ctxId, async () => {
+            const previous = await this.registry.lookup(ctxId, { principal });
+            if (previous.status === "disabled")
                 return await this.registry.validate(ctxId, { principal });
-        } else if (input.touch === true) {
-            record = await this.registry.validateAndTouch(ctxId, { principal });
-        } else {
-            record = await this.registry.validate(ctxId, { principal });
-        }
-        if (input.instance !== undefined)
-            await this.registry.assertInstanceAvailable(
-                record.ctxId,
-                input.instance,
-            );
-        return record;
+            if (input.instance !== undefined) {
+                await this.registry.assertInstanceAvailable(ctxId, input.instance);
+                const environment = previous.environments.find(
+                    (attachment) => attachment.instance === input.instance,
+                );
+                if (input.touch !== false && (
+                    previous.status === "expired" ||
+                    (environment?.workspace !== undefined && environment.temporaryDirectory === undefined)
+                )) {
+                    try {
+                        await this.environment.recover(ctxId, input.instance);
+                    } catch (error) {
+                        await this.registry.park(ctxId);
+                        throw error;
+                    }
+                }
+            }
+            return input.touch === false
+                ? previous
+                : await this.registry.renewForPrincipal(ctxId, { principal });
+        });
     }
 
     async disable(ctxId: string): Promise<ContextRecord> {

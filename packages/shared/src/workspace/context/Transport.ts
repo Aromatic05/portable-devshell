@@ -21,12 +21,10 @@ import type {
 } from "./Model.js";
 
 export interface ContextResolveInput {
-    acceptExpired?: boolean;
     externalBindings?: readonly ContextExternalBinding[];
     ctxId?: string;
     instance?: string;
     principal: string;
-    renewExpired?: boolean;
     touch?: boolean;
 }
 

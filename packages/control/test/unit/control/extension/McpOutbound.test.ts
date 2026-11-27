@@ -165,8 +165,8 @@ test("MCP tools without presentation retain the result payload Rewrite contract"
         return { ...value, payload: { message: "REWRITTEN" } };
     }, { structuredContent: original.structuredContent });
     const output = await h.call();
-    assert.deepEqual(output.result, { ...protocolMeta, content: [], isError: false,
-        structuredContent: { message: "REWRITTEN" } });
+    assert.deepEqual(output.result, { ...protocolMeta, content: [{ type: "text", text: '{"message":"REWRITTEN"}' }],
+        isError: false, structuredContent: { message: "REWRITTEN" } });
     const [record] = await h.history.read();
     assert.deepEqual(record?.output, { message: "REWRITTEN" });
 });

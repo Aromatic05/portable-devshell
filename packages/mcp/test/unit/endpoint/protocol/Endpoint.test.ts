@@ -695,7 +695,10 @@ test("tools/call delegates through the host ToolCall API", async () => {
             toolName: "bash_run",
         });
         assert.equal(response.body.result?.isError, false);
-        assert.deepEqual(response.body.result?.content, []);
+        assert.deepEqual(response.body.result?.content, [{
+            type: "text",
+            text: '{"exitCode":0,"stderr":"","stdout":"/workspace\\n"}',
+        }]);
         assert.deepEqual(response.body.result?.structuredContent, {
             exitCode: 0,
             stderr: "",
@@ -960,8 +963,12 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     ).properties;
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
-    assert.notEqual(environmentInputProperties?.ctxId, undefined);
-    assert.deepEqual(environmentTool?.outputSchema, { type: "object" });
+    assert.equal(environmentInputProperties?.ctxId, undefined);
+    assert.notEqual(
+        (environmentTool?.outputSchema as { properties?: Record<string, unknown> })
+            .properties?.ctxId,
+        undefined,
+    );
 
     const requestContext = {
         principal: "subject-1",
@@ -1267,6 +1274,13 @@ test("tools/call applies the configured model output budget on the HTTP wire", a
             stdoutTruncated: boolean;
         };
         assert.equal(Buffer.byteLength(JSON.stringify(projected)) <= 6_000, true);
+        const text = response.body.result?.content?.[0]?.text;
+        assert.equal(text, JSON.stringify(projected));
+        assert.equal(
+            Buffer.byteLength(JSON.stringify(projected), "utf8") +
+                Buffer.byteLength(text ?? "", "utf8") <= 6_000,
+            true,
+        );
         assert.equal(projected.stdoutPath, original.stdoutPath);
         assert.equal(projected.stdoutTruncated, true);
         assert.equal(projected.stdout.startsWith("first"), true);

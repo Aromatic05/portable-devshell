@@ -33,6 +33,11 @@ export interface ContextRecordPort {
         external: ContextExternalBinding,
         binding: ContextValidationBinding,
     ): Promise<ContextRecord | undefined>;
+    lookupContextByRemoteHandle(
+        handle: string,
+        binding: ContextValidationBinding,
+        instance: string,
+    ): Promise<ContextRecord | undefined>;
     lookup(
         ctxId: string,
         binding: ContextValidationBinding,
@@ -71,6 +76,7 @@ export interface ContextRecordPort {
         handle: string,
     ): Promise<ContextMaskedInstance>;
     list(query?: ContextQuery): Promise<ContextRecord[]>;
+    park(ctxId: string): Promise<void>;
     disable(ctxId: string): Promise<ContextRecord>;
     discard(ctxId: string): Promise<ContextRecord>;
     renewForPrincipal(
@@ -114,6 +120,7 @@ export interface PreparedEnvironmentFacts {
 }
 
 export interface ContextEnvironmentPort {
+    recover(ctxId: string, instance: string): Promise<void>;
     prepareLocal(
         ctxId: string,
         instance: string,
@@ -152,6 +159,7 @@ export interface ContextEnvironmentPort {
 }
 
 export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
+    withContext<Result>(ctxId: string, operation: () => Promise<Result>): Promise<Result>;
     terminate(terminal: ContextRecord): Promise<void>;
 }
 

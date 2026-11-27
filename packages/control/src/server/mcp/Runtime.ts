@@ -34,6 +34,7 @@ export class McpRuntimeFactory {
             toolProvenance?: McpToolProvenanceRecorder;
             toolSource: McpToolSource;
             mcpAppLeaseFile?: string;
+            requestLogger?: (line: string) => void;
         },
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
@@ -67,6 +68,7 @@ export class McpRuntimeFactory {
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
                 modelOutput: config.mcp.modelOutput,
+                ...(options?.requestLogger === undefined ? {} : { requestLogger: options.requestLogger }),
                 oauthApproval: toMcpOAuthApprovalConfig(config.mcp.oauth2),
                 publicBaseUrl: config.mcp.publicBaseUrl,
                 serverVersion:

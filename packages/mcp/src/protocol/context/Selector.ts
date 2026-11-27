@@ -29,7 +29,7 @@ export interface McpContextSelector {
         contexts: Pick<ContextTransport, "resolve">,
         input: JsonValue,
         requestContext: McpContextRequestContext,
-        options?: { allowExpired?: boolean; touch?: boolean },
+        options?: { touch?: boolean },
     ): Promise<McpResolvedContext>;
 }
 
@@ -66,7 +66,7 @@ class UnifiedContextSelector implements McpContextSelector {
         contexts: Pick<ContextTransport, "resolve">,
         input: JsonValue,
         requestContext: McpContextRequestContext,
-        options: { allowExpired?: boolean; touch?: boolean } = {},
+        options: { touch?: boolean } = {},
     ): Promise<McpResolvedContext> {
         const contextInput = readOptionalMcpContextInput(input);
         if (this.requiresExplicitContextId) {
@@ -75,7 +75,6 @@ class UnifiedContextSelector implements McpContextSelector {
             return {
                 input: contextInput.input,
                 record: await contexts.resolve({
-                    acceptExpired: options.allowExpired === true,
                     ctxId: contextInput.ctxId,
                     principal: requestContext.principal,
                     touch: options.touch !== false,
@@ -93,10 +92,8 @@ class UnifiedContextSelector implements McpContextSelector {
         return {
             input: contextInput.input,
             record: await contexts.resolve({
-                acceptExpired: options.allowExpired === true,
                 externalBindings: this.bindings(requestContext),
                 principal: requestContext.principal,
-                renewExpired: options.touch !== false,
                 touch: options.touch !== false,
             }),
         };
