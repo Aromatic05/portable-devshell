@@ -409,56 +409,74 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
 }
 
 struct LocalAttach {
-    child: Child,
+    child: nix::unistd::Pid,
+    reaped: bool,
     master: std::fs::File,
     received: Vec<u8>,
 }
 
 impl LocalAttach {
     fn start(env: &TestEnv, task: &str) -> Self {
-        use std::os::unix::process::CommandExt;
-        let opened = nix::pty::openpty(
-            Some(&nix::pty::Winsize {
-                ws_row: 24,
-                ws_col: 80,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            }),
-            None,
-        )
-        .unwrap();
-        // Match the production Unix PTY descriptor ownership. Other concurrently
-        // launched test Workers must not inherit either end of this terminal.
-        for fd in [&opened.master, &opened.slave] {
-            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC)).unwrap();
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use nix::pty::{ForkptyResult, Winsize, forkpty};
+
+        let command = env.std_command();
+        let executable = CString::new(command.get_program().as_bytes()).unwrap();
+        let args = [
+            executable.clone(), CString::new("terminal").unwrap(),
+            CString::new("attach").unwrap(), CString::new(task).unwrap(),
+            CString::new("--takeover").unwrap(),
+        ];
+        let mut environment: std::collections::BTreeMap<_, _> = std::env::vars_os().collect();
+        for (key, value) in command.get_envs() {
+            if let Some(value) = value {
+                environment.insert(key.to_owned(), value.to_owned());
+            } else {
+                environment.remove(key);
+            }
         }
-        let master = std::fs::File::from(opened.master);
+        let environment: Vec<_> = environment.into_iter().map(|(key, value)| {
+            let mut bytes = key.as_bytes().to_vec();
+            bytes.push(b'=');
+            bytes.extend_from_slice(value.as_bytes());
+            CString::new(bytes).unwrap()
+        }).collect();
+        let argv: Vec<_> = args.iter().map(|arg| arg.as_ptr()).chain(std::iter::once(std::ptr::null())).collect();
+        let envp: Vec<_> = environment.iter().map(|value| value.as_ptr()).chain(std::iter::once(std::ptr::null())).collect();
+        // forkpty installs the controlling terminal before the child execs.
+        // All arguments are prepared in the parent; the child only calls execve/_exit.
+        let (child, master) = match unsafe { forkpty(Some(&Winsize {
+            ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0,
+        }), None) }.unwrap() {
+            ForkptyResult::Parent { child, master } => (child, master),
+            ForkptyResult::Child => unsafe {
+                nix::libc::execve(executable.as_ptr(), argv.as_ptr(), envp.as_ptr());
+                nix::libc::_exit(127);
+            },
+        };
+        let master = std::fs::File::from(master);
+        nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC)).unwrap();
         let flags = nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_GETFL).unwrap();
         nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_SETFL(
             nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK,
         )).unwrap();
-        let slave = opened.slave;
-        let mut command = env.std_command();
-        command
-            .args(["terminal", "attach", task, "--takeover"])
-            .stdin(Stdio::from(slave.try_clone().unwrap()))
-            .stdout(Stdio::from(slave.try_clone().unwrap()))
-            .stderr(Stdio::from(slave));
-        unsafe {
-            command.pre_exec(|| {
-                nix::unistd::setsid().map_err(std::io::Error::other)?;
-                if nix::libc::ioctl(0, nix::libc::TIOCSCTTY as _, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let child = command.spawn().unwrap();
-        drop(command);
-        Self {
-            child,
-            master,
-            received: Vec::new(),
+        let mut attach = Self { child, reaped: false, master, received: Vec::new() };
+        // The native CLI publishes this only after raw mode and control are active.
+        attach.expect("[CONTROL]");
+        attach
+    }
+
+    fn try_wait(&mut self) -> Option<nix::sys::wait::WaitStatus> {
+        use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+        if self.reaped { return None; }
+        loop {
+            match waitpid(self.child, Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::StillAlive) => return None,
+                Ok(status) => { self.reaped = true; return Some(status); }
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(error) => panic!("wait for native attach: {error}"),
+            }
         }
     }
 
@@ -499,8 +517,8 @@ impl LocalAttach {
         self.input(&[0x1d]);
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
-                assert!(status.success(), "{status}");
+            if let Some(status) = self.try_wait() {
+                assert_eq!(status, nix::sys::wait::WaitStatus::Exited(self.child, 0));
                 return;
             }
             assert!(Instant::now() < deadline, "attach did not detach");
@@ -511,12 +529,13 @@ impl LocalAttach {
 
 impl Drop for LocalAttach {
     fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            if let Err(error) = support::wait_child(&mut self.child, Duration::from_secs(5)) {
-                eprintln!("stop test attach client: {error}");
-            }
+        if self.reaped || self.try_wait().is_some() { return; }
+        let _ = nix::sys::signal::kill(self.child, nix::sys::signal::Signal::SIGKILL);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.try_wait().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
         }
+        if !self.reaped { eprintln!("native attach did not exit after SIGKILL"); }
     }
 }
 
@@ -1384,8 +1403,8 @@ fn native_attach_supports_live_takeover_toggle_and_name_lookup() {
     attach.input(&[0x1d, b'd']);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(status) = attach.child.try_wait().unwrap() {
-            assert!(status.success(), "{status}");
+        if let Some(status) = attach.try_wait() {
+            assert_eq!(status, nix::sys::wait::WaitStatus::Exited(attach.child, 0));
             break;
         }
         assert!(Instant::now() < deadline, "attach did not detach on Ctrl+] d");

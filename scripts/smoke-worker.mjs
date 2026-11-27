@@ -136,7 +136,6 @@ try {
         const terminalClient = {
             clientSeq: 1,
             fromSeq: 0,
-            responseTail: "",
             version: terminal.version,
             windows: handshake.platform.os === "windows",
         };
@@ -247,14 +246,6 @@ async function waitForTerminalOutput(terminalPort, terminal, client, expected) {
                 "utf8",
             );
             output += data;
-            if (client.windows) {
-                await respondToCursorPositionQueries(
-                    terminalPort,
-                    terminal,
-                    client,
-                    data,
-                );
-            }
         }
         if (output.includes(expected)) return;
         await delay(50);
@@ -262,30 +253,6 @@ async function waitForTerminalOutput(terminalPort, terminal, client, expected) {
     throw new Error(
         `terminal output did not include ${expected}: ${JSON.stringify(output)}`,
     );
-}
-
-async function respondToCursorPositionQueries(terminalPort, terminal, client, data) {
-    const query = "\u001B[6n";
-    client.responseTail += data;
-    while (true) {
-        const queryIndex = client.responseTail.indexOf(query);
-        if (queryIndex < 0) {
-            client.responseTail = client.responseTail.slice(
-                -(query.length - 1),
-            );
-            return;
-        }
-        client.responseTail = client.responseTail.slice(
-            queryIndex + query.length,
-        );
-        await terminalPort.write({
-            terminalId: terminal.terminalId,
-            generation: terminal.generation,
-            version: client.version,
-            clientSeq: client.clientSeq++,
-            data: Buffer.from("\u001B[1;1R", "utf8").toString("base64"),
-        });
-    }
 }
 
 async function waitForTerminalExit(terminalPort, terminal) {

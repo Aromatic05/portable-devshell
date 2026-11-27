@@ -93,6 +93,7 @@ export function createPlatformContractCiSteps(platform = process.platform) {
             args: ["test", "--locked", "--workspace"],
             command: "cargo",
             name: "Rust workspace tests",
+            env: { RUST_TEST_NOCAPTURE: "1" },
         },
         pnpmStep("Worker process contract tests", ["test:worker:process"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),

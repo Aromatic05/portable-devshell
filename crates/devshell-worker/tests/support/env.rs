@@ -181,8 +181,9 @@ impl TestEnv {
             let waiter = scope.spawn(move || wait_child(&mut child, Duration::from_secs(60)));
             let response = exchange_rpc(&mut input, &mut output, instance, port, packet);
             drop(input);
+            let status = waiter.join().unwrap();
             drop(output);
-            (response, waiter.join().unwrap())
+            (response, status)
         });
         let method = &packet["method"];
         let status = status.unwrap_or_else(|error| panic!("{instance} {method}: transport child: {error}"));

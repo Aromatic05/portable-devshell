@@ -37,7 +37,6 @@ import {
     encodeGlobalConfig,
     encodeInstanceConfig,
 } from "../../unit/control/config/persistence/Support.ts";
-import { createCursorPositionResponder } from "../../support/TerminalProtocol.ts";
 import {
     installUniqueWindowsTestIdentity,
     realWorkerTestOptions,
@@ -461,36 +460,13 @@ test(
         let terminalStream = attached;
         let terminalVersion = opened.version;
         let terminalClientSeq = 1;
-        let cursorResponseCount = 0;
-        const cursorResponder = createCursorPositionResponder(async (data) => {
-            await terminalStream.send({
-                name: "input",
-                payload: {
-                    clientSeq: terminalClientSeq++,
-                    data,
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                    version: terminalVersion,
-                },
-            });
-        });
-        const observeTerminalProtocol = async (
-            event: ControlStreamMessage,
-        ): Promise<void> => {
-            if (process.platform !== "win32" || event.name !== "output") return;
-            const payload = event.payload as { data?: string } | undefined;
-            cursorResponseCount += await cursorResponder.consume(
-                payload?.data ?? "",
-            );
-        };
+        // The Process Host answers device-status queries in observation mode
+        // before publishing the corresponding output. Do not send duplicate replies.
         if (process.platform === "win32") {
             await waitForTerminal(
                 attached,
-                () => cursorResponseCount > 0,
-                () =>
-                    `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
-                10_000,
-                observeTerminalProtocol,
+                (_event, output) => output.includes("\u001B[6n"),
+                () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             );
         }
         const readyInputSeq = terminalClientSeq++;
@@ -520,7 +496,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, ready.lastOutputSeq);
 
@@ -547,11 +522,6 @@ test(
         );
         terminalVersion = (resized.event.payload as { version: number })
             .version;
-        if (process.platform === "win32") {
-            cursorResponseCount += await cursorResponder.consume(
-                resized.output,
-            );
-        }
         const sizedInputSeq = terminalClientSeq++;
         await attached.send({
             name: "input",
@@ -572,7 +542,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, sized.lastOutputSeq);
         await attached.close();
@@ -605,7 +574,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
@@ -642,7 +610,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, restartStarted.lastOutputSeq);
         await resumed.close();
@@ -734,7 +701,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         await recovered.close();
 
