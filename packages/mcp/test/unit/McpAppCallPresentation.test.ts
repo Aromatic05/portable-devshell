@@ -11,7 +11,7 @@ function fixture(ownsPresentation?: (toolName: string) => boolean, inlineToolCal
     const ctxId = "ctx-one";
     const endpoint = new McpAppCall({ actions, instance,
         toolCallResourceUriForTool: (name) => inlineToolCalls &&
-            ["artifact_viewImage", "bash_run", "file_edit", "file_read", "tmux_run"].includes(name)
+            ["artifact_viewImage", "bash_run", "file_edit", "file_read", "bash_run"].includes(name)
             ? "ui://widget/toolcall.html?widgetRevision=1&toolName=" + name : undefined,
         ...(ownsPresentation === undefined ? {} : { ownsPresentation }),
         bootstrap: async () => ({ ctxId, token: "private-valid-capability-01", liveBaseUrl: "https://example.test/api/live" }),
@@ -74,7 +74,7 @@ test("MCP tool catalog keeps Fullscreen while restricting optional Inline to sel
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
         { name: "file_read", group: "file", description: "Read file",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
-        { name: "tmux_read", group: "tmux", description: "Read a task transcript",
+        { name: "task_input", group: "task", description: "Send input or read task output",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
         { name: "progress_report", group: "progress", description: "Report progress",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
@@ -99,7 +99,7 @@ test("MCP tool catalog keeps Fullscreen while restricting optional Inline to sel
     const tools = catalog.listTools();
     assert.equal(tools.length, 5);
     for (const tool of tools) {
-        if (["tmux_read", "progress_report", "environ_info"].includes(tool.name)) {
+        if (["task_input", "progress_report", "environ_info"].includes(tool.name)) {
             const meta = tool._meta as Record<string, unknown> | undefined;
             assert.equal(meta?.["openai/outputTemplate"], undefined);
             continue;
@@ -232,8 +232,8 @@ test("the production Endpoint exposes a reachable fullscreen Workspace with Inli
 
 test("Inline opt-in still excludes frequent background and reporting tools", async () => {
     const f = fixture(undefined, true);
-    for (const name of ["progress_report", "environ_info", "tmux_read", "tmux_input",
-        "tmux_manage", "file_grep", "file_glob", "workspace_goal"]) {
+    for (const name of ["progress_report", "environ_info", "task_input",
+        "task_inspect", "task_manage", "file_grep", "file_glob", "workspace_goal"]) {
         const presented = await f.endpoint.present(name, { ok: true }, f.request);
         assert.ok(presented instanceof McpNativeToolResult);
         assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
@@ -257,12 +257,12 @@ test("MCP App tags ordinary ToolCall results for an inline card without altering
     assert.equal(JSON.stringify(presented.structuredContent).includes("private-valid-capability-01"), false);
 });
 
-test("tmux_read does not issue a Live capability for a background transcript poll", async () => {
+test("task_input does not issue a Live capability for a background task poll", async () => {
     const f = fixture();
-    const presented = await f.endpoint.present("tmux_read", { task: { id: "task-1" } }, f.request);
+    const presented = await f.endpoint.present("task_input", { task: { id: "task-1", status: "running", pty: false } }, f.request);
     assert.ok(presented instanceof McpNativeToolResult);
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
-    assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "tmux_read" });
+    assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "task_input" });
     assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
     assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
 });

@@ -42,6 +42,27 @@ export class CommentService {
         this.#store = options.store;
     }
 
+    async queueHandoff(
+        id: string,
+        text: string,
+        selectRecipient: () => Promise<string | undefined>,
+    ): Promise<void> {
+        let ctxId = await this.#store.handoffRecipient(id);
+        if (ctxId === undefined) {
+            const candidate = await selectRecipient();
+            if (candidate === undefined) return;
+            ctxId = await this.#store.handoffRecipient(id, candidate);
+            if (ctxId === undefined) throw new Error("Terminal handoff recipient was not recorded");
+        }
+        await this.queue({ ctxId, text }, {
+            instance: this.#instanceName,
+            ctxId,
+            workspace: "terminal.handoff",
+            mailId: id,
+            kind: "terminal.handoff",
+        });
+    }
+
     async queue(
         input: ContextMessageQueueInput,
         identity?: MailingNotificationIdentity,

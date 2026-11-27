@@ -26,11 +26,9 @@ const DEFAULT_TOOL_TOKENS: Readonly<Record<string, number>> = {
     file_grep: 4_000,
     file_glob: 2_000,
     file_edit: 2_000,
-    tmux_run: 4_000,
-    tmux_read: 4_000,
-    tmux_input: 4_000,
-    tmux_inspect: 4_000,
-    tmux_manage: 1_000,
+    task_input: 4_000,
+    task_inspect: 4_000,
+    task_manage: 1_000,
     progress_report: 500,
     environ_info: 2_000,
     environ_remote: 2_000,
@@ -80,8 +78,12 @@ export function projectMcpModelOutput(
         content = [];
 
     if (resultBytes(result, content) > budget) {
-        if (toolName === "bash_run" && isRecord(result))
+        if ((toolName === "bash_run" || toolName === "task_input") && isRecord(result))
             result = projectBash(result, budget, content);
+        else if (toolName === "task_inspect" && isRecord(result))
+            result = projectTaskInspect(result, budget, content);
+        else if (toolName === "task_manage" && isRecord(result))
+            result = projectTaskManage(result, budget, content);
         else if (toolName === "file_read" && isRecord(result))
             result = projectFileRead(result, budget, content);
         else if (toolName === "file_grep" && isRecord(result))
@@ -131,7 +133,7 @@ export function projectMcpModelOutput(
 }
 
 function modelRecoveryHint(toolName: string, output: RecordValue): string | undefined {
-    if (toolName === "bash_run" &&
+    if ((toolName === "bash_run" || toolName === "task_input") &&
         (typeof output.stdoutPath === "string" || typeof output.stderrPath === "string") &&
         (output.stdoutTruncated === true || output.stderrTruncated === true))
         return "Output truncated: use file_read with stdoutPath or stderrPath to retrieve omitted content.";
@@ -165,6 +167,56 @@ function projectBash(value: RecordValue, budget: number, content: CallToolResult
     }
     return { ...value, stdout: "", stderr: "", stdoutTruncated: !!stdout || value.stdoutTruncated === true,
         stderrTruncated: !!stderr || value.stderrTruncated === true };
+}
+
+function projectTaskInspect(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {
+    const text = typeof value.text === "string" ? value.text : "";
+    if (text.length === 0) return value;
+    let capacity = Math.max(0, budget - resultBytes({ ...value, text: "", truncated: true }, content) - 128);
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const nextText = shorten(text, capacity, "middle");
+        const result: RecordValue = {
+            ...value,
+            text: nextText,
+            ...(nextText !== text ? { truncated: true } : {}),
+        };
+        if (resultBytes(result, content) <= budget) return result;
+        capacity = Math.floor(capacity * 0.7);
+    }
+    return { ...value, text: "", truncated: true };
+}
+
+function projectTaskManage(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {
+    if (!Array.isArray(value.tasks)) return value;
+    const originalCount = value.tasks.length;
+    const tasks = value.tasks.filter(isRecord).map((entry) => ({ ...entry }));
+    for (const entry of tasks) {
+        if (typeof entry.command === "string" && Buffer.byteLength(entry.command, "utf8") > 128)
+            entry.command = shorten(entry.command, 128, "head");
+    }
+    const project = (): RecordValue => {
+        const omitted = originalCount - tasks.length;
+        return {
+            ...value,
+            tasks,
+            ...(omitted > 0 ? { omittedTasks: omitted } : {}),
+        };
+    };
+    let projected = project();
+    while (resultBytes(projected, content) > budget && tasks.length > 0) {
+        // Drop completed non-persistent tasks from the tail before running/persistent ones.
+        let remove = tasks.length - 1;
+        for (let index = tasks.length - 1; index >= 0; index--) {
+            const candidate = tasks[index]!;
+            if (candidate.state !== "running" && candidate.persistent !== true) {
+                remove = index;
+                break;
+            }
+        }
+        tasks.splice(remove, 1);
+        projected = project();
+    }
+    return projected;
 }
 
 function projectFileRead(value: RecordValue, budget: number, content: CallToolResult["content"]): RecordValue {

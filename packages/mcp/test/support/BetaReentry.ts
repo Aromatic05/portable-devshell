@@ -24,9 +24,9 @@ export async function betaReentry() {
     } }) });
     const goal = new GoalService({ appendEvent: async () => undefined, filePath: join(directory, "goals.json"), instanceName: "local" });
     const uninstall = installMcpAppReentry(native.hooks, { goal } as never);
-    const context = await contexts.registry.create({ principal: "owner", environments: [{ instance: "local", workspace: "/repo" }] });
+    const context = await contexts.registry.create({ principal: "owner", environments: [{ instance: "local", workspace: directory }] });
     const started = await goal.manage(context.ctxId, {
-        action: "start", workspace: "/repo", objective: "Round three recovery",
+        action: "start", workspace: directory, objective: "Round three recovery",
     });
     assert.ok(started);
     const filePath = join(directory, "actions.json");
@@ -49,7 +49,7 @@ export async function betaReentry() {
     });
     const base = { ctxId: context.ctxId, directiveId, intent: "goal-resume", sourceId: started.goalId, claimId: "round3-owner-claim" };
     const call = (input: Record<string, JsonValue>, principal = "owner", target = endpoint()) => target.callTool("mcpapp_reentry", { ...base, ...input }, { principal });
-    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal, native,
+    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal, native, workspace: directory,
         executions: () => executions, failClaim: (value: boolean) => { failClaim = value; },
         async close() { uninstall(); native.close(); await contexts.close(); },
     };

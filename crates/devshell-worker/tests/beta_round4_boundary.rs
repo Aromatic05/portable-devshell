@@ -106,7 +106,7 @@ fn workspace_mode_bash_process_executes_with_workspace_as_cwd() {
         "pwd",
         "ctx",
         "bash_run",
-        json!({"command":"pwd","timeoutMs":5000}),
+        json!({"command":"pwd","waitMs":5000}),
     );
     assert_eq!(response["type"], "reply", "{response}");
     assert_eq!(response["message"]["exitCode"], 0, "{response}");
@@ -174,7 +174,7 @@ fn same_context_concurrent_bash_calls_keep_request_output_isolated() {
                 "a",
                 "shared",
                 "bash_run",
-                json!({"command":"printf AA","timeoutMs":5000}),
+                json!({"command":"printf AA","waitMs":5000}),
             )
         });
         let b = scope.spawn(|| {
@@ -184,7 +184,7 @@ fn same_context_concurrent_bash_calls_keep_request_output_isolated() {
                 "b",
                 "shared",
                 "bash_run",
-                json!({"command":"printf BB","timeoutMs":5000}),
+                json!({"command":"printf BB","waitMs":5000}),
             )
         });
         (a.join().unwrap(), b.join().unwrap())

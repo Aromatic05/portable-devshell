@@ -1,11 +1,16 @@
 import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
-import { crossToolErrorHints } from "./tool/Error.js";
+import { crossToolErrorHints, workerErrorHints } from "./tool/Error.js";
 import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./tool/control/Artifact.js";
 import { instanceErrorHints } from "./tool/control/Instance.js";
 import { bashErrorHints, bashResultHints } from "./tool/worker/Bash.js";
+import {
+    processErrorHints,
+    taskErrorHints,
+    taskManageResultHints,
+} from "./tool/worker/Process.js";
 import {
     fileEditResultHints,
     fileErrorHints,
@@ -13,16 +18,12 @@ import {
     fileGrepResultHints,
     fileReadResultHints,
 } from "./tool/worker/File.js";
-import {
-    tmuxErrorHints,
-    tmuxInspectResultHints,
-    tmuxListResultHints,
-    tmuxTaskResultHints,
-} from "./tool/worker/Tmux.js";
+
 
 type ResultResolver = (
     toolName: string,
     result: JsonValue,
+    instance?: string,
 ) => ToolDiagnosticHint[];
 type ErrorResolver = (
     toolName: string,
@@ -30,26 +31,18 @@ type ErrorResolver = (
 ) => ToolDiagnosticHint[];
 
 const resultResolvers: Record<string, ResultResolver> = {
-    bash_run: (_toolName, result) => bashResultHints(result),
+    bash_run: (_toolName, result, instance) => bashResultHints(result, instance),
+    task_input: (_toolName, result, instance) => bashResultHints(result, instance),
+    task_manage: (_toolName, result, instance) =>
+        taskManageResultHints(result, instance),
     file_edit: (_toolName, result) => fileEditResultHints(result),
     file_glob: (_toolName, result) => fileGlobResultHints(result),
     file_grep: (_toolName, result) => fileGrepResultHints(result),
     file_read: (_toolName, result) => fileReadResultHints(result),
-    tmux_input: (toolName, result) => tmuxTaskResultHints(toolName, result),
-    tmux_inspect: (_toolName, result) => tmuxInspectResultHints(result),
-    tmux_manage: (_toolName, result) => tmuxListResultHints(result),
-    tmux_read: (toolName, result) => tmuxTaskResultHints(toolName, result),
-    tmux_run: (toolName, result) => tmuxTaskResultHints(toolName, result),
 };
 
 const fileTools = new Set(["file_read", "file_edit", "file_glob", "file_grep"]);
-const tmuxTools = new Set([
-    "tmux_run",
-    "tmux_input",
-    "tmux_read",
-    "tmux_inspect",
-    "tmux_manage",
-]);
+
 const artifactControlTools = new Set(["artifact_viewImage", "artifact_share"]);
 const instanceTools = new Set([
     "instance_list",
@@ -59,11 +52,11 @@ const instanceTools = new Set([
 ]);
 
 function errorResolverFor(toolName: string): ErrorResolver | undefined {
-    if (toolName === "bash_run") return (_name, body) => bashErrorHints(body);
+    if (toolName === "bash_run") return (_name, body) => [...bashErrorHints(body), ...processErrorHints(body)];
+    if (["task_input", "task_inspect", "task_manage"].includes(toolName))
+        return (_name, body) => [...taskErrorHints(body), ...workerErrorHints(body)];
     if (fileTools.has(toolName))
         return (name, body) => fileErrorHints(name, body);
-    if (tmuxTools.has(toolName))
-        return (name, body) => tmuxErrorHints(name, body);
     if (artifactControlTools.has(toolName))
         return (_name, body) => artifactControlErrorHints(body);
     if (instanceTools.has(toolName))
@@ -74,9 +67,10 @@ function errorResolverFor(toolName: string): ErrorResolver | undefined {
 export function resolveResultHints(
     toolName: string,
     result: JsonValue,
+    instance?: string,
 ): ToolDiagnosticHint[] {
     const resolver = resultResolvers[toolName];
-    return resolver === undefined ? [] : resolver(toolName, result);
+    return resolver === undefined ? [] : resolver(toolName, result, instance);
 }
 
 export function resolveErrorHints(
@@ -104,6 +98,7 @@ export function resolveToolCallHints(
         return resolveResultHints(
             input.value.toolName,
             input.value.payload as JsonValue,
+            input.value.context.instance,
         );
     if (input.value.kind !== "error") return [];
     const body = readErrorBody(input.value.payload as JsonValue);

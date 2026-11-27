@@ -21,6 +21,7 @@ import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import {
     installWorkspaceGoalTool,
+    isWaitHandoffCandidate,
     rewriteWaitToolCall,
     workspaceGoalDefinition,
 } from "../../task/Public.js";
@@ -72,6 +73,7 @@ export class InstanceState {
     readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
     readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
     readonly #toolCallUnregister: readonly (() => void)[];
+    #terminalNotificationUnregister?: () => void;
     #toolCallEndpoint?: Endpoint;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
@@ -108,9 +110,64 @@ export class InstanceState {
             instanceName,
             invokeTool: (toolName, input, context, signal) =>
                 this.tools.invokeInternal(toolName, input, context, signal),
+            waitLeases: this.tools.waitLeases,
             paths,
         });
-        this.terminal = createTerminalRuntime(dependencies.terminal);
+        this.terminal = createTerminalRuntime(dependencies.terminal, {
+            onControlReleased: async (session) => {
+                await appendEvent("terminal.controlReleased", {
+                    cols: session.cols,
+                    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+                    generation: session.generation,
+                    ...(session.name === undefined ? {} : { name: session.name }),
+                    releasedAt: new Date().toISOString(),
+                    rows: session.rows,
+                    terminalId: session.terminalId,
+                    ...(session.workspace === undefined
+                        ? {}
+                        : { workspace: session.workspace }),
+                });
+            },
+        });
+        if (typeof dependencies.terminal?.onNotification === "function") {
+            this.#terminalNotificationUnregister =
+                dependencies.terminal.onNotification((notification) => {
+                    if (
+                        this.#retiring ||
+                        notification.method !== "terminal.control" ||
+                        notification.params.humanControl !== false
+                    ) {
+                        return;
+                    }
+                    const registered = this.terminal.sessions.api
+                        .list(instanceName)
+                        .some(
+                            (session) =>
+                                session.terminalId ===
+                                notification.params.terminalId,
+                        );
+                    if (registered) return;
+                    const {
+                        cols,
+                        cwd,
+                        generation,
+                        name,
+                        rows,
+                        terminalId,
+                        workspace,
+                    } = notification.params;
+                    void appendEvent("terminal.controlReleased", {
+                        ...(cols === undefined ? {} : { cols }),
+                        ...(cwd === undefined ? {} : { cwd }),
+                        generation,
+                        ...(name === undefined ? {} : { name }),
+                        releasedAt: new Date().toISOString(),
+                        ...(rows === undefined ? {} : { rows }),
+                        terminalId,
+                        ...(workspace === undefined ? {} : { workspace }),
+                    }).catch(() => undefined);
+                });
+        }
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
             [workspaceGoalDefinition(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],
@@ -163,10 +220,17 @@ export class InstanceState {
         const value = await rewriteWaitToolCall({
             callId: request.callId, direction: "inbound", value: request.value,
         }, this.task.api.wait);
+        const handoff = isWaitHandoffCandidate(value);
+        const { waitHandoff: _waitHandoff, ...context } = value.context;
+        if (handoff) await this.task.beginWaitCall(request.callId);
         return await this.tools.target().dispatch({
             ...request,
             execute,
-            value,
+            ...(handoff ? { finalize: () => this.task.finishWaitCall(request.callId) } : {}),
+            value: {
+                ...value,
+                context: handoff ? { ...context, waitHandoff: true } : context,
+            },
             hooks: {
                 review: (input) => request.hooks.review(input),
                 rewrite: async (input) => rewriteWaitToolCall({
@@ -244,6 +308,10 @@ export class InstanceState {
             await close(() => unregister());
         await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
+        await close(() => {
+            this.#terminalNotificationUnregister?.();
+            this.#terminalNotificationUnregister = undefined;
+        });
         await close(() => this.terminal.sessions.close());
         await close(() => this.#workerToolRegistration.dispose());
         await close(() => this.#domainToolRegistration.dispose());

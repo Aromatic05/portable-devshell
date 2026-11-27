@@ -203,7 +203,7 @@ export async function runTestspaceModelDevshellSmoke({
                         command: "pwd",
                         ctxId,
                         instance: remoteInstance,
-                        timeoutMs: 30_000,
+                        waitMs: 30_000,
                     },
                     name: "bash_run",
                 }),
@@ -263,7 +263,7 @@ async function runBash(client, ctxId, command, instance) {
             command,
             ctxId,
             ...(instance === undefined ? {} : { instance }),
-            timeoutMs: 30_000,
+            waitMs: 30_000,
         },
         name: "bash_run",
     });

@@ -39,24 +39,24 @@ pub struct ToolCall {
     pub params: serde_json::Value,
     pub ctx_id: String,
     pub operation_id: String,
+    pub wait_handoff: bool,
+    pub task_creation_id: Option<String>,
     pub source: Option<String>,
     pub policy: Arc<dyn SecurityPolicy>,
-    pub process_registry: Arc<dyn ToolProcessRegistry>,
     pub cancellation: ToolCancellation,
     pub progress: ToolProgressEmitter,
 }
 
-/// A registered process group is released when its RAII guard is dropped.
-pub trait ToolProcessGuard: Send {
-    fn terminate_process_group(&self, force: bool) -> Result<(), String>;
-}
-
-/// Process lifetime port supplied by the Worker runtime.
-pub trait ToolProcessRegistry: Send + Sync {
-    fn register(self: Arc<Self>, process_group: i32) -> Result<Box<dyn ToolProcessGuard>, String>;
-}
-
 impl ToolCall {
+    pub fn creation_task_id(&self) -> Result<String, ToolError> {
+        match &self.task_creation_id {
+            None => Ok(format!("process-{}", uuid::Uuid::new_v4())),
+            Some(id) if id.strip_prefix("process-")
+                .is_some_and(|uuid| uuid::Uuid::parse_str(uuid).is_ok()) => Ok(id.clone()),
+            Some(_) => Err(ToolError::new("tool.invalidArguments", "invalid task creation id")),
+        }
+    }
+
     pub fn check_cancelled(&self) -> Result<(), ToolError> {
         self.cancellation.check()
     }

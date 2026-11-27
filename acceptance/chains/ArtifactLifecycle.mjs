@@ -204,7 +204,7 @@ async function tool(client, name, args) {
 
 async function bash(context, command) {
     const output = await tool(context.client, "bash_run", {
-        ctxId: context.ctxId, command, timeoutMs: 30_000,
+        ctxId: context.ctxId, command, waitMs: 30_000,
     });
     assert.equal(output.exitCode, 0, JSON.stringify(output));
     return output;

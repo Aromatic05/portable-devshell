@@ -27,7 +27,7 @@ test("Agent model tool results retain Comment advice and user instructions", () 
         ["file_read", { files: [{ path: "example.ts", view: "content", content: "1:hello", nextSelector: "2" }] }],
         ["bash_run", { stdout: "ok", stderr: "", exitCode: 0 }],
         ["file_edit", { operations: [{ action: "patch", path: "example.ts", status: "applied" }] }],
-        ["tmux_read", { task: { id: "task-1", status: "0" }, output: ["done"] }],
+        ["task_input", { task: { id: "task-1", status: "0" }, stdout: "done", stderr: "", termination: "exited", exitCode: 0 }],
     ];
     for (const [toolName, value] of results) {
         const text = projectAgentModelToolResult(toolName, { ...value, comment });
@@ -50,7 +50,7 @@ test("Agent tool result truncation reserves Comment ahead of long output", () =>
 });
 
 test("Agent success renderers do not swallow a structured tool error", () => {
-    for (const toolName of ["bash_run", "tmux_read", "tmux_run", "file_edit"]) {
+    for (const toolName of ["bash_run", "task_input", "task_inspect", "task_manage", "file_edit"]) {
         const text = projectAgentModelToolResult(toolName, {
             error: { code: "file.unreadRange", message: "read coverage required", retryable: true },
             comment: ["[file.unreadRange] Read the missing source lines."],
@@ -83,4 +83,246 @@ test("Agent edit summary keeps all-success batches successful", () => {
     assert.match(text, /appliedOperations=1 failedOperations=0 notExecutedOperations=0/u);
     assert.match(text, /write a.ts applied \+1/u);
     assert.doesNotMatch(text, /error=/u);
+});
+
+test("Agent model tool projection applies _meta.devshell.mcp.inputHints to matching properties", () => {
+    const tools = projectAgentModelTools([
+        {
+            name: "task_input",
+            description: "Send input or read task output",
+            _meta: {
+                devshell: {
+                    mcp: {
+                        inputHints: {
+                            ctxId: "Current Context ID.",
+                            input: "Raw UTF-8 text (use \\r for Enter, \\u0003 for Ctrl+C).",
+                            cursor: "Opaque cursor from bash_run, task_manage(create), or task_input.",
+                        },
+                    },
+                },
+            },
+            inputSchema: {
+                type: "object",
+                properties: {
+                    ctxId: { type: "string", description: "Consumer only" },
+                    task: { type: "string", description: "Original task description" },
+                    input: { type: "string", description: "Stale input doc" },
+                    cursor: { type: "string" },
+                },
+                required: ["ctxId", "task"],
+            },
+        },
+        {
+            name: "file_read",
+            description: "Read files",
+            _meta: {
+                devshell: {
+                    mcp: {
+                        inputHints: {
+                            selector: "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+                        },
+                    },
+                },
+            },
+            inputSchema: {
+                type: "object",
+                properties: {
+                    files: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                path: { type: "string" },
+                                selector: { type: "string", description: "Stale selector doc" },
+                            },
+                        },
+                    },
+                },
+                required: ["files"],
+            },
+        },
+    ]);
+
+    const taskInputSchema = tools[0]?.inputSchema as {
+        properties?: Record<string, { description?: string }>;
+        required?: string[];
+    };
+    assert.equal(taskInputSchema.properties?.ctxId, undefined);
+    assert.deepEqual(taskInputSchema.required, ["task"]);
+    assert.equal(taskInputSchema.properties?.task?.description, "Original task description");
+    assert.equal(
+        taskInputSchema.properties?.input?.description,
+        "Raw UTF-8 text (use \\r for Enter, \\u0003 for Ctrl+C).",
+    );
+    assert.equal(
+        taskInputSchema.properties?.cursor?.description,
+        "Opaque cursor from bash_run, task_manage(create), or task_input.",
+    );
+
+    const fileReadSchema = tools[1]?.inputSchema as {
+        properties?: {
+            files?: {
+                items?: {
+                    properties?: Record<string, { description?: string }>;
+                };
+            };
+        };
+    };
+    assert.equal(
+        fileReadSchema.properties?.files?.items?.properties?.selector?.description,
+        "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+    );
+});
+
+test("Agent bash/task result projection preserves detached, waitMs, and untilExit handoff state", () => {
+    const detachedResult = projectAgentModelToolResult("bash_run", {
+        termination: "running",
+        detached: true,
+        waitMs: 120_000,
+        untilExit: true,
+        waitReason: "timeout",
+        cursor: "cur-1",
+        task: { id: "task-1", status: "running" },
+        stdout: "building...",
+        stderr: "",
+    });
+    assert.match(
+        detachedResult,
+        /^termination=running detached=true waitMs=120000 untilExit=true\b/mu,
+    );
+    assert.match(detachedResult, /waitReason=timeout/u);
+
+    const normalResult = projectAgentModelToolResult("task_input", {
+        termination: "exited",
+        exitCode: 0,
+        detached: false,
+        untilExit: false,
+        durationMs: 42,
+        stdout: "done",
+        stderr: "",
+    });
+    assert.match(normalResult, /^termination=exited exitCode=0 durationMs=42$/mu);
+    assert.doesNotMatch(normalResult, /detached=/u);
+    assert.doesNotMatch(normalResult, /untilExit=/u);
+});
+
+test("Agent clipped task_input output without an artifact directs read-only polling, not input replay", () => {
+    const comment = `The task is still running.\n${"Review note. ".repeat(300)}`;
+    const result = {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: true },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6MTAwMDA6MA",
+        waitReason: "output",
+        stdout: "x".repeat(10_000),
+        stdoutBytes: 10_000,
+        stdoutTruncated: false,
+        stderr: "",
+        stderrBytes: 0,
+        stderrTruncated: false,
+        artifactWarnings: ["stdout artifact could not be persisted: disk full"],
+        comment: [comment],
+    };
+
+    for (const name of ["task_input", "devshell_task_input"]) {
+        const text = projectAgentModelToolResult(name, result);
+        assert.doesNotMatch(text, /rerun with narrower output/u, name);
+        assert.ok(text.startsWith(`comment:\n${comment}\n`), name);
+        assert.match(text, /\[tool result truncated:/u, name);
+        assert.match(text, /^stdoutProjectionClipped=true$/mu, name);
+        assert.match(text, /Do not rerun the command or resend input/u, name);
+        assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u, name);
+        assert.ok(text.includes(`task=${JSON.stringify(result.task)}`), name);
+        assert.ok(text.includes(`cursor=${JSON.stringify(result.cursor)}`), name);
+        assert.match(text, /^waitReason=output$/mu, name);
+        assert.match(text, /^warning=stdout artifact could not be persisted: disk full$/mu, name);
+        assert.ok(text.length <= 12_000, name);
+    }
+});
+
+test("Agent guides observation when worker truncation leaves no inline output or recovery path", () => {
+    const text = projectAgentModelToolResult("task_input", {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: true },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6MTAwMDA6MA",
+        stdout: "",
+        stdoutTruncated: true,
+        stderr: "",
+        stderrTruncated: false,
+        artifactWarnings: ["stdout artifact unavailable: Process Host capture limit reached"],
+    });
+
+    assert.match(text, /^stdoutTruncated=true$/mu);
+    assert.match(text, /Do not rerun the command or resend input/u);
+    assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u);
+    assert.doesNotMatch(text, /stderrTruncated=true/u);
+});
+
+test("Agent keeps artifact recovery available alongside an unrecoverable clipped stream", () => {
+    const text = projectAgentModelToolResult("devshell_bash_run", {
+        termination: "running",
+        task: { id: "process-1", status: "running", pty: false },
+        cursor: "tc2_cHJvY2Vzcy0xOjE6NTAwMDo1MDAw",
+        stdout: "x".repeat(5_000),
+        stdoutPath: "/.devshell/tool-results/retained/stdout",
+        stderr: "y".repeat(5_000),
+        artifactWarnings: ["stderr artifact could not be persisted: disk full"],
+    });
+
+    assert.match(text, /^stdoutRecovery=\/\.devshell\/tool-results\/retained\/stdout$/mu);
+    assert.match(text, /^stderrProjectionClipped=true$/mu);
+    assert.doesNotMatch(text, /stdoutProjectionClipped=true|rerun with narrower output/u);
+    assert.match(text, /Do not rerun the command or resend input/u);
+    assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u);
+});
+
+
+test("Agent exposes uncertain durable Wait registration without suggesting replay", () => {
+    const text = projectAgentModelToolResult("bash_run", {
+        termination: "running",
+        task: { id: "task-started", status: "running" },
+        cursor: "tc3_cursor",
+        waitError: {
+            code: "wait.registrationFailed",
+            message: "Durable Wait registration was not confirmed. Continue with task_input using the returned task ID and cursor; do not repeat the original call.",
+        },
+    });
+    assert.match(text, /^waitError=\{"code":"wait.registrationFailed","message":"Durable Wait registration was not confirmed\. Continue with task_input using the returned task ID and cursor; do not repeat the original call\."\}$/mu);
+    assert.match(text, /Continue with task_input/u);
+    assert.doesNotMatch(text, /rerun the original call/u);
+});
+
+
+test("model projection preserves successful and failed creation handles when comments exhaust the budget", () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const comment = ["user instruction ".repeat(20_000)];
+    assert.match(projectAgentModelToolResult("bash_run", {
+        task: { id: taskId }, termination: "running", comment,
+    }), new RegExp(`^taskId=${taskId}\\n`, "u"));
+    assert.match(projectAgentModelToolResult("task_manage", {
+        comment,
+        error: { code: "process.hostFailed", message: "read failed", retryable: false,
+            details: { taskId, taskStart: "confirmed" } },
+    }), new RegExp(`^taskId=${taskId} taskStart=confirmed.*do not repeat the creation call`, "u"));
+});
+
+test("task observation keeps its cursor and terminal outcome when comments consume the result budget", () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const cursor = "tc3_resume";
+    const comment = ["x".repeat(13_000)];
+    const text = projectAgentModelToolResult("task_input", {
+        task: { id: taskId, status: "exited" }, cursor, termination: "exited",
+        exitCode: 0, waitReason: "terminal", stdoutPath: "/.devshell/tool-results/example/stdout", comment,
+    });
+    assert.match(text, /^taskId=process-/u);
+    assert.ok(text.includes('cursor="tc3_resume"'));
+    assert.ok(text.includes("termination=exited"));
+    assert.ok(text.includes("exitCode=0"));
+    assert.ok(text.includes("stdoutRecovery=/.devshell/tool-results/example/stdout"));
+    const cancelled = projectAgentModelToolResult("task_input", {
+        error: { code: "core.toolCallCancelled", message: "cancelled", retryable: false,
+            details: { taskId, cursor } }, comment,
+    });
+    assert.match(cancelled, /^taskId=process-/u);
+    assert.ok(cancelled.includes('cursor="tc3_resume"'));
+    assert.ok(cancelled.includes("omit input"));
 });

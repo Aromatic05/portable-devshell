@@ -14,9 +14,11 @@ import {
 
 import type { WorkerToolInvoker } from "../worker/Invoker.js";
 import type { ToolCallPresentedResult } from "../Api.js";
-import type {
-    WorkerToolCallScheduler,
-    WorkerToolSchedulerReservation,
+import {
+    isUrgentTool,
+    type WorkerToolCallScheduler,
+    type WorkerToolSchedulerCallClass,
+    type WorkerToolSchedulerReservation,
 } from "./Scheduler.js";
 import type {
     ToolCallDispatchRequest,
@@ -26,7 +28,7 @@ import type {
 } from "@portable-devshell/shared";
 import { createErrorFromBody } from "./Error.js";
 import { assertMcpOutboundResult, mcpOutboundResult } from "./Presentation.js";
-import { attachToolCallErrorPayload } from "./ErrorPayload.js";
+import { attachToolCallErrorPayload, readToolCallErrorPayload } from "./ErrorPayload.js";
 import {
     interpretTerminalValue,
     runOutboundPipeline,
@@ -76,6 +78,50 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     }
 
     async dispatch(request: ToolCallDispatchRequest): Promise<JsonValue> {
+        const execution: { task?: TaskCreationEvidence } = {};
+        try {
+            let result: JsonValue;
+            try {
+                result = await this.#dispatch(request, execution);
+            } finally {
+                await request.finalize?.();
+            }
+            assertTaskDelivery(execution.task, result, request.callId);
+            if (request.signal?.aborted && execution.task?.worker && execution.task.completed)
+                throw createRemoteError({
+                    code: runtimeErrorCodes.toolCallCancelled,
+                    message: "Task creation was cancelled before its result was returned.",
+                    retryable: false,
+                });
+            return result;
+        } catch (error) {
+            const task = execution.task;
+            if (task === undefined) throw error;
+            let failure = error;
+            // The Worker may have completed its last cancellation check before
+            // the cancel packet arrived. Its raw reply is still authoritative.
+            // Until Core returns the result, Core owns late cancellation cleanup.
+            if (request.signal?.aborted && task.worker && task.start === "confirmed" && task.running) {
+                try {
+                    await this.#toolInvoker.invoke("task_manage", { command: "close", task: task.id },
+                        executionContext(request.value.context));
+                } catch (cleanup) {
+                    failure = createRemoteError({
+                        code: runtimeErrorCodes.toolCallCancelled,
+                        message: "Task creation was cancelled; termination could not be confirmed.",
+                        cause: cleanup,
+                        retryable: false,
+                    });
+                }
+            }
+            throw preserveTaskError(failure, task);
+        }
+    }
+
+    async #dispatch(
+        request: ToolCallDispatchRequest,
+        execution: { task?: TaskCreationEvidence },
+    ): Promise<JsonValue> {
         const {
             callId,
             execute,
@@ -146,6 +192,8 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             throw error;
         }
 
+        const createsTask = hookValue.toolName === "bash_run" ||
+            (hookValue.toolName === "task_manage" && record(innerInput)?.command === "create");
         let reservation: WorkerToolSchedulerReservation;
         try {
             reservation = this.#toolCallScheduler.reserve(
@@ -155,6 +203,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     ctxId: hookValue.context.ctxId,
                     source: hookValue.context.source,
                     toolName: hookValue.toolName,
+                    toolCallClass: classifyToolCall(hookValue.toolName, innerInput),
                 },
                 signal,
             );
@@ -272,8 +321,43 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                               signal,
                               hookProgress,
                           );
+                    if (createsTask) {
+                        const native = isPresentedToolCallResult(result);
+                        const id = taskResultId(native ? result.result : result);
+                        if (id !== undefined) {
+                            const task = record(record(native ? result.result : result)?.task);
+                            const state = task?.status ?? task?.state;
+                            execution.task = {
+                                id, start: "confirmed", completed: true, native,
+                                worker: execute === undefined,
+                                running: state !== "exited" && state !== "failed" && state !== "signaled",
+                            };
+                            if (signal?.aborted && execute === undefined)
+                                throw createRemoteError({
+                                    code: runtimeErrorCodes.toolCallCancelled,
+                                    message: "Task creation was cancelled before its result was returned.",
+                                    retryable: false,
+                                });
+                        }
+                    }
                     appliedEdit = hookValue.toolName === "file_edit" && hasAppliedFileEdit(result);
                     return result;
+                } catch (error) {
+                    if (createsTask && execution.task === undefined) {
+                        const details = record(toRemoteErrorBody(error)?.details);
+                        const id = details?.taskId;
+                        const start = details?.taskStart;
+                        if (typeof id === "string" && id.length > 0 && (start === "confirmed" || start === "unknown")) {
+                            // An output/serialization failure after spawn does not establish exit.
+                            // Reuse the confirmed identity for late cancellation unless the
+                            // Worker already observed a terminal state or requested termination.
+                            execution.task = { id, start, completed: false, native: false,
+                                worker: execute === undefined,
+                                running: start === "confirmed" && details?.killRequested !== true &&
+                                    details?.state !== "exited" && details?.state !== "failed" };
+                        }
+                    }
+                    throw error;
                 } finally {
                     if (heartbeat !== undefined) clearInterval(heartbeat);
                     // Only an applied, completed edit advances durable progress;
@@ -337,8 +421,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                                 : mcpOutboundResult(adaptedResult, presentation),
                         },
                     }));
-                if (presentation !== undefined && hookValue.kind !== "error") {
-                    assertMcpOutboundResult(hookValue.payload);
+                if (hookValue.kind !== "error") {
+                    if (presentation !== undefined) assertMcpOutboundResult(hookValue.payload);
+                    assertTaskDelivery(execution.task, hookValue.payload, callId);
                 }
             } catch (error) {
                 failureStage = "outboundHook";
@@ -439,8 +524,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     classifiedFailure,
                     hookValue,
                 );
-                if (hasNativePresentation && outerFailure.value.kind !== "error") {
-                    assertMcpOutboundResult(outerFailure.value.payload);
+                if (outerFailure.value.kind !== "error") {
+                    if (hasNativePresentation) assertMcpOutboundResult(outerFailure.value.payload);
+                    assertTaskDelivery(execution.task, outerFailure.value.payload, callId);
                 }
             } catch (error) {
                 failureStage = "outboundHook";
@@ -556,6 +642,55 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage, callId);
         }
     }
+}
+
+interface TaskCreationEvidence {
+    readonly id: string;
+    readonly start: "confirmed" | "unknown";
+    readonly completed: boolean;
+    readonly native: boolean;
+    readonly worker: boolean;
+    readonly running: boolean;
+}
+
+function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function taskResultId(value: JsonValue | undefined): string | undefined {
+    const id = record(record(value)?.task)?.id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function assertTaskDelivery(task: TaskCreationEvidence | undefined, value: JsonValue, callId: string): void {
+    if (task === undefined) return;
+    const result = task.native ? record(value)?.structuredContent : value;
+    if (!task.completed || taskResultId(result) !== task.id ||
+        record(result)?.error !== undefined || (task.native && record(value)?.isError === true)) {
+        throw outboundHookFailure(task.completed, callId);
+    }
+}
+
+function preserveTaskError(error: unknown, task: TaskCreationEvidence): Error {
+    const body = toRemoteErrorBody(error);
+    const details = body?.details;
+    const message = task.start === "confirmed" ? "Task started" : "Task start could not be confirmed";
+    const preserved = createRemoteError({
+        ...body,
+        code: body?.code ?? runtimeErrorCodes.providerFailed,
+        details: {
+            ...(record(details) ?? (details === undefined ? {} : { originalDetails: details })),
+            taskId: task.id,
+            taskStart: task.start,
+        },
+        message: `${message} (taskId=${task.id}). Inspect this task before deciding what to do (task_input without input, or task_inspect for a PTY); do not repeat the creation call. ${errorMessage(error)}`,
+        retryable: false,
+    });
+    const payload = record(readToolCallErrorPayload(error));
+    return payload === undefined ? preserved : attachToolCallErrorPayload(preserved, {
+        ...payload,
+        error: preserved.toBody() as unknown as JsonValue,
+    });
 }
 
 function hasAppliedFileEdit(value: JsonValue | ToolCallPresentedResult): boolean {
@@ -693,4 +828,40 @@ function outboundHookFailure(executionCompleted: boolean, callId: string): Error
             : "ToolCall outbound hook failed before execution completed.",
         retryable: false,
     });
+}
+
+const DEFAULT_TASK_INPUT_WAIT_MS = 5_000;
+
+function isTaskWaitObservation(toolName: string, input: JsonValue): boolean {
+    if (toolName !== "task_input") return false;
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+        return false;
+    }
+    const textInput = input.input;
+    const noInput =
+        textInput === undefined ||
+        textInput === null ||
+        (typeof textInput === "string" && textInput.length === 0);
+    if (!noInput) return false;
+
+    const untilExit = input.untilExit === true;
+    const rawWaitMs = input.waitMs;
+    const effectiveWaitMs =
+        rawWaitMs === undefined || rawWaitMs === null
+            ? DEFAULT_TASK_INPUT_WAIT_MS
+            : typeof rawWaitMs === "number" &&
+                Number.isSafeInteger(rawWaitMs) &&
+                rawWaitMs >= 0
+              ? rawWaitMs
+              : 0;
+    return (untilExit && effectiveWaitMs > 0) || effectiveWaitMs > DEFAULT_TASK_INPUT_WAIT_MS;
+}
+
+/** Classify a tool call for WorkerToolCallScheduler capacity accounting. */
+export function classifyToolCall(
+    toolName: string,
+    input: JsonValue,
+): WorkerToolSchedulerCallClass {
+    if (isTaskWaitObservation(toolName, input)) return "observation";
+    return isUrgentTool(toolName) ? "urgent" : "standard";
 }

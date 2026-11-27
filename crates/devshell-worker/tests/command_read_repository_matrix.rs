@@ -313,7 +313,7 @@ fn classify_real_shell_commands_without_false_coverage() {
             index * 2 + 1,
             &ctx,
             "bash_run",
-            json!({"command": command, "timeoutMs": 5000}),
+            json!({"command": command, "waitMs": 5000}),
         );
         assert_eq!(shell["type"], "reply", "case={} {shell}", case.label);
         let edit = rpc(

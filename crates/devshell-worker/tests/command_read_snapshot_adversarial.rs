@@ -27,7 +27,7 @@ fn check_no_false_coverage(command: &str, text: &str, original: &str) {
         "1",
         "adversarial",
         "bash_run",
-        json!({ "command": command, "timeoutMs": 5000 }),
+        json!({ "command": command, "waitMs": 5000 }),
     );
     assert_eq!(result["type"], "reply", "{result}");
     let edit = rpc(

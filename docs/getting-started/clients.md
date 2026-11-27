@@ -121,7 +121,7 @@ OpenAI workspace 管理员可能需要先审核/发布自定义 App。后续 MCP
 
 已有 ChatGPT connector 保持原 URL。原先使用裸 URL、但不发送 OpenAI 会话 metadata 的客户端，应改为 `/explicit`；OAuth 客户端换 URL 后需授权新 resource。实例 TOML 不再配置 `contextMode`。详见 [Context](../concepts/context.md)。
 
-`/stateless` 不需要先调用 `environ_info`。直接调用全部 10 个 Bash、File、Tmux 基础工具，提供 Worker 绝对路径；`bash_run`、`tmux_run` 及创建 pane 时的 `cwd` 必填。搜索、任务与终端后续调用使用 cursor 或 task/pane ID。详见 [MCP](../concepts/mcp.md#context-selector)。
+`/stateless` 不需要先调用 `environ_info`。直接调用全部 8 个 Bash、File、Task、Terminal 基础工具，提供 Worker 绝对路径；`bash_run` 及创建 terminal 时的 `cwd` 必填。搜索、任务与终端后续调用使用 cursor 或 task/terminal ID。详见 [MCP](../concepts/mcp.md#context-selector)。
 
 ## OAuth 与刷新
 
@@ -150,12 +150,12 @@ devshell instance logs demo-local
 5. MCP URL 的模式是否与 Host 能力匹配；
 6. remote Host 到 endpoint 的 HTTPS/tunnel 链路是否真实可达。
 
-MCP `tools/list` 合并 Worker、Control primitive 和 Extension `mcp.tools`，Extension contribution 变化会更新目录；instance group/capability policy 不裁剪目录。如果缺少的是 `bash_run` / `tmux_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。
+MCP `tools/list` 合并 Worker、Control primitive 和 Extension `mcp.tools`，Extension contribution 变化会更新目录；instance group/capability policy 不裁剪目录。如果缺少的是 `bash_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。
 
 ## 长工具调用
 
 portable-devshell 的 MCP endpoint 使用 request-scoped SSE keepalive。Host 必须允许长时间 SSE response 且中间代理不能 buffering/caching，否则即使 server 正常工作，也可能把长 `tools/call` 误判为空闲连接。
 
-当前 `tmux_run(wait=block)` 可以在同一个 MCP tool call 中同步等待最多 180 秒，之后才进入 portable-devshell 自己的 durable handoff。
+当前 `bash_run(waitMs >= 180000)` 可以在同一个 MCP tool call 中同步等待最多 180 秒，之后才进入 portable-devshell 自己的 durable handoff。
 
-详见 [MCP](../concepts/mcp.md) 和 [tmux 工具](../tools/tmux.md)。
+详见 [MCP](../concepts/mcp.md) 和 [Process 与终端工具](../tools/process.md)。

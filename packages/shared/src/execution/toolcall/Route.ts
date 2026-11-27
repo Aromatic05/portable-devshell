@@ -288,6 +288,13 @@ function toolCallExecutionDetails(details: JsonValue | undefined): { details?: J
         safe.failureStage = record.failureStage;
     if (typeof record.callId === "string" && record.callId.length <= 128)
         safe.callId = record.callId;
+    if (typeof record.taskId === "string" && /^process-[0-9a-f-]{36}$/u.test(record.taskId)) {
+        safe.taskId = record.taskId;
+        if (record.taskStart === "confirmed" || record.taskStart === "unknown")
+            safe.taskStart = record.taskStart;
+        if (typeof record.cursor === "string")
+            safe.cursor = record.cursor;
+    }
     return Object.keys(safe).length === 0 ? {} : { details: safe };
 }
 

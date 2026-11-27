@@ -13,6 +13,7 @@ class FakeTerminalProcess implements TerminalProcess {
     disposed = false;
     exitOnKill?: TerminalProcessExit;
     killed = false;
+    restoreSnapshot?: () => Promise<{ data: string; seq: number } | undefined>;
     readonly #data = new Set<(data: string) => void>();
     readonly #exit = new Set<(exit: TerminalProcessExit) => void>();
 
@@ -427,4 +428,268 @@ test("terminal history keeps active sessions and bounds completed sessions newes
         ["terminal-history-4", "terminal-history-3"],
     );
     assert.throws(() => service.get("terminal-history-2"), /not found/u);
+});
+
+test("recovered session anchored at snapshot seq serves both resuming clients and fresh observers", async () => {
+    const listeners = new Set<(data: string, sourceSeq?: number) => void>();
+    const process: TerminalProcess = {
+        kill() {},
+        onData(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        onExit() {
+            return () => undefined;
+        },
+        resize() {},
+        write() {},
+    };
+    const emit = (data: string, seq: number) => {
+        for (const listener of listeners) listener(data, seq);
+    };
+    const service = new TerminalSessionService();
+    const [recovered] = await service.recover("alpha", {
+        open: async () => process,
+        recover: async () => [
+            {
+                identity: {
+                    cols: 80,
+                    generation: 1,
+                    recoverable: true,
+                    rows: 24,
+                    terminalId: "recovered-term",
+                    version: 1,
+                },
+                process,
+            },
+        ],
+    });
+    assert.ok(recovered);
+
+    emit("\x1bcseed", 10);
+    const live: Array<{ data: string; seq: number }> = [];
+    const resumed = service.attach({
+        fromSeq: 10,
+        generation: 1,
+        onOutput: (frame) => live.push(frame),
+        terminalId: "recovered-term",
+    });
+    assert.deepEqual(resumed.replay, []);
+
+    const fresh = service.attach({
+        fromSeq: 0,
+        generation: 1,
+        onOutput() {},
+        terminalId: "recovered-term",
+    });
+    assert.deepEqual(fresh.replay, [{ data: "\x1bcseed", seq: 10 }]);
+
+    assert.throws(
+        () =>
+            service.attach({
+                fromSeq: 5,
+                generation: 1,
+                onOutput() {},
+                terminalId: "recovered-term",
+            }),
+        (error: unknown) => (error as { code?: string }).code === "stream.gap",
+    );
+
+    emit("after-restart", 11);
+    assert.deepEqual(live, [{ data: "after-restart", seq: 11 }]);
+    resumed.detach();
+    fresh.detach();
+});
+
+test("terminal session propagates rich metadata and fires onControlReleased once on handoff", async () => {
+    const metadataListeners = new Set<
+        (update: {
+            cols?: number;
+            humanControl?: boolean;
+            rows?: number;
+            version?: number;
+        }) => void
+    >();
+    const released: Array<{
+        cols: number;
+        name?: string;
+        rows: number;
+        terminalId: string;
+    }> = [];
+    const process: TerminalProcess = {
+        kill() {},
+        onData() {
+            return () => undefined;
+        },
+        onExit() {
+            return () => undefined;
+        },
+        onMetadataChange(listener) {
+            metadataListeners.add(listener);
+            return () => metadataListeners.delete(listener);
+        },
+        resize() {},
+        write() {},
+    };
+    const service = new TerminalSessionService({
+        onControlReleased: (session) => {
+            released.push({
+                cols: session.cols,
+                ...(session.name === undefined ? {} : { name: session.name }),
+                rows: session.rows,
+                terminalId: session.terminalId,
+            });
+        },
+    });
+    const opened = await service.open({
+        backend: {
+            open: async () => ({
+                identity: {
+                    cols: 120,
+                    cwd: "./",
+                    generation: 1,
+                    humanControl: false,
+                    name: "dev-server",
+                    persistent: true,
+                    recoverable: true,
+                    rows: 36,
+                    terminalId: "term-handoff",
+                    version: 1,
+                    workspace: "/workspace",
+                },
+                process,
+            }),
+        },
+        cols: 120,
+        instance: "alpha",
+        name: "dev-server",
+        persistent: true,
+        rows: 36,
+        workspace: "/workspace",
+    });
+    assert.equal(opened.name, "dev-server");
+    assert.equal(opened.persistent, true);
+    assert.equal(opened.humanControl, false);
+
+    for (const listener of metadataListeners) {
+        listener({ cols: 60, humanControl: true, rows: 20, version: 2 });
+    }
+    assert.equal(service.get("term-handoff").humanControl, true);
+    assert.equal(released.length, 0);
+
+    for (const listener of metadataListeners) {
+        listener({ cols: 120, humanControl: false, rows: 36, version: 3 });
+    }
+    // Duplicate release notification must not emit a second handoff event.
+    for (const listener of metadataListeners) {
+        listener({ humanControl: false });
+    }
+    assert.deepEqual(released, [
+        { cols: 120, name: "dev-server", rows: 36, terminalId: "term-handoff" },
+    ]);
+});
+
+test("terminal attach with restoreSnapshot allows fromSeq 0 on replay overflow but still rejects stale fromSeq > 0", async () => {
+    const process = new FakeTerminalProcess();
+    process.restoreSnapshot = async () => ({ data: "snap", seq: 3 });
+    const service = new TerminalSessionService({
+        idFactory: () => "terminal-snapshot-gap",
+        maxReplayBytes: 6,
+    });
+    const opened = await service.open({
+        backend: { open: async () => process },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
+    });
+
+    process.emit("1111");
+    process.emit("2222");
+    process.emit("3333");
+
+    const observed = service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        takeover: false,
+        terminalId: opened.terminalId,
+    });
+    assert.deepEqual(observed.replay, [{ data: "3333", seq: 3 }]);
+    observed.detach();
+
+    assert.throws(
+        () =>
+            service.attach({
+                fromSeq: 1,
+                generation: opened.generation,
+                onOutput() {},
+                takeover: false,
+                terminalId: opened.terminalId,
+            }),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "stream.gap");
+            assert.deepEqual((error as { details?: unknown }).details, {
+                latestSeq: 3,
+                oldestAvailableSeq: 3,
+                requestedFromSeq: 1,
+                terminalId: opened.terminalId,
+            });
+            return true;
+        },
+    );
+});
+
+test("terminal session forwards shell on open, propagates pty=false, and rejects takeControl on pipe tasks", async () => {
+    const process = new FakeTerminalProcess();
+    const openInputs: Array<{ shell?: string }> = [];
+    const service = new TerminalSessionService();
+    const opened = await service.open({
+        backend: {
+            open: async (input) => {
+                openInputs.push({
+                    ...(input.shell === undefined ? {} : { shell: input.shell }),
+                });
+                return {
+                    identity: {
+                        cols: 80,
+                        generation: 1,
+                        pty: false,
+                        recoverable: true,
+                        rows: 24,
+                        terminalId: "pipe-session-1",
+                        version: 1,
+                        workspace: "/workspace",
+                    },
+                    process,
+                };
+            },
+        },
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        shell: "/bin/bash",
+        workspace: "/workspace",
+    });
+
+    assert.equal(openInputs[0]?.shell, "/bin/bash");
+    assert.equal(opened.pty, false);
+    assert.equal(service.get("pipe-session-1").pty, false);
+
+    const attachment = service.attach({
+        fromSeq: 0,
+        generation: opened.generation,
+        onOutput() {},
+        terminalId: opened.terminalId,
+    });
+
+    await assert.rejects(
+        () => attachment.takeControl(),
+        (error: unknown) =>
+            (error as { code?: string; message?: string }).code ===
+                "control.invalidTarget" &&
+            (error as { message?: string }).message ===
+                "Pipe tasks are read-only and do not support control takeover.",
+    );
+    attachment.detach();
 });

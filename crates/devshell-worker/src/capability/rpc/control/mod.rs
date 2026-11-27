@@ -1,3 +1,4 @@
+mod process_wait;
 pub mod artifact;
 pub mod host;
 pub mod instance;
@@ -16,7 +17,6 @@ use crate::capability::rpc::notification::WorkerNotificationQueue;
 use crate::capability::rpc::router::{ActiveToolCallRegistry, ControlHandler};
 use crate::capability::terminal::TerminalManager;
 use crate::daemon::process::WorkerRuntimeContext;
-use crate::daemon::process::registry::ActiveProcessRegistry;
 use crate::instance::WorkerConfig;
 use crate::instance::sandbox::SecurityPolicy;
 use crate::instance::storage::ExtensionResourceStore;
@@ -28,7 +28,6 @@ pub fn register_control_handlers(
     config: WorkerConfig,
     runtime: WorkerRuntimeContext,
     shutdown_requested: Arc<AtomicBool>,
-    active_processes: Arc<ActiveProcessRegistry>,
     active_tool_calls: Arc<ActiveToolCallRegistry>,
     tools: Arc<ToolRegistry>,
     policy: Arc<dyn SecurityPolicy>,
@@ -142,6 +141,14 @@ pub fn register_control_handlers(
     );
     handlers.insert("tool.session.close".to_string(), tool::session::handler());
     handlers.insert(
+        "process.wait.confirm".to_string(),
+        process_wait::handler(runtime.instance.clone(), "process.v1.confirmWait"),
+    );
+    handlers.insert(
+        "process.wait.reconcile".to_string(),
+        process_wait::handler(runtime.instance.clone(), "process.v1.reconcileWait"),
+    );
+    handlers.insert(
         "terminal.open".to_string(),
         terminal::open(terminals.clone()),
     );
@@ -161,6 +168,14 @@ pub fn register_control_handlers(
         "terminal.kill".to_string(),
         terminal::kill(terminals.clone()),
     );
+    handlers.insert(
+        "terminal.control".to_string(),
+        terminal::control(terminals.clone()),
+    );
+    handlers.insert(
+        "terminal.inspect".to_string(),
+        terminal::inspect(terminals.clone()),
+    );
     handlers.insert("terminal.list".to_string(), terminal::list(terminals));
     handlers.insert(
         "worker.handshake".to_string(),
@@ -172,7 +187,7 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "worker.stop".to_string(),
-        host::lifecycle::stop::handler(shutdown_requested, active_processes, active_tool_calls),
+        host::lifecycle::stop::handler(shutdown_requested, active_tool_calls),
     );
     handlers.insert("worker.ping".to_string(), host::lifecycle::ping::handler());
     handlers.insert(

@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-# The invoking Worker owns and terminates bash_run/tmux_run process groups.
+# The invoking Worker owns and terminates bash_run process groups.
 # Self-upgrade must be started from an independent terminal or SSH session.
 if [ -n "${DEVSHELL_WORKER_TOOL:-}" ] || [ -n "${DEVSHELL_MODEL_CTX_ID:-}" ] || [ -n "${DEVSHELL_MODEL_PARENT_CALL_ID:-}" ]; then
-    echo "不支持从 DevShell bash_run/tmux_run 自升级：停止 Worker 时会终止安装器。请从独立终端或 SSH 会话执行相同的升级命令。" >&2
+    echo "不支持从 DevShell bash_run 自升级：升级过程中可能回收执行资源。请从独立终端或 SSH 会话执行相同的升级命令。" >&2
     exit 1
 fi
 

@@ -240,14 +240,18 @@ test("Round5 SSE concurrent duplicate POSTs survive gaps and cannot cross genera
         await serving;
     });
     await f.store.entered.promise;
+    await channel.drain();
     await Promise.all(uploads);
     assert.ok(sequence >= 3, "handshake must send real upstream RPC replies");
     assert.deepEqual(methods, ["worker.ping", "worker.handshake", "tools.list"]);
     assert.equal(await f.store.authenticate("reverse-test", predecessor), true);
-    const gap = await post(4, [{ seq: sequence + 2, frame: lastFrame }]);
+    await channel.drain();
+    await Promise.all(uploads);
+    const acknowledged = sequence;
+    const gap = await post(4, [{ seq: acknowledged + 2, frame: lastFrame }]);
     assert.equal(gap.status, 400);
     assert.equal(((await gap.json()) as { error: { message: string } }).error.message,
-        `upstream sequence gap: expected ${sequence + 1}, received ${sequence + 2}`);
+        `upstream sequence gap: expected ${acknowledged + 1}, received ${acknowledged + 2}`);
     const mismatched = await post(5, []);
     assert.equal(mismatched.status, 409);
     assert.equal(((await mismatched.json()) as { error: { code: string } }).error.code, "reverse.generationInvalid");
@@ -412,6 +416,14 @@ class TestWorkerChannel implements Channel {
         return write;
     }
 
+    async drain(): Promise<void> {
+        for (;;) {
+            const tail = this.#writeTail;
+            await tail;
+            if (tail === this.#writeTail) return;
+        }
+    }
+
     onData(listener: (data: Uint8Array) => void): () => void {
         this.#dataListeners.add(listener);
         return () => this.#dataListeners.delete(listener);
@@ -450,6 +462,7 @@ async function serveWorkerEndpoint(
 ): Promise<void> {
     const endpoint = new Endpoint({ host: "reverse-test-worker" });
     const core = new Rpc(endpoint.bind("core"), {
+        "process.wait.reconcile": () => ({ reconciled: true }),
         "worker.ping": () => {
             methods.push("worker.ping");
             return responseFor("worker.ping");

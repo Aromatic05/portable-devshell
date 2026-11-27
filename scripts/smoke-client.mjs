@@ -169,7 +169,7 @@ try {
         instance,
         workspace,
         "bash_run",
-        JSON.stringify({ command, timeoutMs: 30_000 }),
+        JSON.stringify({ command, waitMs: 30_000 }),
     ]);
     if (!call.stdout.includes("portable-devshell-client-smoke")) {
         throw new Error(
@@ -183,7 +183,6 @@ try {
     stage("stop control");
     runCli(["stop"]);
     controlStarted = false;
-    process.stdout.write("client smoke passed\n");
 } catch (error) {
     await reportFailure(error);
     throw error;
@@ -196,12 +195,26 @@ try {
         stage("cleanup control");
         runCli(["stop"], true);
     }
+    stage("retire test Process Host");
+    retireTestWorker();
     await rm(root, {
         force: true,
         maxRetries: 10,
         recursive: true,
         retryDelay: 100,
     });
+}
+process.stdout.write("client smoke passed\n");
+
+function retireTestWorker() {
+    for (const action of ["stop", "retire"]) {
+        const result = spawnSync(worker, [action, "--instance", instance], {
+            cwd: workspace, env, encoding: "utf8", timeout: 30_000, windowsHide: true,
+        });
+        if (result.error !== undefined || result.status !== 0) {
+            throw new Error(`test Worker ${action} failed: ${result.error ?? result.stderr}`);
+        }
+    }
 }
 
 function runCli(args, ignoreFailure = false) {

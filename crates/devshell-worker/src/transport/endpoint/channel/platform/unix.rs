@@ -19,6 +19,13 @@ impl LocalIpcListener {
         })
     }
 
+    pub fn bind_private(path: &Path) -> IoResult<Self> {
+        let listener = Self::bind(path)?;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        Ok(listener)
+    }
+
     pub fn set_nonblocking(&self, nonblocking: bool) -> IoResult<()> {
         self.inner.set_nonblocking(nonblocking)
     }

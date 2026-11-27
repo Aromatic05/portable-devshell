@@ -11,7 +11,7 @@ pub mod handshake {
     use crate::host::environment::detect_environment;
     use crate::host::home::user_home_directory;
     use crate::instance::WorkerConfig;
-    use crate::tool::bash::model::ShellRuntime;
+    use crate::capability::process::shell::ShellRuntime;
 
     pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
         control_handler(move |request| {
@@ -148,15 +148,12 @@ pub mod stop {
 
     use crate::capability::rpc::error::RpcError;
     use crate::capability::rpc::router::{ActiveToolCallRegistry, ControlHandler, control_handler};
-    use crate::daemon::process::registry::ActiveProcessRegistry;
 
-    const ACTIVE_PROCESS_STOP_TIMEOUT: Duration = Duration::from_secs(5);
     const ACTIVE_TOOL_CALL_STOP_TIMEOUT: Duration = Duration::from_secs(5);
     const FAIL_STOP_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_STOP";
 
     pub fn handler(
         shutdown_requested: Arc<AtomicBool>,
-        active_processes: Arc<ActiveProcessRegistry>,
         active_tool_calls: Arc<ActiveToolCallRegistry>,
     ) -> Arc<dyn ControlHandler> {
         control_handler(move |_| {
@@ -164,9 +161,6 @@ pub mod stop {
                 return Err(stop_error("injected worker stop failure".to_string()));
             }
             active_tool_calls.begin_stop().map_err(stop_error)?;
-            active_processes
-                .stop_all(ACTIVE_PROCESS_STOP_TIMEOUT)
-                .map_err(stop_error)?;
             active_tool_calls
                 .wait_idle(ACTIVE_TOOL_CALL_STOP_TIMEOUT)
                 .map_err(stop_error)?;

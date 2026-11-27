@@ -53,7 +53,6 @@ export interface PiSubagentRecord {
     readonly profile?: string;
     session: PiSessionLike;
     task: string;
-    toolExposure?: { close(): void };
     turnGeneration: number;
     unsubscribe?: () => void;
 }

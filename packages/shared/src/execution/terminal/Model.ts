@@ -8,28 +8,48 @@ export type TerminalSessionState =
 
 export interface TerminalSessionDescriptor {
     cols: number;
+    command?: string;
     createdAt: string;
+    cwd?: string;
     generation: number;
+    humanControl?: boolean;
     instance: string;
     latestSeq: number;
+    name?: string;
+    persistent?: boolean;
+    pty?: boolean;
     rows: number;
     state: TerminalSessionState;
     terminalId: string;
     version: number;
+    workspace?: string;
 }
 
 export interface TerminalOpenInput {
     cols: number;
     command?: string;
     cwd?: string;
+    name?: string;
+    persistent?: boolean;
     rows: number;
+    shell?: string;
     workspace: string;
 }
 
 export interface TerminalOpenResult extends TerminalSessionDescriptor {}
 
+export interface TerminalInspectResult {
+    cols: number;
+    cursor: { col: number; row: number };
+    lines: string[];
+    rows: number;
+    seq: number;
+    session: TerminalSessionDescriptor;
+}
+
 export interface TerminalAttachInput {
     fromSeq: number;
+    takeover?: boolean;
     generation: number;
     terminalId: string;
 }
@@ -55,12 +75,24 @@ export interface TerminalExitEvent {
 }
 
 export type TerminalStreamMessage =
-    | { kind: "seed"; session: TerminalSessionDescriptor }
+    | {
+          kind: "seed";
+          session: TerminalSessionDescriptor;
+          snapshot?: { seq: number; data: string };
+      }
     | { frame: TerminalOutputFrame; kind: "output" }
     | {
           clientSeq: number;
           identity: TerminalVersionedIdentity;
           kind: "inputAccepted" | "resized";
+      }
+    | {
+          clientSeq: number;
+          error?: string;
+          humanControl: boolean;
+          kind: "controlChanged";
+          session: TerminalSessionDescriptor;
+          snapshot?: { seq: number; data: string };
       }
     | { event: TerminalExitEvent; kind: "exit" }
     | { kind: "closed"; error?: Error; session?: TerminalSessionDescriptor };

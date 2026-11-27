@@ -28,10 +28,10 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
     const unregister = installMcpAppReentry(native.hooks, { goal } as never);
     try {
         const ctx = await contexts.registry.create({
-            principal: "local", environments: [{ instance: "local", workspace: "/repo" }],
+            principal: "local", environments: [{ instance: "local", workspace: directory }],
         });
         const started = await goal.manage(ctx.ctxId, {
-            action: "start", workspace: "/repo", objective: "Restore task safely",
+            action: "start", workspace: directory, objective: "Restore task safely",
 
         });
         assert.ok(started);

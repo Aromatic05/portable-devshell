@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { number, record, redact, safeValue, string, type ToolCallPresentation } from "./ToolCallModel.js";
 import {
-    CodeLines, FileTree, InfoStrip, KeySummary, Notice, Stat, TaskState, Terminal,
+    CodeLines, FileTree, InfoStrip, KeySummary, Notice, Stat, Terminal,
     UnifiedDiff, ValueRows, fileLanguage,
 } from "./ToolCallPrimitives.js";
 
@@ -25,14 +25,18 @@ function OutlineView({ text }: { text: string }): ReactNode {
         })}</ul>;
 }
 
-function ShellView({ input, result }: ToolCallPresentation): ReactNode {
+function ShellView({ name, input, result }: ToolCallPresentation): ReactNode {
     const args = record(input);
     const output = record(result?.output);
     const stdout = string(output?.stdout);
     const stderr = string(output?.stderr);
+    const task = string(args?.task) ?? string(record(output?.task)?.id);
+    const hasInput = typeof args?.input === "string" && args.input.length > 0;
     return <div className="tc-view">
-        {string(args?.command) && <div className="tc-command"><span aria-hidden="true">$</span>
-            <code>{string(args?.command)}</code></div>}
+        {name === "task_input"
+            ? <InfoStrip>Task: {task ?? "task"}{hasInput ? " · input sent" : ""}</InfoStrip>
+            : string(args?.command) && <div className="tc-command"><span aria-hidden="true">$</span>
+                <code>{string(args?.command)}</code></div>}
         {string(args?.cwd) && <InfoStrip>Directory: {string(args?.cwd)}</InfoStrip>}
         <KeySummary output={output} />
         {stdout && <Terminal text={stdout} title="stdout"
@@ -44,7 +48,7 @@ function ShellView({ input, result }: ToolCallPresentation): ReactNode {
             ? <Notice>Loading retained terminal output…</Notice>
             : (number(output?.stdoutBytes) ?? 0) > 0 || (number(output?.stderrBytes) ?? 0) > 0
                     ? <Notice>Retained terminal output is unavailable or has expired.</Notice>
-                    : <Notice>Command produced no terminal output.</Notice>)}
+                    : <Notice>{name === "task_input" ? "No new terminal output." : "Command produced no terminal output."}</Notice>)}
         {output?.stdoutTruncated === true || output?.stderrTruncated === true
             ? <Notice tone="warning">Output was truncated by the tool.</Notice> : null}
         {string(output?.termination) && <InfoStrip>Termination: {string(output?.termination)}</InfoStrip>}
@@ -173,45 +177,57 @@ function warnings(output: Item | undefined): ReactNode {
         {string(item.message) ?? string(item.code) ?? "Terminal warning"}</Notice>);
 }
 
-function TmuxView({ name, input, result }: ToolCallPresentation): ReactNode {
+function taskSummaryText(task: Item): string {
+    const id = string(task.id) ?? "task";
+    const name = string(task.name);
+    const label = name ? `${name} (${id})` : id;
+    const parts = [
+        label,
+        string(task.kind),
+        string(task.state),
+        task.pty === true ? "pty" : undefined,
+        task.persistent === true ? "persistent" : undefined,
+        task.humanControl === true ? "human control" : undefined,
+        number(task.exitCode) !== undefined ? `exit ${number(task.exitCode)}` : undefined,
+    ].filter(Boolean);
+    return parts.join(" · ");
+}
+
+function ProcessView({ name, input, result }: ToolCallPresentation): ReactNode {
     const args = record(input);
     const output = record(result?.output);
-    const task = record(output?.task);
-    const pane = record(output?.pane);
-    const panes = entries(output?.panes);
-    const lines = textList(output?.output);
+    const tasks = entries(output?.tasks);
+    const createdTask = record(output?.task);
+    const terminationTask = output?.killRequested === true ? string(output.taskId) : undefined;
+    const state = string(output?.state);
+    if (name === "task_inspect") {
+        const task = string(output?.task) ?? string(args?.task);
+        const rows = number(output?.rows);
+        const cols = number(output?.cols);
+        const info = [
+            task,
+            string(output?.state),
+            rows !== undefined && cols !== undefined ? `${cols}×${rows}` : undefined,
+            output?.humanControl === true ? "human control" : undefined,
+            output?.alternateScreen === true ? "alternate screen" : undefined,
+        ].filter(Boolean).join(" · ");
+        return <div className="tc-view">
+            {info && <InfoStrip>{info}</InfoStrip>}
+            {string(output?.text) && <Terminal title="Terminal snapshot" text={string(output?.text)!} />}
+            {warnings(output)}
+        </div>;
+    }
     return <div className="tc-view">
-        <div className="tc-stats">
-            <Stat label="Task" value={string(task?.id)} />
-            <Stat label="Pane" value={string(pane?.name) ?? string(pane?.id)} />
-            {task?.status !== undefined && <TaskState status={task.status} />}
-            {string(output?.waitReason) && <Stat label="Wait" value={string(output?.waitReason)} />}
-        </div>
-        {string(args?.command) && name === "tmux_run" &&
-            <div className="tc-command"><span aria-hidden="true">$</span><code>{string(args?.command)}</code></div>}
-        {name === "tmux_input" && <InfoStrip>Input sent to {string(args?.task) ??
-            string(args?.pane) ?? "terminal"}</InfoStrip>}
-        {output?.detached === true && <Notice>The task is detached; it may still be running.</Notice>}
-        {output?.interrupted === true && <Notice tone="warning">Waiting stopped, not the task.</Notice>}
-        {(output?.timedOut === true || output?.waitReason === "timeout") &&
-            <Notice tone="warning">The wait timed out; the task may still be running.</Notice>}
-        {panes.length ? <div className="tc-pane-list">{panes.map((item, index) =>
-            <section className="tc-pane" key={index}>
-                <div className="tc-file-header"><strong>{string(item.name) ?? "Pane"}</strong>
-                    <TaskState status={item.status} /></div>
-                {string(item.cwd) && <InfoStrip>Directory: {string(item.cwd)}</InfoStrip>}
-                {string(item.command) && <InfoStrip>Command: {string(item.command)}</InfoStrip>}
-                {textList(item.lines).length > 0 &&
-                    <Terminal title={string(item.name) ?? "Pane"} text={textList(item.lines).join("\n")} />}
-            </section>)}</div> : null}
-        {lines.length > 0 && <Terminal title="Task transcript" text={lines.join("\n")} />}
-        {name === "tmux_manage" && string(output?.closedTaskId) &&
-            <Notice>Closed task: {string(output?.closedTaskId)}</Notice>}
-        {name === "tmux_manage" && string(output?.closedPaneId) &&
-            <Notice>Closed pane: {string(output?.closedPaneId)}</Notice>}
+        {tasks.map((task, index) => <InfoStrip key={index}>{taskSummaryText(task)}</InfoStrip>)}
+        {Array.isArray(output?.tasks) && tasks.length === 0 && <Notice>No active tasks.</Notice>}
+        {createdTask && <InfoStrip>{taskSummaryText(createdTask)}</InfoStrip>}
+        {createdTask && <ValueRows value={createdTask} />}
+        {terminationTask && <InfoStrip>{state === "exited" || state === "failed"
+            ? `Task ${terminationTask} ended (state: ${state}).`
+            : `Termination requested for task ${terminationTask}${state === "running" ? "; it is still running" : ""}. Poll for the final state.`}</InfoStrip>}
+        {name === "task_manage" && !Array.isArray(output?.tasks) && !createdTask && !terminationTask &&
+            <ValueRows value={output ?? {}} />}
         {warnings(output)}
-        {!lines.length && !panes.length && name === "tmux_read" &&
-            <Notice>No additional transcript lines were returned.</Notice>}
     </div>;
 }
 
@@ -274,11 +290,9 @@ const renderers: Record<string, Renderer> = {
     file_grep: SearchView,
     file_glob: GlobView,
     file_edit: EditView,
-    tmux_run: TmuxView,
-    tmux_read: TmuxView,
-    tmux_input: TmuxView,
-    tmux_inspect: TmuxView,
-    tmux_manage: TmuxView,
+    task_input: ShellView,
+    task_inspect: ProcessView,
+    task_manage: ProcessView,
     progress_report: ReportView,
     artifact_viewImage: ImageView,
     environ_info: EnvironmentView,
@@ -292,7 +306,7 @@ export function ToolCallDetails(view: ToolCallPresentation): ReactNode {
     // Old audit entries may lack typed output. Preserve the recorded text
     // without treating a debugging dump as the primary display for new calls.
     if (view.result?.output === undefined && view.detail) {
-        if (view.name === "bash_run" || view.name.startsWith("tmux_"))
+        if (view.name === "bash_run" || view.name === "task_input")
             return <Terminal text={view.detail} title="Recorded output" />;
         if (view.name === "file_read" || view.name === "file_grep")
             return <CodeLines text={view.detail} />;

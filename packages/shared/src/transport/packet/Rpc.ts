@@ -89,6 +89,7 @@ export class Rpc {
         method: string,
         message?: Message,
         signal?: AbortSignal,
+        options?: { awaitCancellationReply?: boolean },
     ): Promise<T> {
         if (!(this.#target instanceof Connection))
             throw new Error("RPC request requires a Connection.");
@@ -104,7 +105,7 @@ export class Rpc {
         });
         let rejectCancellation: ((reason?: unknown) => void) | undefined;
         const cancellation =
-            signal === undefined
+            signal === undefined || options?.awaitCancellationReply === true
                 ? undefined
                 : new Promise<never>((_resolve, reject) => {
                       rejectCancellation = reject;
@@ -112,9 +113,12 @@ export class Rpc {
         const abort = () => {
             const pending = this.#pending.get(id);
             if (pending === undefined) return;
-            this.#pending.delete(id);
-            const reason = signal!.reason;
-            rejectCancellation!(reason);
+            // Side-effecting calls can require the remote terminal reply:
+            // cancellation requests cleanup, not abandonment of its evidence.
+            if (options?.awaitCancellationReply !== true) {
+                this.#pending.delete(id);
+                rejectCancellation!(signal!.reason);
+            }
             if (connection.connected)
                 void connection.send({ protocol: "rpc", type: "cancel", id })
                     .catch((error: unknown) => {
@@ -127,14 +131,19 @@ export class Rpc {
                 cancellation === undefined
                     ? response
                     : Promise.race([response, cancellation]);
+            const sending = connection.send({
+                protocol: "rpc",
+                type: "request",
+                id,
+                method,
+                ...(message === undefined ? {} : { message }),
+            } satisfies RpcPacket);
             const [, value] = await Promise.all([
-                connection.send({
-                    protocol: "rpc",
-                    type: "request",
-                    id,
-                    method,
-                    ...(message === undefined ? {} : { message }),
-                } satisfies RpcPacket),
+                options?.awaitCancellationReply === true
+                    ? sending.catch((error: unknown) => {
+                        throw uncertainResult(error instanceof Error ? error : new Error(String(error)));
+                    })
+                    : sending,
                 outcome,
             ]);
             return value as T;

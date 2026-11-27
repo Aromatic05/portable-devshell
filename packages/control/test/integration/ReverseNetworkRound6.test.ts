@@ -29,11 +29,20 @@ test("Round6 WSS replay of old sequences after newer ACKs does not redeliver RPC
     const f = await fixture(t);
     const worker = f.connect(await f.enroll(), 9);
     await worker.ready;
-    const count = worker.acks.length;
-    await worker.replay(2);
-    await worker.replay(0);
-    await worker.replay(1);
-    await until(() => worker.acks.length === count + 3);
+    const indices = [2, 0, 1];
+    const ackFor = (index: number) => {
+        const frame = worker.frames[index]!;
+        return `DSR2:${frame.subarray(4, 20).toString("hex")}:${frame.readBigUInt64BE(20)}`;
+    };
+    // Wait for the original acknowledgements and then for the exact replay ACKs.
+    // Background RPC replies may be acknowledged concurrently.
+    await until(() => indices.every((index) => worker.frames[index] !== undefined && worker.acks.includes(ackFor(index))));
+    for (const index of indices) {
+        const ack = ackFor(index);
+        const count = worker.acks.filter((value) => value === ack).length;
+        await worker.replay(index);
+        await until(() => worker.acks.filter((value) => value === ack).length === count + 1);
+    }
     assert.deepEqual(await ping(f.alpha), { pong: true });
     assert.deepEqual(worker.methods, ["worker.ping", "worker.handshake", "tools.list", "worker.ping"]);
     assert.equal(worker.socket.readyState, WebSocket.OPEN);

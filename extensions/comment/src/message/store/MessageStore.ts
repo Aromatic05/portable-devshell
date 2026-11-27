@@ -232,6 +232,38 @@ export class MessageStore {
         });
     }
 
+    async readHandoffCursor(): Promise<number | undefined> {
+        return await this.#exclusive(async () => {
+            const row = await (await this.#open()).get<{ value: string }>(
+                "SELECT value FROM message_metadata WHERE key = 'handoff.cursor'", [],
+            );
+            if (row === undefined) return undefined;
+            const cursor = Number(row.value);
+            if (!Number.isSafeInteger(cursor) || cursor < 0 || String(cursor) !== row.value)
+                throw new Error("Invalid terminal handoff checkpoint");
+            return cursor;
+        });
+    }
+
+    async writeHandoffCursor(seq: number): Promise<void> {
+        await this.#exclusive(async () => {
+            await (await this.#open()).run(`INSERT INTO message_metadata(key, value)
+                VALUES ('handoff.cursor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(seq)]);
+        });
+    }
+
+    async handoffRecipient(id: string, candidate?: string): Promise<string | undefined> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            const key = `handoff.recipient:${id}`;
+            if (candidate !== undefined)
+                await database.run("INSERT INTO message_metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING", [key, candidate]);
+            return (await database.get<{ value: string }>(
+                "SELECT value FROM message_metadata WHERE key = ?", [key],
+            ))?.value;
+        });
+    }
+
     async readControlState(ctxId: string): Promise<MessageControlState> {
         return await this.#exclusive(async () => {
             return await readMessageControlState(await this.#open(), ctxId);

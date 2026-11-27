@@ -52,6 +52,8 @@ pub mod request {
     pub struct RpcRequestContext {
         pub request_id: Option<String>,
         pub operation_id: Option<String>,
+        pub wait_handoff: Option<bool>,
+        pub task_creation_id: Option<String>,
         pub ctx_id: Option<String>,
         pub context_mode: Option<String>,
         pub extension_id: Option<String>,

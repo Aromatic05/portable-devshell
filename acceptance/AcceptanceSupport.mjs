@@ -7,7 +7,6 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
-import { stopTestspaceTmux } from "../scripts/testspace/TestspaceRuntime.mjs";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 export const sourceLoader = resolve(
@@ -152,22 +151,13 @@ export async function createAcceptanceFixture() {
         webPort,
         worker,
         workspace,
-        async cleanup({ retireWorker = false } = {}) {
+        async cleanup() {
             runCli(["instance", "stop", "aromatic-pc"], env, {
                 allowFailure: true,
             });
             runCli(["stop"], env, { allowFailure: true });
-            if (retireWorker) {
-                const retired = spawnSync(worker, ["retire", "--instance", "aromatic-pc"], { env, encoding: "utf8" });
-                assert.equal(retired.status, 0, retired.stderr || retired.error?.message);
-            } else {
-                await stopTestspaceTmux({
-                    devshellHome: join(home, ".devshell"),
-                    instanceName: "aromatic-pc",
-                    runtimeDirectory: runtime,
-                    workspace,
-                });
-            }
+            const retired = spawnSync(worker, ["retire", "--instance", "aromatic-pc"], { env, encoding: "utf8" });
+            assert.equal(retired.status, 0, retired.stderr || retired.error?.message);
             await rm(root, { force: true, recursive: true });
         },
     };

@@ -61,6 +61,7 @@ import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
 import { createMailingService, registerMailing, type MailingRuntime } from "./mailing/index.js";
 import type { MailingNotificationIdentity } from "./mailing/Service.js";
+import { TerminalHandoffWatcher } from "./handoff/Watcher.js";
 
 export type CommentControlDecision =
     | { readonly kind: "allow" }
@@ -153,6 +154,7 @@ export interface CommentRoutePort {
 interface CommentExtensionInstanceState {
     readonly comment: CommentService;
     readonly messageHistory: MessageService;
+    readonly store: MessageStore;
     enabled: boolean;
     readonly key: object;
     readonly report: CommentReportService;
@@ -254,6 +256,13 @@ export class CommentExtension {
         this.#unsubscribe = this.#source.onChange(() => this.#sync());
     }
 
+    readonly handoff = {
+        readCursor: async (instance: string) => await this.#require(instance).store.readHandoffCursor(),
+        writeCursor: async (instance: string, seq: number) => await this.#require(instance).store.writeHandoffCursor(seq),
+        queue: async (instance: string, id: string, text: string, selectRecipient: () => Promise<string | undefined>) =>
+            await this.#require(instance).comment.queueHandoff(id, text, selectRecipient),
+    };
+
     async retireInstance(instance: string, reason: string): Promise<void> {
         const state = this.#instances.get(instance);
         if (state === undefined) return;
@@ -322,6 +331,7 @@ export class CommentExtension {
             const next: CommentExtensionInstanceState = {
                 comment: commentService,
                 messageHistory: messageService,
+                store,
                 enabled: true,
                 key: instance.key,
                 report: new CommentReportService({
@@ -397,8 +407,10 @@ export class CommentExtension {
 
 interface BuiltinCommentRuntime {
     readonly comment: CommentExtension;
+    readonly handoff: TerminalHandoffWatcher;
     readonly mailing: MailingRuntime;
     readonly source: BuiltinCommentInstanceSource;
+    readonly unsubscribeHandoff: () => void;
 }
 
 let builtinRuntime: BuiltinCommentRuntime | undefined;
@@ -439,6 +451,18 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const mailing = createMailingService(context, {
         queue: async (instance, ctxId, text, identity) => await comment.comment.queue(instance, ctxId, text, identity),
     });
+    const handoff = new TerminalHandoffWatcher({
+        contextObserve: context.capabilities.contextObserve,
+        instanceObserve,
+        onError: (instance, error) =>
+            context.logger.warn("Terminal handoff watcher error", {
+                instance,
+                message: error instanceof Error ? error.message : String(error),
+            }),
+        ...comment.handoff,
+    });
+    handoff.sync(source.list());
+    const unsubscribeHandoff = source.onChange(() => handoff.sync(source.list()));
     const gate = createCommentToolCallGate(comment.comment);
     const delivery = createCommentDelivery(comment.comment);
     const advice = createCommentAdvice();
@@ -464,7 +488,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         "progress_report",
         createProgressReportTool(source, comment.comment),
     );
-    builtinRuntime = { comment, mailing, source };
+    builtinRuntime = { comment, handoff, mailing, source, unsubscribeHandoff };
     // Resume pre-existing Context workspaces immediately; periodic polling
     // will also recover from temporarily unavailable Workers.
     void mailing.poll().catch((error) =>
@@ -479,6 +503,7 @@ export async function instanceGenerationRetired(
 ): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
+    await runtime.handoff.retireInstance(event.instance);
     await runtime.mailing.retireInstance(event.instance);
     await runtime.comment.retireInstance(
         event.instance,
@@ -509,6 +534,8 @@ export async function contextEnvironmentRetired(
 export async function deactivate(): Promise<void> {
     const runtime = builtinRuntime;
     builtinRuntime = undefined;
+    runtime?.unsubscribeHandoff();
+    await runtime?.handoff.close();
     await runtime?.mailing.close();
     await runtime?.comment.close();
 }

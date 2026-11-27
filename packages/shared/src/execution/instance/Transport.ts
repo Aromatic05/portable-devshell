@@ -22,6 +22,7 @@ export interface InstanceRuntimeTransport {
     releaseReference(reference: string): Promise<void>;
     subscribeEvents(
         fromSeq: number,
+        signal?: AbortSignal,
     ): Promise<EventStreamPort<InstanceEventRecord>>;
 }
 
@@ -53,9 +54,9 @@ export function createInstanceRuntimeTransport(
         releaseReference: async (reference) => {
             await port.request("releaseReference", { reference });
         },
-        subscribeEvents: async (fromSeq) =>
+        subscribeEvents: async (fromSeq, signal) =>
             new EventStreamReader<InstanceEventRecord>(
-                await port.open("subscribeEvents", { fromSeq }),
+                await port.open("subscribeEvents", { fromSeq }, signal),
                 {
                     decodeEvent: readInstanceEvent,
                     readGap: readStreamGapPayload,

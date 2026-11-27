@@ -5,7 +5,6 @@ use crate::daemon::process::{self, DaemonState};
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
 use crate::instance::{InstanceLock, InstanceName};
-use crate::tool::tmux;
 use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
@@ -51,7 +50,7 @@ pub fn retire_instance(instance: &InstanceName) -> Result<bool, String> {
         DaemonState::Stopped => {}
     }
 
-    tmux::retire_instance_runtime(&instance_paths, &socket_paths, instance.as_str())?;
+    crate::capability::process::client::retire(instance, &instance_paths, &socket_paths)?;
     process::clear_runtime_files(&instance_paths, &socket_paths)?;
     remove_file(&instance_paths.config_file)?;
     remove_tree(&instance_paths.artifacts_dir)?;

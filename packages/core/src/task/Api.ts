@@ -34,6 +34,11 @@ export interface TaskPaths {
     waitsFile: string;
 }
 
+export interface WaitLeasePort {
+    confirm(owner: string, task: string): Promise<boolean>;
+    reconcile(owners: readonly string[]): Promise<void>;
+}
+
 export interface TaskRuntimeOptions {
     appendEvent(type: string, data: JsonValue): Promise<void>;
     instanceName: InstanceName;
@@ -44,10 +49,13 @@ export interface TaskRuntimeOptions {
         signal?: AbortSignal,
     ): Promise<JsonValue>;
     paths: TaskPaths;
+    waitLeases: WaitLeasePort;
 }
 
 export interface TaskRuntime {
     readonly api: TaskApi;
+    beginWaitCall(callId: string): Promise<void>;
+    finishWaitCall(callId: string): Promise<void>;
     close(): Promise<void>;
     resume(): void;
 }

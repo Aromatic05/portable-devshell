@@ -1,0 +1,184 @@
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use schemars::JsonSchema;
+use serde::Serialize;
+
+use crate::capability::artifact::types::ArtifactReference;
+use crate::tool::ToolError;
+
+const CURSOR_PREFIX: &str = "tc3_";
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TaskCursor {
+    pub generation: Option<u64>,
+    pub seq: u64,
+    pub stdout: usize,
+    pub stderr: usize,
+}
+
+impl TaskCursor {
+    pub(crate) fn encode(&self, task: &str) -> String {
+        let generation = self
+            .generation
+            .expect("encoded task cursors must identify a shell generation");
+        let payload = format!("{task}:{generation}:{}:{}:{}", self.seq, self.stdout, self.stderr);
+        format!("{CURSOR_PREFIX}{}", URL_SAFE_NO_PAD.encode(payload))
+    }
+
+    pub(crate) fn decode_for(raw: &str, expected_task: &str) -> Result<Self, ToolError> {
+        let invalid = || ToolError::new("tool.invalidArguments", "invalid task cursor");
+        let encoded = raw.strip_prefix(CURSOR_PREFIX).ok_or_else(invalid)?;
+        let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| invalid())?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| invalid())?;
+        let mut parts = text.split(':');
+        let task = parts.next().filter(|task| !task.is_empty()).ok_or_else(invalid)?;
+        let generation = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse::<u64>()
+            .map_err(|_| invalid())?;
+        let seq = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse::<u64>()
+            .map_err(|_| invalid())?;
+        let stdout = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse::<usize>()
+            .map_err(|_| invalid())?;
+        let stderr = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse::<usize>()
+            .map_err(|_| invalid())?;
+        if parts.next().is_some() {
+            return Err(invalid());
+        }
+        if task != expected_task {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                "task cursor does not belong to task",
+            ));
+        }
+        Ok(Self {
+            generation: Some(generation),
+            seq,
+            stdout,
+            stderr,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDescriptor {
+    pub id: String,
+    pub status: String,
+    pub pty: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub human_control: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate_screen: Option<bool>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BashRunOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub term_signal: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    /// Read-only virtual path for retained stdout when recovery storage is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<String>,
+    /// Read-only virtual path for retained stderr when recovery storage is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_artifact: Option<ArtifactReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_artifact: Option<ArtifactReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_warnings: Option<Vec<String>>,
+    pub duration_ms: u128,
+    pub termination: BashTermination,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_exit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskDescriptor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum BashTermination {
+    Exited,
+    Signaled,
+    Timeout,
+    Running,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TaskCursor, TaskDescriptor};
+
+    #[test]
+    fn task_descriptor_omits_alternate_screen_when_none_and_serializes_true() {
+        let normal = serde_json::to_value(TaskDescriptor {
+            id: "proc-1".into(),
+            status: "running".into(),
+            pty: true,
+            human_control: None,
+            alternate_screen: None,
+        })
+        .unwrap();
+        assert!(normal.get("alternateScreen").is_none(), "{normal}");
+
+        let alternate = serde_json::to_value(TaskDescriptor {
+            id: "proc-1".into(),
+            status: "running".into(),
+            pty: true,
+            human_control: None,
+            alternate_screen: Some(true),
+        })
+        .unwrap();
+        assert_eq!(
+            alternate.get("alternateScreen"),
+            Some(&serde_json::json!(true)),
+            "{alternate}"
+        );
+    }
+
+    #[test]
+    fn opaque_cursor_round_trips_and_rejects_malformed_values() {
+        let task = "process-example";
+        let cursor = TaskCursor {
+            generation: Some(7),
+            seq: 42,
+            stdout: 1024,
+            stderr: 256,
+        };
+        let encoded = cursor.encode(task);
+        assert!(encoded.starts_with("tc3_"));
+        assert_eq!(TaskCursor::decode_for(&encoded, task).unwrap(), cursor);
+
+        for invalid in ["", "tc3_", "tc2_MjoxOjI6Mw", "tc3_!!!", "tc3_cHJvY2Vzcy1leGFtcGxlOjE", "tc3_cHJvY2Vzcy1leGFtcGxlOjE6MjozOjQ6NQ"] {
+            let err = TaskCursor::decode_for(invalid, task).unwrap_err();
+            assert_eq!(err.code, "tool.invalidArguments");
+            assert_eq!(err.message, "invalid task cursor");
+        }
+    }
+}

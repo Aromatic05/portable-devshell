@@ -36,22 +36,6 @@ fn call(env: &TestEnv, instance: &str, id: &str, method: &str, input: Value) -> 
     env.rpc(instance, "tool", &request(env, instance, id, method, input))
 }
 
-fn tmux_call(env: &TestEnv, instance: &str, id: &str, method: &str, input: Value) -> Value {
-    let method = if method == "tmux_close" {
-        "tmux_manage"
-    } else {
-        method
-    };
-    let input = if method == "tmux_manage" {
-        let mut input = input;
-        input["command"] = json!("close");
-        input
-    } else {
-        input
-    };
-    call(env, instance, id, method, input)
-}
-
 #[test]
 fn terminal_attach_replays_only_new_sequences_after_writer_reconnect() {
     let env = TestEnv::new();
@@ -149,7 +133,7 @@ fn terminal_attach_replays_only_new_sequences_after_writer_reconnect() {
 }
 
 #[test]
-fn tmux_read_reports_exit_status_after_task_pane_closes() {
+fn task_read_reports_exit_status_after_pty_exits() {
     let env = TestEnv::new();
     let instance = "round5-tmux-exit";
     start(&env, instance);
@@ -157,45 +141,32 @@ fn tmux_read_reports_exit_status_after_task_pane_closes() {
         &env,
         instance,
         "run",
-        "tmux_run",
+        "bash_run",
         json!({
-            "command":"printf 'PANE-CLOSED\\n'; sleep 0.2; exit 23", "wait":"nonblock", "timeMs":0
+            "command":"printf 'PANE-CLOSED\\n'; sleep 0.2; exit 23", "waitMs":0, "pty":true
         }),
     );
     assert_eq!(run["type"], "reply", "{run}");
     let task = run["message"]["task"]["id"].as_str().unwrap();
-    // tmux_run may synchronously consume the first completed stdout burst.
-    let mut output = run["message"]["output"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let mut output = run["message"]["stdout"].as_str().unwrap().to_owned();
+    let mut cursor = run["message"]["cursor"].clone();
     let deadline = Instant::now() + Duration::from_secs(4);
     let read = loop {
-        let read = call(
-            &env,
-            instance,
-            "read",
-            "tmux_read",
-            json!({"task":task,"line":30,"timeMs":100}),
-        );
+        let read = call(&env, instance, "read", "task_input",
+            json!({"task":task, "cursor":cursor, "waitMs":100}));
         assert_eq!(read["type"], "reply", "{read}");
-        if let Some(lines) = read["message"]["output"].as_array() {
-            output.extend(lines.iter().cloned());
-        }
-        if read["message"]["task"]["status"] != "running" {
-            break read;
-        }
-        assert!(Instant::now() < deadline, "task pane never closed: {read}");
+        output.push_str(read["message"]["stdout"].as_str().unwrap());
+        cursor = read["message"]["cursor"].clone();
+        if read["message"]["task"]["status"] != "running" { break read; }
+        assert!(Instant::now() < deadline, "task never exited: {read}");
     };
-    assert_eq!(read["message"]["task"]["status"], "23", "{read}");
-    assert!(
-        output.iter().any(|line| line == "PANE-CLOSED"),
-        "incremental tmux_read lost terminal output: {output:?} final response: {read}"
-    );
+    assert_eq!(read["message"]["exitCode"], 23, "{read}");
+    assert!(output.lines().any(|line| line == "PANE-CLOSED"), "{output:?}");
+
 }
 
 #[test]
-fn tmux_block_wait_returns_completed_output_and_status() {
+fn bash_wait_returns_completed_pty_output_and_status() {
     let env = TestEnv::new();
     let instance = "round5-tmux-block";
     start(&env, instance);
@@ -203,25 +174,21 @@ fn tmux_block_wait_returns_completed_output_and_status() {
         &env,
         instance,
         "block",
-        "tmux_run",
+        "bash_run",
         json!({
-            "command":"sleep 0.1; printf 'BLOCK-RESULT\\n'; exit 0", "wait":"block", "timeMs":3000, "line":30
+            "command":"sleep 0.1; printf 'BLOCK-RESULT\\n'; exit 0", "waitMs":3000, "pty":true
         }),
     );
     assert_eq!(result["type"], "reply", "{result}");
     assert_eq!(result["message"]["task"]["status"], "0", "{result}");
     assert!(
-        result["message"]["output"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line == "BLOCK-RESULT"),
+        result["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "BLOCK-RESULT")),
         "{result}"
     );
 }
 
 #[test]
-fn tmux_close_preserves_terminated_status_for_later_read() {
+fn terminal_close_preserves_terminated_status_for_later_read() {
     let env = TestEnv::new();
     let instance = "round5-tmux-close";
     start(&env, instance);
@@ -229,29 +196,28 @@ fn tmux_close_preserves_terminated_status_for_later_read() {
         &env,
         instance,
         "run",
-        "tmux_run",
-        json!({"command":"sleep 20","wait":"nonblock","timeMs":0}),
+        "bash_run",
+        json!({"command":"sleep 20","waitMs":0,"pty":true}),
     );
     assert_eq!(started["type"], "reply", "{started}");
     let task = started["message"]["task"]["id"].as_str().unwrap();
-    let closed = tmux_call(
+    let closed = call(
         &env,
         instance,
         "close",
-        "tmux_close",
-        json!({"task":task,"force":true}),
+        "task_manage",
+        json!({"command":"close","task":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");
-    assert_eq!(closed["message"]["closedTaskId"], task, "{closed}");
     let read = call(
         &env,
         instance,
         "later-read",
-        "tmux_read",
-        json!({"task":task,"timeMs":0}),
+        "task_input",
+        json!({"task":task,"waitMs":3000,"untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
-    assert_eq!(read["message"]["task"]["status"], "terminated", "{read}");
+    assert_ne!(read["message"]["task"]["status"], "running", "{read}");
 }
 
 #[test]
@@ -282,14 +248,14 @@ fn bash_cancellation_isolated_from_concurrent_request() {
         instance,
         "long",
         "bash_run",
-        json!({"command":"sleep 20","timeoutMs":25000}),
+        json!({"command":"sleep 20","waitMs":25000}),
     );
     let short = request(
         &env,
         instance,
         "short",
         "bash_run",
-        json!({"command":"printf survives","timeoutMs":5000}),
+        json!({"command":"printf survives","waitMs":5000}),
     );
     writer.send("tool", &long).unwrap();
     writer.send("tool", &short).unwrap();

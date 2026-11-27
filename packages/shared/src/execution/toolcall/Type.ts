@@ -13,7 +13,7 @@ type ToolCallStatus =
     | "queueTimeout"
     | "cancelled";
 type ToolCallFailureStage = "postExecution" | "outboundHook";
-type ToolTermination = "exited" | "signaled" | "timeout";
+type ToolTermination = "exited" | "signaled" | "timeout" | "running";
 
 export interface ToolDefinition {
     _meta?: JsonValue;
@@ -37,6 +37,8 @@ export const statelessMcpContextId = "57a7e1e5-5000-8000-8000-000000000000";
 export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
+    /** Internal destination-Core flag; the Worker pins a running Wait handoff. */
+    waitHandoff?: boolean;
     ctxId?: string;
     extensionId?: string;
     workspace?: string;

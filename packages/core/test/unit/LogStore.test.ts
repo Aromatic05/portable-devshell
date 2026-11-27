@@ -752,7 +752,7 @@ test("ToolCallHistory can exclude the detached wait owner from Context activity"
     });
     await history.started(
         "call-wait-owner",
-        "tmux_run",
+        "bash_run",
         "{}",
         { ctxId: "ctx-active", source: "mcp" },
         "2026-09-01T00:00:00.000Z",
@@ -825,7 +825,7 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 source: "mcp",
                 startedAt: "2026-09-01T10:59:00.000Z",
                 status: "queueTimeout",
-                toolName: "tmux_run",
+                toolName: "bash_run",
                 workspace: "/repo/a",
             },
             {

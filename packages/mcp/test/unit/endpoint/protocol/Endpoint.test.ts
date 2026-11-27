@@ -229,14 +229,14 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     );
 });
 
-test("tmux_run does not render a Workspace App", () => {
+test("bash_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
         tools: [
             {
-                description: "Run one tmux task",
-                group: "tmux",
+                description: "Run one process task",
+                group: "bash",
                 inputSchema: { type: "object" },
-                name: "tmux_run",
+                name: "bash_run",
                 outputSchema: { type: "object" },
                 requiredCapabilities: [],
             },
@@ -249,7 +249,7 @@ test("tmux_run does not render a Workspace App", () => {
         toolSource: harness.toolRegistry,
     })
         .listTools()
-        .find((entry) => entry.name === "tmux_run");
+        .find((entry) => entry.name === "bash_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
     assert.equal(meta?.["openai/outputTemplate"], undefined);
@@ -618,6 +618,110 @@ test("tools/list exposes the fixed worker catalog without group or capability fi
     }
 });
 
+test("stateless tools/list preserves bash lifecycle guidance without advertising the model CLI", async () => {
+    const description = "Do not background long-lived services with '&' (process groups are cleaned up on shell exit); instead run them in the foreground with a short waitMs.";
+    const commandHint = "Shell command. Run in foreground with a short waitMs (not '&') for background services.";
+    const toolSource = new TestToolSource();
+    toolSource.register("demo", [{
+        name: "bash_run",
+        group: "bash",
+        description,
+        inputSchema: {
+            type: "object",
+            properties: { command: { type: "string" }, cwd: { type: "string" } },
+            required: ["command"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["execute"],
+        _meta: { devshell: { mcp: { inputHints: {
+            command: commandHint,
+            cwd: "Working directory relative to the workspace.",
+        } } } },
+    }]);
+    const binding = new McpEndpointBinding(createTestMcpEndpoint({
+        contextMode: "stateless",
+        instanceName: "demo",
+        toolSource,
+    }));
+    const server = await createBindingServer(binding);
+
+    try {
+        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"));
+
+        assert.equal(response.status, 200);
+        const [bash] = response.body.result.tools as Array<{
+            name: string;
+            description: string;
+            inputSchema: { required: string[]; properties: Record<string, { description?: string }> };
+        }>;
+        assert.equal(bash?.name, "bash_run");
+        assert.equal(bash.description, description);
+        assert.equal(bash.inputSchema.properties.command?.description, commandHint);
+        assert.deepEqual(bash.inputSchema.required, ["command", "cwd"]);
+        assert.equal(bash.inputSchema.properties.cwd?.description, "Required absolute working directory on the Worker.");
+        assert.doesNotMatch(JSON.stringify(bash), /devshell help/u);
+    } finally {
+        await server.close();
+    }
+});
+
+test("caller-correctable process tool errors map to JSON-RPC InvalidParams", async () => {
+    for (const code of [
+        "rpc.invalidParams",
+        "process.notFound",
+        "process.notTerminal",
+        "process.stdinClosed",
+        "process.exited",
+        "process.controlOwned",
+    ]) {
+        const harness = createWorkerHarness({
+            callHandler: async () => {
+                throw createRemoteError({
+                    code,
+                    message: `${code} failure`,
+                    retryable: false,
+                });
+            },
+        });
+        const binding = createBinding(harness);
+        const server = await createBindingServer(binding);
+        try {
+            const session = await initialize(server.url);
+            const envResponse = await postJson(
+                server.url,
+                {
+                    id: "req-env",
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        arguments: { workspace: "/workspace" },
+                        name: "environ_info",
+                    },
+                },
+                session.headers,
+            );
+            const ctxId = envResponse.body.result.structuredContent.ctxId as string;
+            const response = await postJson(
+                server.url,
+                {
+                    id: `req-${code}`,
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        arguments: { command: "pwd", ctxId },
+                        name: "bash_run",
+                    },
+                },
+                session.headers,
+            );
+            assert.equal(response.body.error?.code, -32602, `expected InvalidParams for ${code}`);
+            assert.equal(response.body.error?.data?.code, code);
+        } finally {
+            await server.close();
+        }
+    }
+});
+
 test("removed tool recipients are strictly rejected over MCP", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
@@ -814,6 +918,33 @@ test("tools/call returns a structured hint when the tool fails", async () => {
     } finally {
         await server.close();
     }
+});
+
+test("tools/call keeps a confirmed task handle in the model-visible error", async (t) => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const harness = createWorkerHarness({
+        async callHandler() {
+            throw createRemoteError({
+                code: "process.hostFailed",
+                message: `Task started (taskId=${taskId}). Inspect this task; do not repeat the creation call.`,
+                retryable: false,
+                details: { taskId, taskStart: "confirmed", stdoutTail: "private tail" },
+            });
+        },
+    });
+    const server = await createBindingServer(createBinding(harness));
+    t.after(() => server.close());
+    const session = await initialize(server.url);
+    const ctxId = await createContext(server.url, session.headers);
+    const response = await postJson(
+        server.url,
+        withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+        session.headers,
+    );
+    assert.equal(response.body.error?.data?.code, "process.hostFailed");
+    assert.equal(response.body.error?.data?.retryable, false);
+    assert.deepEqual(response.body.error?.data?.details, { taskId, taskStart: "confirmed" });
+    assert.match(response.body.error?.message ?? "", /do not repeat the creation call/u);
 });
 
 test("tools/call exposes correctable input errors without masking their code", async () => {

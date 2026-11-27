@@ -6,11 +6,11 @@ import {
 } from "./BetaMatrixRound5Harness.js";
 import { AppView } from "./App.js";
 
-test("round5: destroying Inline wait aborts observation without dispatching a tmux stop; audit restores independently", async () => {
+test("round5: destroying Inline wait aborts observation without dispatching a process stop; audit restores independently", async () => {
     Object.assign(window, { openai: { toolResponseMetadata: { "portable-devshell/mcpapp": capability() } } });
     const state = snapshot();
-    state.activity = [{ callId: "tmux-call", name: "tmux_run", taskId: "task-tmux-a", state: "completed",
-        at: "2026-10-20T00:00:00Z", output: { task: { id: "task-tmux-a", status: "running" }, output: ["Build still running"] } }];
+    state.activity = [{ callId: "process-call", name: "bash_run", taskId: "task-process-a", state: "completed",
+        at: "2026-10-20T00:00:00Z", output: { task: { id: "task-process-a", status: "running" }, stdout: "Build still running\n", termination: "running" } }];
     const signals: AbortSignal[] = [];
     serve((url, init) => {
         if (url.pathname.endsWith("/snapshot")) return response(state);

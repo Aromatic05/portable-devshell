@@ -4,10 +4,7 @@ import type { TuiDomainReader } from "../../app/control/Reader.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import type { TuiTerminalTab } from "../../state/route/Model.js";
 import { renderExpandableBoxLines } from "../../layout/Box.js";
-import {
-    tuiTerminalTabLabel,
-    tuiTerminalTabs,
-} from "../../terminal/tmux/Model.js";
+import { tuiTerminalTabLabel, tuiTerminalTabs } from "../../terminal/Tabs.js";
 import {
     selectErrorMessage,
     selectMainBoxFlowMetrics,
@@ -82,7 +79,6 @@ export function buildTuiTerminalViewportRegion(
     if (
         state.ui.selectedPage !== "terminal" ||
         route.page !== "terminal" ||
-        route.tab !== "instances" ||
         topTuiOverlay(state.interaction.overlays) !== undefined ||
         !isTerminalSizeSupported(viewport.columns, viewport.rows)
     ) {
@@ -380,7 +376,10 @@ function buildTuiOverlayHitRegions(
     if (overlay === undefined) return [];
     const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
     const frame = {
-        height: geometry.contentHeight - tuiBlockHeight(selectErrorMessage(state)) - (state.connection.status === "connecting" ? 1 : 0),
+        height:
+            geometry.contentHeight -
+            tuiBlockHeight(selectErrorMessage(state)) -
+            (state.connection.status === "connecting" ? 1 : 0),
         width: geometry.contentWidth,
         x: geometry.contentX,
         y: geometry.contentY + tuiBlockHeight(selectErrorMessage(state)),
@@ -407,9 +406,9 @@ function buildTuiOverlayHitRegions(
             (candidate) => candidate.approvalId === overlay.approvalId,
         );
     if (approval === undefined) return [];
-    const toolCall = reader.toolCalls.instances[
-        overlay.instance
-    ]?.calls.find((candidate) => candidate.callId === approval.callId);
+    const toolCall = reader.toolCalls.instances[overlay.instance]?.calls.find(
+        (candidate) => candidate.callId === approval.callId,
+    );
     return projectTuiApprovalActions(approval, toolCall, frame).map(
         (action) => ({
             height: 1,

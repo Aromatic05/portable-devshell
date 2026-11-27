@@ -94,7 +94,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     let previous_running = process::daemon_state(&paths, &socket_paths) == DaemonState::Running;
     require_runtime_replacement(previous_running, options.replace_running, instance.as_str())?;
     if previous_running {
-        eprintln!("Replacing running Worker {instance}: stopping the Worker and terminating its managed tmux tasks (--replace-running).");
+        eprintln!("Replacing running Worker {instance}: stopping the Worker and terminating its managed processes (--replace-running).");
     }
     eprintln!("[2/5] Credential accepted for {instance}; preparing worker binary...");
     // Finish fallible binary preparation before stopping a usable local
@@ -121,7 +121,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     let switched = (|| -> Result<(), String> {
         crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
         // Keep persisted user config, logs and artifacts across re-enrollment.
-        crate::tool::tmux::retire_instance_runtime(&paths, &socket_paths, instance.as_str())?;
+        crate::capability::process::client::retire(&instance, &paths, &socket_paths)?;
         let _lock = InstanceLock::acquire(&paths)?;
         let mut config = match &previous_config {
             Some(config) => config.clone(),
@@ -203,7 +203,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
 fn require_runtime_replacement(running: bool, replace_running: bool, instance: &str) -> Result<(), String> {
     if running && !replace_running {
         return Err(format!(
-            "Worker {instance} is already running. Re-enrollment stops it and terminates its managed tmux tasks. For a normal reconnect, do not enroll again; inspect devshell-worker logs --instance {instance}. To intentionally replace it, generate a new Device Code (the submitted code has been consumed) and rerun enroll with --replace-running. The local Worker has not been stopped or reconfigured."
+            "Worker {instance} is already running. Re-enrollment stops it and terminates its managed processes. For a normal reconnect, do not enroll again; inspect devshell-worker logs --instance {instance}. To intentionally replace it, generate a new Device Code (the submitted code has been consumed) and rerun enroll with --replace-running. The local Worker has not been stopped or reconfigured."
         ));
     }
     Ok(())
@@ -243,7 +243,7 @@ mod tests {
         assert!(super::require_runtime_replacement(false, false, "fixture").is_ok());
         assert!(super::require_runtime_replacement(true, true, "fixture").is_ok());
         let error = super::require_runtime_replacement(true, false, "fixture").unwrap_err();
-        assert!(error.contains("terminates its managed tmux tasks"));
+        assert!(error.contains("terminates its managed processes"));
         assert!(error.contains("--replace-running"));
         assert!(error.contains("new Device Code"));
     }

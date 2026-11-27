@@ -129,7 +129,7 @@ async function context(client, workspace, ctxId) {
 
 async function bash(client, ctxId, command) {
     const result = await client.callTool({ name: "bash_run", arguments: {
-        ctxId, command, timeoutMs: 30_000,
+        ctxId, command, waitMs: 30_000,
     } });
     assert.equal(result.isError, false, JSON.stringify(result));
     return result.structuredContent;

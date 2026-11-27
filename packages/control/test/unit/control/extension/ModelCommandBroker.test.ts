@@ -11,7 +11,7 @@ const request = {
 };
 const record = {
     callId: "parent-a", ctxId: "ctx-a", source: "mcp", workspace: "/repo",
-    toolName: "tmux_run", status: "completed", output: { task: { id: "task-a" } },
+    toolName: "bash_run", status: "completed", output: { task: { id: "task-a" } },
 };
 
 async function exercise(parent: Record<string, unknown>) {
@@ -60,7 +60,7 @@ test("Model command broker rejects forged parent provenance before command effec
         { ...record, source: "extension" },
         { ...record, ctxId: "ctx-other" },
         { ...record, workspace: "/other" },
-        { ...record, toolName: "bash_run" },
+        { ...record, toolName: "task_input" },
         { ...record, output: { task: { id: "task-other" } } },
     ]) {
         const result = await exercise(forged);
@@ -69,7 +69,7 @@ test("Model command broker rejects forged parent provenance before command effec
     }
 });
 
-test("Model command broker accepts completed tmux parent only for its returned task identity", async () => {
+test("Model command broker accepts completed process parent only for its returned task identity", async () => {
     const result = await exercise(record);
     assert.equal(result.executions, 1);
     assert.deepEqual(result.effects, ["output", "complete"]);

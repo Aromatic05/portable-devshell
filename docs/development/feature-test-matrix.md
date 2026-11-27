@@ -6,6 +6,8 @@
 >
 > 更新规则：新增工具/Route/Extension Point/Extension/持久化格式时增加对应功能行和证据；所有权改变或功能退役时以用户最近一次明确决策为准。具体测试命令以 [acceptance](acceptance.md)、[testspace](testspace.md) 为准。
 
+1.1.0 起 C17 使用原生 Process Host。本文后续 Beta 各轮的 tmux/psmux 证据为历史记录，不代表新后端的验收结果。
+
 ## 1. 主体链路
 
 ```text
@@ -32,7 +34,7 @@ Human (CLI / TUI / Web)       MCP Host (ChatGPT / SDK)
          │                      │
          ▼                      │
   Rust devshell-worker           │
-  Bash / File / Tmux / Artifact  │
+  Bash / File / Task / Terminal  │
          └──────────┬───────────┘
                     ▼
        Result / Events / Audit / Message
@@ -85,7 +87,7 @@ Workspace、Todo/Goal、Comment/Memory 和 Extension 是跨层能力，**不是�
 | C14 | Goal/Todo/Wait | Goal 创建/管理/推进、Todo Revision/Checkpoint、Wait Handoff/Cancel/Resume、Reentry Ownership | `core/task`、`testspace workflow-smoke`、`testspace long-smoke` | 同 Context 多 App 竞争、人类暂停后不自动抢占 |
 | C15 | Worker Bash | Execute、stdin、stdout/stderr、Timeout、Signal、进程组回收、Shell 差异、大输出恢复 | `worker_contract.rs`、`execution_contract.rs` | Linux/macOS/Windows PowerShell 真实 Shell |
 | C16 | Worker File | Read/Metadata/Outline、Glob/Grep 分页、Snapshot/Coverage、Write/Patch/Rewrite/Delete/Move | `file_tools_v2_contract.rs` | 文件竞争、软链、外部修改、预算分页、Context 快照独立 |
-| C17 | Worker Tmux | Run/Input/Read/Inspect/Manage、Pane、Transcript、Handoff、Adopt、Worker Restart | `tmux_tools_contract.rs`、`test:worker:tmux`、`long-smoke` | Rust ignored 测试单独运行；Windows 内嵌 psmux `tmux_windows_contract.rs` |
+| C17 | Worker Process Host | Pipe/PTY、Task、独立输出游标、人工 Attach/接管、Handoff、Worker Restart、Retire | `process_host_contract.rs`、`test:worker:process`、`long-smoke` | Unix 原生契约；Windows 原生 `process_windows_contract.rs` |
 | C18 | Terminal PTY | Attach、Input、Resize、Detach、Resume Sequence、Backpressure、Retire | `core/terminal`、`tui/terminal`、`control/terminal` | 跨 UI 切换和断线，不能因为 Client 断开杀 PTY |
 | C19 | Artifact | ViewImage、Image Ref/Audit、Share/TTL/Range、Download Quota、Transfer、Direct/Relay、Cancel、GC | `control/artifact`、`ArtifactHttpRoute.test.ts` | 跨 Provider 和离线 Instance、内容大于 Budget、Restart Lease |
 | C20 | Audit/Activity | ToolCall、Event、Log、SQLite、Cursor、Filter、Retention、原输出/图片恢复 | `core/audit`、`web/activity`、`mcpapp/Activity` | Activity 不依赖 Inline 卡片；大输出分页；Unscoped 的来源归属 |
@@ -145,14 +147,14 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 |---|---|---|
 | 所有 TS/JS Package 普通测试 | `pnpm test:packages` | U/I；`package-test-discovery.test.mjs` 防止深层文件遗漏 |
 | 脚本 / 安装格式 | `pnpm test:scripts` | U/I；包括 release/testspace 入口 |
-| Rust Worker 常规测试 | `cargo test --locked --workspace` | U/I；**不包含 `#[ignore]` 的 tmux 契约** |
-| Rust Tmux 完整契约 | `pnpm test:worker:tmux` | Unix 专项 U/I，需 tmux |
-| Windows psmux | `tmux_windows_contract.rs` | Windows 真实执行才是 P；Cross build 不代替 P |
+| Rust Worker 常规测试 | `cargo test --locked --workspace` | U/I；平台专项以单独入口为准 |
+| Rust Process Host 完整契约 | `pnpm test:worker:process` | Unix 原生 Pipe/PTY 专项 U/I |
+| Windows Process Host | `process_windows_contract.rs` | Windows 真实执行才是 P；Cross build 不代替 P |
 | 独立 MCP App Receipt 压测 | `pnpm --filter @portable-devshell/mcp test:stress` | R，未纳入普通 MCP package |
 | Transport 强压测 | `pnpm stress:transport` | R，需要受限 cgroup；不等价于通用 test |
 | 真 Worker/MCP | `pnpm acceptance:worker`、`pnpm acceptance:mcp` | I/E；独立临时 HOME |
 | 真 Web Chromium | `pnpm acceptance:web` | I/E；不等于 ChatGPT Host |
-| 长等待 Handoff | `pnpm acceptance:tmux-handoff` 或 `pnpm testspace long-smoke` | E，跨过 180 秒 |
+| 长等待 Handoff | `pnpm acceptance:process-handoff` 或 `pnpm testspace long-smoke` | E，跨过 180 秒 |
 | Testspace 基础 | `pnpm testspace smoke` | E：Local + Reverse，不包含所有专项 Smoke |
 | Testspace 专项 | `web-smoke`、`comment-smoke`、`mailing-smoke`、`mcpapp-smoke`、`workflow-smoke`、`approval-smoke`、`update-smoke`、`upgrade-smoke` | E；部分 Host 行为模拟，参见各 smoke 说明 |
 | Extension 损坏候选 | `pnpm testspace extension-smoke` | E；会短暂修改 Testspace 的安装 Manifest，**只手动独占执行** |
@@ -166,7 +168,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | A | Control/Instance/Config/Extension Host：异常隔离、Lease、竞态 | `packages/control/test` |
 | B | MCP/OAuth/MCP App：真实 Route、鉴权、Receipt/Reentry | `packages/mcp/test` |
 | C | Core/Transport/Task：Frame/Stream、Pipeline、Wait、Approval | `packages/core/test`、`packages/shared/test` |
-| D | Worker/Tmux/File：执行、并发、跨 Context、持久状态 | `crates/devshell-worker/tests` |
+| D | Worker/Process/File：执行、并发、跨 Context、持久状态 | `crates/devshell-worker/tests` |
 | E | Comment/Mailing/Memory：多 Context、去重、恢复 | `extensions/comment/test` |
 | F | 其余 Extensions：能力边界、生命周期、Direnv/Agent/Skill | `extensions/access/test`、`extensions/agent/test`、`extensions/artifact/test`、`extensions/direnv/test`、`extensions/instance/test`、`extensions/mcp/test`、`extensions/recall/test`、`extensions/secret/test`、`extensions/skill/test`、`extensions/storage/test` |
 
@@ -196,7 +198,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | T15 | C06 | [ReplayRecovery.test.ts](../../packages/shared/test/unit/transport/ReplayRecovery.test.ts) | 重连从正确游标继续消费；Stop 后订阅正确关闭 |
 | T16 | C27/P05 | [execution_contract.rs](../../crates/devshell-worker/tests/execution_contract.rs) | 可选 Environment Driver 的半完成环境回滚；必需 Driver 失败后再次执行不泄漏环境 |
 | T17 | C16 | [file_tools_v2_contract.rs](../../crates/devshell-worker/tests/file_tools_v2_contract.rs) | 不跨 Context 扩大已读 coverage；旧 revision 被拒绝后重新读取可恢复编辑 |
-| T18 | C17 | [tmux_tools_contract.rs](../../crates/devshell-worker/tests/tmux_tools_contract.rs) | tmux 服务丢失后会重建会话，不能把旧 Task 误当成仍活跃的 Task |
+| T18 | C17 | [process_host_contract.rs](../../crates/devshell-worker/tests/process_host_contract.rs) | Worker 重启后接续同一个 Process Host，Instance retirement 回收任务资源 |
 | T19 | C21/X04 | [Mailing.test.ts](../../extensions/comment/test/unit/Mailing.test.ts) | 并发 Mailing 扫描、Memory 认领唯一 Owner、失败投递持久化恢复、Context Scope 不越界 |
 | T20 | C21/X04 | [CommentRecovery.test.ts](../../extensions/comment/test/unit/CommentRecovery.test.ts) | 并发 Comment Consumer 去重、失败 Resume 保留 Stop、Push Budget 跨重启并由 Report 清除 |
 | T21 | X02 | [AgentModelCommand.test.ts](../../extensions/agent/test/unit/AgentModelCommand.test.ts) | Model Agent 无法控制其他 Context 的 Agent；越界启动结果由 Runtime 回收 |
@@ -205,7 +207,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 ### 仍不能凭新增测试宣称通过的场景
 
 - 真实 ChatGPT Host 的 Inline / Fullscreen、工具卡长期存在、OAuth 登录、人机 Approval 和自动 `sendMessage` 交付（H）。
-- SSH、Docker、Podman 的真实 Provider 全组合；Windows x64/ARM64 内嵌 psmux/PowerShell 运行态（P）。
+- SSH、Docker、Podman 的真实 Provider 全组合；Windows x64/ARM64 原生 Process Host/ConPTY/PowerShell 运行态（P）。
 - 有依赖修改的 `extension-smoke`、发行包 `upgrade-smoke`、长达 180 秒的真实 `long-smoke` 需在独立验收环境按需执行（E/R）。
 - 丢包、网络半断开、跨机大文件传输、并发长时间运行、内存和 FD 压力仍属于后续可靠性证据（R）。
 
@@ -356,7 +358,7 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | R609 | C05/L04 | Failed newer WSS handshake poisons retained reliable session of older active Worker | test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts | Independent real WebSocket RED; stale generation / rpc.resultUncertain |
 | R610 | C06/G27 | 256 streams, 8MiB backpressure, 32MiB real Worker RPC + eight WSS/SSE gateway rounds + Rust Reverse carrier | pnpm stress:transport | cgroup-bounded; baseline 8/8 and Gateway 8/8, Exit 0 |
 | R611 | C24/L03 | Chromium Audit survives real page reload; real WebUI Worker stop/start | pnpm acceptance:web | REAL browser CDP, isolated HOME, Exit 0 |
-| R612 | C17/L05 | 190s tmux task; 180s detached handoff and successful final read | pnpm acceptance:tmux-handoff | real Worker; detachedAfterMs=180093, finalReadMs=10049, status 0 |
+| R612 | C17/L05 | 190s tmux task; 180s detached handoff and successful final read | pnpm acceptance:process-handoff | real Worker; detachedAfterMs=180093, finalReadMs=10049, status 0 |
 | R613 | C25 | Opt-in manual browser/handoff CI with isolated AcceptanceFixture | scripts/beta-matrix-extended.test.mjs + .github/workflows/beta-matrix-extended.yml | Script check passed; GitHub Runner not invoked |
 | R614 | C05/G27 | Original stress checked token before credential commit; now waits protocol DSR2 ready | control/test/integration/ReverseConnectionGateway.test.ts | Retains strict stale-token rejection; 8/8 actual Gateway rounds after test fix |
 

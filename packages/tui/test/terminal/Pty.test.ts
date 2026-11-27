@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TerminalAttachment, TerminalSessionDescriptor, TerminalStreamMessage, TerminalVersionedIdentity } from "@portable-devshell/shared";
+import {
+    STREAM_GAP_CODE,
+    type TerminalAttachment,
+    type TerminalSessionDescriptor,
+    type TerminalStreamMessage,
+    type TerminalVersionedIdentity,
+} from "@portable-devshell/shared";
 import type { TerminalStreamCommandIdentity } from "@portable-devshell/shared/testing";
 import {
     TuiControlTerminalPtyFactory,
@@ -49,6 +55,17 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             this.sent.push({
                 operation: "input",
                 payload: { ...command, data },
+            });
+            return Promise.resolve();
+        }
+
+        sendControl(
+            takeover: boolean,
+            command: TerminalStreamCommandIdentity,
+        ): Promise<void> {
+            this.sent.push({
+                operation: "control",
+                payload: { ...command, takeover },
             });
             return Promise.resolve();
         }
@@ -214,6 +231,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         assert.equal(openCalls, 1);
         assert.deepEqual(attachCalls[1], {
             fromSeq: 0,
+            takeover: true,
             generation: 3,
             terminalId: "terminal-1",
         });
@@ -429,6 +447,181 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         ]);
         assert.equal(factory.snapshot("alpha")?.terminalId, "terminal-new");
+    });
+
+    test("control terminal PTY stays alive in observe mode when controlChanged carries error", async () => {
+        const stream = new FakeAttachment();
+        const session: TerminalSessionDescriptor = {
+            cols: 80,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            humanControl: false,
+            instance: "alpha",
+            latestSeq: 0,
+            rows: 24,
+            state: "running",
+            terminalId: "terminal-observe",
+            version: 1,
+        };
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                return attachAttachment(stream, { ...session });
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async list() {
+                return [{ ...session }];
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const factory = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        });
+        const pty = factory
+            .create("alpha")("alpha", ["terminal-observe", "observe"], {
+                columns: 80,
+                environment: {},
+                rows: 24,
+            });
+        const output: string[] = [];
+        const exits: number[] = [];
+        pty.onData((data) => output.push(data));
+        pty.onExit((event) => exits.push(event.exitCode));
+
+        await waitFor(
+            () => factory.snapshot("alpha:terminal-observe") !== undefined,
+        );
+        const controlPromise = factory.setControl(
+            "alpha",
+            "terminal-observe",
+            true,
+        );
+        await waitFor(() =>
+            stream.sent.some((entry) => entry.operation === "control"),
+        );
+
+        stream.push({
+            kind: "controlChanged",
+            clientSeq: 1,
+            error: "another human holds control",
+            humanControl: false,
+            session: { ...session, version: 2 },
+        });
+
+        await assert.rejects(controlPromise, /another human holds control/u);
+        assert.equal(stream.closed, false);
+        assert.deepEqual(exits, []);
+        assert.equal(factory.snapshot("alpha:terminal-observe")?.version, 2);
+
+        stream.push({ kind: "output", frame: { data: "still-alive", seq: 1 } });
+        await waitFor(() => output.includes("still-alive"));
+        pty.kill();
+    });
+
+    test("control terminal PTY caps stream.gap reconnects and fails cleanly", async () => {
+        const session: TerminalSessionDescriptor = {
+            cols: 80,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            instance: "alpha",
+            latestSeq: 0,
+            rows: 24,
+            state: "running",
+            terminalId: "terminal-gap",
+            version: 1,
+        };
+        let attachCount = 0;
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                attachCount += 1;
+                const stream = new FakeAttachment();
+                stream.push({ kind: "seed", session: { ...session } });
+                const gapError = Object.assign(new Error("stream gap"), {
+                    code: STREAM_GAP_CODE,
+                });
+                stream.push({ kind: "closed", error: gapError });
+                return stream.asTerminalAttachment();
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const pty = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        }).create("alpha")("ignored", [], {
+            columns: 80,
+            environment: {},
+            rows: 24,
+        });
+        const output: string[] = [];
+        const exits: number[] = [];
+        pty.onData((data) => output.push(data));
+        pty.onExit((event) => exits.push(event.exitCode));
+
+        await waitFor(() => exits.length === 1);
+        assert.equal(attachCount, 6);
+        assert.deepEqual(exits, [1]);
+        assert.equal(
+            output.some((line) => line.includes("stream gap")),
+            true,
+        );
+    });
+
+    test("control terminal PTY normalizes bare LF to CRLF for pipe tasks without doubling split CRLF", async () => {
+        const stream = new FakeAttachment();
+        const session: TerminalSessionDescriptor = {
+            cols: 0,
+            createdAt: "2026-08-06T00:00:00.000Z",
+            generation: 1,
+            instance: "alpha",
+            latestSeq: 0,
+            pty: false,
+            rows: 0,
+            state: "running",
+            terminalId: "pipe-lf",
+            version: 1,
+        };
+        const client: TuiControlTerminalClient = {
+            async attach() {
+                return attachAttachment(stream, { ...session });
+            },
+            async kill() {
+                throw new Error("not used");
+            },
+            async list() {
+                return [{ ...session }];
+            },
+            async open() {
+                return { ...session };
+            },
+        };
+        const factory = new TuiControlTerminalPtyFactory({
+            client: () => client,
+            workspaceForInstance: () => "/home/alpha",
+        });
+        const pty = factory
+            .create("alpha")("alpha", ["pipe-lf", "observe"], {
+                columns: 80,
+                environment: {},
+                rows: 24,
+            });
+        const output: string[] = [];
+        pty.onData((data) => output.push(data));
+
+        await waitFor(() => factory.snapshot("alpha:pipe-lf") !== undefined);
+        stream.push({ kind: "output", frame: { data: "line1\nline2\r\nline3\r", seq: 1 } });
+        stream.push({ kind: "output", frame: { data: "\nline4\n", seq: 2 } });
+        await waitFor(() => output.length === 2);
+        assert.equal(output.join(""), "line1\r\nline2\r\nline3\r\nline4\r\n");
+        pty.kill();
     });
 }
 

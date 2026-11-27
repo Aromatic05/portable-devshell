@@ -54,7 +54,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         /changed from revision/iu, "stale Goal action must fail through the real MCP boundary");
         assert.deepEqual(await readGoal(), paused, "rejected action changed durable state");
         const faultMarker = `${marker}-exit7`;
-        const fault = (await call(client, "bash_run", { ctxId, command: `printf '%s' '${faultMarker}'; printf '%s' '${faultMarker}-stderr' >&2; exit 7`, timeoutMs: 10000 })).structuredContent;
+        const fault = (await call(client, "bash_run", { ctxId, command: `printf '%s' '${faultMarker}'; printf '%s' '${faultMarker}-stderr' >&2; exit 7`, waitMs: 10000 })).structuredContent;
         assert.equal(fault.exitCode, 7);
         assert.equal(fault.stdout, faultMarker);
         assert.equal(fault.stderr, `${faultMarker}-stderr`);
@@ -70,9 +70,9 @@ export async function runWorkflowPersistentChain(fixture, record) {
         // Gate completion on a file written by a later *real Worker* bash call.
         // A finite 10-minute guard prevents a failed harness leaving work alive.
         const command = `printf '%s\\n' '${startedMarker}' | tee -a ./effects.txt; n=0; while [ ! -f ./release ]; do n=$((n+1)); [ "$n" -lt 3000 ] || exit 97; sleep 0.2; done; printf '%s\\n' '${doneMarker}' | tee -a ./effects.txt`;
-        record("long-tmux-starting", { handoffBudgetMs: 180000, timeoutMs: 360000 });
+        record("long-process-starting", { handoffBudgetMs: 180000, waitMs: 360000 });
         const startedAt = Date.now();
-        const launch = (await call(client, "tmux_run", { ctxId, command, wait: "block", timeout: 360000, line: 20 }, 240000)).structuredContent;
+        const launch = (await call(client, "bash_run", { ctxId, command, waitMs: 360000 }, 240000)).structuredContent;
         const elapsedMs = Date.now() - startedAt;
         assert.equal(launch.detached, true, JSON.stringify(launch));
         assert.equal(launch.task?.status, "running");
@@ -83,14 +83,14 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const readWaits = async () => (await taskApi((api) => api.getWaits(ctxId))).waits;
         const waits = await readWaits();
         const wait = waits.find((entry) => entry.targetId === terminalTask);
-        assert.ok(wait, "tmux handoff did not traverse Wait persistence");
+        assert.ok(wait, "process handoff did not traverse Wait persistence");
         assert.equal(wait.status, "detached");
         assert.equal(wait.ctxId, ctxId);
         assert.equal(wait.source, "mcp");
         assert.equal(waits.filter((entry) => entry.targetId === terminalTask).length, 1);
         assert.deepEqual((await readWaitDocument(fixture)).waits.find((entry) => entry.waitId === wait.waitId), wait);
         const beforeCalls = await callsApi(ctxId);
-        const launchCalls = beforeCalls.filter((entry) => entry.toolName === "tmux_run");
+        const launchCalls = beforeCalls.filter((entry) => entry.toolName === "bash_run" && entry.output?.task?.id === terminalTask);
         assert.equal(launchCalls.length, 1);
         assert.equal(launchCalls[0].callId, wait.callId);
         assert.equal(launchCalls[0].status, "completed");
@@ -100,7 +100,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const beforeRestart = await readGoal();
         await client.close();
         await fixture.stop();
-        await fixture.assertTmuxAlive(startedMarker);
+        await fixture.assertProcessAlive(terminalTask);
         assert.equal((await readWaitDocument(fixture)).waits.find((entry) => entry.waitId === wait.waitId).status, "detached");
         const beforeDisk = readWorkflowAudit(fixture);
         assert.equal(beforeDisk.filter((row) => row.collection === "toolCalls" && row.value.callId === wait.callId).length, 1);
@@ -126,7 +126,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
 
         await client.close();
         await fixture.stop();
-        await fixture.assertTmuxAlive(startedMarker);
+        await fixture.assertProcessAlive(terminalTask);
         await fixture.start();
         await connect();
         const repeated = (await call(client, "mcpapp_reentry", { ...recovery, action: "attempt" })).structuredContent;
@@ -140,12 +140,12 @@ export async function runWorkflowPersistentChain(fixture, record) {
         assert.equal((await snapshot(client, ctxId)).reentry.directives, undefined, "settled directive must leave the pending projection");
         record("restart-two-attempt-replay-fenced", { receipt: settled, hostDelivery: "simulated-rejected" });
 
-        const release = (await call(client, "bash_run", { ctxId, command: "printf 'release\\n' > ./release", timeoutMs: 10000 })).structuredContent;
+        const release = (await call(client, "bash_run", { ctxId, command: "printf 'release\\n' > ./release", waitMs: 10000 })).structuredContent;
         assert.equal(release.exitCode, 0, "fresh Worker execution after reconnect failed");
-        const completed = (await call(client, "tmux_read", { ctxId, task: terminalTask, line: -100, timeMs: 30000 }, 45000)).structuredContent;
+        const completed = (await call(client, "task_input", { ctxId, task: terminalTask, untilExit: true, waitMs: 30000, cursor: launch.cursor }, 45000)).structuredContent;
         assert.equal(completed.task?.id, terminalTask);
         assert.equal(completed.task?.status, "0", JSON.stringify(completed));
-        assert.match(completed.output.join("\n"), new RegExp(doneMarker, "u"));
+        assert.match(completed.stdout, new RegExp(doneMarker, "u"));
         const finalWaits = await eventually(readWaits, (entries) => entries.find((entry) => entry.waitId === wait.waitId)?.status === "resolved", "restarted Wait monitor did not resolve", 45000);
         const finalWait = finalWaits.find((entry) => entry.waitId === wait.waitId);
         assert.equal(finalWait.result.task.id, terminalTask);
@@ -168,7 +168,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const logEntries = await fixture.control((shared, connection) => shared.createProcessTransport(connection, instance).readLogs({ ctxId, callId: faultCall.callId, limit: 100 }));
         assert.equal(logEntries.filter((entry) => entry.stream === "stdout").map((entry) => entry.message).join(""), faultMarker);
         assert.equal(logEntries.filter((entry) => entry.stream === "stderr").map((entry) => entry.message).join(""), `${faultMarker}-stderr`);
-        assert.equal(finalCalls.filter((entry) => entry.toolName === "tmux_run").length, 1);
+        assert.equal(finalCalls.filter((entry) => entry.toolName === "bash_run" && entry.output?.task?.id === terminalTask).length, 1);
         const resumeCalls = finalCalls.filter((entry) => entry.toolName === "mcpapp_action" && entry.input?.requestId === resume.requestId);
         assert.equal(resumeCalls.length, 1, "replayed action produced a second Instance execution");
         const attemptCalls = finalCalls.filter((entry) => entry.toolName === "mcpapp_reentry" && entry.input?.action === "attempt");
@@ -193,7 +193,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         }
         const launchRecord = persistedCalls.find((entry) => entry.callId === wait.callId);
         assert.deepEqual(launchRecord, beforeDisk.find((row) => row.collection === "toolCalls" && row.value.callId === wait.callId).value,
-            "restart changed the original durable tmux execution audit");
+            "restart changed the original durable process execution audit");
         const waitEvents = disk.filter((row) => row.collection === "events" && row.value.data?.waitId === wait.waitId).map((row) => row.value);
         assert.deepEqual(waitEvents.map((entry) => entry.type), ["wait.detached", "wait.resolved"]);
         assert.ok(waitEvents[1].seq > waitEvents[0].seq);
@@ -209,7 +209,7 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const diskLogs = disk.filter((row) => row.collection === "logs" && row.value.callId === faultCall.callId).map((row) => row.value);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stdout").map((entry) => entry.message).join(""), faultMarker);
         assert.equal(diskLogs.filter((entry) => entry.stream === "stderr").map((entry) => entry.message).join(""), `${faultMarker}-stderr`);
-        const terminalRead = persistedCalls.find((entry) => entry.toolName === "tmux_read" && entry.output?.output?.some((line) => line.includes(doneMarker)));
+        const terminalRead = persistedCalls.find((entry) => entry.toolName === "task_input" && entry.output?.stdout?.includes(doneMarker));
         assert.ok(terminalRead, "SQLite must retain the independently verified terminal completion output");
         assert.deepEqual((await readWaitDocument(fixture)).waits.find((entry) => entry.waitId === wait.waitId), finalWait);
         record("sqlite-audit-events-verified", { calls: persistedCalls.length, waitEvents, launchCount: 1, resumeExecutions: 1, attemptExecutions: 1 });

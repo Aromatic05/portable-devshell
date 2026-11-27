@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
     createRemoteError,
     STREAM_GAP_CODE,
+    type TerminalInspectResult,
     type TerminalSessionDescriptor,
     type TerminalSessionState,
     type TerminalOutputFrame,
@@ -19,6 +20,7 @@ import type {
     TerminalOpenRequest,
     TerminalProcess,
     TerminalProcessExit,
+    TerminalProcessMetadataUpdate,
     TerminalSessionApi,
     TerminalSessionRuntimeOptions,
 } from "./Api.js";
@@ -28,17 +30,25 @@ const DEFAULT_MAX_TERMINAL_HISTORY = 64;
 
 interface TerminalSessionRecord {
     attachments: Set<TerminalAttachmentRecord>;
+    controller?: TerminalAttachmentRecord;
     cols: number;
+    command?: string;
     createdAt: string;
+    cwd?: string;
     exit?: TerminalProcessExit;
     generation: number;
+    humanControl?: boolean;
+    initialSeedSeq?: number;
     instance: string;
     killPending: boolean;
     latestSeq: number;
+    name?: string;
     pendingKillExit?: TerminalProcessExit;
+    persistent?: boolean;
     process: TerminalProcess;
     processDisposed: boolean;
     processSubscriptions: Array<() => void>;
+    pty?: boolean;
     replay: Array<TerminalOutputFrame & { bytes: number }>;
     replayBytes: number;
     recoverable: boolean;
@@ -46,6 +56,7 @@ interface TerminalSessionRecord {
     state: TerminalSessionState;
     terminalId: string;
     version: number;
+    workspace?: string;
 }
 
 interface TerminalAttachmentRecord {
@@ -60,6 +71,9 @@ export class TerminalSessionService implements TerminalSessionApi {
     readonly #maxReplayBytes: number;
     readonly #maxTerminalHistory: number;
     readonly #now: () => Date;
+    readonly #onControlReleased?: (
+        session: TerminalSessionDescriptor,
+    ) => void | Promise<void>;
     readonly #sessions = new Map<string, TerminalSessionRecord>();
     #closed = false;
     #nextGeneration = 1;
@@ -88,6 +102,7 @@ export class TerminalSessionService implements TerminalSessionApi {
             );
         }
         this.#now = options.now ?? (() => new Date());
+        this.#onControlReleased = options.onControlReleased;
     }
 
     async open(
@@ -102,7 +117,12 @@ export class TerminalSessionService implements TerminalSessionApi {
                 ? {}
                 : { command: request.command }),
             ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+            ...(request.name === undefined ? {} : { name: request.name }),
+            ...(request.persistent === undefined
+                ? {}
+                : { persistent: request.persistent }),
             rows: request.rows,
+            ...(request.shell === undefined ? {} : { shell: request.shell }),
             workspace: request.workspace,
         });
         if (this.#closed || this.#instanceEpoch(request.instance) !== epoch) {
@@ -116,6 +136,17 @@ export class TerminalSessionService implements TerminalSessionApi {
             opened,
             request.cols,
             request.rows,
+            {
+                ...(request.command === undefined
+                    ? {}
+                    : { command: request.command }),
+                ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+                ...(request.name === undefined ? {} : { name: request.name }),
+                ...(request.persistent === undefined
+                    ? {}
+                    : { persistent: request.persistent }),
+                workspace: request.workspace,
+            },
         );
     }
 
@@ -126,7 +157,12 @@ export class TerminalSessionService implements TerminalSessionApi {
         this.#assertOpen();
         if (backend.recover === undefined) return this.list(instance);
         const epoch = this.#instanceEpoch(instance);
-        const recovered = await backend.recover();
+        const known = new Set(
+            [...this.#sessions.values()]
+                .filter((session) => session.instance === instance)
+                .map((session) => session.terminalId),
+        );
+        const recovered = await backend.recover(known);
         if (this.#closed || this.#instanceEpoch(instance) !== epoch) {
             await Promise.all(recovered.map(disposeUnregistered));
             throw this.#closed
@@ -145,6 +181,36 @@ export class TerminalSessionService implements TerminalSessionApi {
                 opened.identity.rows ?? 24,
             );
         }
+        if (backend.listMetadata !== undefined) {
+            const latest = await backend.listMetadata();
+            if (!this.#closed && this.#instanceEpoch(instance) === epoch) {
+                for (const item of latest) {
+                    const existing = this.#sessions.get(item.terminalId);
+                    if (existing?.instance === instance) {
+                        this.#applyMetadata(existing, {
+                            ...(item.cols === undefined ? {} : { cols: item.cols }),
+                            ...(item.command === undefined
+                                ? {}
+                                : { command: item.command }),
+                            ...(item.cwd === undefined ? {} : { cwd: item.cwd }),
+                            ...(item.humanControl === undefined
+                                ? {}
+                                : { humanControl: item.humanControl }),
+                            ...(item.name === undefined ? {} : { name: item.name }),
+                            ...(item.persistent === undefined
+                                ? {}
+                                : { persistent: item.persistent }),
+                            ...(item.pty === undefined ? {} : { pty: item.pty }),
+                            ...(item.rows === undefined ? {} : { rows: item.rows }),
+                            version: item.version,
+                            ...(item.workspace === undefined
+                                ? {}
+                                : { workspace: item.workspace }),
+                        });
+                    }
+                }
+            }
+        }
         return this.list(instance);
     }
 
@@ -153,7 +219,16 @@ export class TerminalSessionService implements TerminalSessionApi {
         assertSequence(request.fromSeq);
         const oldestAvailableSeq =
             session.replay[0]?.seq ?? session.latestSeq + 1;
-        if (request.fromSeq < oldestAvailableSeq - 1) {
+        const seededFromStart =
+            request.fromSeq === 0 &&
+            session.initialSeedSeq !== undefined &&
+            oldestAvailableSeq === session.initialSeedSeq;
+        if (
+            !seededFromStart &&
+            request.fromSeq < oldestAvailableSeq - 1 &&
+            !(request.takeover && session.process.acquireControl !== undefined) &&
+            !(request.fromSeq === 0 && session.process.restoreSnapshot !== undefined)
+        ) {
             throw createRemoteError({
                 code: STREAM_GAP_CODE,
                 details: {
@@ -186,9 +261,70 @@ export class TerminalSessionService implements TerminalSessionApi {
                 if (attachment.detached) return;
                 attachment.detached = true;
                 session.attachments.delete(attachment);
+                if (session.controller === attachment) {
+                    session.controller = undefined;
+                    void session.process
+                        .releaseControl?.()
+                        .catch(() => undefined);
+                }
+            },
+            releaseControl: async () => {
+                if (attachment.detached) return;
+                if (session.controller !== attachment) return;
+                session.controller = undefined;
+                await session.process.releaseControl?.();
+            },
+            restoreSnapshot: async () => {
+                if (attachment.detached) return undefined;
+                return await session.process.restoreSnapshot?.();
+            },
+            takeControl: async () => {
+                if (attachment.detached)
+                    throw new Error("Terminal attachment has detached.");
+                if (session.pty === false) {
+                    throw createRemoteError({
+                        code: controlErrorCodes.invalidTarget,
+                        message:
+                            "Pipe tasks are read-only and do not support control takeover.",
+                        retryable: false,
+                    });
+                }
+                if (session.controller === attachment) {
+                    return await session.process.restoreSnapshot?.();
+                }
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
+                session.controller = attachment;
+                try {
+                    const snapshot = await session.process.acquireControl?.();
+                    if (attachment.detached) {
+                        if (session.controller === undefined || session.controller === attachment)
+                            await session.process.releaseControl?.();
+                        throw new Error(
+                            "Terminal attachment detached during takeover.",
+                        );
+                    }
+                    return snapshot;
+                } catch (error) {
+                    if (session.controller === attachment)
+                        session.controller = undefined;
+                    throw error;
+                }
             },
             resize: async (cols, rows) => {
                 this.#assertActive(session);
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
                 assertDimensions(cols, rows);
                 await session.process.resize(cols, rows);
                 this.#assertActive(session);
@@ -198,6 +334,13 @@ export class TerminalSessionService implements TerminalSessionApi {
             },
             write: async (data) => {
                 this.#assertActive(session);
+                if (
+                    session.controller !== undefined &&
+                    session.controller !== attachment
+                )
+                    throw new Error(
+                        "Another attachment controls the terminal.",
+                    );
                 await session.process.write(data);
             },
         };
@@ -205,6 +348,26 @@ export class TerminalSessionService implements TerminalSessionApi {
 
     get(terminalId: string): TerminalSessionDescriptor {
         return descriptor(this.#requireById(terminalId));
+    }
+
+    async inspect(
+        terminalId: string,
+        generation: number,
+    ): Promise<TerminalInspectResult> {
+        const session = this.#require(terminalId, generation);
+        if (session.process.inspect === undefined) {
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
+                details: { terminalId },
+                message: `Terminal ${terminalId} does not support screen inspection.`,
+                retryable: false,
+            });
+        }
+        const screen = await session.process.inspect();
+        return {
+            ...screen,
+            session: descriptor(session),
+        };
     }
 
     assertVersion(
@@ -308,6 +471,7 @@ export class TerminalSessionService implements TerminalSessionApi {
         opened: TerminalBackendOpenResult,
         cols: number,
         rows: number,
+        fallbackMetadata?: Partial<TerminalProcessMetadataUpdate>,
     ): TerminalSessionDescriptor {
         this.#assertOpen();
         const backendSession = isBackendSession(opened) ? opened : undefined;
@@ -325,25 +489,39 @@ export class TerminalSessionService implements TerminalSessionApi {
         const generation =
             backendSession?.identity.generation ?? this.#nextGeneration++;
         this.#nextGeneration = Math.max(this.#nextGeneration, generation + 1);
+        const identity = backendSession?.identity;
+        const command = identity?.command ?? fallbackMetadata?.command;
+        const cwd = identity?.cwd ?? fallbackMetadata?.cwd;
+        const humanControl = identity?.humanControl;
+        const name = identity?.name ?? fallbackMetadata?.name;
+        const persistent = identity?.persistent ?? fallbackMetadata?.persistent;
+        const pty = identity?.pty;
+        const workspace = identity?.workspace ?? fallbackMetadata?.workspace;
         const session: TerminalSessionRecord = {
             attachments: new Set(),
             cols,
-            createdAt:
-                backendSession?.identity.createdAt ?? this.#now().toISOString(),
+            ...(command === undefined ? {} : { command }),
+            createdAt: identity?.createdAt ?? this.#now().toISOString(),
+            ...(cwd === undefined ? {} : { cwd }),
             generation,
+            ...(humanControl === undefined ? {} : { humanControl }),
             instance,
             killPending: false,
             latestSeq: 0,
+            ...(name === undefined ? {} : { name }),
+            ...(persistent === undefined ? {} : { persistent }),
             process,
             processDisposed: false,
             processSubscriptions: [],
+            ...(pty === undefined ? {} : { pty }),
             replay: [],
             replayBytes: 0,
-            recoverable: backendSession?.identity.recoverable ?? false,
+            recoverable: identity?.recoverable ?? false,
             rows,
             state: "running",
             terminalId,
-            version: backendSession?.identity.version ?? 1,
+            version: identity?.version ?? 1,
+            ...(workspace === undefined ? {} : { workspace }),
         };
         this.#sessions.set(terminalId, session);
         session.processSubscriptions.push(
@@ -351,6 +529,18 @@ export class TerminalSessionService implements TerminalSessionApi {
                 this.#append(session, data, sourceSeq),
             ),
         );
+        const unsubscribeControlLost = process.onControlLost?.(() => {
+            session.controller = undefined;
+        });
+        if (unsubscribeControlLost !== undefined) {
+            session.processSubscriptions.push(unsubscribeControlLost);
+        }
+        const unsubscribeMetadata = process.onMetadataChange?.((update) =>
+            this.#applyMetadata(session, update),
+        );
+        if (unsubscribeMetadata !== undefined) {
+            session.processSubscriptions.push(unsubscribeMetadata);
+        }
         const unsubscribeError = process.onError?.((error) =>
             this.#failProcess(session, error),
         );
@@ -363,6 +553,36 @@ export class TerminalSessionService implements TerminalSessionApi {
         return descriptor(session);
     }
 
+    #applyMetadata(
+        session: TerminalSessionRecord,
+        update: TerminalProcessMetadataUpdate,
+    ): void {
+        const wasControlled = session.humanControl === true;
+        if (update.cols !== undefined) session.cols = update.cols;
+        if (update.rows !== undefined) session.rows = update.rows;
+        if (update.version !== undefined && update.version > session.version) {
+            session.version = update.version;
+        }
+        if (update.name !== undefined) session.name = update.name;
+        if (update.cwd !== undefined) session.cwd = update.cwd;
+        if (update.workspace !== undefined) session.workspace = update.workspace;
+        if (update.command !== undefined) session.command = update.command;
+        if (update.persistent !== undefined)
+            session.persistent = update.persistent;
+        if (update.pty !== undefined) session.pty = update.pty;
+        if (update.humanControl !== undefined)
+            session.humanControl = update.humanControl;
+        if (
+            wasControlled &&
+            update.humanControl === false &&
+            session.state === "running"
+        ) {
+            void Promise.resolve(
+                this.#onControlReleased?.(descriptor(session)),
+            ).catch(() => undefined);
+        }
+    }
+
     #append(
         session: TerminalSessionRecord,
         data: string,
@@ -371,7 +591,12 @@ export class TerminalSessionService implements TerminalSessionApi {
         if (session.state !== "running") return;
         const nextSeq = sourceSeq ?? session.latestSeq + 1;
         if (nextSeq <= session.latestSeq) return;
-        if (nextSeq !== session.latestSeq + 1) {
+        const initialSeed =
+            session.latestSeq === 0 &&
+            session.replay.length === 0 &&
+            sourceSeq !== undefined &&
+            sourceSeq > 1;
+        if (!initialSeed && nextSeq !== session.latestSeq + 1) {
             this.#failProcess(
                 session,
                 new Error(
@@ -380,6 +605,7 @@ export class TerminalSessionService implements TerminalSessionApi {
             );
             return;
         }
+        if (initialSeed) session.initialSeedSeq = nextSeq;
         session.latestSeq = nextSeq;
         const frame = {
             bytes: Buffer.byteLength(data, "utf8"),
@@ -393,7 +619,10 @@ export class TerminalSessionService implements TerminalSessionApi {
             session.replay.length > 1
         ) {
             const removed = session.replay.shift();
-            if (removed !== undefined) session.replayBytes -= removed.bytes;
+            if (removed !== undefined) {
+                session.replayBytes -= removed.bytes;
+                session.initialSeedSeq = undefined;
+            }
         }
         for (const attachment of [...session.attachments]) {
             if (!attachment.detached)
@@ -640,14 +869,27 @@ function instanceBackendReplacedError(instance: string): Error {
 function descriptor(session: TerminalSessionRecord): TerminalSessionDescriptor {
     return {
         cols: session.cols,
+        ...(session.command === undefined ? {} : { command: session.command }),
         createdAt: session.createdAt,
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
         generation: session.generation,
+        ...(session.humanControl === undefined
+            ? {}
+            : { humanControl: session.humanControl }),
         instance: session.instance,
         latestSeq: session.latestSeq,
+        ...(session.name === undefined ? {} : { name: session.name }),
+        ...(session.persistent === undefined
+            ? {}
+            : { persistent: session.persistent }),
+        ...(session.pty === undefined ? {} : { pty: session.pty }),
         rows: session.rows,
         state: session.state,
         terminalId: session.terminalId,
         version: session.version,
+        ...(session.workspace === undefined
+            ? {}
+            : { workspace: session.workspace }),
     };
 }
 

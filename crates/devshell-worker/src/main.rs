@@ -10,19 +10,7 @@ mod transport;
 
 use instance::InstanceName;
 
-#[cfg(windows)]
-const INTERNAL_PSMUX_ENV: &str = "DEVSHELL_WORKER_INTERNAL_PSMUX";
-
 fn main() {
-    #[cfg(windows)]
-    if std::env::var_os(INTERNAL_PSMUX_ENV).is_some() {
-        if let Err(error) = psmux::run() {
-            eprintln!("psmux: {error}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
     if let Some(result) = capability::rpc::command::client::try_run_shim() {
         match result {
             Ok(code) => std::process::exit(code),
@@ -46,12 +34,12 @@ fn main() {
 }
 
 fn run() -> Result<String, String> {
-    #[cfg(any(unix, windows))]
-    if let Some(result) = tool::tmux::transcript::try_run_transcript_logger() {
-        result?;
+    #[cfg(windows)]
+    if let Some(instance) = std::env::var_os("DEVSHELL_WORKER_INTERNAL_PROCESS_HOST") {
+        let instance = InstanceName::parse(&instance.to_string_lossy())?;
+        capability::process::host::serve(&instance)?;
         return Ok(String::new());
     }
-
     if let Some(raw_instance) = std::env::var_os(daemon::process::INTERNAL_INSTANCE_ENV) {
         let raw_instance = raw_instance
             .into_string()

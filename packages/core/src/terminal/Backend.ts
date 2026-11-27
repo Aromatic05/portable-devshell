@@ -1,4 +1,9 @@
 import { StringDecoder } from "node:string_decoder";
+import {
+    STREAM_GAP_CODE,
+    TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+    type TerminalInspectResult,
+} from "@portable-devshell/shared";
 import type {
     WorkerTerminalPort,
     WorkerTerminalDescriptor,
@@ -8,8 +13,11 @@ import type {
     TerminalBackendOpenInput,
     TerminalBackendOpenResult,
     TerminalBackendSession,
+    TerminalBackendSessionIdentity,
     TerminalProcess,
     TerminalProcessExit,
+    TerminalProcessMetadataUpdate,
+    TerminalRestore,
 } from "./Api.js";
 
 export class WorkerTerminalBackend implements TerminalBackend {
@@ -22,34 +30,54 @@ export class WorkerTerminalBackend implements TerminalBackend {
             cols: input.cols,
             ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+            ...(input.name === undefined ? {} : { name: input.name }),
+            ...(input.persistent === undefined
+                ? {}
+                : { persistent: input.persistent }),
             rows: input.rows,
+            ...(input.shell === undefined ? {} : { shell: input.shell }),
             workspace: input.workspace,
         });
         const process = new WorkerTerminalProcess(
             this.options.worker,
             descriptor,
         );
-        await process.initialize();
+        try {
+            await process.initialize();
+        } catch (error) {
+            process.dispose();
+            await process.kill().catch(() => undefined);
+            throw error;
+        }
         return {
             identity: remoteIdentity(descriptor),
             process,
         };
     }
 
-    async recover(): Promise<TerminalBackendSession[]> {
+    async recover(
+        known?: ReadonlySet<string>,
+    ): Promise<TerminalBackendSession[]> {
         const descriptors = (await this.options.worker.list()).filter(
-            (descriptor) => descriptor.state === "running",
+            (descriptor) =>
+                descriptor.state === "running" &&
+                !known?.has(descriptor.terminalId),
         );
-        return await Promise.all(
-            descriptors.map(async (descriptor) => {
-                const process = new WorkerTerminalProcess(
-                    this.options.worker,
-                    descriptor,
-                );
-                await process.initialize();
-                return { identity: remoteIdentity(descriptor), process };
-            }),
-        );
+        const sessions = descriptors.map((descriptor) => ({
+            identity: remoteIdentity(descriptor),
+            process: new WorkerTerminalProcess(this.options.worker, descriptor),
+        }));
+        try {
+            await Promise.all(sessions.map(({ process }) => process.initialize()));
+            return sessions;
+        } catch (error) {
+            for (const { process } of sessions) process.dispose();
+            throw error;
+        }
+    }
+
+    async listMetadata(): Promise<readonly TerminalBackendSessionIdentity[]> {
+        return (await this.options.worker.list()).map(remoteIdentity);
     }
 }
 
@@ -58,7 +86,11 @@ class WorkerTerminalProcess implements TerminalProcess {
         (data: string, sourceSeq?: number) => void
     >();
     readonly #errorListeners = new Set<(error: Error) => void>();
+    readonly #controlLostListeners = new Set<() => void>();
     readonly #exitListeners = new Set<(exit: TerminalProcessExit) => void>();
+    readonly #metadataListeners = new Set<
+        (update: TerminalProcessMetadataUpdate) => void
+    >();
     readonly #decoder = new StringDecoder("utf8");
     readonly #pendingData: Array<{ data: string; seq: number }> = [];
     readonly #unsubscribeConnected: () => void;
@@ -66,12 +98,17 @@ class WorkerTerminalProcess implements TerminalProcess {
     readonly #unsubscribeNotification: () => void;
     readonly #worker: WorkerTerminalPort;
     #clientSeq = 0;
+    #connectionEpoch = 0;
     #closed = false;
     #descriptor: WorkerTerminalDescriptor;
     #exit?: TerminalProcessExit;
     #lastSeq = 0;
+    #localSeq = 0;
+    #controller?: string;
+    #controlHeartbeat?: ReturnType<typeof setInterval>;
     #operationTail = Promise.resolve();
     #resumeTail = Promise.resolve();
+    #finalResumeRetry?: ReturnType<typeof setTimeout>;
 
     constructor(
         worker: WorkerTerminalPort,
@@ -88,8 +125,11 @@ class WorkerTerminalProcess implements TerminalProcess {
             if (!this.#closed) this.#scheduleResume();
         });
         this.#unsubscribeDisconnected = worker.onDisconnected(() => {
-            // The remote PTY remains owned by the worker process. Reattach after the
-            // next authenticated reverse channel activation instead of fabricating exit.
+            this.#connectionEpoch++;
+            clearTimeout(this.#finalResumeRetry);
+            this.#finalResumeRetry = undefined;
+            // Invalidate the local attachment, not the remote ownership state.
+            this.#clearController();
         });
     }
 
@@ -101,6 +141,156 @@ class WorkerTerminalProcess implements TerminalProcess {
         if (this.#closed) return;
         this.#closed = true;
         this.#disposeSubscriptions();
+        void this.releaseControl().catch(() => undefined);
+    }
+
+    async acquireControl(): Promise<TerminalRestore> {
+        let snapshot: TerminalRestore | undefined;
+        await this.#serialize(async () => {
+            if (this.#closed) throw new Error("Terminal is closed.");
+            if (this.#worker.control === undefined)
+                throw new Error("Worker does not provide terminal control.");
+            if (this.#controller !== undefined)
+                throw new Error(
+                    "Terminal already has a controlling attachment.",
+                );
+            const epoch = this.#connectionEpoch;
+            const result = await this.#worker.control({
+                terminalId: this.#descriptor.terminalId,
+                generation: this.#descriptor.generation,
+            });
+            if (this.#closed || epoch !== this.#connectionEpoch)
+                throw new Error("Terminal control lease was lost during takeover.");
+            if (
+                result.controller === undefined ||
+                result.snapshot === undefined ||
+                result.session === undefined
+            ) {
+                throw new Error(
+                    "Worker returned incomplete terminal control state.",
+                );
+            }
+            this.#controller = result.controller;
+            this.#startControlHeartbeat();
+            this.#descriptor = { ...result.session, humanControl: true };
+            this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+            try {
+                if (result.snapshot.seq > this.#lastSeq) await this.#resume();
+                if (this.#controller !== result.controller)
+                    throw new Error("Terminal control lease was lost during takeover.");
+                const seq = this.#mapHostSeq(result.snapshot.seq);
+                snapshot = { seq, data: result.snapshot.data };
+            } catch (error) {
+                await this.#releaseControl().catch(() => undefined);
+                throw error;
+            }
+        });
+        if (snapshot === undefined)
+            throw new Error("Terminal control snapshot is missing.");
+        return snapshot;
+    }
+
+    async releaseControl(): Promise<void> {
+        await this.#serialize(async () => await this.#releaseControl());
+    }
+
+    async restoreSnapshot(): Promise<TerminalRestore | undefined> {
+        let snapshot: TerminalRestore | undefined;
+        await this.#serialize(async () => {
+            if (this.#closed) return;
+            const attached = await this.#worker.attach({
+                fromSeq: this.#lastSeq,
+                generation: this.#descriptor.generation,
+                restore: true,
+                terminalId: this.#descriptor.terminalId,
+            });
+            if (this.#closed) return;
+            this.#descriptor = attached.session;
+            this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+            if (attached.snapshot !== undefined) {
+                if (attached.snapshot.seq > this.#lastSeq) {
+                    await this.#applyAttached(attached);
+                }
+                snapshot = {
+                    data: attached.snapshot.data,
+                    seq: this.#mapHostSeq(attached.snapshot.seq),
+                };
+            }
+        });
+        return snapshot;
+    }
+
+    async inspect(): Promise<Omit<TerminalInspectResult, "session">> {
+        if (this.#worker.inspect === undefined) {
+            throw new Error("Worker does not provide terminal inspect.");
+        }
+        const result = await this.#worker.inspect({
+            generation: this.#descriptor.generation,
+            terminalId: this.#descriptor.terminalId,
+        });
+        this.#descriptor = result.session;
+        this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+        return {
+            cols: result.cols,
+            cursor: result.cursor,
+            lines: result.lines,
+            rows: result.rows,
+            seq: result.seq,
+        };
+    }
+
+    #mapHostSeq(hostSeq: number): number {
+        if (hostSeq > this.#lastSeq) return this.#localSeq;
+        const delta = this.#lastSeq - hostSeq;
+        return this.#localSeq >= delta ? this.#localSeq - delta : this.#localSeq;
+    }
+
+    #startControlHeartbeat(): void {
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = setInterval(() => {
+            const controller = this.#controller;
+            if (controller === undefined) return;
+            void this.#renewControl(controller).then((renewed) => {
+                if (renewed === false && this.#controller === controller) {
+                    this.#clearController();
+                    this.#scheduleResume();
+                }
+            });
+        }, 10_000);
+        this.#controlHeartbeat.unref?.();
+    }
+
+    async #renewControl(controller: string): Promise<boolean | undefined> {
+        try {
+            const result = await this.#worker.control?.({
+                terminalId: this.#descriptor.terminalId,
+                generation: this.#descriptor.generation,
+                controller,
+                renew: true,
+            });
+            return result?.renewed;
+        } catch (error) {
+            return isControlLeaseLost(error) ? false : undefined;
+        }
+    }
+
+    async #releaseControl(): Promise<void> {
+        const controller = this.#controller;
+        if (controller === undefined) return;
+        // The caller has already relinquished its attachment. Do not notify
+        // Service of involuntary loss and clear a takeover queued behind it.
+        this.#clearController(false);
+        const epoch = this.#connectionEpoch;
+        const result = await this.#worker.control?.({
+            terminalId: this.#descriptor.terminalId,
+            generation: this.#descriptor.generation,
+            controller,
+        });
+        if (epoch !== this.#connectionEpoch || this.#closed) return;
+        if (result?.session !== undefined) {
+            this.#descriptor = result.session;
+            this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+        }
     }
 
     async kill(): Promise<void> {
@@ -125,6 +315,11 @@ class WorkerTerminalProcess implements TerminalProcess {
         return () => this.#errorListeners.delete(listener);
     }
 
+    onControlLost(listener: () => void): () => void {
+        this.#controlLostListeners.add(listener);
+        return () => this.#controlLostListeners.delete(listener);
+    }
+
     onExit(listener: (exit: TerminalProcessExit) => void): () => void {
         this.#exitListeners.add(listener);
         if (this.#exit !== undefined) {
@@ -132,6 +327,13 @@ class WorkerTerminalProcess implements TerminalProcess {
             queueMicrotask(() => listener(exit));
         }
         return () => this.#exitListeners.delete(listener);
+    }
+
+    onMetadataChange(
+        listener: (update: TerminalProcessMetadataUpdate) => void,
+    ): () => void {
+        this.#metadataListeners.add(listener);
+        return () => this.#metadataListeners.delete(listener);
     }
 
     async resize(cols: number, rows: number): Promise<void> {
@@ -179,6 +381,9 @@ class WorkerTerminalProcess implements TerminalProcess {
             generation: this.#descriptor.generation,
             terminalId: this.#descriptor.terminalId,
             version: this.#descriptor.version,
+            ...(this.#controller === undefined
+                ? {}
+                : { controller: this.#controller }),
         };
     }
 
@@ -199,24 +404,71 @@ class WorkerTerminalProcess implements TerminalProcess {
         await current;
     }
 
-    #scheduleResume(): void {
+    #scheduleResume(retryFinal = false): void {
+        const epoch = this.#connectionEpoch;
         const current = this.#resumeTail.then(async () => {
             await this.#serialize(async () => {
-                await this.#resume();
+                if (this.#closed || epoch !== this.#connectionEpoch) return;
+                const resumed = await this.#resume(true);
+                if (
+                    !resumed && retryFinal && !this.#closed &&
+                    epoch === this.#connectionEpoch && this.#finalResumeRetry === undefined
+                ) {
+                    // Exit may be the last notification; give its replay one
+                    // more attempt even if the live stream stays quiet.
+                    this.#finalResumeRetry = setTimeout(() => {
+                        this.#finalResumeRetry = undefined;
+                        this.#scheduleResume();
+                    }, 100);
+                    this.#finalResumeRetry.unref?.();
+                }
             });
         });
         this.#resumeTail = current.catch((error: unknown) => {
-            this.#fail(asError(error));
+            if (epoch === this.#connectionEpoch) this.#fail(asError(error));
         });
     }
 
-    async #resume(): Promise<void> {
-        if (this.#closed) return;
-        const attached = await this.#worker.attach({
+    async #resume(background = false): Promise<boolean> {
+        if (this.#closed) return true;
+        let attached;
+        try {
+            attached = await this.#attachForResume();
+        } catch (error) {
+            // A failed subscription is not evidence that the PTY died.
+            if (background && isTemporaryAttachError(error)) return false;
+            throw error;
+        }
+        await this.#applyAttached(attached);
+        return true;
+    }
+
+    async #attachForResume(): ReturnType<WorkerTerminalPort["attach"]> {
+        const initialRestore =
+            this.#localSeq === 0 && this.#worker.control !== undefined;
+        const input = {
             fromSeq: this.#lastSeq,
             generation: this.#descriptor.generation,
             terminalId: this.#descriptor.terminalId,
-        });
+        };
+        try {
+            return await this.#worker.attach({
+                ...input,
+                ...(initialRestore ? { restore: true } : {}),
+            });
+        } catch (error) {
+            if (initialRestore || !isStreamGapError(error)) throw error;
+            return await this.#worker.attach({
+                ...input,
+                fromSeq: this.#lastSeq,
+                restore: true,
+            });
+        }
+    }
+
+    async #applyAttached(
+        attached: Awaited<ReturnType<WorkerTerminalPort["attach"]>>,
+    ): Promise<void> {
         if (this.#closed) return;
         if (
             attached.session.terminalId !== this.#descriptor.terminalId ||
@@ -224,7 +476,33 @@ class WorkerTerminalProcess implements TerminalProcess {
         ) {
             throw new Error("Remote terminal attachment identity changed.");
         }
+        if (attached.session.humanControl === false) this.#clearController();
         this.#descriptor = attached.session;
+        this.#emitMetadata(metadataFromDescriptor(this.#descriptor));
+        if (attached.snapshot !== undefined && attached.snapshot.seq >= this.#lastSeq) {
+            // Live frames can arrive while the snapshot RPC is in flight. An
+            // older snapshot must not rewind a screen that already has them.
+            // Reset the decoder as well as the terminal. For initial recovery
+            // after a Control restart (localSeq === 0), anchor localSeq at
+            // snapshot.seq + 1 so client sequence continuity holds. For a
+            // mid-session resync after stream.gap (localSeq > 0), advance
+            // localSeq contiguously by 1 so downstream attachments receive the
+            // full screen reset frame without tripping a fatal sequence gap.
+            this.#decoder.end();
+            this.#lastSeq = attached.snapshot.seq;
+            this.#localSeq =
+                this.#localSeq === 0
+                    ? attached.snapshot.seq + 1
+                    : this.#localSeq + 1;
+            this.#emitData(attached.snapshot.data, this.#localSeq);
+        } else if (
+            this.#descriptor.pty === false &&
+            attached.replay.length > 0 &&
+            attached.replay[0]!.seq > this.#lastSeq + 1
+        ) {
+            this.#decoder.end();
+            this.#lastSeq = attached.replay[0]!.seq - 1;
+        }
         for (const frame of attached.replay)
             this.#acceptOutput(frame.seq, frame.dataBase64);
         if (attached.exit !== undefined) {
@@ -246,6 +524,34 @@ class WorkerTerminalProcess implements TerminalProcess {
         ) {
             return;
         }
+        if (notification.method === "terminal.error") {
+            this.#scheduleResume();
+            return;
+        }
+        if (notification.method === "terminal.control") {
+            const { params } = notification;
+            const controller = this.#controller;
+            if (params.humanControl || controller === undefined) {
+                this.#applyControlNotification(params);
+            } else {
+                // A release and a later takeover can have the same version.
+                // Confirm the current token before clearing it on a delayed event.
+                void this.#serialize(async () => {
+                    if (this.#closed || this.#controller !== controller) return;
+                    if (
+                        params.version !== undefined &&
+                        params.version < this.#descriptor.version
+                    ) return;
+                    if (
+                        (await this.#renewControl(controller)) !== false ||
+                        this.#closed || this.#controller !== controller
+                    ) return;
+                    this.#clearController();
+                    this.#scheduleResume();
+                });
+            }
+            return;
+        }
         if (notification.method === "terminal.output") {
             if (notification.params.seq > this.#lastSeq + 1) {
                 this.#scheduleResume();
@@ -257,6 +563,10 @@ class WorkerTerminalProcess implements TerminalProcess {
             );
             return;
         }
+        if (notification.params.latestSeq > this.#lastSeq) {
+            this.#scheduleResume(true);
+            return;
+        }
         this.#acceptExit(
             {
                 exitCode: notification.params.exitCode,
@@ -264,6 +574,35 @@ class WorkerTerminalProcess implements TerminalProcess {
             },
             notification.params.version,
         );
+    }
+
+    #applyControlNotification(
+        params: Extract<WorkerTerminalNotification, { method: "terminal.control" }>["params"],
+    ): void {
+        if (params.version !== undefined && params.version < this.#descriptor.version) return;
+        const update: TerminalProcessMetadataUpdate = {
+            ...(params.cols === undefined
+                ? {}
+                : { cols: params.cols }),
+            ...(params.cwd === undefined
+                ? {}
+                : { cwd: params.cwd }),
+            humanControl: params.humanControl,
+            ...(params.name === undefined
+                ? {}
+                : { name: params.name }),
+            ...(params.rows === undefined
+                ? {}
+                : { rows: params.rows }),
+            ...(params.version === undefined
+                ? {}
+                : { version: params.version }),
+            ...(params.workspace === undefined
+                ? {}
+                : { workspace: params.workspace }),
+        };
+        this.#descriptor = { ...this.#descriptor, ...update };
+        this.#emitMetadata(update);
     }
 
     #acceptOutput(seq: number, dataBase64: string): void {
@@ -279,14 +618,14 @@ class WorkerTerminalProcess implements TerminalProcess {
             latestSeq: Math.max(this.#descriptor.latestSeq, seq),
         };
         const decoded = this.#decoder.write(Buffer.from(dataBase64, "base64"));
-        this.#emitData(decoded, seq);
+        this.#emitData(decoded, ++this.#localSeq);
     }
 
     #acceptExit(exit: TerminalProcessExit, version: number): void {
         if (this.#closed) return;
         const finalText = this.#decoder.end();
         if (finalText.length > 0 && this.#lastSeq > 0) {
-            this.#emitData(finalText, this.#lastSeq);
+            this.#emitData(finalText, ++this.#localSeq);
         }
         this.#descriptor = { ...this.#descriptor, state: "exited", version };
         this.#exit = exit;
@@ -303,6 +642,10 @@ class WorkerTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#dataListeners]) listener(data, seq);
     }
 
+    #emitMetadata(update: TerminalProcessMetadataUpdate): void {
+        for (const listener of [...this.#metadataListeners]) listener(update);
+    }
+
     #fail(error: Error): void {
         if (this.#closed) return;
         this.#closed = true;
@@ -310,23 +653,110 @@ class WorkerTerminalProcess implements TerminalProcess {
         for (const listener of [...this.#errorListeners]) listener(error);
     }
 
+    #clearController(notify = true): void {
+        const hadController = this.#controller !== undefined;
+        this.#controller = undefined;
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
+        if (!hadController || !notify) return;
+        for (const listener of [...this.#controlLostListeners]) listener();
+    }
+
     #disposeSubscriptions(): void {
+        clearTimeout(this.#finalResumeRetry);
+        this.#finalResumeRetry = undefined;
+        clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
         this.#unsubscribeConnected();
         this.#unsubscribeDisconnected();
         this.#unsubscribeNotification();
     }
 }
 
-function remoteIdentity(descriptor: WorkerTerminalDescriptor) {
+function remoteIdentity(
+    descriptor: WorkerTerminalDescriptor,
+): TerminalBackendSessionIdentity {
     return {
         cols: descriptor.cols,
+        ...(descriptor.command === undefined
+            ? {}
+            : { command: descriptor.command }),
         createdAt: new Date(descriptor.createdAtMs).toISOString(),
+        ...(descriptor.cwd === undefined ? {} : { cwd: descriptor.cwd }),
+        ...(descriptor.humanControl === undefined
+            ? {}
+            : { humanControl: descriptor.humanControl }),
+        ...(descriptor.name === undefined ? {} : { name: descriptor.name }),
+        ...(descriptor.persistent === undefined
+            ? {}
+            : { persistent: descriptor.persistent }),
+        ...(descriptor.pty === undefined ? {} : { pty: descriptor.pty }),
         recoverable: true,
         rows: descriptor.rows,
         generation: descriptor.generation,
         terminalId: descriptor.terminalId,
         version: descriptor.version,
+        ...(descriptor.workspace === undefined
+            ? {}
+            : { workspace: descriptor.workspace }),
     };
+}
+
+function metadataFromDescriptor(
+    descriptor: WorkerTerminalDescriptor,
+): TerminalProcessMetadataUpdate {
+    return {
+        cols: descriptor.cols,
+        ...(descriptor.command === undefined
+            ? {}
+            : { command: descriptor.command }),
+        ...(descriptor.cwd === undefined ? {} : { cwd: descriptor.cwd }),
+        ...(descriptor.humanControl === undefined
+            ? {}
+            : { humanControl: descriptor.humanControl }),
+        ...(descriptor.name === undefined ? {} : { name: descriptor.name }),
+        ...(descriptor.persistent === undefined
+            ? {}
+            : { persistent: descriptor.persistent }),
+        ...(descriptor.pty === undefined ? {} : { pty: descriptor.pty }),
+        rows: descriptor.rows,
+        version: descriptor.version,
+        ...(descriptor.workspace === undefined
+            ? {}
+            : { workspace: descriptor.workspace }),
+    };
+}
+
+function isControlLeaseLost(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "process.controlOwned"
+    );
+}
+
+function isStreamGapError(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === STREAM_GAP_CODE
+    );
+}
+
+function isTemporaryAttachError(error: unknown): boolean {
+    const { code, retryable } = (error ?? {}) as {
+        code?: unknown;
+        retryable?: unknown;
+    };
+    return (
+        // The worker's RPC errors carry retryable; local transport errors may not.
+        retryable !== false ||
+        code === TRANSPORT_RPC_RESULT_UNCERTAIN_CODE ||
+        code === "process.hostFailed" ||
+        code === "terminal.bridgeFailed"
+    );
 }
 
 function asError(error: unknown): Error {

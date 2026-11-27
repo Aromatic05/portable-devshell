@@ -128,7 +128,7 @@ Scheduler 在 Review（含审批）、inbound Rewrite、target 输入准备/read
 
 `invocationInput(input, callId, finalValue)` 在 reserve 前将 Rewrite 后输入转换为 inner input。`transformResult(result, callId, presentation?)` 在 executor 返回后、outbound Rewrite 前运行。它们仍是独立的 tool-owned adaptation 接口。
 
-Rewrite 本身也承载业务处理：Core Wait hook 修改 numeric `timeMs`、创建 detach 并改写 handoff 结果；Comment 的 Todo access、advice、delivery 也使用 Rewrite。因此不能继续规定“所有业务语义都在 Rewrite 外”。
+Rewrite 本身也承载业务处理：Core Wait hook 修改 numeric `waitMs`、创建 detach 并改写 handoff 结果；Comment 的 Todo access、advice、delivery 也使用 Rewrite。因此不能继续规定“所有业务语义都在 Rewrite 外”。
 
 Worker-backed calls 通过 invoker 发往 Worker；Control-owned operations 通过 `registerExecute` 注册 callback，同样经过 target Scheduler 和 Audit，不依赖 Worker readiness。[Context Tool runtime](../../packages/control/src/context/tool/Runtime.ts) 将 `environ_info/environ_remote` 的准备行为放在 executor 内，先经过共享 pipeline 再执行 touch/prepare/connect。
 

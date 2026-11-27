@@ -4,8 +4,8 @@ use serde_json::json;
 
 use crate::capability::rpc::router::{ControlHandler, control_handler, parse_params, serialize};
 use crate::capability::terminal::{
-    TerminalAttachInput, TerminalCommandInput, TerminalManager, TerminalOpenInput,
-    TerminalResizeInput, TerminalWriteInput,
+    TerminalAttachInput, TerminalCommandInput, TerminalControlInput, TerminalInspectInput,
+    TerminalManager, TerminalOpenInput, TerminalResizeInput, TerminalWriteInput,
 };
 
 pub fn open(manager: TerminalManager) -> Arc<dyn ControlHandler> {
@@ -45,5 +45,15 @@ pub fn capabilities() -> serde_json::Value {
         "resize": cfg!(any(unix, windows)),
         "replay": cfg!(any(unix, windows)),
         "binaryFrames": false,
+    })
+}
+
+pub fn control(manager: TerminalManager) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| manager.control(parse_params::<TerminalControlInput>(request)?))
+}
+
+pub fn inspect(manager: TerminalManager) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        serialize(manager.inspect(parse_params::<TerminalInspectInput>(request)?)?)
     })
 }

@@ -16,7 +16,7 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
     await contexts.initialize();
     try {
         const record = await contexts.registry.create({
-            principal: "local", environments: [{ instance: "local", workspace: "/repo" }],
+            principal: "local", environments: [{ instance: "local", workspace: directory }],
         });
         const source = new TestToolSource();
         source.register("local", [mcpAppActionDefinition()]);

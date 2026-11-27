@@ -134,6 +134,28 @@ test("Instance observe capability watchEvents filters authoritative runtime even
     assert.equal(subscriptions, 1);
 });
 
+test("retirement can cancel an Instance watch before subscription admission", async () => {
+    const controller = new AbortController();
+    const reason = new Error("watch retired while opening");
+    const runtime = runtimeStub({
+        async subscribeEvents(fromSeq, signal) {
+            assert.equal(fromSeq, 11);
+            assert.equal(signal, controller.signal);
+            controller.abort(reason);
+            signal!.throwIfAborted();
+            return assert.fail("cancelled admission returned a stream");
+        },
+    });
+    const capability = new ExtensionInstanceObserveCapabilityControl({
+        allowed: true, extensionId: "instance", listConfigured: () => [],
+        process: () => processStub(), runtime: () => runtime,
+    });
+    await assert.rejects(capability.watchEvents("demo-local", {
+        fromSeq: 11, signal: controller.signal,
+        onEvent: () => assert.fail("cancelled admission delivered an event"),
+    }), reason);
+});
+
 test("Instance observe capability never exposes lifecycle mutation", async () => {
     const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true,

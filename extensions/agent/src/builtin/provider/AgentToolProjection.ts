@@ -14,9 +14,6 @@ const CONSUMER_ONLY_INPUT_PROPERTIES = new Set([
 
 const TOOL_INTERNAL_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
     ["file_edit", new Set(["resultDetail"])],
-    ["tmux_input", new Set(["line", "timeMs"])],
-    ["tmux_read", new Set(["consumeOutput"])],
-    ["tmux_run", new Set(["consumeOutput"])],
 ]);
 
 const MAX_MODEL_TOOL_RESULT_CHARACTERS = 12_000;
@@ -64,36 +61,9 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
             projectResult: renderFileReadModelToolResult,
         },
     ],
-    [
-        "tmux_input",
-        {
-            projectResult: renderTmuxTaskModelToolResult,
-        },
-    ],
-    [
-        "tmux_inspect",
-        {
-            projectResult: renderTmuxInspectModelToolResult,
-        },
-    ],
-    [
-        "tmux_manage",
-        {
-            projectResult: renderTmuxManageModelToolResult,
-        },
-    ],
-    [
-        "tmux_read",
-        {
-            projectResult: renderTmuxTaskModelToolResult,
-        },
-    ],
-    [
-        "tmux_run",
-        {
-            projectResult: renderTmuxTaskModelToolResult,
-        },
-    ],
+    ["task_input", { projectResult: renderBashModelToolResult }],
+    ["task_inspect", { projectResult: renderProcessModelToolResult }],
+    ["task_manage", { projectResult: renderProcessModelToolResult }],
 ]);
 
 const AGENT_MODEL_TOOL_NAMES = new Set(AGENT_MODEL_TOOL_PROJECTIONS.keys());
@@ -114,6 +84,7 @@ export function projectAgentModelTools(
                 inputSchema: projectAgentModelInputSchema(
                     tool.name,
                     tool.inputSchema,
+                    tool._meta,
                 ),
                 name: tool.name,
             };
@@ -140,26 +111,62 @@ export function projectAgentModelToolResult(
     toolName: string,
     value: ExtensionJsonValue,
 ): string {
-    const rendered = renderAgentModelToolResult(toolName, value);
-    if (!isRecord(value) || !AGENT_MODEL_TOOL_PROJECTIONS.has(toolName) ||
-        !Array.isArray(value.comment))
-        return limitModelToolResult(rendered);
-    const comments = value.comment.filter(
-        (entry): entry is string => typeof entry === "string" && entry.length > 0,
-    );
-    if (comments.length === 0) return limitModelToolResult(rendered);
-    // Comment may contain a new user instruction; reserve it before clipping
-    // routine tool output, rather than losing it in the semantic projection.
-    const advice = `comment:\n${comments.join("\n")}\n`;
-    const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - advice.length;
+    const projectionName = toolName.startsWith("devshell_")
+        ? toolName.slice("devshell_".length)
+        : toolName;
+    const rendered = renderAgentModelToolResult(projectionName, value);
+    const comments = isRecord(value) && AGENT_MODEL_TOOL_PROJECTIONS.has(projectionName) && Array.isArray(value.comment)
+        ? value.comment.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+        : [];
+    // Preserve instructions before clipping routine output, but reserve the
+    // task recovery metadata even when instructions exhaust the result budget.
+    const advice = comments.length === 0 ? "" : `comment:\n${comments.join("\n")}\n`;
+    const task = rendered.length + advice.length > MAX_MODEL_TOOL_RESULT_CHARACTERS
+        ? retainedProcessRecovery(projectionName, value) : "";
+    const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - task.length - advice.length;
     return remaining <= 0
-        ? `${advice}[tool result omitted: comment exceeds the result budget]`
-        : `${advice}${limitModelToolResult(rendered, remaining)}`;
+        ? `${task}${advice}[tool result omitted: comment exceeds the result budget]`
+        : `${advice}${task}${limitModelToolResult(rendered, remaining)}`;
+}
+
+function retainedProcessRecovery(toolName: string, value: ExtensionJsonValue): string {
+    if ((toolName !== "bash_run" && toolName !== "task_input" && toolName !== "task_manage") || !isRecord(value))
+        return "";
+    const details = isRecord(value.error) && isRecord(value.error.details) ? value.error.details : undefined;
+    if (typeof details?.taskId === "string") {
+        if (details.taskStart === "confirmed" || details.taskStart === "unknown")
+            return `taskId=${details.taskId} taskStart=${details.taskStart}. Inspect the task; do not repeat the creation call.\n`;
+        return [
+            `taskId=${details.taskId}`,
+            typeof details.cursor === "string" ? `cursor=${JSON.stringify(details.cursor)}` : undefined,
+            "Observe the existing task with task_input; omit input to avoid replaying side effects.",
+        ].filter((line) => line !== undefined).join("\n") + "\n";
+    }
+    const task = isRecord(value.task) ? value.task : undefined;
+    const id = task?.id ?? value.taskId;
+    if (typeof id !== "string") return "";
+    return [
+        `taskId=${id}`,
+        field("status", task?.status ?? task?.state ?? value.state),
+        field("termination", value.termination),
+        field("exitCode", value.exitCode),
+        field("termSignal", value.termSignal),
+        field("waitReason", value.waitReason),
+        value.detached === true ? "detached=true" : undefined,
+        value.killRequested === true ? "killRequested=true" : undefined,
+        typeof value.cursor === "string" ? `cursor=${JSON.stringify(value.cursor)}` : undefined,
+        typeof value.stdoutPath === "string" ? `stdoutRecovery=${value.stdoutPath}` : undefined,
+        typeof value.stderrPath === "string" ? `stderrRecovery=${value.stderrPath}` : undefined,
+        ...(typeof value.cursor === "string"
+            ? ["Observe the existing task with task_input; omit input to avoid replaying side effects."]
+            : []),
+    ].filter((line) => line !== undefined).join("\n") + "\n";
 }
 
 function projectAgentModelInputSchema(
     toolName: string,
     schema: ExtensionJsonValue,
+    meta?: ExtensionJsonValue,
 ): ExtensionJsonValue {
     if (!isRecord(schema)) return schema;
     const properties = isRecord(schema.properties)
@@ -178,11 +185,62 @@ function projectAgentModelInputSchema(
               (entry) => typeof entry !== "string" || !hidden.has(entry),
           )
         : undefined;
-    return {
+    const projected: Record<string, ExtensionJsonValue> = {
         ...schema,
         properties,
         ...(required === undefined ? {} : { required }),
     };
+    const hints = readInputHints(meta);
+    return Object.keys(hints).length === 0
+        ? projected
+        : applyInputHints(projected, hints);
+}
+
+function readInputHints(
+    meta: ExtensionJsonValue | undefined,
+): Readonly<Record<string, string>> {
+    if (!isRecord(meta) || !isRecord(meta.devshell) || !isRecord(meta.devshell.mcp)) {
+        return {};
+    }
+    const inputHints = meta.devshell.mcp.inputHints;
+    if (!isRecord(inputHints)) return {};
+    return Object.fromEntries(
+        Object.entries(inputHints).filter(
+            (entry): entry is [string, string] =>
+                typeof entry[1] === "string" && entry[1].length > 0,
+        ),
+    );
+}
+
+function applyInputHints(
+    value: ExtensionJsonValue,
+    hints: Readonly<Record<string, string>>,
+): ExtensionJsonValue {
+    if (Array.isArray(value)) {
+        return value.map((entry) => applyInputHints(entry, hints));
+    }
+    if (!isRecord(value)) return value;
+    const updated: Record<string, ExtensionJsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === "properties" && isRecord(entry)) {
+            updated.properties = Object.fromEntries(
+                Object.entries(entry).map(([propertyName, propertySchema]) => {
+                    const recursed = applyInputHints(propertySchema, hints);
+                    const hint = hints[propertyName];
+                    if (hint !== undefined && isRecord(recursed)) {
+                        return [
+                            propertyName,
+                            { ...recursed, description: hint },
+                        ];
+                    }
+                    return [propertyName, recursed];
+                }),
+            );
+            continue;
+        }
+        updated[key] = applyInputHints(entry, hints);
+    }
+    return updated;
 }
 
 function renderAgentModelToolResult(
@@ -191,7 +249,7 @@ function renderAgentModelToolResult(
 ): string {
     if (!isRecord(value)) return renderToolResult(value);
     // Structured tool failures need their own path: a success projector such
-    // as bash_run or tmux_read otherwise renders this error as empty output.
+    // as bash_run or task_input otherwise renders this error as empty output.
     if (isRecord(value.error)) return `error=${renderToolResult(value.error)}`;
     return (
         AGENT_MODEL_TOOL_PROJECTIONS.get(toolName)?.projectResult(value) ??
@@ -302,38 +360,65 @@ function renderBashModelToolResult(
     const streamBudget = Math.floor(
         MAX_SEMANTIC_CONTENT_CHARACTERS / Math.max(streams, 1),
     );
+    const stdoutPreview = previewText(stdout, streamBudget);
+    const stderrPreview = previewText(stderr, streamBudget);
+    const stdoutMissingRecovery =
+        stdoutPath === undefined &&
+        (stdoutPreview.clipped || value.stdoutTruncated === true);
+    const stderrMissingRecovery =
+        stderrPath === undefined &&
+        (stderrPreview.clipped || value.stderrTruncated === true);
     const lines = [
         compactFields([
             field("termination", value.termination),
             field("exitCode", value.exitCode),
             field("termSignal", value.termSignal),
             value.timedOut === true ? "timedOut=true" : undefined,
+            value.detached === true ? "detached=true" : undefined,
+            field("waitMs", value.waitMs),
+            value.untilExit === true ? "untilExit=true" : undefined,
             field("durationMs", value.durationMs),
         ]),
     ];
-    if (stdout.length > 0) {
-        const preview = previewText(stdout, streamBudget);
+    if (stdout.length > 0)
         lines.push(
-            `stdout${streamLabel(value.stdoutBytes, value.stdoutTruncated)}:\n${preview.text}`,
+            `stdout${streamLabel(value.stdoutBytes, value.stdoutTruncated)}:\n${stdoutPreview.text}`,
         );
-        if (preview.clipped && stdoutPath === undefined)
-            lines.push(
-                "stdoutProjectionClipped=true; rerun with narrower output if omitted text is required",
-            );
-    }
-    if (stderr.length > 0) {
-        const preview = previewText(stderr, streamBudget);
+    if (stdoutMissingRecovery)
         lines.push(
-            `stderr${streamLabel(value.stderrBytes, value.stderrTruncated)}:\n${preview.text}`,
+            stdoutPreview.clipped ? "stdoutProjectionClipped=true" : "stdoutTruncated=true",
         );
-        if (preview.clipped && stderrPath === undefined)
-            lines.push(
-                "stderrProjectionClipped=true; rerun with narrower output if omitted text is required",
-            );
-    }
+    if (stderr.length > 0)
+        lines.push(
+            `stderr${streamLabel(value.stderrBytes, value.stderrTruncated)}:\n${stderrPreview.text}`,
+        );
+    if (stderrMissingRecovery)
+        lines.push(
+            stderrPreview.clipped ? "stderrProjectionClipped=true" : "stderrTruncated=true",
+        );
+    if (value.task !== undefined) lines.push(`task=${JSON.stringify(value.task)}`);
+    if (value.cursor !== undefined) lines.push(`cursor=${JSON.stringify(value.cursor)}`);
+    if (value.waitReason !== undefined) lines.push(`waitReason=${String(value.waitReason)}`);
+    if (isRecord(value.waitError))
+        lines.push(`waitError=${JSON.stringify(value.waitError)}`);
     if (stdoutPath !== undefined) lines.push(`stdoutRecovery=${stdoutPath}`);
     if (stderrPath !== undefined) lines.push(`stderrRecovery=${stderrPath}`);
     lines.push(...renderStringWarnings(value.artifactWarnings));
+    if (stdoutMissingRecovery || stderrMissingRecovery) {
+        // Keep this at the tail with the continuation metadata, away from
+        // the middle removed by the final size limit.
+        lines.push(
+            "Output is incomplete. Do not rerun the command or resend input to recover omitted output.",
+        );
+        if (
+            isRecord(value.task) &&
+            typeof value.task.id === "string" &&
+            typeof value.cursor === "string"
+        )
+            lines.push(
+                "Observe the existing task with its returned ID and cursor; omit input to avoid replaying side effects.",
+            );
+    }
     return lines.filter((line) => line.length > 0).join("\n");
 }
 
@@ -474,180 +559,6 @@ function renderFileGrepModelToolResult(
     return sections.join("\n\n");
 }
 
-function renderTmuxTaskModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    const task = isRecord(value.task) ? value.task : undefined;
-    const pane = isRecord(value.pane) ? value.pane : undefined;
-    const taskId =
-        task !== undefined && typeof task.id === "string" ? task.id : undefined;
-    const paneId =
-        pane !== undefined && typeof pane.id === "string" ? pane.id : undefined;
-    const lines = [
-        compactFields([
-            field("task", taskId),
-            field("status", task?.status),
-            field("pane", paneId),
-            field("paneName", pane?.name),
-            field("waitReason", value.waitReason),
-            field("timeout", value.timeout),
-            value.detached === true ? "detached=true" : undefined,
-            value.interrupted === true ? "interrupted=true" : undefined,
-            value.timedOut === true ? "timedOut=true" : undefined,
-        ]),
-    ];
-    const output = stringArray(value.output);
-    if (output.length > 0) {
-        const preview = previewText(
-            output.join("\n"),
-            MAX_SEMANTIC_CONTENT_CHARACTERS,
-        );
-        lines.push(`output:\n${preview.text}`);
-        if (preview.clipped) {
-            if (taskId !== undefined)
-                lines.push(
-                    `projectionClipped=true; continue with tmux_read task=${taskId}`,
-                );
-            else if (paneId !== undefined)
-                lines.push(
-                    `projectionClipped=true; inspect pane=${paneId} for omitted terminal content`,
-                );
-        }
-    }
-    lines.push(...renderTmuxWarnings(value.warnings));
-    return lines.filter((line) => line.length > 0).join("\n");
-}
-
-function renderTmuxInspectModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    const panes = Array.isArray(value.panes)
-        ? value.panes.filter(isRecord)
-        : undefined;
-    if (panes === undefined) return renderToolResult(value);
-    if (panes.length === 0)
-        return [
-            ...renderTmuxWarnings(value.warnings),
-            "No panes returned.",
-        ].join("\n");
-    const lineBudget = Math.max(
-        80,
-        Math.floor(MAX_SEMANTIC_CONTENT_CHARACTERS / panes.length),
-    );
-    const sections = panes.map((pane) => {
-        const task = isRecord(pane.task) ? pane.task : undefined;
-        const size = isRecord(pane.size) ? pane.size : undefined;
-        const paneId = typeof pane.id === "string" ? pane.id : undefined;
-        const header = compactFields([
-            field("pane", paneId),
-            field("name", pane.name),
-            field("status", pane.status),
-            field("cwd", pane.cwd),
-            field("command", pane.command),
-            size === undefined
-                ? undefined
-                : `size=${String(size.columns ?? "?")}x${String(size.rows ?? "?")}`,
-            pane.locked === true ? "locked=true" : undefined,
-            field("task", task?.id),
-            field("taskStatus", task?.status),
-        ]);
-        const terminalLines = stringArray(pane.lines);
-        if (terminalLines.length === 0) return header;
-        const preview = previewText(terminalLines.join("\n"), lineBudget);
-        return [
-            header,
-            `lines:\n${preview.text}`,
-            preview.clipped && paneId !== undefined
-                ? `projectionClipped=true; rerun tmux_inspect pane=${paneId} with narrower start/end`
-                : undefined,
-        ]
-            .filter(
-                (line): line is string =>
-                    typeof line === "string" && line.length > 0,
-            )
-            .join("\n");
-    });
-    sections.push(...renderTmuxWarnings(value.warnings));
-    return sections.join("\n\n");
-}
-
-function renderTmuxListModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    const panes = Array.isArray(value.panes)
-        ? value.panes.filter(isRecord)
-        : undefined;
-    if (panes === undefined) return renderToolResult(value);
-    const lines = panes.map((pane) => {
-        const task = isRecord(pane.task) ? pane.task : undefined;
-        return compactFields([
-            field("pane", pane.id),
-            field("name", pane.name),
-            field("status", pane.status),
-            field("task", task?.id),
-            field("taskStatus", task?.status),
-        ]);
-    });
-    if (lines.length === 0) lines.push("No panes or active tasks.");
-    lines.push(...renderTmuxWarnings(value.warnings));
-    return lines.join("\n");
-}
-
-function renderTmuxManageModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    if (Array.isArray(value.panes)) return renderTmuxListModelToolResult(value);
-    if (isRecord(value.pane)) return renderTmuxCreateModelToolResult(value);
-    if (
-        typeof value.closedTaskId === "string" ||
-        typeof value.closedPaneId === "string"
-    ) {
-        return renderTmuxCloseModelToolResult(value);
-    }
-    return renderToolResult(value);
-}
-
-function renderTmuxCreateModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    const pane = isRecord(value.pane) ? value.pane : undefined;
-    if (pane === undefined) return renderToolResult(value);
-    return [
-        compactFields([field("pane", pane.id), field("name", pane.name)]),
-        ...renderTmuxWarnings(value.warnings),
-    ]
-        .filter((line) => line.length > 0)
-        .join("\n");
-}
-
-function renderTmuxCloseModelToolResult(
-    value: Record<string, ExtensionJsonValue>,
-): string {
-    const closed =
-        typeof value.closedTaskId === "string"
-            ? `closedTask=${value.closedTaskId}`
-            : typeof value.closedPaneId === "string"
-              ? `closedPane=${value.closedPaneId}`
-              : "closed";
-    return [closed, ...renderTmuxWarnings(value.warnings)].join("\n");
-}
-
-function renderTmuxWarnings(value: ExtensionJsonValue | undefined): string[] {
-    if (!Array.isArray(value)) return [];
-    return value
-        .filter(isRecord)
-        .map((warning) =>
-            compactFields([
-                "warning",
-                field("code", warning.code),
-                field("pane", warning.pane),
-                typeof warning.message === "string"
-                    ? warning.message
-                    : undefined,
-            ]),
-        );
-}
-
 function renderStringWarnings(value: ExtensionJsonValue | undefined): string[] {
     return stringArray(value).map((warning) => `warning=${warning}`);
 }
@@ -743,11 +654,15 @@ function isJsonValue(value: unknown): value is ExtensionJsonValue {
 }
 
 function isRecord(
-    value: ExtensionJsonValue,
+    value: ExtensionJsonValue | undefined,
 ): value is Record<string, ExtensionJsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function renderToolResult(value: ExtensionJsonValue): string {
     return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function renderProcessModelToolResult(value: Record<string, ExtensionJsonValue>): string {
+    return JSON.stringify(value, null, 2);
 }

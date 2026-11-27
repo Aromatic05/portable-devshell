@@ -57,11 +57,9 @@ export const toolTitles: Record<string, string> = {
     file_grep: "Search content",
     file_glob: "Find files",
     file_edit: "Edit files",
-    tmux_run: "Run task",
-    tmux_read: "Read task output",
-    tmux_input: "Send terminal input",
-    tmux_inspect: "Inspect terminal",
-    tmux_manage: "Manage terminals",
+    task_input: "Task input",
+    task_inspect: "Inspect terminal",
+    task_manage: "Manage terminals",
     progress_report: "Progress report",
     environ_info: "Workspace environment",
     environ_remote: "Remote environment",
@@ -86,7 +84,7 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
     if (!filePaths.length && Array.isArray(output?.files)) filePaths.push(...paths(output.files));
     if (label) {
         const target = name === "file_read" ? filePaths.join(", ") :
-            name === "bash_run" || name === "tmux_run" ? string(args?.command) : undefined;
+            name === "bash_run" ? string(args?.command) : undefined;
         return (redact(label) + (target ? " · " + target : "")).slice(0, 250);
     }
     switch (name) {
@@ -101,11 +99,16 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
                 ? (total ?? operations.length) + " file operation" + ((total ?? operations.length) === 1 ? "" : "s")
                 : "Apply file changes";
         }
-        case "tmux_run": return string(args?.command)?.slice(0, 250) ?? summary ?? "Task started";
-        case "tmux_read": return string(args?.task) ?? summary ?? "Task transcript";
-        case "tmux_input": return string(args?.task) ?? string(args?.pane) ?? summary ?? "Terminal input";
-        case "tmux_inspect": return string(args?.pane) ?? summary ?? "Terminal snapshot";
-        case "tmux_manage": return string(args?.command) ?? summary ?? "Terminal resources";
+        case "task_input": return string(args?.task) ?? string(record(output?.task)?.id) ?? summary ?? "Task input";
+        case "task_inspect": return string(args?.task) ?? string(output?.task) ?? summary ?? "Terminal snapshot";
+        case "task_manage": {
+            const command = string(args?.command);
+            const detail = string(args?.name) ?? string(args?.task) ??
+                string(record(output?.task)?.id) ?? string(output?.taskId);
+            if (output?.killRequested === true && output.state === "running")
+                return detail ? `Termination requested · ${detail}` : "Termination requested";
+            return command && detail ? `${command} · ${detail}` : command ?? detail ?? summary ?? "Terminal resources";
+        }
         case "progress_report": return string(args?.message)?.slice(0, 180) ?? summary ?? "Progress update";
         case "artifact_viewImage": return string(output?.name) ?? string(args?.path) ??
             string(args?.handle) ?? summary ?? "Image";

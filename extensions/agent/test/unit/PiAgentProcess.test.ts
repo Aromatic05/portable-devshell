@@ -16,6 +16,7 @@ import type {
 import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
+import { PiToolExposureController } from "../../src/provider/pi/adapt/ToolExposure.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/runtime/AgentProcess.ts";
 import {
     parseAgentWorkerTarget,
@@ -416,6 +417,29 @@ test("Pi provider child does not inherit Extension sandbox permission flags", as
         );
         await rm(runtimeDirectory, { force: true, recursive: true });
     }
+});
+
+test("Pi agent gating does not reactivate disabled task tools", () => {
+    let active = ["task_input", "task_manage", "agent_spawn", "agent_poll"];
+    const controller = new PiToolExposureController(
+        {
+            getActiveToolNames: () => [...active],
+            setActiveToolsByName: (names) => {
+                active = [...names];
+            },
+        },
+        {
+            expanded: ["agent_spawn", "agent_poll", "agent_interact", "agent_manage"],
+            gateway: ["agent_spawn"],
+        },
+    );
+
+    assert.deepEqual(active, ["task_input", "task_manage", "agent_spawn"]);
+    active = ["task_manage", "agent_spawn"];
+    controller.setExpanded(true);
+    assert.deepEqual(active, ["task_manage", "agent_spawn", "agent_poll"]);
+    controller.setExpanded(false);
+    assert.deepEqual(active, ["task_manage", "agent_spawn"]);
 });
 
 function startOptions(

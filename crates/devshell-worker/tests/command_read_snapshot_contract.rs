@@ -67,7 +67,7 @@ fn bash_pipeline_credits_only_observed_source_lines_in_its_context() {
         "bash_run",
         json!({
             "command": "cat sample.txt | grep 'fn ' | head -n 1",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(bash["type"], "reply", "{bash}");
@@ -116,7 +116,7 @@ fn bash_sed_and_full_cat_produce_snapshots_without_extra_file_read() {
         "bash_run",
         json!({
             "command": "sed -n '2,3p' sample.txt",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(sed["message"]["stdout"], "second\nthird\n", "{sed}");
@@ -134,7 +134,7 @@ fn bash_sed_and_full_cat_produce_snapshots_without_extra_file_read() {
         "bash_run",
         json!({
             "command": "cat sample.txt",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(cat["type"], "reply", "{cat}");
@@ -160,7 +160,7 @@ fn bash_rejects_unknown_commands_and_redirection_as_read_provenance() {
         "bash_run",
         json!({
             "command": "printf 'secret\\n'",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(echo["message"]["stdout"], "secret\n");
@@ -188,7 +188,7 @@ fn ripgrep_directory_pipeline_maps_filename_and_line_number() {
         "bash_run",
         json!({
             "command": "rg -n 'TODO' src | head -n 1",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(bash["type"], "reply", "{bash}");
@@ -235,7 +235,7 @@ fn relative_command_cwd_resolves_to_workspace_file_identity() {
         json!({
             "command": "tail -n 1 source.txt",
             "cwd": "subdir",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(bash["message"]["stdout"], "after\n", "{bash}");
@@ -274,7 +274,7 @@ fn large_command_output_does_not_mark_unseen_text_as_read() {
         "bash_run",
         json!({
             "command": "cat sample.txt",
-            "timeoutMs": 5000
+            "waitMs": 5000
         }),
     );
     assert_eq!(bash["type"], "reply", "{bash}");
@@ -284,7 +284,7 @@ fn large_command_output_does_not_mark_unseen_text_as_read() {
 }
 
 #[test]
-fn tmux_read_uses_the_original_task_command_for_source_attribution() {
+fn task_read_uses_the_original_task_command_for_source_attribution() {
     let env = TestEnv::new();
     let instance = "tmux-command-read-coverage";
     fs::write(
@@ -298,11 +298,10 @@ fn tmux_read_uses_the_original_task_command_for_source_attribution() {
         instance,
         "1",
         "ctx-a",
-        "tmux_run",
+        "bash_run",
         json!({
             "command": "cat sample.txt",
-            "wait": "nonblock",
-            "consumeOutput": false
+            "waitMs": 0
         }),
     );
     assert_eq!(started["type"], "reply", "{started}");
@@ -312,20 +311,15 @@ fn tmux_read_uses_the_original_task_command_for_source_attribution() {
         instance,
         "2",
         "ctx-a",
-        "tmux_read",
+        "task_input",
         json!({
             "task": task,
-            "timeMs": 10000,
-            "line": 120
+            "waitMs": 10000, "untilExit": true
         }),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert!(
-        read["message"]["output"]
-            .as_array()
-            .is_some_and(|lines| lines
-                .iter()
-                .any(|line| line.as_str() == Some("tmux second"))),
+        read["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "tmux second")),
         "{read}"
     );
     let edited = patch(&env, instance, "3", "ctx-a", "tmux second", "tmux updated");

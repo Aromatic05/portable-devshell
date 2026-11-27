@@ -35,13 +35,13 @@ test("clean success produces only user comments in order", () => {
 test("user comments precede hints and keep their order", () => {
     const hints = [
         errorHint("bash.nonZeroExit", "x"),
-        diagnosticHint("tmux.taskRunning", "y"),
+        diagnosticHint("bash.taskRunning", "y"),
     ];
     assert.deepEqual(mergeComments(["alpha", "beta"], hints), [
         "alpha",
         "beta",
         "[bash.nonZeroExit] x",
-        "[tmux.taskRunning] y",
+        "[bash.taskRunning] y",
     ]);
 });
 

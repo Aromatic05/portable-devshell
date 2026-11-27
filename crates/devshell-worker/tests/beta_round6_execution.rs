@@ -185,7 +185,7 @@ fn terminal_max_sequence_cursor_is_empty_and_does_not_wrap() {
 }
 
 #[test]
-fn tmux_output_remains_readable_after_task_pane_is_closed() {
+fn task_output_remains_readable_after_terminal_close() {
     let env = TestEnv::new();
     let instance = "round6-tmux-output-close";
     start(&env, instance);
@@ -193,10 +193,10 @@ fn tmux_output_remains_readable_after_task_pane_is_closed() {
         &env,
         instance,
         "run",
-        "tmux_run",
+        "bash_run",
         json!({
             "command":"printf 'BEFORE-CLOSE\n'; touch close-ready; sleep 20",
-            "wait":"nonblock", "timeMs":0
+            "waitMs":0, "pty":true
         }),
     );
     assert_eq!(run["type"], "reply", "{run}");
@@ -213,30 +213,22 @@ fn tmux_output_remains_readable_after_task_pane_is_closed() {
         &env,
         instance,
         "close",
-        "tmux_manage",
-        json!({"command":"close","task":task,"force":true}),
+        "task_manage",
+        json!({"command":"close","task":task}),
     );
     assert_eq!(closed["type"], "reply", "{closed}");
     let read = call(
         &env,
         instance,
         "read",
-        "tmux_read",
-        json!({"task":task,"line":50,"timeMs":0}),
+        "task_input",
+        json!({"task":task,"cursor":run["message"]["cursor"],"waitMs":3000,"untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert_ne!(read["message"]["task"]["status"], "running", "{read}");
-    // tmux_run can consume the first stdout chunk. tmux_read yields only
-    // unread frames; the union is the transcript visible to the caller.
-    let output = run["message"]["output"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .chain(read["message"]["output"].as_array().into_iter().flatten());
-    assert!(
-        output.into_iter().any(|line| line == "BEFORE-CLOSE"),
-        "task output lost across run+close+read: run={run} read={read}"
-    );
+    let output = format!("{}{}", run["message"]["stdout"].as_str().unwrap(), read["message"]["stdout"].as_str().unwrap());
+    assert!(output.lines().any(|line| line == "BEFORE-CLOSE"), "task output lost: {output:?}");
+
 }
 
 #[test]
@@ -370,7 +362,7 @@ fn daemon_stop_start_reopens_ipc_and_keeps_workspace_files() {
         instance,
         "before",
         "bash_run",
-        json!({"command":"printf before","timeoutMs":3000}),
+        json!({"command":"printf before","waitMs":3000}),
     );
     assert_eq!(before["type"], "reply", "{before}");
     assert_eq!(before["message"]["stdout"], "before", "{before}");
@@ -388,7 +380,7 @@ fn daemon_stop_start_reopens_ipc_and_keeps_workspace_files() {
         instance,
         "after",
         "bash_run",
-        json!({"command":"cat survivor.txt","timeoutMs":3000}),
+        json!({"command":"cat survivor.txt","waitMs":3000}),
     );
     assert_eq!(after["type"], "reply", "{after}");
     assert_eq!(after["message"]["stdout"], "persisted\n", "{after}");
@@ -406,7 +398,7 @@ fn concurrent_real_ipc_tool_calls_complete_with_distinct_responses() {
                 instance,
                 "tool-a",
                 "bash_run",
-                json!({"command":"sleep 0.15; printf alpha","timeoutMs":3000}),
+                json!({"command":"sleep 0.15; printf alpha","waitMs":3000}),
             )
         });
         let second = scope.spawn(|| {
@@ -415,7 +407,7 @@ fn concurrent_real_ipc_tool_calls_complete_with_distinct_responses() {
                 instance,
                 "tool-b",
                 "bash_run",
-                json!({"command":"printf beta","timeoutMs":3000}),
+                json!({"command":"printf beta","waitMs":3000}),
             )
         });
         let first = first.join().unwrap();
@@ -458,7 +450,7 @@ fn cancellation_settles_within_bound_and_next_call_remains_usable() {
                 instance,
                 "cancelled",
                 "bash_run",
-                json!({"command":"sleep 30","timeoutMs":35000}),
+                json!({"command":"sleep 30","waitMs":35000}),
             ),
         )
         .unwrap();
@@ -503,7 +495,7 @@ fn cancellation_settles_within_bound_and_next_call_remains_usable() {
         instance,
         "recovered",
         "bash_run",
-        json!({"command":"printf recovered","timeoutMs":3000}),
+        json!({"command":"printf recovered","waitMs":3000}),
     );
     assert_eq!(recovered["type"], "reply", "{recovered}");
     assert_eq!(recovered["message"]["stdout"], "recovered", "{recovered}");

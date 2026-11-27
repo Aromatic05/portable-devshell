@@ -1,6 +1,6 @@
 import type { TuiFocusScope } from "../Ui.js";
 
-export type TuiTerminalTab = "instances" | "tmuxPanes";
+export type TuiTerminalTab = "instances" | "sessions";
 
 export type TuiRoute =
     | { page: "overview"; view: "summary" }

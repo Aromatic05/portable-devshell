@@ -15,6 +15,7 @@ import {
     createConnectionTransport,
     createProcessTransport,
     createServerTransport,
+    createTerminalTransport,
     createToolTransport,
     type ApprovalTransport,
     type ConfigTransport,
@@ -29,6 +30,7 @@ import {
     type ConnectionTransport,
     type ProcessTransport,
     type ServerTransport,
+    type TerminalTransport,
     type ToolTransport,
 } from "@portable-devshell/shared";
 
@@ -60,6 +62,7 @@ export interface CliClients {
     reverse: ConnectionTransport;
     runtime(instance: string): CliClientRuntime;
     server: ServerTransport;
+    terminal?(instance: string): TerminalTransport;
     tool(instance: string): ToolTransport;
     close(): void;
     reconnect(): Promise<void>;
@@ -92,6 +95,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
             return createCliRuntimeAdapter(endpoint, instance, runtime);
         },
         server: createServerTransport(endpoint, { clientKind: "cli" }),
+        terminal: (instance) => createTerminalTransport(endpoint, instance),
         tool: (instance) => createToolTransport(endpoint, instance),
         close: () => endpoint.close(),
         reconnect: async () => await endpoint.reconnect(),

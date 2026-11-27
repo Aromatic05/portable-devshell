@@ -13,9 +13,17 @@ import {
     type WaitRecord,
 } from "@portable-devshell/shared";
 
+import type { WaitLeasePort } from "../Api.js";
+
 export const WAIT_SYNC_MS = 120_000;
 export const WAIT_HANDOFF_MS = 180_000;
 const WAIT_TERMINAL_RETENTION = 128;
+const TERMINAL_WAIT_ERROR_CODES = new Set([
+    "process.notFound",
+    "process.taskFailed",
+    "process.ioFailed",
+    "tool.invalidArguments",
+]);
 
 export interface WaitInvokePort {
     invoke(
@@ -30,6 +38,7 @@ export interface WaitServiceOptions {
     appendEvent(type: string, data: JsonValue): Promise<void>;
     filePath: string;
     invoke: WaitInvokePort;
+    leases?: WaitLeasePort;
     now?: () => string;
     waitId?: () => string;
 }
@@ -51,6 +60,8 @@ export class WaitService {
     readonly #appendEvent: WaitServiceOptions["appendEvent"];
     readonly #filePath: string;
     readonly #invoke: WaitInvokePort;
+    readonly #leases?: WaitLeasePort;
+    readonly #activeCalls = new Set<string>();
     readonly #now: () => string;
     readonly #waitId: () => string;
     #records = new Map<string, WaitRecord>();
@@ -71,12 +82,46 @@ export class WaitService {
         this.#appendEvent = options.appendEvent;
         this.#filePath = options.filePath;
         this.#invoke = options.invoke;
+        this.#leases = options.leases;
         this.#now = options.now ?? (() => new Date().toISOString());
         this.#waitId = options.waitId ?? (() => `wait-${randomUUID()}`);
         const document = readDocument(this.#filePath);
         for (const record of document.waits)
             this.#records.set(record.waitId, record);
         this.#notifications = document.notifications;
+    }
+
+    async beginCall(callId: string): Promise<void> {
+        await this.#serialize(async () => { this.#activeCalls.add(callId); });
+    }
+
+    async finishCall(callId: string): Promise<void> {
+        this.#activeCalls.delete(callId);
+        try {
+            await this.#exclusive(async () => await this.#reconcileLeases());
+        } catch (error) {
+            console.warn("Wait lease reconciliation failed:", errorMessage(error));
+            this.#scheduleDelivery();
+        }
+    }
+
+    // Serialized with beginCall, detach, and settle. Never release a pin
+    // before its replacement state is durable, or while a call can install it.
+    async #reconcileLeases(): Promise<void> {
+        if (this.#leases === undefined) return;
+        try {
+            if (process.platform !== "win32" && existsSync(dirname(this.#filePath))) {
+                const directory = await open(dirname(this.#filePath), "r");
+                try { await directory.sync(); } finally { await directory.close(); }
+            }
+            const owners = new Set(this.#activeCalls);
+            for (const record of this.#records.values())
+                if (record.status === "detached") owners.add(record.callId);
+            await this.#leases.reconcile([...owners]);
+        } catch (error) {
+            console.warn("Wait lease reconciliation failed:", errorMessage(error));
+            this.#scheduleDelivery();
+        }
     }
 
     async list(ctxId?: string): Promise<WaitRecord[]> {
@@ -99,6 +144,8 @@ export class WaitService {
                 this.#start(existing);
                 return structuredClone(existing);
             }
+            if (this.#leases !== undefined && !await this.#leases.confirm(input.callId, input.targetId))
+                throw new Error("Process Host has not retained this Wait target.");
             const now = this.#now();
             const record: WaitRecord = {
                 callId: input.callId,
@@ -128,6 +175,7 @@ export class WaitService {
     resume(): void {
         if (this.#closed) return;
         void this.#exclusive(async () => {
+            await this.#reconcileLeases();
             for (const record of this.#records.values())
                 if (record.status === "detached") this.#start(record);
             await this.#deliverNotifications();
@@ -179,35 +227,61 @@ export class WaitService {
     }
 
     async #monitor(waitId: string, signal: AbortSignal): Promise<void> {
+        let cursor: string | undefined;
         for (;;) {
             if (signal.aborted) return;
             const record = this.#records.get(waitId);
             if (record === undefined || record.status !== "detached") return;
+            const context: ToolCallContext = {
+                ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
+                source: record.source,
+                ...(record.workspace === undefined
+                    ? {}
+                    : { workspace: record.workspace }),
+            };
             try {
+                const usedCursor = cursor;
                 const result = await this.#invoke.invoke(
-                    "tmux_read",
+                    "task_input",
                     {
-                        consumeOutput: false,
-                        line: -1,
+                        untilExit: true,
                         task: record.targetId,
-                        timeMs: WAIT_SYNC_MS,
+                        waitMs: WAIT_SYNC_MS,
+                        ...(usedCursor === undefined ? {} : { cursor: usedCursor }),
                     },
-                    {
-                        ...(record.ctxId === undefined ? {} : { ctxId: record.ctxId }),
-                        source: record.source,
-                        ...(record.workspace === undefined
-                            ? {}
-                            : { workspace: record.workspace }),
-                    },
+                    context,
                     signal,
                 );
                 if (signal.aborted) return;
-                if (readString(result, "waitReason") !== "terminal") continue;
-                await this.#settleObserved(waitId, "resolved", { result }, signal);
+                if (readString(result, "waitReason") !== "terminal") {
+                    const nextCursor = readString(result, "cursor");
+                    if (nextCursor !== undefined) cursor = nextCursor;
+                    continue;
+                }
+                let terminalResult = result;
+                if (usedCursor !== undefined) {
+                    try {
+                        terminalResult = await this.#invoke.invoke(
+                            "task_input",
+                            {
+                                task: record.targetId,
+                                waitMs: 0,
+                            },
+                            context,
+                            signal,
+                        );
+                        if (signal.aborted) return;
+                    } catch {
+                        if (signal.aborted) return;
+                        terminalResult = result;
+                    }
+                }
+                await this.#settleObserved(waitId, "resolved", { result: terminalResult }, signal);
                 return;
             } catch (error) {
                 if (signal.aborted) return;
-                if (toRemoteErrorBody(error)?.code === "tmux.taskExpired") {
+                const code = toRemoteErrorBody(error)?.code;
+                if (code !== undefined && TERMINAL_WAIT_ERROR_CODES.has(code)) {
                     await this.#settleObserved(waitId, "failed", {
                         error: errorMessage(error),
                     }, signal);
@@ -225,7 +299,7 @@ export class WaitService {
         signal: AbortSignal,
     ): Promise<void> {
         // A terminal observation is a fact. A failed state commit must never
-        // cause another tmux_read that could report taskExpired instead.
+        // cause another task_input that could report a missing task instead.
         while (!signal.aborted) {
             try {
                 await this.#settle(waitId, status, terminal);
@@ -263,6 +337,7 @@ export class WaitService {
             await this.#deliverNotifications();
             if (warning !== undefined)
                 console.warn("Wait terminal commit durability unconfirmed:", warning);
+            await this.#reconcileLeases();
         });
     }
 
@@ -349,11 +424,7 @@ export class WaitService {
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
-        const previous = this.#operation;
-        let release!: () => void;
-        this.#operation = new Promise<void>((resolve) => { release = resolve; });
-        await previous;
-        try {
+        return await this.#serialize(async () => {
             const pending = this.#pending;
             if (pending !== undefined) {
                 const stored = readDocument(this.#filePath);
@@ -362,7 +433,18 @@ export class WaitService {
                 if (isDeepStrictEqual(stored, pending.document) && pending.start !== undefined)
                     this.#start(pending.start);
                 await this.#deliverNotifications();
+                await this.#reconcileLeases();
             }
+            return await operation();
+        });
+    }
+
+    async #serialize<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.#operation;
+        let release!: () => void;
+        this.#operation = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try {
             return await operation();
         } finally {
             release();
@@ -398,7 +480,10 @@ export class WaitService {
         this.#retryTimer = setTimeout(() => {
             this.#retryTimer = undefined;
             if (this.#closed) return;
-            void this.#exclusive(async () => await this.#deliverNotifications())
+            void this.#exclusive(async () => {
+                await this.#deliverNotifications();
+                await this.#reconcileLeases();
+            })
                 .catch((error: unknown) => {
                     console.warn("Wait notification reconciliation failed:", errorMessage(error));
                     this.#scheduleDelivery();

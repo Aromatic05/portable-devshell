@@ -34,7 +34,7 @@ impl InstanceLock {
         Self::acquire_path(&paths.daemon_lock_file, true)
     }
 
-    fn acquire_path(path: &Path, nonblocking: bool) -> Result<Option<Self>, String> {
+    pub(crate) fn acquire_path(path: &Path, nonblocking: bool) -> Result<Option<Self>, String> {
         Ok(
             PlatformInstanceLock::acquire(path, nonblocking)?.map(|platform| Self {
                 _platform: platform,

@@ -107,3 +107,33 @@ test("WorkerToolInvoker treats current schemas as discovery metadata, not a wire
     );
     assert.deepEqual(calls, [{ path: "./legacy.txt", view: "content" }]);
 });
+
+test("process creation keeps its preallocated task ID and receives a late cancellation reply", async (t) => {
+    const catalog = new WorkerToolCatalog();
+    catalog.refresh([{
+        requiredCapabilities: ["execute"], description: "Run a command.", group: "bash",
+        name: "bash_run", inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    }]);
+    const { client, server } = await endpoints();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    let taskId: string | undefined;
+    const rpc = new Rpc(server.bind("tool"), {
+        bash_run: async (message, request) => {
+            taskId = (message as { context: { taskCreationId: string } }).context.taskCreationId;
+            started();
+            if (!request.signal.aborted)
+                await new Promise<void>((resolve) =>
+                    request.signal.addEventListener("abort", () => resolve(), { once: true }));
+            return { task: { id: taskId, status: "running" } };
+        },
+    });
+    t.after(() => { rpc.close(); client.close(); server.close(); });
+    const controller = new AbortController();
+    const invoker = new WorkerToolInvoker(client, "worker", catalog);
+    const pending = invoker.invoke("bash_run", { command: "true" }, undefined, controller.signal);
+    await ready;
+    controller.abort();
+    assert.match(taskId!, /^process-[0-9a-f-]{36}$/u);
+    assert.deepEqual(await pending, { task: { id: taskId, status: "running" } });
+});

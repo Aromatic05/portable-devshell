@@ -41,11 +41,9 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
                 arguments: {
                     command,
                     ctxId,
-                    line: 20,
-                    timeout: TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS,
-                    wait: "block",
+                    waitMs: TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS,
                 },
-                name: "tmux_run",
+                name: "bash_run",
             },
             {
                 maxTotalTimeout: TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS,
@@ -53,12 +51,12 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             },
         );
         const detachedAfterMs = Date.now() - startedAt;
-        assertToolSuccess(launched, "long wait tmux_run");
+        assertToolSuccess(launched, "long wait bash_run");
         const launch = launched.structuredContent;
         const taskId = readTaskId(launch);
         if (launch?.detached !== true || readTaskStatus(launch) !== "running") {
             throw new Error(
-                `long wait tmux_run did not hand off a running task: ${JSON.stringify(launch)}`,
+                `long wait bash_run did not hand off a running task: ${JSON.stringify(launch)}`,
             );
         }
         if (
@@ -66,7 +64,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             detachedAfterMs >= TESTSPACE_LONG_WAIT_TASK_DURATION_MS
         ) {
             throw new Error(
-                `long wait tmux_run detached outside the expected 180s boundary: ${detachedAfterMs}ms`,
+                `long wait bash_run detached outside the expected 180s boundary: ${detachedAfterMs}ms`,
             );
         }
 
@@ -75,11 +73,12 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             {
                 arguments: {
                     ctxId,
-                    line: -20,
+                    cursor: launch.cursor,
+                    untilExit: true,
                     task: taskId,
-                    timeMs: FINAL_READ_TIMEOUT_MS,
+                    waitMs: FINAL_READ_TIMEOUT_MS,
                 },
-                name: "tmux_read",
+                name: "task_input",
             },
             {
                 maxTotalTimeout: FINAL_READ_TIMEOUT_MS + 15_000,
@@ -87,19 +86,16 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             },
         );
         const finalReadMs = Date.now() - readStartedAt;
-        assertToolSuccess(completed, "long wait tmux_read");
+        assertToolSuccess(completed, "long wait task_input");
         const completion = completed.structuredContent;
         if (readTaskStatus(completion) !== "0") {
             throw new Error(
-                `long wait tmux_read did not return a successful task: ${JSON.stringify(completion)}`,
+                `long wait task_input did not return a successful task: ${JSON.stringify(completion)}`,
             );
         }
-        const output = Array.isArray(completion?.output)
-            ? completion.output.map(String)
-            : [];
-        if (!output.some((line) => line.includes(marker))) {
+        if (typeof completion?.stdout !== "string" || !completion.stdout.includes(marker)) {
             throw new Error(
-                `long wait tmux_read missed the completion marker: ${JSON.stringify(completion)}`,
+                `long wait task_input missed the completion marker: ${JSON.stringify(completion)}`,
             );
         }
 

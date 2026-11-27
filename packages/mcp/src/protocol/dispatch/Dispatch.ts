@@ -73,6 +73,7 @@ export class McpEndpointDispatch {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
         onExecuted?: (callId: string, value: Readonly<ToolCallHookValue>, result: JsonValue) => void,
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const snapshot = this.#catalog.snapshot();
@@ -179,6 +180,7 @@ export class McpEndpointDispatch {
                     await prepareCall(callId, value);
                     return rewrittenInput;
                 },
+                onProgress,
             );
         return appendWorkspaceAdvice(
             presentMcpEndpointResult(result, nativeResult),

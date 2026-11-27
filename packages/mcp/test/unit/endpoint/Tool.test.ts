@@ -194,9 +194,9 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
     test("McpToolSchemaAdapter hides metadata-selected fields only from model-facing schema", () => {
         const adapter = new McpToolSchemaAdapter();
-        const tmuxInput: ToolDefinition = {
+        const processInput: ToolDefinition = {
             ...bashRun,
-            name: "tmux_input",
+            name: "task_input",
             inputSchema: {
                 $defs: {
                     Pane: {
@@ -214,7 +214,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
                             input: { type: "string" },
                             line: { type: "integer" },
                             task: { type: "string" },
-                            timeMs: { type: "integer" },
+                            waitMs: { type: "integer" },
                         },
                         required: ["task", "input"],
                         type: "object",
@@ -224,9 +224,9 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             },
         };
 
-        const canonical = adapter.toMcpTool(tmuxInput, "Send input");
-        const model = adapter.toMcpTool(tmuxInput, "Send input", {
-            hiddenInputProperties: ["line", "timeMs"],
+        const canonical = adapter.toMcpTool(processInput, "Send input");
+        const model = adapter.toMcpTool(processInput, "Send input", {
+            hiddenInputProperties: ["line", "waitMs"],
             modelFacing: true,
         });
         const canonicalProperties = (
@@ -237,7 +237,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         ).properties;
 
         assert.notEqual(canonicalProperties?.line, undefined);
-        assert.notEqual(canonicalProperties?.timeMs, undefined);
+        assert.notEqual(canonicalProperties?.waitMs, undefined);
         assert.deepEqual(Object.keys(modelProperties ?? {}).sort(), [
             "input",
             "pane",
@@ -454,7 +454,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         const adapter = new McpToolSchemaAdapter();
         const source: ToolDefinition = {
             ...bashRun,
-            name: "tmux_run",
+            name: "bash_run",
             inputSchema: {
                 type: "object",
                 properties: {

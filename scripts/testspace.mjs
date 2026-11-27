@@ -55,7 +55,7 @@ import {
     resetTestspacePodmanStorage,
     resolveTestspaceRoot,
     resolveTestspaceRuntimeDirectory,
-    stopTestspaceTmux,
+    retireTestspaceProcessHost,
 } from "./testspace/TestspaceRuntime.mjs";
 import {
     assertTestspaceExecutionContext,
@@ -279,13 +279,15 @@ async function start(argv) {
     }
     stopTestspaceWorkerProcesses(previousRuntime);
 
-    await stopTestspaceTmux({
+    await retireTestspaceProcessHost({
+        workerPath: workerPath(),
         devshellHome: join(paths.home, ".devshell"),
         instanceName: TESTSPACE_INSTANCE,
         runtimeDirectory: previousRuntime,
         workspace: paths.workspace,
     });
-    await stopTestspaceTmux({
+    await retireTestspaceProcessHost({
+        workerPath: workerPath(),
         devshellHome: paths.reverseDevshellHome,
         instanceName: TESTSPACE_REVERSE_INSTANCE,
         runtimeDirectory: paths.reverseRuntime,
@@ -723,13 +725,15 @@ async function stop() {
             `testspace control process ${String(controlPid)} is still running`,
         );
     }
-    await stopTestspaceTmux({
+    await retireTestspaceProcessHost({
+        workerPath: workerPath(),
         devshellHome: join(paths.home, ".devshell"),
         instanceName: TESTSPACE_INSTANCE,
         runtimeDirectory,
         workspace: paths.workspace,
     });
-    await stopTestspaceTmux({
+    await retireTestspaceProcessHost({
+        workerPath: workerPath(),
         devshellHome: paths.reverseDevshellHome,
         instanceName: TESTSPACE_REVERSE_INSTANCE,
         runtimeDirectory: paths.reverseRuntime,
@@ -1032,7 +1036,7 @@ async function ensureWorkspace(directory, role) {
         "",
         `This is the isolated ${role} worker workspace.`,
         "It may be modified by the testspace GPT-style connector simulator.",
-        "All generated tool calls are limited to harmless reads, short shell output, Goal updates and short tmux tasks.",
+        "All generated tool calls are limited to harmless reads, short shell output, Goal updates and short process tasks.",
         "",
     ].join("\n");
     await writeFile(join(directory, "README.md"), readme, "utf8");

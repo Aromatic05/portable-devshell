@@ -98,15 +98,24 @@ export class TuiTestDomains {
         }),
         {
             loadContext: async (instance: string, ctxId: string) => {
-                const entries = (this.messageHistory.state.instances[instance]?.entries ?? [])
-                    .filter((entry: any) => entry.ctxId === ctxId);
-                this.messageHistory.patch({ context: {
-                    ctxId, entries, historyExhausted: true, instance, loading: false,
-                } });
+                const entries = (
+                    this.messageHistory.state.instances[instance]?.entries ?? []
+                ).filter((entry: any) => entry.ctxId === ctxId);
+                this.messageHistory.patch({
+                    context: {
+                        ctxId,
+                        entries,
+                        historyExhausted: true,
+                        instance,
+                        loading: false,
+                    },
+                });
             },
             clearContext: (instance: string, ctxId: string) => {
-                if (this.messageHistory.state.context?.instance === instance &&
-                    this.messageHistory.state.context.ctxId === ctxId)
+                if (
+                    this.messageHistory.state.context?.instance === instance &&
+                    this.messageHistory.state.context.ctxId === ctxId
+                )
                     this.messageHistory.patch({ context: undefined });
             },
             loadOlderContext: async () => 0,
@@ -124,14 +133,16 @@ export class TuiTestDomains {
         instances: {} as Record<string, any>,
     });
     readonly toolCalls = new TestDomainSource({
-        context: undefined as {
-            calls: ToolCallRecord[];
-            ctxId: string;
-            historyBefore?: string;
-            historyExhausted?: boolean;
-            instance: string;
-            loading: boolean;
-        } | undefined,
+        context: undefined as
+            | {
+                  calls: ToolCallRecord[];
+                  ctxId: string;
+                  historyBefore?: string;
+                  historyExhausted?: boolean;
+                  instance: string;
+                  loading: boolean;
+              }
+            | undefined,
         instances: {} as Record<string, any>,
     });
 
@@ -326,6 +337,7 @@ export class TuiTestDomains {
 }
 
 export interface TuiDomainHarnessOptions {
+    terminalSessions?: import("@portable-devshell/shared").TerminalSessionDescriptor[];
     approvalRecords?: ApprovalRequest[];
     configUpdate?: (request: unknown) => unknown;
     configView?: Record<string, unknown>;
@@ -743,9 +755,8 @@ export class TuiDomainHarness {
                 throw new Error("Config subscription is not supported.");
             },
             update: config.update,
-            updateMessagePreferences: async (
-                patch: Record<string, unknown>,
-            ) => await messagePreferences.update(patch),
+            updateMessagePreferences: async (patch: Record<string, unknown>) =>
+                await messagePreferences.update(patch),
             updateMcpEndpoint: config.updateMcpEndpoint,
             updateWeb: config.updateWeb,
             validate: config.validate,
@@ -810,17 +821,19 @@ export class TuiDomainHarness {
                 return (this.#options.toolCall?.(instance, toolName, input) ??
                     {}) as JsonValue;
             },
-            callStreaming: async (
-                toolName: string,
-                input: JsonValue,
-            ) =>
+            callStreaming: async (toolName: string, input: JsonValue) =>
                 (this.#options.toolCall?.(instance, toolName, input) ??
                     {}) as JsonValue,
             closeSession: async () => ({}) as Record<string, never>,
-            listCalls: async () => this.#toolCallRecords.filter((call) => call.instance === instance),
+            listCalls: async () =>
+                this.#toolCallRecords.filter(
+                    (call) => call.instance === instance,
+                ),
             openSession: async () => ({}) as any,
         });
-        const terminalTransport = {} as any;
+        const terminalTransport = (() => ({
+            list: async () => this.#options.terminalSessions ?? [],
+        })) as any;
 
         this.domains = {
             server,

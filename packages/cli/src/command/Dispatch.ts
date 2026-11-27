@@ -17,6 +17,7 @@ import { executeInstanceLifecycle } from "./instance/lifecycle/Command.js";
 import { executeInstanceLogs } from "./instance/observe/Logs.js";
 import { executeWatchStatus } from "./instance/observe/Status.js";
 import { executeToolCommand } from "./instance/Tool.js";
+import { executeTerminalCommand } from "./terminal/Command.js";
 import type { CliParsedCommand } from "./Parse.js";
 import {
     renderCliTopicUsage,
@@ -108,6 +109,7 @@ export async function dispatchCliCommand(
         executeInstanceLogs,
         executeWatchStatus,
         executeToolCommand,
+        executeTerminalCommand,
     ];
     for (const handler of handlers) if (await handler(command, context)) return;
     throw new Error(`Unhandled CLI command: ${command.kind}`);
@@ -124,6 +126,7 @@ export function commandUsesControlClient(command: CliParsedCommand): boolean {
         command.kind === "cli.command" ||
         (command.kind.startsWith("extension.") &&
             command.kind !== "extension.help") ||
+        command.kind.startsWith("terminal.") ||
         command.kind.startsWith("tool.")
     )
         return true;

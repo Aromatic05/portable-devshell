@@ -66,11 +66,9 @@ try {
             throw new Error("bash_run is missing from tools.list");
         if (handshake.platform.os === "windows") {
             for (const name of [
-                "tmux_input",
-                "tmux_inspect",
-                "tmux_manage",
-                "tmux_read",
-                "tmux_run",
+                "task_input",
+                "task_inspect",
+                "task_manage",
             ]) {
                 if (!names.includes(name)) {
                     throw new Error(
@@ -120,8 +118,7 @@ try {
                 : "printf 'portable-devshell-smoke\\n'";
         const result = await callTool("bash_run", {
             command,
-            maxCaptureBytes: 4096,
-            timeoutMs: 10_000,
+            waitMs: 10_000,
         });
         if (
             result.exitCode !== 0 ||
@@ -139,7 +136,6 @@ try {
         const terminalClient = {
             clientSeq: 1,
             fromSeq: 0,
-            responseTail: "",
             version: terminal.version,
             windows: handshake.platform.os === "windows",
         };
@@ -205,20 +201,16 @@ try {
 
     stage("stop worker");
     runWorker(["stop", "--instance", instance]);
-    process.stdout.write("worker smoke passed\n");
 } catch (error) {
     await reportFailure(error);
     throw error;
 } finally {
-    spawnSync(worker, ["stop", "--instance", instance], {
-        cwd: workspace,
-        env,
-        stdio: "ignore",
-        timeout: 10_000,
-        windowsHide: true,
-    });
+    stage("retire test Process Host");
+    runWorker(["stop", "--instance", instance]);
+    runWorker(["retire", "--instance", instance]);
     await rm(root, { force: true, recursive: true });
 }
+process.stdout.write("worker smoke passed\n");
 
 function terminalPrintCommand(marker) {
     if (!/^[A-Za-z0-9._-]{2,128}$/u.test(marker)) {
@@ -254,14 +246,6 @@ async function waitForTerminalOutput(terminalPort, terminal, client, expected) {
                 "utf8",
             );
             output += data;
-            if (client.windows) {
-                await respondToCursorPositionQueries(
-                    terminalPort,
-                    terminal,
-                    client,
-                    data,
-                );
-            }
         }
         if (output.includes(expected)) return;
         await delay(50);
@@ -269,30 +253,6 @@ async function waitForTerminalOutput(terminalPort, terminal, client, expected) {
     throw new Error(
         `terminal output did not include ${expected}: ${JSON.stringify(output)}`,
     );
-}
-
-async function respondToCursorPositionQueries(terminalPort, terminal, client, data) {
-    const query = "\u001B[6n";
-    client.responseTail += data;
-    while (true) {
-        const queryIndex = client.responseTail.indexOf(query);
-        if (queryIndex < 0) {
-            client.responseTail = client.responseTail.slice(
-                -(query.length - 1),
-            );
-            return;
-        }
-        client.responseTail = client.responseTail.slice(
-            queryIndex + query.length,
-        );
-        await terminalPort.write({
-            terminalId: terminal.terminalId,
-            generation: terminal.generation,
-            version: client.version,
-            clientSeq: client.clientSeq++,
-            data: Buffer.from("\u001B[1;1R", "utf8").toString("base64"),
-        });
-    }
 }
 
 async function waitForTerminalExit(terminalPort, terminal) {

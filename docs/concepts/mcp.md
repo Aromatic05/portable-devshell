@@ -76,7 +76,7 @@ MCP 按请求选择两个共享 event bus 的 handler：
 
 这个设计不是为了把工具改成流式输出，而是为了保证**同一个长时间 `tools/call` 可以真实阻塞**，不会因为 HTTP 链路长时间没有 response bytes 而被中间 Host/代理当成 idle connection 关闭。
 
-当前产品把 `tmux_run(wait=block)` 的同步窗口统一设为 **180 秒**：
+当前产品把 `bash_run(waitMs >= 180000)` 的同步窗口统一设为 **180 秒**：
 
 ```text
 0s ----------------------------- 180s
@@ -88,7 +88,7 @@ MCP 按请求选择两个共享 event bus 的 handler：
 
 历史链路实验曾观察到 175 秒调用同步返回、190 秒 task 在约 180 秒返回 `detached: true`；这些是当时环境的观测，本次文档修订未重跑。当前实现的同步窗口仍是 180 秒，handoff 后底层 task 继续运行。这里的 180 秒是 portable-devshell 的产品窗口，不是 OpenAI 公布的 MCP hard limit。
 
-详见 [Workspace](workspace.md) 与 [tmux 工具](../tools/tmux.md)。
+详见 [Workspace](workspace.md) 与 [Process 与终端工具](../tools/process.md)。
 
 ## Context selector
 
@@ -97,11 +97,11 @@ MCP 按请求选择两个共享 event bus 的 handler：
 - `/<instance>/mcp` 与 `/<instance>/mcp/openai-session`：OpenAI 会话绑定，保留 MCP App 私有能力；裸 URL 仍使用原 OAuth resource。
 - `/<instance>/mcp/agy-session`：agy 对话绑定。只提供会话绑定，不承诺客户端自动唤醒或续跑。
 - `/<instance>/mcp/explicit`：Gemini Web / 通用客户端，显式传递 `ctxId`。
-- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 10 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`tmux_run`、`tmux_read`、`tmux_input`、`tmux_inspect`、`tmux_manage`。
+- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 8 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`task_input`、`task_inspect`、`task_manage`。
 
 `tools/list`、`tools/call` 和资源使用同一入口契约，不按 metadata 切换。OAuth audience 按完整 URL 校验。完整模型见 [Context](context.md)。
 
-`stateless` 由 URL 选定，不需要新 TOML 字段。文件参数必须使用 Worker 上的绝对路径，`bash_run`、`tmux_run` 及 `tmux_manage` 的 create 操作必须显式提供绝对 `cwd`。搜索 cursor 可以跨调用继续，不建立 Context 读取快照。Stateless tmux 使用 Instance 下独立于 Workspace 的命名空间，按 task/pane ID 访问；list 仅列出该命名空间，等待超时后由调用者继续读取任务，不创建 Context Wait。`file_edit` 不要求先读，但不改变 Worker 的权限；`security.mode = "workspace"` 仍拒绝绝对文件访问和绝对 `cwd`。`bash_run` 返回的 `stdoutPath` / `stderrPath` 可原样交给后续 `file_read`；调用者不需要原会话或 Context。
+`stateless` 由 URL 选定，不需要新 TOML 字段。文件参数必须使用 Worker 上的绝对路径，`bash_run` 及 `task_manage` 的 create 操作必须显式提供绝对 `cwd`。搜索 cursor 可以跨调用继续，不建立 Context 读取快照。Stateless Process Host 资源使用 Instance 下独立于 Workspace 的作用域，按 task/terminal ID 访问；list 仅列出该命名空间，等待超时后由调用者继续读取任务，不创建 Context Wait。`file_edit` 不要求先读，但不改变 Worker 的权限；`security.mode = "workspace"` 仍拒绝绝对文件访问和绝对 `cwd`。`bash_run` 返回的 `stdoutPath` / `stderrPath` 可原样交给后续 `file_read`；调用者不需要原会话或 Context。
 
 ## 认证
 
@@ -130,7 +130,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Environment       | `environ_info`、`environ_remote`                                                               |
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
-| tmux              | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`                           |
+| Task / Terminal   | `task_input`、`task_inspect`、`task_manage`                           |
 | Goal              | `workspace_goal`（最终目标管理）                                                      |
 | Comment           | Comment `mcp.tools` 提供 `progress_report`（面向用户的进度报告）                        |
 | Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |
@@ -145,7 +145,7 @@ Worker catalog 的 description 只描述 canonical capability 契约；MCP endpo
 刷新 tool schema。`mask` 对当前 Context 不可撤销，并从 model discovery 与所有 routed tool 中屏蔽
 对应 instance。创建、启动、停止、删除等 owner 管理仍由原生 `devshell instance ...` / TUI 负责。
 
-可扩展命令走另一条数据面。`bash_run` / `tmux_run` 启动的进程环境中存在 Context-bound `devshell` shim；它只解析 `cli.model-commands`，并按当前 instance 的 `[extensions].model` allowlist 授权。例如：
+可扩展命令走另一条数据面。`bash_run` 启动的进程环境中存在 Context-bound `devshell` shim；它只解析 `cli.model-commands`，并按当前 instance 的 `[extensions].model` allowlist 授权。例如：
 
 ```toml
 [extensions]
@@ -154,7 +154,7 @@ model = ["instance", "artifact"]
 
 当前 bundled 默认是 `artifact / comment / instance / mcp / recall / secret / skill`；独立安装的 Extension（例如 `agent`）需要显式加入。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
 
-Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 MCP tool。人类本地使用 `devshell artifact ...`；模型只有在 `artifact` 被当前 instance 的 model Extension ACL 允许时，才能通过 shell/tmux 中的 `devshell artifact ...` 调用。
+Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 MCP tool。人类本地使用 `devshell artifact ...`；模型只有在 `artifact` 被当前 instance 的 model Extension ACL 允许时，才能通过 shell 中的 `devshell artifact ...` 调用。
 
 ## Workspace App 工具边界
 
@@ -190,15 +190,14 @@ MCP v2 的 per-request HTTP stream cancellation 会传播成当前 request 的 A
 
 ```text
 排队 / 等待审批    立即取消
-bash_run           终止对应进程组
+bash_run           若仍在启动调用的等待阶段，终止对应进程
 file read/search   在读取/扫描安全点停止
 file_edit          已完成的原子子操作不回滚
 artifact read      停止读取并释放 lease
-tmux_run           只停止当前等待；已启动 task 继续运行
-tmux_read          停止等待；尚未返回的 transcript 不被消费
+task_input         只停止本次等待；已启动 task 继续运行，读取游标互相独立
 ```
 
-取消不是事务回滚协议。
+取消不是事务回滚协议。durable Wait 的 Stop waiting 仅停止观察，不终止 Process Host 持有的任务。
 
 ## 旧 recipient 兼容
 

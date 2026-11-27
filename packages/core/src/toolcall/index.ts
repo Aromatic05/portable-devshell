@@ -57,6 +57,10 @@ export function createToolCallExecutionRuntime(
         return catalog.refresh(tools);
     };
     return {
+        waitLeases: {
+            confirm: (owner, task) => invoker.confirmWaitLease(owner, task),
+            reconcile: (owners) => invoker.reconcileWaitLeases(owners),
+        },
         target: () => tool.target(),
         listTools: () => catalog.listTools(),
         readToolCalls: (query) => tool.readToolCalls(query),

@@ -30,7 +30,7 @@ export async function runTestspaceWorkflowSmoke({ endpoint, instance, runtimeDir
 
         const tool = await call(client, session, "bash_run", {
             command: "printf 'testspace workflow tool executed\\n'",
-            timeoutMs: 10_000,
+            waitMs: 10_000,
         });
         assert.equal(tool.exitCode, 0);
         assert.match(tool.stdout, /testspace workflow tool executed/u);

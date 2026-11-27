@@ -437,6 +437,90 @@ test("quiet ToolCall keeps the HTTP connection live before the Worker finishes",
     }
 });
 
+test("tools/call forwards Worker progress updates as MCP notifications/progress when progressToken is supplied", async () => {
+    const base = createHttpToolCallApi();
+    const tools: ToolCallApi = {
+        async call(
+            instance,
+            toolName,
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
+            onProgress,
+            recording,
+        ) {
+            if (toolName === "bash_run") {
+                onProgress?.({
+                    durationMs: 1_000,
+                    stdoutBytes: 120,
+                    stderrBytes: 0,
+                    termination: "running",
+                });
+                onProgress?.({
+                    durationMs: 5_000,
+                    stdoutBytes: 480,
+                    stderrBytes: 12,
+                    termination: "running",
+                });
+            }
+            return await base.call(
+                instance,
+                toolName,
+                input,
+                context,
+                signal,
+                transformResult,
+                invocationInput,
+                onProgress,
+                recording,
+            );
+        },
+    };
+    const host = createHost({ tools });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp/explicit`;
+        const context = await host.contexts.registry.create({ principal: "local" });
+        const ctxId = context.ctxId;
+        await host.contexts.registry.referenceInstance(ctxId, "demo");
+        const response = await postModern(endpoint, "progress-call", "tools/call", {
+            name: "bash_run",
+            arguments: { command: "long-running", ctxId },
+            _meta: { progressToken: "tok-1" },
+        });
+        assert.equal(response.status, 200);
+        const body = await response.text();
+        const messages = body
+            .split(/\r?\n/u)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => JSON.parse(line.slice(5).trim()) as {
+                method?: string;
+                params?: { progressToken?: string | number; progress?: number; message?: string };
+                result?: { structuredContent?: { stdout?: string } };
+            });
+        const progressEvents = messages.filter(
+            (message) => message.method === "notifications/progress",
+        );
+        assert.equal(progressEvents.length, 2, body);
+        assert.deepEqual(progressEvents[0]?.params, {
+            progressToken: "tok-1",
+            progress: 1,
+            message: "running, 1s, 120 stdout bytes",
+        });
+        assert.deepEqual(progressEvents[1]?.params, {
+            progressToken: "tok-1",
+            progress: 2,
+            message: "running, 5s, 480 stdout bytes, 12 stderr bytes",
+        });
+        const finalResult = messages.find((message) => message.result !== undefined);
+        assert.equal(finalResult?.result?.structuredContent?.stdout, "ok\n");
+    } finally {
+        await host.stop();
+    }
+});
+
 test("production MCP host advertises MCP App resources only on OpenAI", async () => {
     const host = createHost();
     await host.start();

@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { mergeComments } from "../../src/comment/Merge.ts";
 import type { ToolDiagnosticHint } from "../../src/hint/Hint.ts";
-import { resolveErrorHints, resolveResultHints } from "../../src/hint/Resolver.ts";
+import {
+    resolveErrorHints,
+    resolveResultHints,
+    resolveToolCallHints,
+} from "../../src/hint/Resolver.ts";
 
 function codes(hints: readonly ToolDiagnosticHint[]): string[] {
     return hints.map((hint) => hint.code);
@@ -19,6 +23,12 @@ function body(
 } & Record<string, unknown> {
     return { code, message: `${code} happened`, retryable: false, ...extra };
 }
+
+test("a failed task directs the model to the task, not to restart the host", () => {
+    const hints = resolveErrorHints("task_input", body("process.taskFailed"));
+    assert.deepEqual(codes(hints), ["process.taskFailed"]);
+    assert.match(hints[0].text, /target process failed.*do not restart the Process Host/u);
+});
 
 test("bash_run clean success produces no hint", () => {
     const hints = resolveResultHints("bash_run", {
@@ -336,113 +346,139 @@ test("file_edit literal diff body is rejected with a scolding hint", () => {
     assert.match(hints[0]?.text ?? "", /literal content/u);
 });
 
-test("tmux_run block timeout keeps the task running and is not a failure", () => {
-    const hints = resolveResultHints("tmux_run", {
-        observationReset: false,
-        output: [],
+test("bash_run soft wait returns a running task without treating it as failure", () => {
+    const hints = resolveResultHints("bash_run", {
+        termination: "running",
+        waitReason: "timeout",
+        waitMs: 250,
         task: { id: "t1", status: "running" },
-        warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }],
     });
-    assert.deepEqual(codes(hints), ["tmux.blockTimeout"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/u);
+    assert.deepEqual(codes(hints), ["bash.taskRunning"]);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
 });
 
-test("tmux_run running task without block timeout yields a task-running diagnostic", () => {
-    const hints = resolveResultHints("tmux_run", {
-        observationReset: false,
-        output: [],
-        task: { id: "t1", status: "running" },
-        warnings: [],
-    });
-    assert.deepEqual(codes(hints), ["tmux.taskRunning"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/u);
-});
-
-test("tmux_run detached handoff stays valid without Workspace recovery", () => {
-    const hints = resolveResultHints("tmux_run", {
+test("bash_run durable handoff directs the model to the independent task cursor", () => {
+    const hints = resolveResultHints("bash_run", {
         detached: true,
+        termination: "running",
         task: { id: "t1", status: "running" },
+        cursor: "4",
     });
-    assert.deepEqual(codes(hints), ["tmux.runDetached"]);
-    assert.match(hints[0]?.text ?? "", /returned task id/iu);
-    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
-    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
+    assert.deepEqual(codes(hints), ["bash.waitDetached"]);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
+    assert.match(hints[0]?.text ?? "", /cursor/u);
 });
 
-test("tmux_read detached handoff stays valid without Workspace recovery", () => {
-    const hints = resolveResultHints("tmux_read", {
-        detached: true,
+test("task_input running result uses the same task continuation guidance", () => {
+    const hints = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
         task: { id: "t1", status: "running" },
     });
-    assert.deepEqual(codes(hints), ["tmux.readDetached"]);
-    assert.match(hints[0]?.text ?? "", /tmux_read/iu);
-    assert.doesNotMatch(hints[0]?.text ?? "", /Workspace/iu);
-});
+    assert.deepEqual(codes(hints), ["bash.taskRunning"]);
+    assert.match(hints[0]?.text ?? "", /task_input/u);
 
-test("tmux_run interrupted wait tells the model the task is still running", () => {
-    const hints = resolveResultHints("tmux_run", {
-        interrupted: true,
-        task: { id: "t1", status: "running" },
+    const controlled = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: { id: "t1", status: "running", humanControl: true },
     });
-    assert.deepEqual(codes(hints), ["tmux.runInterrupted"]);
-    assert.match(hints[0]?.text ?? "", /user stopped waiting/iu);
-    assert.match(hints[0]?.text ?? "", /still running/iu);
+    assert.deepEqual(codes(controlled), ["bash.humanControl"]);
+    assert.match(controlled[0]?.text ?? "", /human currently controls this terminal/u);
+    assert.match(controlled[0]?.text ?? "", /task_inspect/u);
+
+    const altScreen = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: { id: "t1", status: "running", alternateScreen: true },
+    });
+    assert.deepEqual(codes(altScreen), ["bash.taskRunning", "bash.alternateScreen"]);
+    assert.match(altScreen[1]?.text ?? "", /alternate-screen mode/u);
+    assert.match(altScreen[1]?.text ?? "", /task_inspect/u);
+
+    const controlledAltScreen = resolveResultHints("task_input", {
+        termination: "running",
+        waitReason: "timeout",
+        task: {
+            id: "t1",
+            status: "running",
+            humanControl: true,
+            alternateScreen: true,
+        },
+    });
+    assert.deepEqual(codes(controlledAltScreen), ["bash.humanControl"]);
 });
 
-test("tmux task terminal status distinguishes success, failure, and unknown", () => {
+test("Process Host errors have task-specific recovery guidance", () => {
     assert.deepEqual(
-        resolveResultHints("tmux_read", {
-            task: { status: "0" },
-            warnings: [],
+        codes(resolveErrorHints("task_input", body("process.controlOwned"))),
+        ["process.controlOwned"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("task_input", body("process.notFound"))),
+        ["process.notFound"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("task_manage", body("process.resourceLimit"))),
+        ["process.resourceLimit"],
+    );
+    const notTerminal = resolveErrorHints("task_input", body("process.notTerminal"));
+    assert.deepEqual(codes(notTerminal), ["process.notTerminal"]);
+    assert.match(notTerminal[0]?.text ?? "", /task_input without input/u);
+    const stdinClosed = resolveErrorHints("task_input", body("process.stdinClosed"));
+    assert.deepEqual(codes(stdinClosed), ["process.stdinClosed"]);
+    assert.match(stdinClosed[0]?.text ?? "", /pty: true/u);
+    assert.deepEqual(
+        codes(resolveErrorHints("task_input", body("process.notPipe"))),
+        ["process.notPipe"],
+    );
+    const exited = resolveErrorHints("task_input", body("process.exited"));
+    assert.deepEqual(codes(exited), ["process.exited"]);
+    assert.match(exited[0]?.text ?? "", /already exited/u);
+    assert.deepEqual(
+        codes(resolveErrorHints("task_manage", body("tool.invalidArguments"))),
+        ["tool.invalidArguments"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("task_input", body("tool.cancelled"))),
+        ["tool.cancelled"],
+    );
+    const closePending = resolveResultHints("task_manage", {
+        taskId: "process-1",
+        killRequested: true,
+        state: "running",
+    });
+    assert.deepEqual(codes(closePending), ["process.closePending"]);
+    assert.match(closePending[0]?.text ?? "", /task_manage\(command: "list"\)/u);
+    assert.deepEqual(
+        resolveResultHints("task_manage", {
+            taskId: "process-1",
+            killRequested: true,
+            state: "exited",
         }),
         [],
     );
+});
+
+test("task_input uses the shared Bash result status for successful and failed tasks", () => {
     assert.deepEqual(
-        resolveResultHints("tmux_run", { task: { status: "0" } }),
+        resolveResultHints("task_input", {
+            task: { status: "0" },
+            exitCode: 0,
+            termination: "exited",
+            stdout: "ok",
+            stderr: "",
+        }),
         [],
     );
-    assert.deepEqual(
-        codes(
-            resolveResultHints("tmux_read", {
-                task: { status: "3" },
-                warnings: [],
-            }),
-        ),
-        ["tmux.taskFailed"],
-    );
-    assert.deepEqual(
-        codes(
-            resolveResultHints("tmux_read", {
-                task: { status: "unknown" },
-                warnings: [],
-            }),
-        ),
-        ["tmux.taskStatusUnknown"],
-    );
-});
-
-test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
-    const hints = resolveErrorHints(
-        "tmux_run",
-        body("tmux.taskStartUnconfirmed"),
-    );
-    assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
-});
-
-test("tmux cwd errors preserve their diagnostic code", () => {
-    assert.deepEqual(
-        codes(resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))),
-        ["tmux.invalidCwd"],
-    );
-});
-
-test("tmux_manage list full capacity is a diagnostic, not a list failure", () => {
-    const hints = resolveResultHints("tmux_manage", {
-        capacity: { max: 4, used: 4 },
-        panes: [],
-        warnings: [],
+    const failed = resolveResultHints("task_input", {
+        task: { status: "3" },
+        exitCode: 3,
+        termination: "exited",
+        stdout: "",
+        stderr: "failure",
     });
-    assert.deepEqual(codes(hints), ["tmux.capacityFull"]);
+    assert.deepEqual(codes(failed), ["bash.nonZeroExit"]);
 });
 
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {
@@ -549,5 +585,77 @@ test("merge keeps user comments first and deduplicates hint codes", () => {
         merged.filter((entry) => entry.startsWith("[bash.nonZeroExit] "))
             .length,
         1,
+    );
+});
+
+test("task_manage create emits process.terminalCreated with exact attach command", () => {
+    const namedHints = resolveResultHints(
+        "task_manage",
+        {
+            task: {
+                id: "term-42",
+                name: "dev-auth",
+                pty: true,
+                status: "running",
+            },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(namedHints), ["process.terminalCreated"]);
+    assert.match(
+        namedHints[0]?.text ?? "",
+        /devshell terminal attach alpha dev-auth --takeover/u,
+    );
+
+    const unnamedHints = resolveToolCallHints({
+        callId: "c1",
+        direction: "outbound",
+        value: {
+            context: { instance: "beta", source: "mcp" },
+            kind: "result",
+            payload: {
+                task: {
+                    id: "term-99",
+                    pty: true,
+                    status: "running",
+                },
+            },
+            toolName: "task_manage",
+        },
+    });
+    assert.deepEqual(codes(unnamedHints), ["process.terminalCreated"]);
+    assert.match(
+        unnamedHints[0]?.text ?? "",
+        /devshell terminal attach beta term-99 --takeover/u,
+    );
+});
+
+test("bash_run running with instance appends attach command for pty=true only", () => {
+    const ptyHints = resolveResultHints(
+        "bash_run",
+        {
+            termination: "running",
+            task: { id: "t-pty", pty: true, status: "running" },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(ptyHints), ["bash.taskRunning"]);
+    assert.match(
+        ptyHints[0]?.text ?? "",
+        /devshell terminal attach alpha t-pty --takeover/u,
+    );
+
+    const pipeHints = resolveResultHints(
+        "bash_run",
+        {
+            termination: "running",
+            task: { id: "t-pipe", pty: false, status: "running" },
+        },
+        "alpha",
+    );
+    assert.deepEqual(codes(pipeHints), ["bash.taskRunning"]);
+    assert.equal(
+        pipeHints[0]?.text.includes("devshell terminal attach"),
+        false,
     );
 });

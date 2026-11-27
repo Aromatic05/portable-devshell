@@ -73,7 +73,7 @@ fn twenty_concurrent_contexts_remain_isolated_and_can_patch_their_own_files() {
                     &format!("read-{index}"),
                     &format!("ctx-{index}"),
                     "bash_run",
-                    json!({ "command": cmd, "timeoutMs": 5000 }),
+                    json!({ "command": cmd, "waitMs": 5000 }),
                 )
             }));
         }
@@ -116,7 +116,7 @@ fn twenty_concurrent_contexts_remain_isolated_and_can_patch_their_own_files() {
                             &format!("retry-{index}"),
                             &format!("ctx-{index}"),
                             "bash_run",
-                            json!({"command":cmd, "timeoutMs":5000}),
+                            json!({"command":cmd, "waitMs":5000}),
                         )
                     })
                 })
@@ -175,7 +175,7 @@ fn shell_read_then_conflicting_external_change_never_overwrites_new_revision() {
         "1",
         "ctx-a",
         "bash_run",
-        json!({"command":"cat source.txt", "timeoutMs":5000}),
+        json!({"command":"cat source.txt", "waitMs":5000}),
     );
     assert_eq!(read["message"]["stdout"], "header\noriginal\n");
     fs::write(&path, "header\nexternal\n").unwrap();
@@ -200,7 +200,7 @@ fn shell_read_then_conflicting_external_change_never_overwrites_new_revision() {
         "3",
         "ctx-a",
         "bash_run",
-        json!({"command":"cat source.txt", "timeoutMs":5000}),
+        json!({"command":"cat source.txt", "waitMs":5000}),
     );
     assert_eq!(refreshed["message"]["stdout"], "header\nexternal\n");
     let edited = patch(
@@ -232,7 +232,7 @@ fn crlf_bom_unicode_path_can_be_read_via_shell() {
         "1",
         "ctx-a",
         "bash_run",
-        json!({"command":"sed -n '2p' '源 文件.txt'", "timeoutMs":5000}),
+        json!({"command":"sed -n '2p' '源 文件.txt'", "waitMs":5000}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     let edited = patch(
@@ -269,7 +269,7 @@ fn binary_and_oversize_sources_do_not_get_credit() {
             &format!("r-{i}"),
             &format!("ctx-{i}"),
             "bash_run",
-            json!({"command": format!("head -n 1 {file}"), "timeoutMs":5000}),
+            json!({"command": format!("head -n 1 {file}"), "waitMs":5000}),
         );
         assert_eq!(read["type"], "reply", "{read}");
         let edited = patch(
@@ -287,18 +287,22 @@ fn binary_and_oversize_sources_do_not_get_credit() {
 }
 
 #[test]
-fn tmux_task_read_is_credited_to_context_that_consumes_the_output() {
+fn background_task_read_is_credited_to_context_that_consumes_the_output() {
     let env = TestEnv::new();
     let instance = "read-cross-context-tmux";
     fs::write(env.workspace().join("source.txt"), "head\noutcome\n").unwrap();
+    let shim = env.workspace().join("cat");
+    fs::write(&shim, "#!/bin/sh\nsleep 0.3\nexec /bin/cat \"$@\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
     start(&env, instance);
     let started = call(
         &env,
         instance,
         "1",
         "ctx-a",
-        "tmux_run",
-        json!({"command":"cat source.txt", "wait":"nonblock", "consumeOutput":false}),
+        "bash_run",
+        json!({"command":"cat source.txt", "waitMs":0, "env":{"PATH":format!("{}:{}", env.workspace().display(), std::env::var("PATH").unwrap())}}),
     );
     assert_eq!(started["type"], "reply", "{started}");
     let task = started["message"]["task"]["id"].as_str().unwrap();
@@ -307,14 +311,12 @@ fn tmux_task_read_is_credited_to_context_that_consumes_the_output() {
         instance,
         "2",
         "ctx-b",
-        "tmux_read",
-        json!({"task":task, "timeMs":10000, "line":120}),
+        "task_input",
+        json!({"task":task, "waitMs":10000, "untilExit":true}),
     );
     assert_eq!(read["type"], "reply", "{read}");
     assert!(
-        read["message"]["output"]
-            .as_array()
-            .is_some_and(|lines| lines.iter().any(|line| line.as_str() == Some("outcome"))),
+        read["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "outcome")),
         "{read}"
     );
     let wrong = patch(

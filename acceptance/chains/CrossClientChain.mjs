@@ -111,7 +111,7 @@ try {
         // read proves actual execution, not merely a successful tool envelope.
         const effectFile = join(fixture.workspace, "crossclient-effects.txt");
         const workerResult = await call("bash_run", {
-            ctxId, command: "printf 'initial\n' >> crossclient-effects.txt; cat crossclient-effects.txt", timeoutMs: 10_000,
+            ctxId, command: "printf 'initial\n' >> crossclient-effects.txt; cat crossclient-effects.txt", waitMs: 10_000,
         });
         assert.equal(workerResult.exitCode, 0);
         assert.equal(await readFile(effectFile, "utf8"), "initial\n");
@@ -165,7 +165,7 @@ try {
         await cliObserver.close();
         // Reacquire model context after the real Worker lifecycle change.
         ctxId = (await call("environ_info", { workspace: fixture.workspace })).ctxId;
-        assert.equal((await call("bash_run", { ctxId, command: "printf 'recovered\n' >> crossclient-effects.txt", timeoutMs: 10_000 })).exitCode, 0);
+        assert.equal((await call("bash_run", { ctxId, command: "printf 'recovered\n' >> crossclient-effects.txt", waitMs: 10_000 })).exitCode, 0);
         assert.equal(await readFile(effectFile, "utf8"), "initial\nrecovered\n");
         const auditDatabase = join(fixture.home, ".devshell", instance, "control-worker", "audit.sqlite3");
         const lifecycleEvents = readAuditCollections(auditDatabase)
@@ -236,7 +236,7 @@ try {
         // Attach rejection handler immediately: a protocol rejection must remain
         // a test failure when the operation is awaited, never an unhandled rejection.
         const operation = mcp.callTool({ name: "bash_run", arguments: {
-            ctxId, command: "printf 'approved\n' >> crossclient-effects.txt", timeoutMs: 10_000,
+            ctxId, command: "printf 'approved\n' >> crossclient-effects.txt", waitMs: 10_000,
         } }).then(value => ({ value }), error => ({ error }));
         const pending = await until(() => approvalApi.snapshot({ pendingOnly: true }),
             value => value.approvals.some(item => item.ctxId === ctxId && item.toolName === "bash_run"), "MCP pending approval");

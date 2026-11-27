@@ -14,7 +14,10 @@ import {
 } from "../../Hint.js";
 import { workerErrorHints } from "../Error.js";
 
-export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
+export function bashResultHints(
+    result: JsonValue,
+    instance?: string,
+): ToolDiagnosticHint[] {
     const record = asRecord(result);
     if (record === undefined) return [];
     const hints: ToolDiagnosticHint[] = [];
@@ -23,13 +26,50 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const exitCode = asNumber(record.exitCode);
     const termSignal = asNumber(record.termSignal);
 
-    if (termination === "timeout" || asBoolean(record.timedOut) === true) {
+    if (asBoolean(record.detached) === true) {
+        hints.push(diagnosticHint(
+            "bash.waitDetached",
+            "The synchronous wait window ended. The process is still running; continue with task_input (omit input to poll) using the returned task ID and cursor.",
+        ));
+    } else if (termination === "timeout" || asBoolean(record.timedOut) === true) {
         hints.push(
             errorHint(
                 "bash.timeout",
-                "Command timed out; use tmux_run for long tasks.",
+                "The command timed out. Use waitMs to return while a long task keeps running, then continue with task_input.",
             ),
         );
+    } else if (termination === "running") {
+        const task = asRecord(record.task);
+        if (asBoolean(task?.humanControl) === true) {
+            hints.push(
+                diagnosticHint(
+                    "bash.humanControl",
+                    "A human currently controls this terminal; do not send model input until control is released. You may continue read-only polling (task_input without input) or screen inspection (task_inspect).",
+                ),
+            );
+        } else {
+            const taskId = asString(task?.id);
+            const attachGuidance =
+                asBoolean(task?.pty) === true &&
+                instance !== undefined &&
+                taskId !== undefined
+                    ? ` If human intervention is needed, tell the user to run: devshell terminal attach ${instance} ${taskId} --takeover (or open TUI Sessions).`
+                    : "";
+            hints.push(
+                diagnosticHint(
+                    "bash.taskRunning",
+                    `Continue with task_input (omit input to poll) using the returned task ID and cursor, or stop it with task_manage(command: "close", task); the process is still running.${attachGuidance}`,
+                ),
+            );
+            if (asBoolean(task?.alternateScreen) === true) {
+                hints.push(
+                    diagnosticHint(
+                        "bash.alternateScreen",
+                        "This PTY is currently in alternate-screen mode (full-screen TUI). Use task_inspect to view the clean rendered screen instead of parsing raw ANSI output.",
+                    ),
+                );
+            }
+        }
     } else if (termination === "signaled") {
         hints.push(
             errorHint(
@@ -103,8 +143,6 @@ export function bashErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
                     "Verify the shell installation.",
                 ),
             ];
-        case "bash.ioFailed":
-            return [errorHint("bash.ioFailed", "Inspect process I/O state.")];
         case "tool.cancelled":
             return [
                 errorHint(

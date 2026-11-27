@@ -103,11 +103,15 @@ function target(record: ToolCallRecord): string | undefined {
 }
 
 function taskId(record: ToolCallRecord): string | undefined {
-    if (!record.toolName.startsWith("tmux_")) return undefined;
+    if (!["bash_run", "task_input", "task_inspect", "task_manage"].includes(record.toolName)) return undefined;
     const requested = object(record.input)?.task;
     if (typeof requested === "string") return protect(requested, 160);
-    const task = object(object(record.output)?.task);
-    return typeof task?.id === "string" ? protect(task.id, 160) : undefined;
+    const out = object(record.output);
+    const outTask = out?.task;
+    if (typeof outTask === "string") return protect(outTask, 160);
+    const task = object(outTask);
+    if (typeof task?.id === "string") return protect(task.id, 160);
+    return typeof out?.taskId === "string" ? protect(out.taskId, 160) : undefined;
 }
 
 function detail(name: string, output: unknown): string | undefined {
@@ -167,7 +171,7 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
                 ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
                 ...(summary(record) === undefined ? {} : { summary: summary(record) }),
                 ...(record.input === undefined ? {} : { input: presentationValue(record.input, 2_000) }),
-                ...(record.toolName === "bash_run" ? {
+                ...(record.toolName === "bash_run" || record.toolName === "task_input" ? {
                     output: presentationValue({
                         ...(object(record.output) ?? {}),
                         ...(record.stdoutBytes === undefined ? {} : { stdoutBytes: record.stdoutBytes }),

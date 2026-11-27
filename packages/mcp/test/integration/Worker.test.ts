@@ -6,7 +6,6 @@ import {
     stat,
     writeFile,
     mkdtemp,
-    readdir,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -21,11 +20,9 @@ import {
     TestMcpHost as McpHost,
 } from "../ContextRuntime.ts";
 import {
-    commandAvailable,
     readRelativeMarkerCommand,
     realWorkerTestOptions,
     resolveTestWorkerBinary,
-    tmuxTestOptions,
 } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
@@ -42,8 +39,6 @@ import { tmpdir } from "node:os";
         "../fixtures",
     );
     const workerBinaryPath = resolveTestWorkerBinary();
-    const tmuxAvailable =
-        process.platform === "win32" || commandAvailable("tmux", ["-V"]);
     type JsonValue =
         | boolean
         | number
@@ -183,171 +178,49 @@ import { tmpdir } from "node:os";
                 const fileRead = tools.find(
                     (tool) => tool.name === "file_read",
                 );
-                const tmuxManage = tools.find(
-                    (tool) => tool.name === "tmux_manage",
-                );
                 assert.notEqual(bash, undefined);
                 assert.notEqual(fileRead, undefined);
                 assert.notEqual(
-                    (
-                        fileRead?.inputSchema.properties as Record<
-                            string,
-                            unknown
-                        >
-                    ).files,
+                    (fileRead?.inputSchema.properties as Record<string, unknown>).files,
                     undefined,
                 );
                 assert.equal(
-                    (
-                        fileRead?.inputSchema.properties as Record<
-                            string,
-                            unknown
-                        >
-                    ).path,
+                    (fileRead?.inputSchema.properties as Record<string, unknown>).path,
                     undefined,
                 );
-                assert.equal(tmuxManage === undefined, !tmuxAvailable);
-                const workerBash = instance
-                    .listTools()
-                    .find((tool) => tool.name === "bash_run");
-                const workerBashSchema = workerBash?.inputSchema as Record<
-                    string,
-                    unknown
-                >;
-                const workerTmuxSchema = instance
-                    .listTools()
-                    .find((tool) => tool.name === "tmux_manage")
-                    ?.inputSchema as Record<string, unknown> | undefined;
+                const workerBash = instance.listTools().find((tool) => tool.name === "bash_run");
+                const workerBashSchema = workerBash?.inputSchema as Record<string, unknown>;
                 assert.equal(bash?.description, workerBash?.description);
-                assert.match(bash?.description ?? "", /tmux_run/u);
+                assert.match(bash?.description ?? "", /task_input/u);
                 assert.deepEqual(
-                    Object.fromEntries(
-                        Object.entries(bash?.inputSchema ?? {}).filter(
-                            ([key]) =>
-                                ![
-                                    "$schema",
-                                    "properties",
-                                    "required",
-                                    "title",
-                                ].includes(key),
-                        ),
-                    ),
-                    Object.fromEntries(
-                        Object.entries(workerBashSchema).filter(
-                            ([key]) =>
-                                ![
-                                    "$schema",
-                                    "properties",
-                                    "required",
-                                    "title",
-                                ].includes(key),
-                        ),
-                    ),
-                );
-                if (
-                    tmuxManage !== undefined &&
-                    workerTmuxSchema !== undefined
-                ) {
-                    assert.deepEqual(
-                        Object.fromEntries(
-                            Object.entries(tmuxManage.inputSchema).filter(
-                                ([key]) =>
-                                    ![
-                                        "$defs",
-                                        "$schema",
-                                        "properties",
-                                        "required",
-                                        "title",
-                                    ].includes(key),
-                            ),
-                        ),
-                        Object.fromEntries(
-                            Object.entries(workerTmuxSchema).filter(
-                                ([key]) =>
-                                    ![
-                                        "$defs",
-                                        "$schema",
-                                        "properties",
-                                        "required",
-                                        "title",
-                                    ].includes(key),
-                            ),
-                        ),
-                    );
-                }
-                assert.deepEqual(
-                    (bash?.inputSchema.properties as Record<string, unknown>)
-                        .ctxId,
-                    {
-                        description: "Current Context ID.",
-                        minLength: 1,
-                        type: "string",
-                    },
+                    Object.fromEntries(Object.entries(bash?.inputSchema ?? {}).filter(([key]) =>
+                        !["$schema", "properties", "required", "title"].includes(key))),
+                    Object.fromEntries(Object.entries(workerBashSchema).filter(([key]) =>
+                        !["$schema", "properties", "required", "title"].includes(key))),
                 );
                 assert.equal(
-                    (bash?.inputSchema.required as string[]).includes("ctxId"),
+                    (bash?.inputSchema.properties as Record<string, unknown>).ctxId !== undefined,
                     true,
                 );
-                if (tmuxManage !== undefined) {
-                    assert.equal(
-                        (tmuxManage.inputSchema.required as string[]).includes(
-                            "ctxId",
-                        ),
-                        true,
-                    );
-                }
-                if (tmuxManage !== undefined) {
-                    const manageProperties = tmuxManage.inputSchema
-                        .properties as Record<string, Record<string, unknown>>;
-                    assert.equal(manageProperties.name?.minLength, 1);
-                    assert.equal(manageProperties.name?.maxLength, 64);
-                    assert.equal(
-                        manageProperties.name?.pattern,
-                        "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-                    );
-                    assert.notEqual(manageProperties.command, undefined);
-                    assert.deepEqual(manageProperties.command?.enum, [
-                        "list", "create", "close",
-                    ]);
-                    assert.deepEqual(manageProperties.scope?.enum, [
-                        "workspace", "instance",
-                    ]);
-                    assert.equal(manageProperties.scope?.anyOf, undefined);
-                }
+                assert.equal((bash?.inputSchema.required as string[]).includes("ctxId"), true);
                 for (const name of [
-                    "file_glob",
-                    "file_grep",
-                    ...(tmuxAvailable
-                        ? ["tmux_input", "tmux_inspect", "tmux_manage"]
-                        : []),
+                    "task_input", "task_inspect", "task_manage",
+                    "file_glob", "file_grep",
                 ]) {
-                    const schema = tools.find(
-                        (tool) => tool.name === name,
-                    )?.inputSchema;
-                    assert.notEqual(schema, undefined, name);
-                    assert.equal(schema?.type, "object", name);
-                    assert.equal(schema?.anyOf, undefined, name);
-                    assert.equal(schema?.oneOf, undefined, name);
-                    assert.notEqual(schema?.properties, undefined, name);
-                    assert.equal(
-                        (schema?.required as string[]).includes("ctxId"),
-                        true,
-                        name,
-                    );
+                    const tool = tools.find((entry) => entry.name === name);
+                    assert.notEqual(tool, undefined, name);
+                    assert.equal(tool?.inputSchema.type, "object", name);
+                    assert.notEqual(tool?.inputSchema.properties, undefined, name);
+                    assert.equal((tool?.inputSchema.required as string[]).includes("ctxId"), true, name);
+                    const worker = instance.listTools().find((entry) => entry.name === name);
+                    assert.equal(tool?.description, worker?.description, name);
                 }
                 for (const retired of [
-                    "file_find",
-                    "file_info",
-                    "file_search",
-                    "tmux_list",
-                    "tmux_create",
-                    "tmux_close",
+                    "file_find", "file_info", "file_search",
+                    "task_read",
+                    "tmux_run", "tmux_read", "tmux_input", "tmux_inspect", "tmux_manage",
                 ]) {
-                    assert.equal(
-                        tools.some((tool) => tool.name === retired),
-                        false,
-                        retired,
-                    );
+                    assert.equal(tools.some((tool) => tool.name === retired), false, retired);
                 }
 
                 const ctxId = await createContext(
@@ -470,7 +343,7 @@ import { tmpdir } from "node:os";
         request.params.arguments = {
             ...(request.params.arguments ?? {}),
             ctxId,
-            timeoutMs: 30_000,
+            waitMs: 30_000,
         };
         return request as JsonValue;
     }
@@ -548,445 +421,279 @@ import { tmpdir } from "node:os";
         | JsonValue[]
         | { [key: string]: JsonValue };
 
-    const tmuxCommand = (unix: string, windows: string): string =>
-        process.platform === "win32" ? windows : unix;
+    test(
+        "MCP exposes one shell entry and the complete process task/terminal API",
+        realWorkerTestOptions(workerBinaryPath),
+        async () => {
+            await withProcessHarness(
+                "aromatic-mcp-process-catalog",
+                async ({ listTools }) => {
+                    const tools = await listTools();
+                    const names = new Set(tools.map((tool) => tool.name));
+                    for (const name of [
+                        "bash_run", "task_input",
+                        "task_inspect", "task_manage",
+                    ]) assert.equal(names.has(name), true, name);
+                    for (const name of [
+                        "task_read",
+                        "tmux_run", "tmux_read", "tmux_input",
+                        "tmux_inspect", "tmux_manage",
+                    ]) assert.equal(names.has(name), false, name);
+
+                    const bash = tools.find((tool) => tool.name === "bash_run");
+                    const taskInput = tools.find((tool) => tool.name === "task_input");
+                    const terminalManage = tools.find((tool) => tool.name === "task_manage");
+                    assert.ok(bash);
+                    assert.ok(taskInput);
+                    assert.ok(terminalManage);
+                    assert.match(bash.description ?? "", /task_input/u);
+                    assert.match(bash.description ?? "", /waitMs/u);
+                    assert.equal(bash.inputSchema.properties?.waitMs?.minimum, 0);
+                    assert.equal(bash.inputSchema.properties?.pty?.type, "boolean");
+                    assert.notEqual(taskInput.inputSchema.properties?.cursor, undefined);
+                    assert.equal(taskInput.inputSchema.properties?.untilExit?.type, "boolean");
+                    assert.equal(taskInput.inputSchema.required?.includes("task"), true);
+                    assert.ok((taskInput.inputSchema.properties?.input?.type as string[]).includes("string"));
+                    assert.match(terminalManage.inputSchema.properties?.command?.description ?? "",
+                        /If state is still running, poll with task_manage\(command="list"\)/u);
+                    const statelessManage = (await listTools("stateless")).find((tool) => tool.name === "task_manage");
+                    assert.equal(statelessManage?.inputSchema.properties?.command?.description,
+                        terminalManage.inputSchema.properties?.command?.description);
+                },
+            );
+        },
+    );
 
     test(
-        "MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused",
-        tmuxTestOptions(workerBinaryPath),
+        "MCP bash_run starts one PTY that task_input continues",
+        realWorkerTestOptions(workerBinaryPath),
         async () => {
-            await withTmuxHarness(
-                "aromatic-mcp-tmux-lifecycle",
-                async ({ callTool, createContext, listTools }) => {
-                    const tools = await listTools();
-                    const runTool = tools.find(
-                        (entry) => entry.name === "tmux_run",
-                    );
-                    assert.notEqual(runTool, undefined);
-                    assert.equal(
-                        runTool?.inputSchema.properties?.timeMs,
-                        undefined,
-                    );
-                    assert.equal(
-                        runTool?.inputSchema.properties?.resume,
-                        undefined,
-                    );
-                    assert.notEqual(
-                        runTool?.inputSchema.properties?.timeout,
-                        undefined,
-                    );
-                    const readTool = tools.find(
-                        (entry) => entry.name === "tmux_read",
-                    );
-                    assert.notEqual(readTool, undefined);
-                    assert.equal(
-                        readTool?.inputSchema.properties?.timeMs?.minimum,
-                        0,
-                    );
-                    assert.equal(
-                        readTool?.inputSchema.properties?.timeMs?.maximum,
-                        3_600_000,
-                    );
-                    const inputTool = tools.find(
-                        (entry) => entry.name === "tmux_input",
-                    );
-                    assert.equal(inputTool?.inputSchema.type, "object");
-                    assert.equal(inputTool?.inputSchema.anyOf, undefined);
-                    assert.equal(inputTool?.inputSchema.oneOf, undefined);
-                    for (const property of ["ctxId", "input", "task", "pane"]) {
-                        assert.notEqual(
-                            inputTool?.inputSchema.properties?.[property],
-                            undefined,
-                            property,
-                        );
-                    }
-                    assert.equal(
-                        inputTool?.inputSchema.properties?.timeMs,
-                        undefined,
-                    );
-                    assert.equal(
-                        inputTool?.inputSchema.properties?.line,
-                        undefined,
-                    );
-                    assert.equal(
-                        inputTool?.inputSchema.required?.includes("ctxId"),
-                        true,
-                    );
-                    assert.equal(
-                        inputTool?.inputSchema.required?.includes("input"),
-                        true,
-                    );
-                    assert.equal(
-                        tools.some((entry) => entry.name === "tmux_run"),
-                        true,
-                    );
+            await withProcessHarness(
+                "aromatic-mcp-process-interactive",
+                async ({ callTool, createContext }) => {
                     const ctxId = await createContext();
-                    const requestId = "reused-tools-call-id";
-                    const created = await callTool(requestId, "tmux_manage", {
-                        command: "create",
-                        ctxId,
-                        name: "interactive",
+                    const command = process.platform === "win32"
+                        ? '[Console]::WriteLine("READY"); $value = [Console]::ReadLine(); [Console]::WriteLine("received:$value")'
+                        : "stty -echo; printf 'READY\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"";
+                    const started = await callTool("reused-process-call", "bash_run", {
+                        command, ctxId, pty: true, waitMs: 50,
                     });
-                    assert.equal(
-                        created.error,
-                        undefined,
-                        JSON.stringify(created),
-                    );
+                    assert.equal(started.error, undefined, JSON.stringify(started));
+                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
+                    assert.equal(started.result?.structuredContent?.termination, "running");
 
-                    const run = await callTool(requestId, "tmux_run", {
-                        command: tmuxCommand(
-                            "read -r value; printf 'received:%s\\n' \"$value\"",
-                            '$value = [Console]::ReadLine(); Write-Output ("received:" + $value)',
-                        ),
-                        ctxId,
-                        wait: "nonblock",
+                    const listed = await callTool("reused-process-call", "task_manage", {
+                        command: "list", ctxId,
                     });
-                    assert.equal(run.error, undefined, JSON.stringify(run));
-                    const task = readString(
-                        run.result?.structuredContent?.task?.id,
-                        "tmux_run task id",
-                    );
+                    assert.equal(listed.error, undefined, JSON.stringify(listed));
+                    assert.ok(listed.result?.structuredContent?.tasks?.some((entry) => entry.id === task));
 
-                    const input = await callTool(requestId, "tmux_input", {
-                        ctxId,
-                        input: "hello^M",
-                        line: 100,
-                        task,
-                        timeMs: 1000,
+                    const inspected = await callTool("reused-process-call", "task_inspect", {
+                        ctxId, task,
+                    });
+                    assert.equal(inspected.error, undefined, JSON.stringify(inspected));
+
+                    const finished = await callTool("reused-process-call", "task_input", {
+                        ctxId, task, input: "hello\r",
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
+                    });
+                    assert.equal(finished.error, undefined, JSON.stringify(finished));
+                    assert.equal(finished.result?.structuredContent?.exitCode, 0);
+                    assert.equal(finished.result?.structuredContent?.termination, "exited");
+                    const output = (started.result?.structuredContent?.stdout ?? "") +
+                        (finished.result?.structuredContent?.stdout ?? "");
+                    assert.match(output, /READY/u);
+                    assert.match(output, /received:hello/u);
+                },
+            );
+        },
+    );
+
+    test(
+        "MCP bash_run waitMs is a soft wait and task_input resumes from an independent cursor",
+        realWorkerTestOptions(workerBinaryPath),
+        async () => {
+            await withProcessHarness(
+                "aromatic-mcp-process-soft-wait",
+                async ({ callTool, createContext, readToolCalls }) => {
+                    const ctxId = await createContext();
+                    const started = await callTool("soft-wait-start", "bash_run", {
+                        command: process.platform === "win32"
+                            ? 'Write-Output EARLY; Start-Sleep -Seconds 2; Write-Output LATE'
+                            : "printf 'EARLY\\n'; sleep 2; printf 'LATE\\n'",
+                        ctxId, waitMs: 250,
+                    });
+                    assert.equal(started.error, undefined, JSON.stringify(started));
+                    assert.equal(started.result?.structuredContent?.termination, "running");
+                    assert.equal(started.result?.structuredContent?.waitReason, "timeout");
+                    assert.match(started.result?.structuredContent?.stdout ?? "", /EARLY/u);
+                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
+
+                    const finished = await callTool("soft-wait-read", "task_input", {
+                        ctxId, task,
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
+                    });
+                    assert.equal(finished.error, undefined, JSON.stringify(finished));
+                    assert.equal(finished.result?.structuredContent?.waitReason, "terminal");
+                    assert.notEqual(finished.result?.structuredContent?.task?.status, "running");
+                    assert.match(finished.result?.structuredContent?.stdout ?? "", /LATE/u);
+                    assert.doesNotMatch(finished.result?.structuredContent?.stdout ?? "", /EARLY/u);
+                    const replay = await callTool("independent-read", "task_input", { ctxId, task });
+                    assert.equal(replay.error, undefined, JSON.stringify(replay));
+                    assert.match(replay.result?.structuredContent?.stdout ?? "", /EARLY[\s\S]*LATE/u);
+
+                    const records = await readToolCalls();
+                    assert.equal(records.filter((record) => record.toolName === "bash_run").length, 1);
+                    assert.equal(records.filter((record) => record.toolName === "task_input").length, 2);
+                },
+            );
+        },
+    );
+
+    test(
+        "MCP terminal creation, input, inspection and close preserve one process across Context renewal",
+        realWorkerTestOptions(workerBinaryPath),
+        async () => {
+            await withProcessHarness(
+                "aromatic-mcp-process-terminal",
+                async ({ callTool, createContext }) => {
+                    const ctxId = await createContext();
+                    const created = await callTool("terminal-create", "task_manage", {
+                        ctxId, command: "create",
+                        shell: process.platform === "win32"
+                            ? "powershell.exe"
+                            : "/bin/bash",
+                    });
+                    assert.equal(created.error, undefined, JSON.stringify(created));
+                    const task = readString(created.result?.structuredContent?.task?.id, "terminal id");
+                    assert.equal(created.result?.structuredContent?.task?.state, "running");
+                    const renewed = await createContext();
+                    const input = await callTool("terminal-write", "task_input", {
+                        ctxId: renewed, task, input: process.platform === "win32"
+                            ? "Write-Output ('TERMINAL-' + 'ALIVE')\r"
+                            : "printf '%s%s\\n' 'TERMINAL-' 'ALIVE'\r",
                     });
                     assert.equal(input.error, undefined, JSON.stringify(input));
-                    const output = [
-                        ...(input.result?.structuredContent?.output ?? []),
-                    ];
-
-                    const finished = await waitForTask(
-                        callTool,
-                        requestId,
-                        ctxId,
-                        task,
-                    );
-                    output.push(...finished.output);
-                    assert.notEqual(finished.task.status, "running");
-                    assert.equal(
-                        output.some((line) => line.includes("received:hello")),
-                        true,
-                        JSON.stringify({ finished, output }),
-                    );
-
-                    const closed = await callTool(requestId, "tmux_manage", {
-                        command: "close",
-                        ctxId,
-                        pane: "interactive",
+                    let stdout = input.result?.structuredContent?.stdout ?? "";
+                    let cursor = input.result?.structuredContent?.cursor;
+                    for (let i = 0; i < 30 && !stdout.includes("TERMINAL-ALIVE"); i++) {
+                        const page = await callTool("terminal-read", "task_input", {
+                            ctxId: renewed, task, ...(cursor === undefined ? {} : { cursor }), waitMs: 1000,
+                        });
+                        assert.equal(page.error, undefined, JSON.stringify(page));
+                        stdout += page.result?.structuredContent?.stdout ?? "";
+                        cursor = page.result?.structuredContent?.cursor ?? cursor;
+                    }
+                    assert.match(stdout, /TERMINAL-ALIVE/u);
+                    const inspected = await callTool("terminal-screen", "task_inspect", {
+                        ctxId: renewed, task,
                     });
-                    assert.equal(
-                        closed.error,
-                        undefined,
-                        JSON.stringify(closed),
-                    );
-                    assert.equal(
-                        closed.result?.structuredContent?.closedPaneId,
-                        created.result?.structuredContent?.pane?.id,
-                    );
+                    assert.equal(inspected.error, undefined, JSON.stringify(inspected));
+                    assert.match(inspected.result?.structuredContent?.text ?? "", /TERMINAL-ALIVE/u);
+                    const closed = await callTool("terminal-close", "task_manage", {
+                        ctxId: renewed, command: "close", task,
+                    });
+                    assert.equal(closed.error, undefined, JSON.stringify(closed));
+                    assert.equal(closed.result?.structuredContent?.taskId, task);
+                    assert.equal(closed.result?.structuredContent?.killRequested, true);
+                    assert.match(closed.result?.structuredContent?.state ?? "", /^(running|exited)$/u);
+                    assert.equal("closedTask" in (closed.result?.structuredContent ?? {}), false);
+                    assert.equal("accepted" in (closed.result?.structuredContent ?? {}), false);
+
+                    let finalStdout = "";
+                    let finalCursor: string | undefined;
+                    let waitReason: string | undefined;
+                    for (let i = 0; i < 10 && waitReason !== "terminal"; i++) {
+                        const page = await callTool("terminal-final", "task_input", {
+                            ctxId: renewed, task, waitMs: 1000,
+                            ...(finalCursor === undefined ? {} : { cursor: finalCursor }),
+                        });
+                        assert.equal(page.error, undefined, JSON.stringify(page));
+                        finalStdout += page.result?.structuredContent?.stdout ?? "";
+                        finalCursor = readString(page.result?.structuredContent?.cursor, "terminal cursor");
+                        waitReason = page.result?.structuredContent?.waitReason;
+                    }
+                    assert.equal(waitReason, "terminal");
+                    assert.match(finalStdout, /TERMINAL-ALIVE/u);
                 },
             );
         },
     );
 
     test(
-        "MCP tmux block wait returns the full unread transcript instead of discarding it",
-        tmuxTestOptions(workerBinaryPath),
+        "MCP synchronous bash_run returns full output without another tool call",
+        realWorkerTestOptions(workerBinaryPath),
         async () => {
-            await withTmuxHarness(
-                "aromatic-mcp-tmux-block-output",
+            await withProcessHarness(
+                "aromatic-mcp-process-sync",
                 async ({ callTool, createContext, readToolCalls }) => {
                     const ctxId = await createContext();
-                    const result = await callTool("block-output", "tmux_run", {
-                        command: tmuxCommand(
-                            "printf 'EARLY\\n'; printf 'LATE\\n'",
-                            "Write-Output EARLY; Write-Output LATE",
-                        ),
-                        ctxId,
-                        line: 80,
-                        timeout: 30_000,
-                        wait: "block",
+                    const result = await callTool("sync", "bash_run", {
+                        ctxId, waitMs: 10000,
+                        command: process.platform === "win32"
+                            ? "Write-Output EARLY; Write-Output LATE"
+                            : "printf 'EARLY\\n'; printf 'LATE\\n'",
                     });
-                    assert.equal(
-                        result.error,
-                        undefined,
-                        JSON.stringify(result),
-                    );
-                    assert.notEqual(
-                        result.result?.structuredContent?.task?.status,
-                        "running",
-                    );
-                    const output =
-                        result.result?.structuredContent?.output ?? [];
-                    assert.equal(
-                        output.some((line) => line === "EARLY"),
-                        true,
-                        JSON.stringify(result),
-                    );
-                    assert.equal(
-                        output.some((line) => line === "LATE"),
-                        true,
-                        JSON.stringify(result),
-                    );
-                    const toolCalls = await readToolCalls();
-                    const tmuxRuns = toolCalls.filter(
-                        (record) => record.toolName === "tmux_run",
-                    );
-                    assert.equal(tmuxRuns.length, 1, JSON.stringify(tmuxRuns));
-                    assert.equal(
-                        (
-                            tmuxRuns[0]?.input as
-                                Record<string, JsonValue> | undefined
-                        )?.wait,
-                        "block",
-                    );
-                    assert.equal(
-                        toolCalls.filter(
-                            (record) => record.toolName === "tmux_read",
-                        ).length,
-                        0,
-                        JSON.stringify(toolCalls),
-                    );
+                    assert.equal(result.error, undefined, JSON.stringify(result));
+                    assert.equal(result.result?.structuredContent?.exitCode, 0);
+                    assert.equal(result.result?.structuredContent?.waitReason, "terminal");
+                    assert.match(result.result?.structuredContent?.stdout ?? "", /EARLY[\s\S]*LATE/u);
+                    const records = await readToolCalls();
+                    assert.equal(records.filter((record) => record.toolName === "bash_run").length, 1);
+                    assert.equal(records.filter((record) => record.toolName === "task_input").length, 0);
                 },
             );
         },
     );
 
     test(
-        "MCP tmux block timeout returns current transcript without a follow-up read",
-        tmuxTestOptions(workerBinaryPath),
+        "MCP task resources remain available to a refreshed context in the same workspace",
+        realWorkerTestOptions(workerBinaryPath),
         async () => {
-            await withTmuxHarness(
-                "aromatic-mcp-tmux-block-timeout-output",
-                async ({ callTool, createContext, readToolCalls }) => {
-                    const ctxId = await createContext();
-                    const result = await callTool(
-                        "block-timeout-output",
-                        "tmux_run",
-                        {
-                            command: tmuxCommand(
-                                "printf 'EARLY\\n'; sleep 2",
-                                "Write-Output EARLY; Start-Sleep -Seconds 3",
-                            ),
-                            ctxId,
-                            line: -20,
-                            timeout: process.platform === "win32" ? 1000 : 300,
-                            wait: "block",
-                        },
-                    );
-                    assert.equal(
-                        result.error,
-                        undefined,
-                        JSON.stringify(result),
-                    );
-                    assert.equal(
-                        result.result?.structuredContent?.task?.status,
-                        "running",
-                        JSON.stringify(result),
-                    );
-                    assert.equal(
-                        result.result?.structuredContent?.timedOut,
-                        true,
-                        JSON.stringify(result),
-                    );
-                    const output =
-                        result.result?.structuredContent?.output ?? [];
-                    assert.equal(
-                        output.some((line) => line === "EARLY"),
-                        true,
-                        JSON.stringify(result),
-                    );
-
-                    const task = readString(
-                        result.result?.structuredContent?.task?.id,
-                        "tmux_run task id",
-                    );
-                    const closed = await callTool(
-                        "block-timeout-close",
-                        "tmux_manage",
-                        { command: "close", ctxId, force: true, task },
-                    );
-                    assert.equal(
-                        closed.error,
-                        undefined,
-                        JSON.stringify(closed),
-                    );
-
-                    const toolCalls = await readToolCalls();
-                    assert.equal(
-                        toolCalls.filter(
-                            (record) => record.toolName === "tmux_run",
-                        ).length,
-                        1,
-                        JSON.stringify(toolCalls),
-                    );
-                    assert.equal(
-                        toolCalls.filter(
-                            (record) => record.toolName === "tmux_read",
-                        ).length,
-                        0,
-                        JSON.stringify(toolCalls),
-                    );
-                },
-            );
-        },
-    );
-
-    test(
-        "MCP tmux lets a refreshed context continue a task while preserving busy checks",
-        tmuxTestOptions(workerBinaryPath),
-        async () => {
-            await withTmuxHarness(
-                "aromatic-mcp-tmux-cross-context",
+            await withProcessHarness(
+                "aromatic-mcp-process-context-refresh",
                 async ({ callTool, createContext }) => {
-                    const firstCtxId = await createContext();
-                    const refreshedCtxId = await createContext();
-                    const requestId = "reused-tools-call-id";
-                    const created = await callTool(requestId, "tmux_manage", {
-                        command: "create",
-                        ctxId: firstCtxId,
-                        name: "continued",
+                    const firstContext = await createContext();
+                    const started = await callTool("context-task-start", "bash_run", {
+                        command: process.platform === "win32"
+                            ? 'Start-Sleep -Seconds 1; Write-Output CONTEXT-REFRESHED'
+                            : "sleep 1; printf 'CONTEXT-REFRESHED\\n'",
+                        ctxId: firstContext, waitMs: 0,
                     });
-                    assert.equal(
-                        created.error,
-                        undefined,
-                        JSON.stringify(created),
-                    );
-
-                    const paneInput = await callTool(requestId, "tmux_input", {
-                        ctxId: firstCtxId,
-                        input: `${tmuxCommand(
-                            "sleep 10",
-                            "ping.exe 127.0.0.1 -n 11 > $null",
-                        )}^M`,
-                        pane: "continued",
+                    assert.equal(started.error, undefined, JSON.stringify(started));
+                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
+                    const refreshedContext = await createContext();
+                    const result = await callTool("context-task-read", "task_input", {
+                        ctxId: refreshedContext, task,
+                        ...(started.result?.structuredContent?.cursor === undefined ? {} : { cursor: started.result.structuredContent.cursor }),
+                        waitMs: 10_000, untilExit: true,
                     });
-                    assert.equal(
-                        paneInput.error,
-                        undefined,
-                        JSON.stringify(paneInput),
-                    );
-
-                    const run = await callTool(requestId, "tmux_run", {
-                        command: tmuxCommand(
-                            "sleep 10",
-                            "Start-Sleep -Seconds 10",
-                        ),
-                        ctxId: firstCtxId,
-                        wait: "nonblock",
-                    });
-                    assert.equal(run.error, undefined, JSON.stringify(run));
-                    assert.equal(
-                        run.result?.structuredContent?.pane
-                            ?.ownedByCurrentContext,
-                        undefined,
-                    );
-                    const task = readString(
-                        run.result?.structuredContent?.task?.id,
-                        "tmux_run task id",
-                    );
-
-                    const read = await callTool(requestId, "tmux_read", {
-                        ctxId: refreshedCtxId,
-                        task,
-                    });
-                    assert.equal(read.error, undefined, JSON.stringify(read));
-
-                    const foreground = await callTool(requestId, "tmux_input", {
-                        ctxId: refreshedCtxId,
-                        input: `${tmuxCommand(
-                            "sleep 10",
-                            "ping.exe 127.0.0.1 -n 11 > $null",
-                        )}^M`,
-                        pane: "continued",
-                    });
-                    assert.equal(
-                        foreground.error,
-                        undefined,
-                        JSON.stringify(foreground),
-                    );
-                    await new Promise((resolve) => setTimeout(resolve, 100));
-
-                    const busyClose = await callTool(requestId, "tmux_manage", {
-                        command: "close",
-                        ctxId: refreshedCtxId,
-                        pane: "continued",
-                    });
-                    assert.equal(
-                        busyClose.error?.data?.code,
-                        "tmux.paneBusy",
-                        JSON.stringify(busyClose),
-                    );
-
-                    const interrupted = await callTool(
-                        requestId,
-                        "tmux_input",
-                        {
-                            ctxId: refreshedCtxId,
-                            input: "^C",
-                            task,
-                            timeMs: 1000,
-                        },
-                    );
-                    assert.equal(
-                        interrupted.error,
-                        undefined,
-                        JSON.stringify(interrupted),
-                    );
-                    const finished = await waitForTask(
-                        callTool,
-                        requestId,
-                        refreshedCtxId,
-                        task,
-                    );
-                    assert.notEqual(finished.task.status, "running");
-
-                    const stopForeground = await callTool(
-                        requestId,
-                        "tmux_input",
-                        {
-                            ctxId: refreshedCtxId,
-                            input: "^C",
-                            pane: "continued",
-                        },
-                    );
-                    assert.equal(
-                        stopForeground.error,
-                        undefined,
-                        JSON.stringify(stopForeground),
-                    );
-                    await new Promise((resolve) => setTimeout(resolve, 100));
-
-                    const closed = await callTool(requestId, "tmux_manage", {
-                        command: "close",
-                        ctxId: refreshedCtxId,
-                        force: true,
-                        pane: "continued",
-                    });
-                    assert.equal(
-                        closed.error,
-                        undefined,
-                        JSON.stringify(closed),
-                    );
-                    assert.equal(
-                        closed.result?.structuredContent?.closedPaneId,
-                        created.result?.structuredContent?.pane?.id,
-                    );
+                    assert.equal(result.error, undefined, JSON.stringify(result));
+                    assert.match(result.result?.structuredContent?.stdout ?? "", /CONTEXT-REFRESHED/u);
                 },
             );
         },
     );
 
     interface ToolStructuredContent {
-        closedPaneId?: string;
+        id?: string;
+        taskId?: string;
+        killRequested?: boolean;
+        text?: string;
         ctxId?: string;
-        output?: string[];
-        pane?: { id?: string; ownedByCurrentContext?: boolean };
-        task?: { id?: string; status?: string };
+        state?: string;
+        exitCode?: number;
+        stdout?: string;
+        stderr?: string;
+        termination?: string;
+        waitReason?: string;
+        waitMs?: number;
         timedOut?: boolean;
+        cursor?: string;
+        task?: { id?: string; status?: string; state?: string; pty?: boolean };
+        tasks?: Array<{ id?: string; state?: string }>;
     }
 
     interface ToolSummary {
@@ -996,7 +703,7 @@ import { tmpdir } from "node:os";
             oneOf?: JsonValue[];
             properties?: Record<
                 string,
-                { description?: string; maximum?: number; minimum?: number }
+                { description?: string; maximum?: number; minimum?: number; type?: string | string[]; anyOf?: JsonValue[]; enum?: JsonValue[] }
             >;
             required?: string[];
             type?: string;
@@ -1018,30 +725,30 @@ import { tmpdir } from "node:os";
         headers: Headers;
     }
 
-    interface TmuxHarness {
+    interface ProcessHarness {
         callTool(
             requestId: string,
             name: string,
             args: Record<string, JsonValue>,
         ): Promise<ToolResponse>;
         createContext(): Promise<string>;
-        listTools(): Promise<ToolSummary[]>;
+        listTools(mode?: "explicit" | "stateless"): Promise<ToolSummary[]>;
         readToolCalls(): Promise<ToolCallRecord[]>;
     }
 
-    async function withTmuxHarness(
+    async function withProcessHarness(
         instanceName: string,
-        body: (harness: TmuxHarness) => Promise<void>,
+        body: (harness: ProcessHarness) => Promise<void>,
     ): Promise<void> {
-        const homeDirectory = await createTestTempDirectory("mcp-tmux-home");
+        const homeDirectory = await createTestTempDirectory("mcp-process-home");
         const runtimeDirectory = await mkdtemp(
             join(
                 process.platform === "darwin" ? "/tmp" : tmpdir(),
-                "pds-mcp-tmux-",
+                "pds-mcp-process-",
             ),
         );
         const workspacePath =
-            await createTestTempDirectory("mcp-tmux-workspace");
+            await createTestTempDirectory("mcp-process-workspace");
         const workerEnvironment = {
             ...process.env,
             HOME: homeDirectory,
@@ -1121,9 +828,9 @@ import { tmpdir } from "node:os";
                     "environ_info ctxId",
                 );
             };
-            const listTools = async () => {
+            const listTools = async (mode: "explicit" | "stateless" = "explicit") => {
                 const response = await postJson(
-                    endpoint,
+                    `http://127.0.0.1:${port}/${instanceName}/mcp/${mode}`,
                     {
                         id: "list-tools",
                         jsonrpc: "2.0",
@@ -1138,95 +845,17 @@ import { tmpdir } from "node:os";
             await body({ callTool, createContext, listTools, readToolCalls });
         } finally {
             await host.stop();
-            const runtimeInstanceDirectory = join(
-                runtimeDirectory,
-                "devshell-worker",
-                instanceName,
-            );
-            const sockets = (
-                await readdir(runtimeInstanceDirectory).catch(() => [])
-            ).filter(
-                (name) => name === "tmux.sock" || /^tmux-.+\.sock$/u.test(name),
-            );
-            for (const socket of sockets) {
-                const cleanup = spawnSync(
-                    "tmux",
-                    [
-                        "-S",
-                        join(runtimeInstanceDirectory, socket),
-                        "kill-server",
-                    ],
-                    {
-                        encoding: "utf8",
-                    },
-                );
-                assert.equal(
-                    cleanup.status,
-                    0,
-                    cleanup.stderr ||
-                        cleanup.error?.message ||
-                        "failed to stop test tmux server",
-                );
-            }
             await instance.close();
-            if (process.platform === "win32") {
-                const cleanup = spawnSync(
-                    workerBinaryPath!,
-                    ["retire", "--instance", instanceName],
-                    {
-                        encoding: "utf8",
-                        env: workerEnvironment,
-                        windowsHide: true,
-                    },
-                );
-                assert.equal(
-                    cleanup.status,
-                    0,
-                    cleanup.stderr ||
-                        cleanup.error?.message ||
-                        "failed to retire test psmux server",
-                );
-            }
+            const cleanup = spawnSync(
+                workerBinaryPath!,
+                ["retire", "--instance", instanceName],
+                { encoding: "utf8", env: workerEnvironment, windowsHide: true },
+            );
+            assert.equal(cleanup.status, 0, cleanup.stderr || cleanup.error?.message || "failed to retire test Process Host");
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
             await rm(workspacePath, { force: true, recursive: true });
         }
-    }
-
-    async function waitForTask(
-        callTool: TmuxHarness["callTool"],
-        requestId: string,
-        ctxId: string,
-        task: string,
-    ): Promise<{ output: string[]; task: { status: string } }> {
-        const output: string[] = [];
-        let status = "running";
-        for (let attempt = 0; attempt < 30 && status === "running"; attempt += 1) {
-            const waited = await callTool(requestId, "tmux_read", {
-                ctxId,
-                line: 200,
-                task,
-                timeMs: 1000,
-            });
-            assert.equal(waited.error, undefined, JSON.stringify(waited));
-            output.push(...(waited.result?.structuredContent?.output ?? []));
-            status = readString(
-                waited.result?.structuredContent?.task?.status,
-                "tmux_read task status",
-            );
-        }
-        assert.notEqual(status, "running");
-
-        const read = await callTool(requestId, "tmux_read", {
-            ctxId,
-            line: 200,
-            task,
-        });
-        assert.equal(read.error, undefined, JSON.stringify(read));
-        return {
-            output: [...output, ...(read.result?.structuredContent?.output ?? [])],
-            task: { status },
-        };
     }
 
     function readString(value: unknown, name: string): string {

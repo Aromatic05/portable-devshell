@@ -10,7 +10,7 @@ import { WaitService } from "../../../src/task/wait/index.ts";
 
 const input = {
     callId: "call-1", ctxId: "ctx-1", instance: asInstanceName("local"),
-    source: "mcp" as const, targetId: "task-1", toolName: "tmux_run",
+    source: "mcp" as const, targetId: "task-1", toolName: "bash_run",
 };
 
 async function until(check: () => Promise<boolean>): Promise<void> {
@@ -45,7 +45,7 @@ test("a successful terminal observation survives a transient rename failure with
                 if (reads === 1)
                     return { waitReason: "terminal", task: { id: "task-1", status: "exited", exitCode: 0 } };
                 throw createRemoteError({
-                    code: "tmux.taskExpired",
+                    code: "process.notFound",
                     message: "Worker already collected the task",
                     retryable: false,
                 });
@@ -136,5 +136,56 @@ test("transient notification errors retry delivery within a running Control", { 
         assert.deepEqual(events, ["wait.detached"]);
     } finally {
         await service.close();
+    }
+});
+
+test("Wait pins transfer across Control restart and release only after terminal commit", async () => {
+    const root = await createTestTempDirectory("wait-lease-recovery-");
+    const filePath = join(root, "waits.json");
+    const pins = new Map<string, string>();
+    const leases = {
+        async confirm(owner: string, task: string) { return pins.get(owner) === task; },
+        async reconcile(owners: readonly string[]) {
+            for (const owner of pins.keys()) {
+                if (!owners.includes(owner)) {
+                    const record = JSON.parse(fs.readFileSync(filePath, "utf8")).waits
+                        .find((entry: { callId: string }) => entry.callId === owner);
+                    assert.equal(record?.status, "resolved", "pin released before terminal commit");
+                    pins.delete(owner);
+                }
+            }
+        },
+    };
+    const service = new WaitService({
+        filePath, leases, appendEvent: async () => undefined,
+        invoke: {
+            async invoke(_name, _input, _context, signal) {
+                if (!signal?.aborted) await new Promise<void>((resolve) =>
+                    signal?.addEventListener("abort", () => resolve(), { once: true }));
+                return null;
+            },
+        },
+    });
+    await service.beginCall(input.callId);
+    pins.set(input.callId, input.targetId);
+    await service.detach(input);
+    await service.finishCall(input.callId);
+    assert.equal(pins.get(input.callId), input.targetId);
+    await service.close();
+    assert.equal(pins.get(input.callId), input.targetId);
+    const restarted = new WaitService({
+        filePath, leases, appendEvent: async () => undefined,
+        invoke: {
+            async invoke() {
+                assert.equal(pins.get(input.callId), input.targetId);
+                return { waitReason: "terminal", task: { id: input.targetId, status: "exited" } };
+            },
+        },
+    });
+    try {
+        restarted.resume();
+        await until(async () => (await restarted.list())[0]?.status === "resolved" && pins.size === 0);
+    } finally {
+        await restarted.close();
     }
 });

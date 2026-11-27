@@ -23,7 +23,10 @@ import {
 import { TuiDomainReader } from "./control/Reader.js";
 import type { TuiInteractionProjection } from "../interaction/Projection.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
-import { currentTuiRoute } from "../state/route/State.js";
+import {
+    currentTuiRoute,
+    tuiRouteContextKey,
+} from "../state/route/State.js";
 import { TuiApp } from "../view/shell/App.js";
 import type { TuiAppKey } from "../view/shell/App.js";
 import {
@@ -51,7 +54,7 @@ import {
 import { projectTuiTerminalInputFrame } from "../terminal/Input.js";
 import { TuiControlTerminalPtyFactory } from "../terminal/control/Pty.js";
 import { TuiTerminalSession } from "../terminal/emulation/Session.js";
-import { TuiTmuxPaneTerminalSession } from "../terminal/tmux/Session.js";
+import { TuiSharedTerminalList } from "../terminal/SharedList.js";
 import { TuiTerminalController } from "../terminal/Controller.js";
 import {
     createTuiScreenCaptureStdout,
@@ -92,7 +95,7 @@ export class TuiRuntime {
     readonly projection: TuiInteractionProjection;
     readonly store: TuiAppStore;
     readonly terminal: TuiTerminalSession;
-    readonly tmuxPanes: TuiTmuxPaneTerminalSession;
+    readonly sharedTerminals: TuiSharedTerminalList;
     readonly viewport: TuiViewport;
     readonly #alternateScreen: AlternateScreen;
     readonly #inkDebug: boolean;
@@ -254,18 +257,35 @@ export class TuiRuntime {
             reconnect: async () => await this.session.reconnect(),
             store: this.store,
         });
-        this.tmuxPanes = new TuiTmuxPaneTerminalSession({
-            operations: this.#operations.tmuxOperations,
+        this.sharedTerminals = new TuiSharedTerminalList({
+            kill: (instance, identity) =>
+                domains.terminalTransport(instance).kill(identity),
+            list: (instance) => domains.terminalTransport(instance).list(),
+            open: (instance, input) =>
+                domains.terminalTransport(instance).open({
+                    ...input,
+                    workspace: this.#resolveSharedTerminalWorkspace(instance),
+                }),
         });
         this.#terminalController = new TuiTerminalController({
             columns: () => this.columns,
             graphicsSupport: terminalGraphicsSupport,
             rows: () => this.rows,
             domains,
+            setSharedControl: async (instance, terminalId, takeover) => {
+                if (this.#controlTerminalPty === undefined) {
+                    throw new Error("Control terminal transport is unavailable.");
+                }
+                await this.#controlTerminalPty.setControl(
+                    instance,
+                    terminalId,
+                    takeover,
+                );
+            },
             stdout: this.#stdout,
             store: this.store,
             terminal: this.terminal,
-            tmuxPanes: this.tmuxPanes,
+            sharedTerminals: this.sharedTerminals,
             copyText: (text) => this.#copyText(text),
             enqueueInput: (operation) => {
                 void this.#enqueueInput(operation);
@@ -480,9 +500,9 @@ export class TuiRuntime {
                     this.#reconcilingFocus = false;
                 }
             }
+            this.#terminalController.syncSharedTerminals();
             this.#terminalController.syncFocus();
             void this.#terminalController.syncSession();
-            this.#terminalController.syncTmuxPanes();
         });
         this.focusManager.syncPanel(
             this.store.getState().ui.selectedPage,
@@ -564,7 +584,7 @@ export class TuiRuntime {
         this.#storeUnsubscribe();
         this.routeLifecycle.stop();
         this.terminal.dispose();
-        this.tmuxPanes.dispose();
+        this.sharedTerminals.dispose();
         this.reader.dispose();
         await this.session.stop();
         this.scheduler.dispose();
@@ -736,10 +756,12 @@ export class TuiRuntime {
                 if (frame.type === "paste") {
                     await this.#enqueueInput(async () => {
                         this.selection.clearSelection();
-                        await this.commandDispatcher.dispatchMany(this.keyDispatcher.dispatch(
-                            this.store.getState().interaction.focusScope,
-                            { input: frame.data, key: {}, paste: true },
-                        ));
+                        await this.commandDispatcher.dispatchMany(
+                            this.keyDispatcher.dispatch(
+                                this.store.getState().interaction.focusScope,
+                                { input: frame.data, key: {}, paste: true },
+                            ),
+                        );
                     });
                     continue;
                 }
@@ -765,6 +787,73 @@ export class TuiRuntime {
             clearTimeout(this.#inputEscapeTimer);
             this.#inputEscapeTimer = undefined;
         }
+    }
+
+    #resolveSharedTerminalWorkspace(instance: string): string {
+        const activeContexts = this.domains.context.state.contexts.filter(
+            (context) => context.status === "active",
+        );
+        const selectedCtxId = this.#selectedContextId(instance);
+        if (selectedCtxId !== undefined) {
+            const selected = activeContexts.find(
+                (context) => context.ctxId === selectedCtxId,
+            );
+            const workspace = selected?.environments.find(
+                (env) => env.instance === instance,
+            )?.workspace;
+            if (workspace !== undefined && workspace.length > 0) {
+                return workspace;
+            }
+        }
+        const activeForInstance = activeContexts.filter((context) =>
+            context.environments.some((env) => env.instance === instance),
+        );
+        if (activeForInstance.length === 1) {
+            const workspace = activeForInstance[0]!.environments.find(
+                (env) => env.instance === instance,
+            )?.workspace;
+            if (workspace !== undefined && workspace.length > 0) {
+                return workspace;
+            }
+        }
+        return this.#requireInstanceHome(instance);
+    }
+
+    #selectedContextId(instance: string): string | undefined {
+        const state = this.store.getState();
+        const cursor = state.interaction.sidebarCursor;
+        if (
+            cursor?.kind === "context" &&
+            this.domains.context.state.contexts.some(
+                (context) =>
+                    context.ctxId === cursor.id &&
+                    context.status === "active" &&
+                    context.environments.some((env) => env.instance === instance),
+            )
+        ) {
+            return cursor.id;
+        }
+        const auditRoute =
+            state.ui.routeStacks[tuiRouteContextKey("audit", instance)]?.at(-1);
+        if (
+            auditRoute?.page === "audit" &&
+            auditRoute.view !== "contexts" &&
+            auditRoute.scope === "context"
+        ) {
+            return auditRoute.ctxId;
+        }
+        const messagesRoute =
+            state.ui.routeStacks[
+                tuiRouteContextKey("messages", undefined)
+            ]?.at(-1);
+        if (
+            messagesRoute?.page === "messages" &&
+            messagesRoute.view === "thread" &&
+            messagesRoute.instance === instance
+        ) {
+            return messagesRoute.ctxId;
+        }
+        return undefined;
     }
 
     #requireInstanceHome(instance: string): string {

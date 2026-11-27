@@ -28,7 +28,7 @@ if (browserExecutable === undefined) {
             "aromatic-pc",
             fixture.workspace,
             "bash_run",
-            JSON.stringify({ command: "printf alpha4-audit-persistence", timeoutMs: 10_000 }),
+            JSON.stringify({ command: "printf alpha4-audit-persistence", waitMs: 10_000 }),
         ], fixture.env);
         const result = await runTestspaceWebSmoke({
             browserExecutable,

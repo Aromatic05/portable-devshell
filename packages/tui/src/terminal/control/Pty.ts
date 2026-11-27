@@ -1,8 +1,9 @@
-import type {
-    TerminalAttachment,
-    TerminalSessionDescriptor,
-    TerminalStreamMessage,
-    TerminalTransport,
+import {
+    STREAM_GAP_CODE,
+    type TerminalAttachment,
+    type TerminalSessionDescriptor,
+    type TerminalStreamMessage,
+    type TerminalTransport,
 } from "@portable-devshell/shared";
 
 import type {
@@ -13,11 +14,14 @@ import type {
 } from "../emulation/Model.js";
 
 const OPERATION_ACK_TIMEOUT_MS = 30_000;
+const MAX_GAP_RECONNECTS = 5;
+const GAP_WINDOW_MS = 2_000;
 
 export type TuiControlTerminalClient = Pick<
     TerminalTransport,
     "attach" | "kill" | "open"
->;
+> &
+    Partial<Pick<TerminalTransport, "list">>;
 
 interface StoredTerminalIdentity extends TerminalSessionDescriptor {}
 
@@ -32,6 +36,8 @@ export class TuiControlTerminalPtyFactory {
     readonly #operationAckTimeoutMs: number;
     readonly #workspaceForInstance: (instance: string) => string;
     readonly #sessions = new Map<string, StoredTerminalIdentity>();
+
+    readonly #activePtys = new Map<string, TuiControlTerminalPty>();
 
     constructor(options: {
         client(instance: string): TuiControlTerminalClient;
@@ -53,18 +59,42 @@ export class TuiControlTerminalPtyFactory {
     }
 
     create(instance?: string): TuiTerminalPtyFactory {
-        return (command, _args, options) => {
+        return (command, args, options) => {
             const targetInstance = instance ?? command;
-            return new TuiControlTerminalPty({
+            const terminalId = args[0];
+            const takeover = args[1] !== "observe";
+            const key =
+                terminalId === undefined
+                    ? targetInstance
+                    : `${targetInstance}:${terminalId}`;
+            const pty = new TuiControlTerminalPty({
                 client: this.#client(targetInstance),
+                onDispose: () => {
+                    if (this.#activePtys.get(key) === pty)
+                        this.#activePtys.delete(key);
+                },
                 operationAckTimeoutMs: this.#operationAckTimeoutMs,
                 options,
-                readIdentity: () => this.#sessions.get(targetInstance),
+                readIdentity: () => this.#sessions.get(key),
+                takeover,
+                terminalId,
                 workspace: this.#workspaceForInstance(targetInstance),
-                writeIdentity: (identity) =>
-                    this.#sessions.set(targetInstance, identity),
+                writeIdentity: (identity) => this.#sessions.set(key, identity),
             });
+            this.#activePtys.set(key, pty);
+            return pty;
         };
+    }
+
+    async setControl(
+        instance: string,
+        terminalId: string,
+        takeover: boolean,
+    ): Promise<void> {
+        const pty = this.#activePtys.get(`${instance}:${terminalId}`);
+        if (pty === undefined)
+            throw new Error("Selected terminal is not attached.");
+        await pty.setControl(takeover);
     }
 
     async kill(
@@ -102,6 +132,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     readonly #exitListeners = new Set<
         (event: { exitCode: number; signal?: number }) => void
     >();
+    readonly #onDispose?: () => void;
     readonly #operationAckTimeoutMs: number;
     readonly #options: TuiTerminalPtyOptions;
     readonly #workspace: string;
@@ -109,25 +140,36 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     readonly #readIdentity: () => StoredTerminalIdentity | undefined;
     readonly #writeIdentity: (identity: StoredTerminalIdentity) => void;
     readonly #ready: Promise<void>;
+    readonly #terminalId?: string;
     #clientSeq = 0;
     #closed = false;
     #exited = false;
+    #gapCount = 0;
+    #gapWindowStart = Date.now();
+    #lastPipeWasCr = false;
     #operationTail = Promise.resolve();
     #stream?: TerminalAttachment;
+    #takeover: boolean;
 
     constructor(options: {
         client: TuiControlTerminalClient;
+        onDispose?(): void;
         operationAckTimeoutMs: number;
         options: TuiTerminalPtyOptions;
         readIdentity(): StoredTerminalIdentity | undefined;
+        takeover: boolean;
+        terminalId?: string;
         workspace: string;
         writeIdentity(identity: StoredTerminalIdentity): void;
     }) {
         this.#client = options.client;
+        this.#onDispose = options.onDispose;
         this.#operationAckTimeoutMs = options.operationAckTimeoutMs;
         this.#options = options.options;
         this.#workspace = options.workspace;
         this.#readIdentity = options.readIdentity;
+        this.#takeover = options.takeover;
+        this.#terminalId = options.terminalId;
         this.#writeIdentity = options.writeIdentity;
         this.#ready = this.#connect().catch((error: unknown) => {
             this.#fail(asError(error), false);
@@ -142,6 +184,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         this.#stream?.close();
         this.#stream = undefined;
         this.#rejectPending(new Error("Terminal attachment was detached."));
+        this.#onDispose?.();
     }
 
     onData(listener: (data: string) => void): TuiTerminalDisposable {
@@ -157,15 +200,74 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     }
 
     resize(columns: number, rows: number): void {
+        if (!this.#takeover) return;
         this.#enqueueOperation("resize", { cols: columns, rows });
     }
 
     write(data: string): void {
+        if (!this.#takeover) return;
         this.#enqueueOperation("input", { data });
+    }
+
+    async setControl(takeover: boolean): Promise<void> {
+        await this.#ready;
+        if (this.#closed) throw new Error("Terminal attachment is closed.");
+        if (this.#takeover === takeover) return;
+        const stream = this.#stream;
+        const identity = this.#readIdentity();
+        if (
+            stream === undefined ||
+            identity === undefined ||
+            stream.sendControl === undefined
+        ) {
+            throw new Error("Terminal control toggle is unavailable.");
+        }
+        const clientSeq = ++this.#clientSeq;
+        const command = {
+            clientSeq,
+            generation: identity.generation,
+            terminalId: identity.terminalId,
+            version: identity.version,
+        };
+        const acknowledged = new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.#pending.delete(clientSeq);
+                reject(
+                    new Error(
+                        "Terminal control change timed out before acknowledgement.",
+                    ),
+                );
+            }, this.#operationAckTimeoutMs);
+            timer.unref?.();
+            this.#pending.set(clientSeq, { reject, resolve, timer });
+        });
+        try {
+            await stream.sendControl(takeover, command);
+            await acknowledged;
+            this.#takeover = takeover;
+        } catch (error) {
+            const pending = this.#pending.get(clientSeq);
+            if (pending !== undefined) {
+                clearTimeout(pending.timer);
+                this.#pending.delete(clientSeq);
+                pending.reject(asError(error));
+            }
+            throw error;
+        }
     }
 
     async #connect(): Promise<void> {
         let identity = this.#readIdentity();
+        if (this.#terminalId !== undefined) {
+            identity = (await this.#client.list?.())?.find(
+                (session) =>
+                    session.terminalId === this.#terminalId &&
+                    session.state === "running",
+            );
+            if (identity === undefined)
+                throw new Error("Selected terminal is not running.");
+            this.#writeIdentity(identity);
+        }
         if (identity === undefined || identity.state !== "running") {
             identity = await this.#client.open({
                 cols: this.#options.columns,
@@ -174,12 +276,17 @@ class TuiControlTerminalPty implements TuiTerminalPty {
             });
             this.#writeIdentity({ ...identity });
         }
+        await this.#attachStream(identity);
+    }
+
+    async #attachStream(identity: StoredTerminalIdentity): Promise<void> {
         // Every TUI attachment creates a fresh local terminal buffer. Replay
         // durable server output from the beginning so reopening the terminal
         // restores the screen instead of resuming after unseen output.
         const fromSeq = 0;
         const stream = await this.#client.attach({
             fromSeq,
+            ...(this.#takeover ? { takeover: true } : {}),
             generation: identity.generation,
             terminalId: identity.terminalId,
         });
@@ -191,7 +298,15 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         if (seed.kind !== "seed")
             throw new Error("Terminal stream seed is missing.");
         const acknowledged = seed.session;
-        this.#writeIdentity({ ...acknowledged, latestSeq: fromSeq });
+        this.#lastPipeWasCr = false;
+        this.#writeIdentity({
+            ...acknowledged,
+            latestSeq: seed.snapshot?.seq ?? fromSeq,
+        });
+        if (seed.snapshot !== undefined) {
+            for (const listener of this.#dataListeners)
+                listener(seed.snapshot.data);
+        }
         this.#stream = stream;
         void this.#consume(stream).catch((error: unknown) => {
             if (!this.#closed)
@@ -239,7 +354,10 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                             command,
                         );
                     } else {
-                        const resize = payload as { cols: number; rows: number };
+                        const resize = payload as {
+                            cols: number;
+                            rows: number;
+                        };
                         await stream.sendResize(
                             resize.cols,
                             resize.rows,
@@ -269,6 +387,21 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 if (next.session !== undefined)
                     this.#writeIdentity(next.session);
                 this.#stream = undefined;
+                if (
+                    next.error !== undefined &&
+                    isStreamGapError(next.error) &&
+                    this.#pending.size === 0
+                ) {
+                    const identity = this.#readIdentity();
+                    if (
+                        identity !== undefined &&
+                        identity.state === "running" &&
+                        this.#allowGapReconnect()
+                    ) {
+                        await this.#attachStream(identity);
+                        return;
+                    }
+                }
                 if (next.error !== undefined) throw next.error;
                 return;
             }
@@ -276,21 +409,58 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 const frame = next.frame;
                 const identity = this.#requireIdentity();
                 if (frame.seq <= identity.latestSeq) continue;
-                if (frame.seq !== identity.latestSeq + 1)
+                if (frame.seq !== identity.latestSeq + 1) {
+                    if (
+                        this.#pending.size === 0 &&
+                        this.#allowGapReconnect()
+                    ) {
+                        stream.close();
+                        this.#stream = undefined;
+                        await this.#attachStream(identity);
+                        return;
+                    }
                     throw new Error(
                         `Terminal output gap: expected ${identity.latestSeq + 1}, received ${frame.seq}.`,
                     );
+                }
                 const updated = { ...identity, latestSeq: frame.seq };
                 this.#writeIdentity(updated);
-                this.#emitData(frame.data);
+                this.#emitData(this.#formatOutput(updated, frame.data));
                 await stream.ack(updated, frame.seq);
                 continue;
             }
-            if (
-                next.kind === "inputAccepted" ||
-                next.kind === "resized"
-            ) {
+            if (next.kind === "inputAccepted" || next.kind === "resized") {
                 this.#acceptOperation(next);
+                continue;
+            }
+            if (next.kind === "controlChanged") {
+                const identity = this.#requireIdentity();
+                const updated: StoredTerminalIdentity = {
+                    ...next.session,
+                    latestSeq: Math.max(
+                        identity.latestSeq,
+                        next.snapshot?.seq ?? identity.latestSeq,
+                    ),
+                };
+                this.#writeIdentity(updated);
+                if (next.error !== undefined) {
+                    const pending = this.#pending.get(next.clientSeq);
+                    if (pending !== undefined) {
+                        clearTimeout(pending.timer);
+                        this.#pending.delete(next.clientSeq);
+                        pending.reject(new Error(next.error));
+                    }
+                    continue;
+                }
+                if (next.snapshot !== undefined) {
+                    this.#emitData(next.snapshot.data);
+                }
+                const pending = this.#pending.get(next.clientSeq);
+                if (pending !== undefined) {
+                    clearTimeout(pending.timer);
+                    this.#pending.delete(next.clientSeq);
+                    pending.resolve();
+                }
                 continue;
             }
             if (next.kind === "exit") {
@@ -323,6 +493,31 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         clearTimeout(pending.timer);
         this.#pending.delete(clientSeq);
         pending.resolve();
+    }
+
+    #allowGapReconnect(): boolean {
+        const now = Date.now();
+        if (now - this.#gapWindowStart > GAP_WINDOW_MS) {
+            this.#gapWindowStart = now;
+            this.#gapCount = 0;
+        }
+        this.#gapCount += 1;
+        return this.#gapCount <= MAX_GAP_RECONNECTS;
+    }
+
+    #formatOutput(identity: StoredTerminalIdentity, data: string): string {
+        if (identity.pty !== false) return data;
+        let result = "";
+        for (let index = 0; index < data.length; index += 1) {
+            const ch = data[index]!;
+            if (ch === "\n" && !this.#lastPipeWasCr) {
+                result += "\r\n";
+            } else {
+                result += ch;
+            }
+            this.#lastPipeWasCr = ch === "\r";
+        }
+        return result;
     }
 
     #requireIdentity(): StoredTerminalIdentity {
@@ -361,6 +556,13 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         this.#exited = true;
         for (const listener of [...this.#exitListeners]) listener(exit);
     }
+}
+
+function isStreamGapError(error: Error): boolean {
+    return (
+        "code" in error &&
+        (error as { code?: unknown }).code === STREAM_GAP_CODE
+    );
 }
 
 function asError(error: unknown): Error {

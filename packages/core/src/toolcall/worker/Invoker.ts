@@ -4,6 +4,8 @@ import {
     Rpc,
     createRemoteError,
     runtimeErrorCodes,
+    toRemoteErrorBody,
+    TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -26,6 +28,25 @@ export class WorkerToolInvoker {
         this.#catalog = catalog;
     }
 
+    async confirmWaitLease(owner: string, task: string): Promise<boolean> {
+        const result = await this.#waitLeaseRequest("process.wait.confirm", { owner, id: task });
+        return isRecord(result) && result.retained === true;
+    }
+
+    async reconcileWaitLeases(owners: readonly string[]): Promise<void> {
+        await this.#waitLeaseRequest("process.wait.reconcile", { owners: [...owners] });
+    }
+
+    async #waitLeaseRequest(method: string, input: JsonValue): Promise<JsonValue> {
+        const connection = await this.#endpoint.connect(this.#workerHost, "core");
+        const rpc = new Rpc(connection);
+        try {
+            return await rpc.request<JsonValue>(method, input);
+        } finally {
+            rpc.close();
+        }
+    }
+
     async invoke(
         toolName: string,
         input: JsonValue,
@@ -42,6 +63,11 @@ export class WorkerToolInvoker {
             });
 
         const operationId = context?.operationId ?? randomUUID();
+        const command = isRecord(input) ? input.command : undefined;
+        const createsTask = toolName === "bash_run" || (toolName === "task_manage" && command === "create");
+        const taskCreationId = createsTask ? `process-${randomUUID()}` : undefined;
+        const awaitCancellationReply = createsTask || toolName === "task_input" ||
+            (toolName === "task_manage" && command === "close");
         const connection = await this.#endpoint.connect(
             this.#workerHost,
             "tool",
@@ -65,11 +91,23 @@ export class WorkerToolInvoker {
             return (await rpc.request(
                 toolName,
                 {
-                    context: { ...(context ?? {}), operationId },
+                    context: {
+                        ...(context ?? {}), operationId,
+                        ...(taskCreationId === undefined ? {} : { taskCreationId }),
+                    },
                     input,
                 },
                 signal,
+                { awaitCancellationReply },
             )) as JsonValue;
+        } catch (error) {
+            const body = toRemoteErrorBody(error);
+            if (taskCreationId !== undefined && body?.code === TRANSPORT_RPC_RESULT_UNCERTAIN_CODE)
+                throw createRemoteError({
+                    ...body, cause: error, retryable: false,
+                    details: { taskId: taskCreationId, taskStart: "unknown" },
+                });
+            throw error;
         } finally {
             off?.();
             events.close();

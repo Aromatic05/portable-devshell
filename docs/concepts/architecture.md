@@ -32,7 +32,7 @@ provider transport
 Rust devshell-worker daemon
   ├── bash
   ├── file
-  ├── tmux
+  ├── process
   └── artifact payload
 ```
 
@@ -212,9 +212,9 @@ automatic model re-entry
 
 详见 [Workspace](workspace.md)。
 
-## tmux task 与 Context 解耦
+## process task 与 Context 解耦
 
-managed tmux task 属于 worker/runtime，不属于某个 HTTP request 或 Context 生命周期。
+managed process task 属于 worker/runtime，不属于某个 HTTP request 或 Context 生命周期。
 
 因此：
 
@@ -264,7 +264,7 @@ Provider / Carrier -> Channel
 
 CLI↔Control 与 Core↔Worker 共享 Endpoint/Envelope/Packet 基础设施，但 Control hello、admission 与业务 port 的权限契约独立。应用 Stream 在 Packet 层复用，不能把它们画成多个 Frame service。
 
-连接断开会使未完成 RPC 的结果 uncertain、不可自动重试；重连建立新连接，不自动 replay ToolCall。必须先检查操作状态再决定是否重新发起请求，不能依赖旧 `worker.rpc` terminal-response cache 保证。self-managed Reverse Worker 不由 Control 启动，删除 Control registration 也不等于清理远端 daemon/tmux 数据。
+连接断开会使未完成 RPC 的结果 uncertain、不可自动重试；重连建立新连接，不自动 replay ToolCall。必须先检查操作状态再决定是否重新发起请求，不能依赖旧 `worker.rpc` terminal-response cache 保证。self-managed Reverse Worker 不由 Control 启动，删除 Control registration 也不等于清理远端 daemon/Process Host 数据。
 
 详见 [Reverse Worker](../operations/reverse-connections.md)。
 
@@ -285,7 +285,7 @@ CLI↔Control 与 Core↔Worker 共享 Endpoint/Envelope/Packet 基础设施，�
 
 `data-home` 默认是 Unix `$XDG_DATA_HOME` 或 `~/.local/share`；Windows 使用 `$XDG_DATA_HOME` 或 `%LOCALAPPDATA%`。
 
-高频、可重建状态尽量不写成永久历史。例如 Context execution sidecar、临时 workspace data、tmux volatile runtime 会使用专门的 bounded/transient storage，而不是无限增长 Control 主状态文件。
+高频、可重建状态尽量不写成永久历史。例如 Context execution sidecar、临时 workspace data、Process Host volatile runtime 会使用专门的 bounded/transient storage，而不是无限增长 Control 主状态文件。
 
 Control IPC：
 
@@ -300,7 +300,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**
-3. **Workspace owns recovery; tmux task does not depend on Workspace.**
+3. **Workspace owns recovery; process task does not depend on Workspace.**
 4. **CLI/TUI/MCP share one authority path.**
 5. **Model-facing schema stays small; Control-plane management stays out of the model catalog.**
 6. **Compatibility is hidden at the wire boundary, not reintroduced into new product semantics.**

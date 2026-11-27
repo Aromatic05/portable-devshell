@@ -21,8 +21,6 @@ export function mcpAppModelContext(
                           result: item.result,
                           status: item.status,
                           taskId: item.taskId,
-                          tmuxTaskId:
-                              item.kind === "tmux" ? item.targetId : undefined,
                       }),
                   ];
         }),

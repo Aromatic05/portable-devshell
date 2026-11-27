@@ -10,12 +10,11 @@ use crate::tool::file::edit::FileEditTool;
 use crate::tool::file::read::FileReadTool;
 use crate::tool::file::search::glob::FileGlobTool;
 use crate::tool::file::search::grep::FileGrepTool;
-use crate::tool::tmux::register_tools as register_tmux_tools;
 use crate::tool::{ToolCommandEnvironmentProvider, ToolError, ToolRegistry};
 use crate::transport::endpoint::channel::EndpointPaths;
 
 pub fn builtin_registry(
-    instance_paths: &InstancePaths,
+    _instance_paths: &InstancePaths,
     socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
     artifacts: Arc<ArtifactStore>,
@@ -30,6 +29,7 @@ pub fn builtin_registry(
         Arc::clone(&artifacts),
         Arc::clone(&model_devshell),
         Arc::clone(&files),
+        runtime.instance.clone(),
     )?) as Arc<_>)?;
     registry.register(Arc::new(FileReadTool::new(
         Arc::clone(&files),
@@ -38,13 +38,12 @@ pub fn builtin_registry(
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGlobTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGrepTool::new(Arc::clone(&files))) as Arc<_>)?;
-    register_tmux_tools(
+    crate::tool::process::task::register_tools(
         &mut registry,
-        instance_paths,
-        socket_paths,
-        runtime,
-        model_devshell,
-        files,
+        &runtime.instance,
+        Arc::clone(&artifacts),
+        Arc::clone(&files),
     )?;
+    crate::tool::process::terminal::register_tools(&mut registry, &runtime.instance)?;
     Ok(registry)
 }

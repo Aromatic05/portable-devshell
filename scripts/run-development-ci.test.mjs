@@ -78,7 +78,7 @@ test("common CI owns source correctness without rebuilding release assets", () =
         "Build",
         "Typecheck",
         "Rust workspace tests",
-        "Worker tmux contract tests",
+        "Worker process contract tests",
         "Prepare test Worker",
         "Package tests",
     ]);
@@ -90,7 +90,7 @@ test("common CI owns source correctness without rebuilding release assets", () =
     );
 });
 
-test("Windows common CI keeps source correctness and excludes only tmux contracts", () => {
+test("Windows common CI keeps source correctness and excludes only native process contracts", () => {
     const directory = mkdtempSync(join(tmpdir(), "devshell-ci-plan-"));
     const pnpmCli = join(directory, "pnpm.cjs");
     writeFileSync(pnpmCli, "");
@@ -108,7 +108,7 @@ test("Windows common CI keeps source correctness and excludes only tmux contract
             "Prepare test Worker",
             "Package tests",
         ]);
-        assert.equal(names.includes("Worker tmux contract tests"), false);
+        assert.equal(names.includes("Worker process contract tests"), false);
     } finally {
         if (previous === undefined) {
             delete process.env.PORTABLE_DEVSHELL_PNPM_CLI;
@@ -143,13 +143,13 @@ test("Unix target CI proves the native deliverable without rerunning common corr
     }
 });
 
-test("macOS platform contract retains OS-sensitive package Rust and tmux behavior on one architecture", () => {
+test("macOS platform contract retains OS-sensitive package Rust and Process Host behavior on one architecture", () => {
     const steps = createPlatformContractCiSteps("darwin");
     const names = steps.map((step) => step.name);
     assert.deepEqual(names, [
         "Build",
         "Rust workspace tests",
-        "Worker tmux contract tests",
+        "Worker process contract tests",
         "Prepare test Worker",
         "Package tests",
     ]);

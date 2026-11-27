@@ -8,7 +8,6 @@ import { DatabaseSync } from "node:sqlite";
 import { zstdDecompressSync } from "node:zlib";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { resolvePreparedWorker, runCli, workerEnvironmentName } from "../AcceptanceSupport.mjs";
-import { resolveTestspaceTmuxSockets, stopTestspaceTmux } from "../../scripts/testspace/TestspaceRuntime.mjs";
 
 export const instance = "l05-workflow";
 
@@ -101,22 +100,13 @@ export async function createWorkflowFixture(record) {
         async stop() {
             assert.match(cli(["stop"]).stdout, /control: stopped/u);
         },
-        async assertTmuxAlive(marker) {
-            const sockets = await resolveTestspaceTmuxSockets({ devshellHome, instanceName: instance, runtimeDirectory: runtime, workspace });
-            const matching = [];
-            for (const socket of sockets) {
-                const panes = spawnSync("tmux", ["-S", socket, "list-panes", "-a", "-F", "#{pane_id} #{pane_dead}"], { env, encoding: "utf8" });
-                if (panes.status !== 0) continue;
-                for (const row of panes.stdout.trim().split("\n")) {
-                    const [pane, dead] = row.split(" ");
-                    const capture = spawnSync("tmux", ["-S", socket, "capture-pane", "-p", "-t", pane, "-S", "-100"], { env, encoding: "utf8" });
-                    assert.equal(capture.status, 0, capture.stderr);
-                    if (capture.stdout.includes(marker)) matching.push({ pane, dead, output: capture.stdout });
-                }
-            }
-            assert.equal(matching.length, 1, "exactly one real tmux pane must contain our start marker");
-            assert.equal(matching[0].dead, "0", "stopping Control/Wait must leave the command alive");
-            record("tmux-while-control-stopped", matching[0]);
+        async assertProcessAlive(id) {
+            const listed = spawnSync(worker, ["terminal", "list"], { env, encoding: "utf8" });
+            assert.equal(listed.status, 0, listed.stderr);
+            const matching = JSON.parse(listed.stdout).filter((resource) => resource.id === id);
+            assert.equal(matching.length, 1, "the original Process Host resource must survive");
+            assert.equal(matching[0].state, "running");
+            record("process-while-control-stopped", matching[0]);
         },
         async cleanup() {
             try {
@@ -126,7 +116,8 @@ export async function createWorkflowFixture(record) {
                     assert.equal(stopped.status, 0, "temporary Control cleanup failed");
                 }
             } finally {
-                await stopTestspaceTmux({ devshellHome, instanceName: instance, runtimeDirectory: runtime, workspace });
+                const retired = spawnSync(worker, ["retire", "--instance", instance], { env, encoding: "utf8" });
+                assert.equal(retired.status, 0, retired.stderr);
             }
             await rm(root, { force: true, recursive: true });
         },

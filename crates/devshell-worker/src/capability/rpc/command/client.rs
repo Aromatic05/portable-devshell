@@ -328,15 +328,9 @@ mod tests {
     fn cli_and_mcp_worker_shells_reject_installer_before_any_work() {
         use crate::instance::sandbox::policy::DisabledSecurityPolicy;
         use crate::tool::{
-            ToolCall, ToolCancellation, ToolProcessGuard, ToolProcessRegistry, ToolProgressEmitter,
+            ToolCall, ToolCancellation, ToolProgressEmitter,
         };
         use std::sync::Arc;
-        struct NoProcesses;
-        impl ToolProcessRegistry for NoProcesses {
-            fn register(self: Arc<Self>, _: i32) -> Result<Box<dyn ToolProcessGuard>, String> {
-                unreachable!()
-            }
-        }
         let root = crate::testing::temp_dir();
         let shim = super::ModelDevshellShim {
             bin_dir: root.path().join("bin"),
@@ -349,9 +343,10 @@ mod tests {
                 params: serde_json::Value::Null,
                 ctx_id: "ctx".into(),
                 operation_id: "call".into(),
+                wait_handoff: false,
+                task_creation_id: None,
                 source: source.map(str::to_string),
                 policy: Arc::new(DisabledSecurityPolicy),
-                process_registry: Arc::new(NoProcesses),
                 cancellation: ToolCancellation::default(),
                 progress: ToolProgressEmitter::new(|_| {}),
             };
@@ -396,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn bash_model_environment_explicitly_clears_inherited_tmux_task_binding() {
+    fn bash_model_environment_explicitly_clears_inherited_process_task_binding() {
         let model = model_command_environment(
             "/run/worker.sock".to_string(),
             "ctx-real".to_string(),
@@ -407,7 +402,7 @@ mod tests {
         );
         let mut env = BTreeMap::from([(
             TASK_ID_ENV.to_string(),
-            Some("task-inherited-from-outer-tmux".to_string()),
+            Some("task-inherited-from-outer-process".to_string()),
         )]);
 
         model.inject(&mut env);

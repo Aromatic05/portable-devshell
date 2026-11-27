@@ -1,9 +1,10 @@
-import type {
-    JsonValue,
-    ToolCallHookValue,
-    ToolCallHooks,
-    ToolCallRewriteInput,
-    WaitDetachInput,
+import {
+    RemoteError,
+    type JsonValue,
+    type ToolCallHookValue,
+    type ToolCallHooks,
+    type ToolCallRewriteInput,
+    type WaitDetachInput,
 } from "@portable-devshell/shared";
 import type { WaitApi } from "../Api.js";
 import { WAIT_HANDOFF_MS, WAIT_SYNC_MS } from "./index.js";
@@ -16,7 +17,7 @@ export function installWaitToolCallRewrite(
             rewrites: [
                 {
                     hook: "520-wait-detach",
-                    id: "tmux-wait",
+                    id: "task-wait",
                     rewrite: (input) => rewriteWaitToolCall(input, wait),
                 },
             ],
@@ -30,70 +31,74 @@ export async function rewriteWaitToolCall(
     wait: WaitApi,
 ): Promise<ToolCallHookValue> {
     const { value } = input;
-    if (input.direction === "inbound" && value.kind === "call")
+    if (input.direction === "inbound" && value.kind === "call" && value.context.contextMode !== "stateless")
         return rewriteInbound(value);
-    if (input.direction === "outbound" && value.context.contextMode !== "stateless") {
-        const targetId = detachedTarget(value);
-        if (targetId !== undefined) {
-            await wait.detach(detachInput(input.callId, targetId, value));
-            if (isHandoff(value)) return presentHandoff(value);
-        }
+    if (input.direction !== "outbound" || value.kind !== "result" || value.context.contextMode === "stateless")
+        return value;
+    const output = record(value.payload);
+    const targetId = record(output?.task)?.id;
+    if (output === undefined || typeof targetId !== "string" || !isHandoff(value.toolName, output))
+        return value;
+
+    try {
+        await wait.detach(detachInput(input.callId, targetId, value));
+    } catch (error) {
+        // The task is already running; failure to register its observer must
+        // not discard the result needed to continue polling it.
+        const code = error instanceof RemoteError &&
+            (error.code === "wait.commitUncertain" || error.code === "wait.commitDurabilityUnconfirmed")
+            ? error.code
+            : "wait.registrationFailed";
+        const { detached: _detached, ...running } = output;
+        return {
+            ...value,
+            payload: {
+                ...running,
+                waitError: {
+                    code,
+                    message: "Durable Wait registration was not confirmed. Continue with task_input using the returned task ID and cursor; do not repeat the original call.",
+                },
+            },
+        };
     }
-    return value;
+    return { ...value, payload: { ...output, detached: true } };
+}
+
+export function isWaitHandoffCandidate(value: ToolCallHookValue): boolean {
+    if (value.kind !== "call" || value.context.contextMode === "stateless") return false;
+    const input = record(value.payload);
+    const waitMs = milliseconds(input?.waitMs) ?? 0;
+    return value.toolName === "bash_run" ? waitMs >= WAIT_HANDOFF_MS
+        : value.toolName === "task_input" && input?.untilExit === true && waitMs >= WAIT_SYNC_MS;
 }
 
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
     const input = record(value.payload);
     if (input === undefined) return value;
-    if (value.toolName === "tmux_run" && input.wait === "block") {
-        const requested = milliseconds(input.timeMs) ?? milliseconds(input.timeout) ?? WAIT_HANDOFF_MS;
-        return {
-            ...value,
-            payload: { ...input, timeMs: Math.min(requested, WAIT_HANDOFF_MS) },
-        };
+    if (value.toolName === "bash_run") {
+        const requested = milliseconds(input.waitMs);
+        if (requested !== undefined && requested > WAIT_HANDOFF_MS)
+            return { ...value, payload: { ...input, waitMs: WAIT_HANDOFF_MS } };
     }
-    if (value.toolName === "tmux_read") {
-        const requested = milliseconds(input.timeMs);
+    if (value.toolName === "task_input") {
+        const requested = milliseconds(input.waitMs);
         if (requested !== undefined && requested > WAIT_SYNC_MS)
-            return { ...value, payload: { ...input, timeMs: WAIT_SYNC_MS } };
+            return { ...value, payload: { ...input, waitMs: WAIT_SYNC_MS } };
     }
     return value;
 }
 
-function isHandoff(value: ToolCallHookValue): boolean {
-    if (value.toolName !== "tmux_run" || value.kind !== "result") return false;
-    const output = record(value.payload);
-    if (output?.timedOut !== true) return false;
-    const deadline = milliseconds(output.timeout);
-    return deadline === undefined || deadline > WAIT_HANDOFF_MS;
-}
-
-function presentHandoff(value: ToolCallHookValue): ToolCallHookValue {
-    const output = record(value.payload)!;
-    const { timedOut: _workerTimeout, ...rest } = output;
-    const warnings = Array.isArray(rest.warnings)
-        ? rest.warnings.filter((warning) => record(warning)?.code !== "tmux.blockTimeout")
-        : rest.warnings;
-    return { ...value, payload: { ...rest, ...(warnings === undefined ? {} : { warnings }), detached: true } };
-}
-
-function detachedTarget(value: ToolCallHookValue): string | undefined {
-    const payload = record(value.payload);
-    if (payload === undefined) return undefined;
-    if (value.kind === "result") {
-        const task = record(payload.task);
-        const taskId = typeof task?.id === "string" ? task.id : undefined;
-        if (taskId === undefined) return undefined;
-        if (value.toolName === "tmux_run" && payload.timedOut === true) return taskId;
-        if (value.toolName === "tmux_read" && payload.waitReason === "timeout") return taskId;
-        return undefined;
-    }
-    if (value.kind !== "error" || value.toolName !== "tmux_run") return undefined;
-    const error = record(payload.error);
-    const details = record(error?.details);
-    return error?.code === "tool.cancelled" && typeof details?.task === "string"
-        ? details.task
-        : undefined;
+function isHandoff(toolName: string, output: Record<string, JsonValue>): boolean {
+    if (output.termination !== "running" || output.waitReason !== "timeout")
+        return false;
+    if (toolName === "bash_run")
+        return (milliseconds(output.waitMs) ?? 0) >= WAIT_HANDOFF_MS;
+    if (toolName === "task_input")
+        return (
+            output.untilExit === true &&
+            (milliseconds(output.waitMs) ?? 0) >= WAIT_SYNC_MS
+        );
+    return false;
 }
 
 function detachInput(

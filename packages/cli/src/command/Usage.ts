@@ -1,7 +1,13 @@
 import type { CliCommandDescriptor } from "@portable-devshell/shared";
 
 export type CliHelpTopic =
-    "approval" | "config" | "context" | "debug" | "oauth" | "tool";
+    | "approval"
+    | "config"
+    | "context"
+    | "debug"
+    | "oauth"
+    | "terminal"
+    | "tool";
 
 export function renderCliUsage(
     commands: readonly CliCommandDescriptor[] = [],
@@ -29,6 +35,7 @@ export function renderCliUsage(
         "  context <command>              Manage MCP contexts and messages",
         "  debug <command>                Apply protected local runtime debug patches",
         "  tool <command>                 Inspect tool calls",
+        "  terminal <command>             Manage and attach to remote PTY sessions",
         "  tui                            Open the terminal UI",
         "  instance <command>             Manage instances",
         "  watch <command>                Follow instance state or logs",
@@ -107,6 +114,17 @@ export function renderCliTopicUsage(
                     "  devshell debug unload <patchId>",
                     "",
                     "Debug patch operations are accepted only through the local owner Control socket.",
+                ].join("\n");
+            case "terminal":
+                return [
+                    "Usage:",
+                    "  devshell terminal list <instance> [--all]",
+                    "  devshell terminal create <instance> [--workspace <path>] [--name <name>] [--cwd <dir>] [--command <cmd>] [--shell <path>] [--cols <n>] [--rows <n>] [--ephemeral] [--detach]",
+                    "  devshell terminal attach <instance> [target] [--takeover]",
+                    "  devshell terminal inspect <instance> [target]",
+                    "  devshell terminal close <instance> [target]",
+                    "",
+                    "In-session keys: Ctrl+] or Ctrl+] d detach · Ctrl+] t toggle observe/control · Ctrl+] ] send literal Ctrl+]",
                 ].join("\n");
             case "tool":
                 return [

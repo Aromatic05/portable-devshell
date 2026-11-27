@@ -37,7 +37,6 @@ import {
     encodeGlobalConfig,
     encodeInstanceConfig,
 } from "../../unit/control/config/persistence/Support.ts";
-import { createCursorPositionResponder } from "../../support/TerminalProtocol.ts";
 import {
     installUniqueWindowsTestIdentity,
     realWorkerTestOptions,
@@ -48,6 +47,7 @@ import {
     terminalPrintCommand,
     terminalSizeProbeCommand,
 } from "../../../../../test/TestPlatformSupport.ts";
+import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import {
     startLoopbackHttpProxy,
@@ -187,24 +187,36 @@ test(
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
         let workerStdout = "";
         let workerStderr = "";
+        const environment: NodeJS.ProcessEnv = {
+            ...process.env,
+            HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
+            PORTABLE_DEVSHELL_HOME: join(homeDirectory, ".devshell"),
+            XDG_RUNTIME_DIR: xdgRuntimeDir,
+        };
+        delete environment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+        delete environment.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE;
+        delete environment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 
         t.after(async () => {
-            const worker = workerRef.value;
-            if (
-                worker !== undefined &&
-                worker.exitCode === null &&
-                worker.signalCode === null
-            ) {
-                worker.kill("SIGTERM");
-                await waitForExit(worker);
-            }
-            await server.stop();
-            await routeProxy.close();
-            await proxy.close();
-            restoreWindowsIdentity();
-            await rm(homeDirectory, { force: true, recursive: true });
-            await rm(xdgRuntimeDir, { force: true, recursive: true });
-            await rm(workspace, { force: true, recursive: true });
+            await cleanupInOrder(
+                async () => {
+                    const worker = workerRef.value;
+                    if (worker !== undefined && worker.exitCode === null && worker.signalCode === null) {
+                        worker.kill("SIGTERM");
+                        await waitForExit(worker);
+                    }
+                },
+                () => runWorkerCommand(["stop", "--instance", "reverse-test"], environment, workspace),
+                () => runWorkerCommand(["retire", "--instance", "reverse-test"], environment, workspace),
+                () => server.stop(),
+                () => routeProxy.close(),
+                () => proxy.close(),
+                restoreWindowsIdentity,
+                () => rm(homeDirectory, { force: true, recursive: true }),
+                () => rm(xdgRuntimeDir, { force: true, recursive: true }),
+                () => rm(workspace, { force: true, recursive: true }),
+            );
         });
 
         await mkdir(paths.controlHomeDir, { recursive: true });
@@ -266,12 +278,9 @@ test(
         await pointProxyAtControlMcp(proxy, server.socketPath);
         const worker = spawn(workerBinary!, [], {
             env: {
-                ...process.env,
+                ...environment,
                 DEVSHELL_WORKER_INTERNAL_INSTANCE: "reverse-test",
                 DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "disabled",
-                HOME: homeDirectory,
-                USERPROFILE: homeDirectory,
-                XDG_RUNTIME_DIR: xdgRuntimeDir,
             },
             stdio: ["pipe", "pipe", "pipe"],
         });
@@ -317,7 +326,7 @@ test(
             {
                 input: {
                     command: readRelativeMarkerCommand(workspaceMarkerName),
-                    timeoutMs: 30_000,
+                    waitMs: 30_000,
                 },
                 toolName: "bash_run",
                 workspace,
@@ -451,36 +460,13 @@ test(
         let terminalStream = attached;
         let terminalVersion = opened.version;
         let terminalClientSeq = 1;
-        let cursorResponseCount = 0;
-        const cursorResponder = createCursorPositionResponder(async (data) => {
-            await terminalStream.send({
-                name: "input",
-                payload: {
-                    clientSeq: terminalClientSeq++,
-                    data,
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                    version: terminalVersion,
-                },
-            });
-        });
-        const observeTerminalProtocol = async (
-            event: ControlStreamMessage,
-        ): Promise<void> => {
-            if (process.platform !== "win32" || event.name !== "output") return;
-            const payload = event.payload as { data?: string } | undefined;
-            cursorResponseCount += await cursorResponder.consume(
-                payload?.data ?? "",
-            );
-        };
+        // The Process Host answers device-status queries in observation mode
+        // before publishing the corresponding output. Do not send duplicate replies.
         if (process.platform === "win32") {
             await waitForTerminal(
                 attached,
-                () => cursorResponseCount > 0,
-                () =>
-                    `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
-                10_000,
-                observeTerminalProtocol,
+                (_event, output) => output.includes("\u001B[6n"),
+                () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             );
         }
         const readyInputSeq = terminalClientSeq++;
@@ -510,7 +496,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, ready.lastOutputSeq);
 
@@ -537,11 +522,6 @@ test(
         );
         terminalVersion = (resized.event.payload as { version: number })
             .version;
-        if (process.platform === "win32") {
-            cursorResponseCount += await cursorResponder.consume(
-                resized.output,
-            );
-        }
         const sizedInputSeq = terminalClientSeq++;
         await attached.send({
             name: "input",
@@ -562,7 +542,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, sized.lastOutputSeq);
         await attached.close();
@@ -595,7 +574,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
@@ -632,7 +610,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         outputSeq = Math.max(outputSeq, restartStarted.lastOutputSeq);
         await resumed.close();
@@ -640,12 +617,7 @@ test(
 
         // T1: disconnected Reverse + live daemon. `start` must wait until
         // Control returns Ready without restarting the daemon.
-        const startEnvironment = {
-            ...process.env,
-            HOME: homeDirectory,
-            USERPROFILE: homeDirectory,
-            XDG_RUNTIME_DIR: xdgRuntimeDir,
-        };
+        const startEnvironment = environment;
         const beforeRestart = JSON.parse(runWorkerCommand(
             ["status", "--instance", "reverse-test"], startEnvironment, workspace,
         ).stdout) as { pid: number };
@@ -729,7 +701,6 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
-            observeTerminalProtocol,
         );
         await recovered.close();
 
@@ -926,21 +897,17 @@ test(
         delete workerEnvironment.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
 
         t.after(async () => {
-            runWorkerCommand(
-                ["stop", "--instance", "reverse-reenroll"],
-                workerEnvironment,
-                workspace,
-                true,
+            await cleanupInOrder(
+                () => runWorkerCommand(["stop", "--instance", "reverse-reenroll"], workerEnvironment, workspace),
+                () => runWorkerCommand(["retire", "--instance", "reverse-reenroll"], workerEnvironment, workspace),
+                () => server.stop(),
+                () => proxy.close(),
+                () => rm(controlHome, { force: true, recursive: true }),
+                () => rm(controlRuntime, { force: true, recursive: true }),
+                () => rm(workerHome, { force: true, recursive: true }),
+                () => rm(workerRuntime, { force: true, recursive: true }),
+                () => rm(workspace, { force: true, recursive: true }),
             );
-            await server.stop();
-            await proxy.close();
-            await Promise.all([
-                rm(controlHome, { force: true, recursive: true }),
-                rm(controlRuntime, { force: true, recursive: true }),
-                rm(workerHome, { force: true, recursive: true }),
-                rm(workerRuntime, { force: true, recursive: true }),
-                rm(workspace, { force: true, recursive: true }),
-            ]);
         });
 
         await mkdir(paths.controlHomeDir, { recursive: true });
@@ -1117,6 +1084,7 @@ function runWorkerCommand(
         cwd,
         encoding: "utf8",
         env: environment,
+        timeout: 45_000,
         windowsHide: true,
     });
     if (result.error !== undefined) throw result.error;
@@ -1163,7 +1131,7 @@ async function assertReverseMarker(
         {
             input: {
                 command: readRelativeMarkerCommand(markerName),
-                timeoutMs: 30_000,
+                waitMs: 30_000,
             },
             toolName: "bash_run",
             workspace,

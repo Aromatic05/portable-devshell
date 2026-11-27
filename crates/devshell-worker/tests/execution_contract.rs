@@ -60,7 +60,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s|%s|%s|%s' \"$DAEMON_STAGE\" \"$PROCESS_STAGE\" \"$OVERWRITE\" \"${REMOVE_ME-absent}\" \"${DEVSHELL_WORKER_EXECUTION_CONFIG-absent}\"",
-                "timeoutMs": 10000,
+                "waitMs": 10000,
                 "env": { "OVERWRITE": "explicit-value" }
             }),
         );
@@ -113,7 +113,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s' \"$EXECUTION_DIRENV_PROBE\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -147,7 +147,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s' \"$GENERIC_DRIVER_PROBE\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -190,7 +190,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_LAYER\" \"$EXECUTION_OBSERVED\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(result["type"], "reply", "{result}");
@@ -221,7 +221,7 @@ mod unix {
         let failed = bash_call(
             &env,
             instance,
-            json!({ "command": "printf ran > command-ran", "timeoutMs": 10000 }),
+            json!({ "command": "printf ran > command-ran", "waitMs": 10000 }),
         );
         assert_eq!(failed["type"], "error", "{failed}");
         assert_eq!(failed["error"]["code"], "execution.providerFailed", "{failed}");
@@ -238,7 +238,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"$EXECUTION_TRANSIENT\"",
-                "timeoutMs": 10000,
+                "waitMs": 10000,
                 "env": { "EXECUTION_TRANSIENT": "request-value" }
             }),
         );
@@ -252,7 +252,7 @@ mod unix {
             instance,
             json!({
                 "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"${EXECUTION_TRANSIENT-absent}\"",
-                "timeoutMs": 10000
+                "waitMs": 10000
             }),
         );
         assert_eq!(isolated["type"], "reply", "{isolated}");
@@ -262,14 +262,7 @@ mod unix {
     }
 
     #[test]
-    fn ordered_environment_hooks_reach_a_managed_tmux_task() {
-        if !Command::new("tmux")
-            .arg("-V")
-            .output()
-            .is_ok_and(|out| out.status.success())
-        {
-            return;
-        }
+    fn ordered_environment_hooks_reach_a_managed_task() {
         let env = TestEnv::new();
         let instance = "execution-tmux-environment";
         let config = json!({ "environment": [
@@ -288,15 +281,15 @@ mod unix {
             "tool",
             &json!({
                 "protocol": "rpc", "type": "request", "id": "execution-tmux-run",
-                "method": "tmux_run",
+                "method": "bash_run",
                 "message": {
                     "input": {
                         "command": "printf '%s|%s\\n' \"$LAYER\" \"${REMOVE_ME-missing}\"",
-                        "wait": "block", "timeMs": 3000, "line": 80
+                        "waitMs": 3000, "pty": true
                     },
                     "context": {
                         "workspace": env.workspace(), "source": "mcp",
-                        "ctxId": "ctx-execution", "requestId": "tmux-execution-run"
+                        "ctxId": "ctx-execution", "requestId": "pty-execution-run"
                     }
                 }
             }),
@@ -304,25 +297,14 @@ mod unix {
         assert_eq!(run["type"], "reply", "{run}");
         assert_eq!(run["message"]["task"]["status"], "0", "{run}");
         assert!(
-            run["message"]["output"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|line| line == "second|missing"),
+            run["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "second|missing")),
             "{run}"
         );
         env.json_command(&["stop", "--instance", instance]);
     }
 
     #[test]
-    fn exclusive_process_sandbox_wraps_bash_and_managed_tmux_tasks() {
-        if !Command::new("tmux")
-            .arg("-V")
-            .output()
-            .is_ok_and(|out| out.status.success())
-        {
-            return;
-        }
+    fn exclusive_process_sandbox_wraps_bash_and_managed_pty_tasks() {
         if !Command::new("bwrap")
             .args([
                 "--ro-bind",
@@ -355,30 +337,26 @@ mod unix {
             &env,
             instance,
             json!({
-                "command": "printf sandbox-bash", "timeoutMs": 10000
+                "command": "printf sandbox-bash", "waitMs": 10000
             }),
         );
         assert_eq!(bash["message"]["stdout"], "sandbox-bash", "{bash}");
-        let tmux = env.rpc(instance, "tool", &json!({
-            "protocol": "rpc", "type": "request", "id": "sandbox-tmux-run",
-            "method": "tmux_run",
+        let task = env.rpc(instance, "tool", &json!({
+            "protocol": "rpc", "type": "request", "id": "sandbox-pty-run",
+            "method": "bash_run",
             "message": {
-                "input": { "command": "printf 'sandbox-task\\n'", "wait": "block", "timeMs": 3000, "line": 80 },
+                "input": { "command": "printf 'sandbox-task\\n'", "waitMs": 3000, "pty": true },
                 "context": {
                     "workspace": env.workspace(), "source": "mcp",
-                    "ctxId": "ctx-sandbox", "requestId": "sandbox-tmux-run"
+                    "ctxId": "ctx-sandbox", "requestId": "sandbox-pty-run"
                 }
             }
         }));
-        assert_eq!(tmux["type"], "reply", "{tmux}");
-        assert_eq!(tmux["message"]["task"]["status"], "0", "{tmux}");
+        assert_eq!(task["type"], "reply", "{task}");
+        assert_eq!(task["message"]["task"]["status"], "0", "{task}");
         assert!(
-            tmux["message"]["output"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|line| line == "sandbox-task"),
-            "{tmux}"
+            task["message"]["stdout"].as_str().is_some_and(|output| output.lines().any(|line| line == "sandbox-task")),
+            "{task}"
         );
         env.json_command(&["stop", "--instance", instance]);
     }

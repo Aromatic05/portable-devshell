@@ -162,7 +162,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         assert.equal(typeof ctxId, "string");
         const marker = `audit-${randomUUID()}`;
         for (const exitCode of [0, 7]) {
-            const result = await call("bash_run", { ctxId, timeoutMs: 10_000,
+            const result = await call("bash_run", { ctxId, waitMs: 10_000,
                 command: `printf '${marker}-${exitCode}'; printf '${marker}-stderr' >&2; exit ${exitCode}` });
             assert.equal(result.exitCode, exitCode);
             assert.equal(result.stdout, `${marker}-${exitCode}`);
@@ -244,7 +244,7 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
         assert.match(await readFile(configPath, "utf8"), /RECOVERY_REVISION = "recovered"/u);
         await connectMcp();
         const freshContext = await call("environ_info", { workspace });
-        const after = await call("bash_run", { ctxId: freshContext.ctxId, command: `printf '${marker}-after'`, timeoutMs: 10_000 });
+        const after = await call("bash_run", { ctxId: freshContext.ctxId, command: `printf '${marker}-after'`, waitMs: 10_000 });
         assert.equal(after.exitCode, 0);
         assert.equal(after.stdout, `${marker}-after`);
         await client.close();

@@ -18,14 +18,14 @@ on:
                     - browser
                     - handoff
                     - chains
-                    - windows-psmux
+                    - windows-process
 
 permissions:
     contents: read
 
 jobs:
     linux-testspace:
-        if: inputs.suite != 'windows-psmux'
+        if: inputs.suite != 'windows-process'
         runs-on: ubuntu-24.04
         timeout-minutes: 60
         steps:
@@ -43,7 +43,7 @@ jobs:
             - name: Install test dependencies
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y tmux fish zsh
+                  sudo apt-get install -y fish zsh
                   rustup toolchain install stable --profile minimal
                   rustup default stable
                   pnpm install --frozen-lockfile
@@ -89,10 +89,10 @@ jobs:
               if: inputs.suite == 'browser'
               shell: bash
               run: pnpm acceptance:web 2>&1 | tee "$RUNNER_TEMP/beta-matrix-browser.log"
-            - name: Real 190-second tmux handoff and recovery
+            - name: Real 190-second process handoff and recovery
               if: inputs.suite == 'handoff'
               shell: bash
-              run: pnpm acceptance:tmux-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
+              run: pnpm acceptance:process-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
             - name: Install Chromium for multi-client chain
               if: inputs.suite == 'chains'
               shell: bash
@@ -124,8 +124,8 @@ jobs:
                       ${{ runner.temp }}/beta-matrix-chains.log
                   if-no-files-found: ignore
 
-    windows-psmux:
-        if: inputs.suite == 'windows-psmux'
+    windows-process:
+        if: inputs.suite == 'windows-process'
         strategy:
             fail-fast: false
             matrix:
@@ -147,4 +147,4 @@ jobs:
               shell: pwsh
               run: |
                   Get-Command pwsh | Out-Null
-                  cargo test --locked -p devshell-worker --test tmux_windows_contract -- --nocapture
+                  cargo test --locked -p devshell-worker --test process_windows_contract -- --test-threads=1 --nocapture

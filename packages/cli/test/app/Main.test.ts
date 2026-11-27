@@ -1029,7 +1029,7 @@ test("CliMain handles instance logs follow and tool call through injected client
             "demo-local",
             "/tmp/ws",
             "bash_run",
-            '{"command":"pwd","timeoutMs":30000}',
+            '{"command":"pwd","waitMs":30000}',
         ]),
         0,
     );
@@ -1046,7 +1046,7 @@ test("CliMain handles instance logs follow and tool call through injected client
             "demo-local",
             "/tmp/ws",
             "bash_run",
-            '{"command":"pwd","timeoutMs":30000}',
+            '{"command":"pwd","waitMs":30000}',
         ]),
         0,
     );

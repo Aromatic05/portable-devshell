@@ -3,6 +3,7 @@ import { createToolCallRuntime } from "@portable-devshell/shared";
 import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 import type {
     ContextTransport,
@@ -61,11 +62,12 @@ test.after(async () => {
     contextState.toolCallRuntime.close();
     await contextState.contexts.close();
 });
+const activeWorkspace = await createTestTempDirectory("mcp-worker-domain");
 const activeContext = await contextRegistry.create({
     environments: [
         {
             instance: "main-pc",
-            workspace: "/workspace",
+            workspace: activeWorkspace,
         },
     ],
     principal: "local",
@@ -160,25 +162,25 @@ test("routing fields are injected into strict worker schema union branches", () 
     const unionTool: ToolDefinition = {
         requiredCapabilities: ["execute"],
         description: "Union tool",
-        group: "tmux",
+        group: "task",
         inputSchema: {
             $defs: {
-                Pane: {
+                Create: {
                     additionalProperties: false,
-                    properties: { pane: { type: "string" } },
-                    required: ["pane"],
+                    properties: { command: { const: "create" }, cwd: { type: "string" } },
+                    required: ["command"],
                     type: "object",
                 },
-                Task: {
+                Close: {
                     additionalProperties: false,
-                    properties: { task: { type: "string" } },
-                    required: ["task"],
+                    properties: { command: { const: "close" }, task: { type: "string" } },
+                    required: ["command", "task"],
                     type: "object",
                 },
             },
-            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }],
+            anyOf: [{ $ref: "#/$defs/Create" }, { $ref: "#/$defs/Close" }],
         },
-        name: "tmux_input",
+        name: "task_manage",
         outputSchema: { type: "object" },
     };
     const schema = withMcpInstanceTarget(withMcpContextId(unionTool))
@@ -410,13 +412,15 @@ async function rewrittenEndpoint(
 ) {
     const state = createTestMcpRuntimeState();
     await state.contexts.initialize();
+    const originalWorkspace = await createTestTempDirectory("mcp-original");
+    const finalWorkspace = await createTestTempDirectory("mcp-final");
     const original = await state.contexts.registry.create({
-        environments: [{ instance: "main-pc", workspace: "/original" }],
+        environments: [{ instance: "main-pc", workspace: originalWorkspace }],
         principal: "local",
     });
     const instance = remote ? "final" : "main-pc";
     const final = await state.contexts.registry.create({
-        environments: [{ instance, workspace: "/final" }],
+        environments: [{ instance, workspace: finalWorkspace }],
         principal: "local",
     });
     const changes: Array<[string, ...unknown[]]> = [];
@@ -453,14 +457,14 @@ async function rewrittenEndpoint(
                         return await request.transformResult?.({}, request.callId) ?? {};
                     }
                     changes.push(["ready", target]);
-                    changes.push(["workspace", target, "/final"]);
+                    changes.push(["workspace", target, finalWorkspace]);
                     changes.push(["event", target, request.value.toolName, request.value.context]);
-                    if (request.value.toolName.startsWith("tmux_")) {
+                    if (["bash_run", "task_input"].includes(request.value.toolName)) {
                         changes.push(["internal", target, request.value.toolName, request.value.context]);
                     }
                     return await request.transformResult?.({
-                        task: { id: "final-task", status: "completed" },
-                        output: "ready",
+                        task: { id: "final-task", status: "0", pty: false },
+                        termination: "exited", exitCode: 0, stdout: "ready", stderr: "",
                         waitReason: "terminal",
                     }, request.callId) ?? {};
                 },
@@ -485,17 +489,16 @@ async function rewrittenEndpoint(
                 return {
                     ...value,
                     toolName,
-                    payload: {
-                        command: "rewritten",
-                        task: "final-task",
-                        wait: "block",
-                        timeMs: 180000,
-                    },
+                    payload: (toolName === "bash_run"
+                        ? { command: "rewritten", waitMs: 180000 }
+                        : toolName === "task_input"
+                            ? { task: "final-task", waitMs: 120000, untilExit: true }
+                            : toolName === "file_read" ? { files: [{ path: "rewritten" }] } : {}) as JsonValue,
                     context: {
                         ...value.context,
                         instance: asInstanceName(instance),
                         ctxId: final.ctxId,
-                        workspace: "/final",
+                        workspace: finalWorkspace,
                     },
                 };
             },
@@ -505,8 +508,7 @@ async function rewrittenEndpoint(
     const definitions = [
         bashTool,
         fileReadTool,
-        { ...bashTool, group: "tmux", name: "tmux_run" },
-        { ...bashTool, group: "tmux", name: "tmux_read" },
+        { ...bashTool, group: "task", name: "task_input" },
         { ...bashTool, group: "ext", name: "ext_original" },
         { ...bashTool, group: "ext", name: "ext_final" },
     ];
@@ -516,8 +518,7 @@ async function rewrittenEndpoint(
             tools: [
                 bashTool,
                 fileReadTool,
-                { ...bashTool, group: "tmux", name: "tmux_run" },
-                { ...bashTool, group: "tmux", name: "tmux_read" },
+                { ...bashTool, group: "task", name: "task_input" },
             ],
         }),
         endpointTools,
@@ -534,6 +535,7 @@ async function rewrittenEndpoint(
         original,
         final,
         instance,
+        finalWorkspace,
         changes,
         inputs,
         provenance,
@@ -575,7 +577,7 @@ for (const remote of [true, false]) {
         );
         assert.deepEqual(
             h.changes.find((change) => change[0] === "workspace"),
-            ["workspace", h.instance, "/final"],
+            ["workspace", h.instance, h.finalWorkspace],
         );
         assert.deepEqual(
             h.changes.find((change) => change[0] === "event"),
@@ -601,29 +603,25 @@ for (const remote of [true, false]) {
     });
 }
 
-for (const name of ["tmux_run", "tmux_read"]) {
+for (const name of ["bash_run", "task_input"]) {
     test(`${name} adapts final rewritten input and finishes against final Context`, async () => {
         const h = await rewrittenEndpoint(name, true);
         await h.endpoint.callTool(
             name,
             {
                 ctxId: h.original.ctxId,
-                command: "original",
-                task: "original-task",
-                wait: "block",
-                timeMs: 180000,
-                purpose: "tmux",
+                ...(name === "bash_run"
+                    ? { command: "original", waitMs: 180000 }
+                    : { task: "original-task", waitMs: 120000, untilExit: true }),
+                purpose: "process",
             },
             context,
         );
         assert.deepEqual(
             h.inputs[0],
-            {
-                command: "rewritten",
-                task: "final-task",
-                wait: "block",
-                timeMs: 180000,
-            },
+            name === "bash_run"
+                ? { command: "rewritten", waitMs: 180000 }
+                : { task: "final-task", waitMs: 120000, untilExit: true },
         );
         const internal = h.changes.find(
             (change) => change[0] === "internal",
@@ -634,7 +632,7 @@ for (const name of ["tmux_run", "tmux_read"]) {
     });
 }
 
-for (const name of ["bash_run", "ext_original", "tmux_run"]) {
+for (const name of ["bash_run", "ext_original", "task_input"]) {
     test(`${name} rejected review leaves accepted MCP state untouched`, async () => {
         const h = await rewrittenEndpoint(name, true, true);
         await assert.rejects(
@@ -642,7 +640,8 @@ for (const name of ["bash_run", "ext_original", "tmux_run"]) {
                 name,
                 {
                 ctxId: h.original.ctxId,
-                    wait: "block",
+                    ...(name === "bash_run" ? { command: "original", waitMs: 180000 }
+                        : name === "task_input" ? { task: "original-task", waitMs: 120000 } : {}),
                     purpose: "rejected",
                 },
                 context,

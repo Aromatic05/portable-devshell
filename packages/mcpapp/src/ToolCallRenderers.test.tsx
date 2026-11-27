@@ -125,22 +125,64 @@ test("file_edit failure in operation 41 survives server preview and UI truncatio
     expect(view.querySelectorAll(".tc-edit-operation")).toHaveLength(25);
 });
 
-test("tmux_run and tmux_inspect use tasks, panes, transcript and wait semantics", async () => {
-    let view = await display({ name: "tmux_run", isError: false, output: {
-        task: { id: "task-17", status: "running" }, pane: { id: "pane-1", name: "build" },
-        output: ["building...\n"], timedOut: true,
-    } }, { command: "pnpm build", wait: "block" });
+test("bash_run, task_input, task_inspect and task_manage render the unified process result contract", async () => {
+    let view = await display({ name: "bash_run", isError: false, output: {
+        task: { id: "process-17", status: "running", pty: true },
+        stdout: "building...\n", stderr: "",
+        termination: "running", waitReason: "timeout", waitMs: 250,
+    } }, { command: "pnpm build", waitMs: 250, pty: true });
     expect(view.querySelector(".toolcall-line")?.textContent).toContain("Running");
     expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("building...");
-    expect(view.textContent).toContain("wait timed out");
+    expect(view.textContent).toContain("running");
     await act(async () => { root?.unmount(); root = undefined; });
     container?.remove();
-    view = await display({ name: "tmux_inspect", isError: false, output: {
-        panes: [{ id: "pane-1", name: "editor", status: "ready", cwd: "/repo",
-            lines: ["$ vim main.rs", "-- INSERT --"] }],
+    view = await display({ name: "task_input", isError: false, output: {
+        task: { id: "process-17", status: "0", pty: true },
+        stdout: "done\n", stderr: "", exitCode: 0,
+        cursor: "cursor-2", waitReason: "terminal", waitMs: 1000, termination: "exited",
+    } }, { task: "process-17", input: "hello\r", cursor: "cursor-1" });
+    expect(view.querySelector(".tc-info")?.textContent).toContain("process-17");
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("done");
+    expect(view.querySelector(".tc-stats")?.textContent).toContain("Exit0");
+    await act(async () => { root?.unmount(); root = undefined; });
+    container?.remove();
+    view = await display({ name: "task_inspect", isError: false, output: {
+        task: "process-17", state: "running", humanControl: false, seq: 1,
+        rows: 24, cols: 80, cursorRow: 1, cursorCol: 1, alternateScreen: false,
+        text: "$ vim main.rs\n-- INSERT --",
+    } }, { task: "process-17" });
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("INSERT");
+    expect(view.textContent).toContain("Terminal snapshot");
+    expect(view.textContent).toContain("80×24");
+    await act(async () => { root?.unmount(); root = undefined; });
+    container?.remove();
+    view = await display({ name: "task_manage", isError: false, output: {
+        tasks: [{
+            id: "process-17", kind: "terminal", persistent: true, pty: true,
+            state: "running", name: "dev-shell", cwd: "/workspace",
+            humanControl: true, createdAtMs: 1234,
+        }],
+    } }, { command: "list" });
+    expect(view.textContent).toContain("dev-shell (process-17)");
+    expect(view.textContent).toContain("human control");
+});
+
+test("task_manage close renders running as a pending termination request", async () => {
+    const view = await display({ name: "task_manage", isError: false, output: {
+        taskId: "process-17", killRequested: true, state: "running",
     } });
-    expect(view.querySelector(".tc-pane .tc-terminal pre")?.textContent).toContain("INSERT");
-    expect(view.textContent).toContain("/repo");
+    expect(view.querySelector(".toolcall-description")?.textContent).toBe("Termination requested · process-17");
+    expect(view.querySelector(".tc-info")?.textContent).toBe(
+        "Termination requested for task process-17; it is still running. Poll for the final state.");
+    expect(view.textContent).not.toMatch(/Closed task|task process-17 ended/iu);
+});
+
+test("task_manage close reports that the task ended when exit was observed", async () => {
+    const view = await display({ name: "task_manage", isError: false, output: {
+        taskId: "process-17", killRequested: true, state: "exited",
+    } }, { command: "close", task: "process-17" });
+    expect(view.querySelector(".tc-info")?.textContent).toBe("Task process-17 ended (state: exited).");
+    expect(view.textContent).not.toContain("Poll for the final state");
 });
 
 test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {
