@@ -145,7 +145,7 @@ fn cancelled_terminal_create_closes_the_spawned_terminal_before_returning() {
             .reply(json!({"process": host.descriptor(&id, "exited", 0), "frames": []}));
     });
     assert_eq!(response["error"]["code"], "tool.cancelled", "{response}");
-    assert_eq!(response["error"]["details"], json!({"taskId": id, "killRequested": true, "state": "exited"}));
+    assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed", "killRequested": true, "state": "exited"}));
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn bash_cancellation_during_final_capture_kills_before_losing_the_first_handle()
             .reply(json!({"process": host.descriptor(&id, "exited", 1), "frames": []}));
     });
     assert_eq!(response["error"]["code"], "tool.cancelled", "{response}");
-    assert_eq!(response["error"]["details"], json!({"taskId": id, "killRequested": true, "state": "exited"}));
+    assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed", "killRequested": true, "state": "exited"}));
 }
 
 #[test]
@@ -227,6 +227,7 @@ fn cancelled_create_with_lost_spawn_reply_and_rejected_kill_keeps_a_recoverable_
     assert_eq!(response["error"]["code"], "tool.cancelled", "{response}");
     let details = &response["error"]["details"];
     assert_eq!(details["taskId"], id, "{response}");
+    assert_eq!(details["taskStart"], "unknown", "{response}");
     assert_eq!(details["cleanupError"]["code"], "process.killFailed", "{response}");
     assert!(details.get("killRequested").is_none(), "{response}");
     assert!(details.get("state").is_none(), "{response}");
@@ -261,4 +262,57 @@ fn cancelled_task_input_without_cursor_can_resume_at_the_pre_input_tail() {
     });
     assert_eq!(resumed["message"]["termination"], "running", "{resumed}");
     assert_eq!(resumed["message"]["stdout"], "y", "{resumed}");
+}
+
+#[test]
+fn failed_read_after_bash_spawn_ack_keeps_the_live_task_handle() {
+    let host = FakeHost::start();
+    let mut id = Value::Null;
+    let response = host.call("bash_run", json!({"command": "true", "waitMs": 1000}), || {
+        let spawn = host.expect("process.v1.spawn");
+        id = spawn.request["params"]["id"].clone();
+        assert!(id.is_string());
+        spawn.reply(host.descriptor(&id, "running", 0));
+        host.task_request("process.v1.read", &id).respond(json!({
+            "ok": false,
+            "error": {"code": "process.hostFailed", "message": "Read RPC failed", "retryable": true, "details": {"operation": "read"}},
+        }));
+    });
+    assert_eq!(response["error"]["code"], "process.hostFailed", "{response}");
+    assert_eq!(response["error"]["retryable"], false, "{response}");
+    assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed", "operation": "read"}));
+    let resumed = host.call("task_input", json!({"task": id, "waitMs": 0}), || {
+        host.task_request("process.v1.describe", &id).reply(host.descriptor(&id, "running", 0));
+    });
+    assert_eq!(resumed["message"]["task"]["id"], id, "{resumed}");
+    assert_eq!(resumed["message"]["termination"], "running", "{resumed}");
+}
+
+#[test]
+fn failed_capture_after_bash_spawn_ack_keeps_the_task_handle() {
+    let host = FakeHost::start();
+    let mut id = Value::Null;
+    let response = host.call("bash_run", json!({"command": "true", "waitMs": 0}), || {
+        let spawn = host.expect("process.v1.spawn");
+        id = spawn.request["params"]["id"].clone();
+        assert!(id.is_string());
+        spawn.reply(host.descriptor(&id, "running", 1));
+        drop(host.task_request("process.v1.capture", &id));
+    });
+    assert_eq!(response["error"]["code"], "process.ioFailed", "{response}");
+    assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed"}));
+}
+
+#[test]
+fn terminal_spawn_ack_without_a_summary_still_returns_the_requested_handle() {
+    let host = FakeHost::start();
+    let mut id = Value::Null;
+    let response = host.call("task_manage", json!({"command": "create"}), || {
+        let spawn = host.expect("process.v1.spawn");
+        id = spawn.request["params"]["id"].clone();
+        assert!(id.is_string());
+        spawn.reply(json!({"state": "running"}));
+    });
+    assert_eq!(response["error"]["code"], "process.hostFailed", "{response}");
+    assert_eq!(response["error"]["details"], json!({"taskId": id, "taskStart": "confirmed"}));
 }

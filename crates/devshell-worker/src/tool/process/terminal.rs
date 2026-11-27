@@ -357,6 +357,9 @@ impl ToolHandler for TerminalTool {
                             }),
                         )?;
                         let result = summarize(&created).and_then(|task| {
+                            if task.id != id {
+                                return Err(error("process descriptor task id does not match spawn request"));
+                            }
                             let initial_cursor = TaskCursor {
                                 generation: created["shellGeneration"].as_u64(),
                                 ..TaskCursor::default()
@@ -371,8 +374,9 @@ impl ToolHandler for TerminalTool {
                                 state: None,
                             })
                         });
-                        check_spawn_cancelled(&client, &call, &id, &created)?;
-                        result
+                        check_spawn_cancelled(&client, &call, &id, &created)
+                            .and(result)
+                            .map_err(|failure| confirmed_spawn_error(failure, &id))
                     }
                     TaskManageCommand::Close => {
                         if params.name.is_some()

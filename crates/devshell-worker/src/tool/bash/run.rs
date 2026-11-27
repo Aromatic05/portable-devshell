@@ -139,6 +139,7 @@ impl ToolHandler for BashRunTool {
             plan.observe(&call, &self.files, &result.stdout);
         }
         crate::tool::contract::serialize(result)
+            .map_err(|failure| crate::tool::process::confirmed_spawn_error(failure, &task_id))
     }
 }
 

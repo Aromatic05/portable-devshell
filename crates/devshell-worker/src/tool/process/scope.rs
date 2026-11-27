@@ -98,11 +98,28 @@ pub(super) fn spawn(
     match rpc(client, "process.v1.spawn", payload) {
         // A transport failure does not tell us whether the Host created the task.
         Err(failure) if failure.code == "process.hostFailed" => {
-            check_spawn_cancelled(client, call, id, &Value::Null)?;
-            Err(failure.with_details(json!({"taskId": id})))
+            check_spawn_cancelled(client, call, id, &Value::Null)
+                .map_err(|failure| spawn_error(failure, id, "unknown"))?;
+            Err(spawn_error(failure, id, "unknown"))
         }
         result => result,
     }
+}
+
+pub(crate) fn confirmed_spawn_error(failure: ToolError, id: &str) -> ToolError {
+    spawn_error(failure, id, "confirmed")
+}
+
+fn spawn_error(mut failure: ToolError, id: &str, start: &str) -> ToolError {
+    let mut details = match failure.details.take() {
+        Some(Value::Object(details)) => details,
+        Some(other) => serde_json::Map::from_iter([("originalDetails".into(), other)]),
+        None => serde_json::Map::new(),
+    };
+    details.insert("taskId".into(), json!(id));
+    details.insert("taskStart".into(), json!(start));
+    failure.retryable = false;
+    failure.with_details(Value::Object(details))
 }
 
 pub(super) fn check_spawn_cancelled(

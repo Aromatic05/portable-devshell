@@ -1,7 +1,7 @@
 use super::capture::BashProgress;
 use super::model::{BashRunOutput, TaskCursor};
 use super::output::collect;
-use super::scope::{check_spawn_cancelled, error, spawn, wait_for};
+use super::scope::{check_spawn_cancelled, confirmed_spawn_error, error, spawn, wait_for};
 use crate::capability::artifact::store::ArtifactStore;
 use crate::capability::process::client::ProcessHostClient;
 use crate::instance::InstanceName;
@@ -58,8 +58,9 @@ pub(crate) fn run(
         0,
         Some(&progress),
     );
-    check_spawn_cancelled(&client, call, id, &descriptor)?;
-    waited?;
+    check_spawn_cancelled(&client, call, id, &descriptor)
+        .and(waited)
+        .map_err(|failure| confirmed_spawn_error(failure, id))?;
     let collected = collect(
         &client,
         artifacts,
@@ -70,8 +71,9 @@ pub(crate) fn run(
         started,
         progress,
     );
-    check_spawn_cancelled(&client, call, id, &descriptor)?;
-    let mut result = collected?;
+    let mut result = check_spawn_cancelled(&client, call, id, &descriptor)
+        .and(collected)
+        .map_err(|failure| confirmed_spawn_error(failure, id))?;
     result.wait_reason = Some(
         if result.termination == super::model::BashTermination::Running {
             "timeout"
