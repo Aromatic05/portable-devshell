@@ -411,7 +411,7 @@ fn worker_restart_preserves_process_host_and_retirement_releases_it() {
 struct LocalAttach {
     child: nix::unistd::Pid,
     reaped: bool,
-    master: std::fs::File,
+    master: Option<std::fs::File>,
     received: Vec<u8>,
 }
 
@@ -461,7 +461,7 @@ impl LocalAttach {
         nix::fcntl::fcntl(&master, nix::fcntl::FcntlArg::F_SETFL(
             nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK,
         )).unwrap();
-        let mut attach = Self { child, reaped: false, master, received: Vec::new() };
+        let mut attach = Self { child, reaped: false, master: Some(master), received: Vec::new() };
         // The native CLI publishes this only after raw mode and control are active.
         attach.expect("[CONTROL]");
         attach
@@ -491,7 +491,7 @@ impl LocalAttach {
             {
                 return;
             }
-            match self.master.read(&mut buffer) {
+            match self.master.as_mut().unwrap().read(&mut buffer) {
                 Ok(n) if n != 0 => self.received.extend_from_slice(&buffer[..n]),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(10))
@@ -510,18 +510,32 @@ impl LocalAttach {
     }
 
     fn input(&mut self, bytes: &[u8]) {
-        self.master.write_all(bytes).unwrap();
+        self.master.as_mut().unwrap().write_all(bytes).unwrap();
     }
 
     fn detach(&mut self) {
         self.input(&[0x1d]);
+        self.wait_detached();
+    }
+
+    fn wait_detached(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(5);
+        let mut buffer = [0u8; 8192];
         loop {
+            // Keep the master consuming output while the slave flushes and closes.
+            // Darwin can wait for pending terminal output during process exit.
+            match self.master.as_mut().unwrap().read(&mut buffer) {
+                Ok(n) => self.received.extend_from_slice(&buffer[..n]),
+                Err(error)
+                    if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted)
+                        || error.raw_os_error() == Some(nix::libc::EIO) => {}
+                Err(error) => panic!("read while detaching: {error}"),
+            }
             if let Some(status) = self.try_wait() {
                 assert_eq!(status, nix::sys::wait::WaitStatus::Exited(self.child, 0));
                 return;
             }
-            assert!(Instant::now() < deadline, "attach did not detach");
+            assert!(Instant::now() < deadline, "attach did not detach: {}", String::from_utf8_lossy(&self.received));
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -530,6 +544,8 @@ impl LocalAttach {
 impl Drop for LocalAttach {
     fn drop(&mut self) {
         if self.reaped || self.try_wait().is_some() { return; }
+        // Release the PTY master before waiting for a killed terminal client.
+        drop(self.master.take());
         let _ = nix::sys::signal::kill(self.child, nix::sys::signal::Signal::SIGKILL);
         let deadline = Instant::now() + Duration::from_secs(5);
         while self.try_wait().is_none() && Instant::now() < deadline {
@@ -616,7 +632,7 @@ fn worker_command_and_native_attach_share_one_pty() {
 fn hosted_pipe_wait_deadline_and_retained_output() {
     let fixture = WorkerFixture::start(INSTANCE);
     let task = fixture.tool("bash_run", json!({
-        "command": "sleep 0.1; printf 'out:pipe\\n'; printf 'error\\n' >&2; exit 7",
+        "command": "while [ ! -f pipe-release ]; do sleep 0.05; done; printf 'out:pipe\\n'; printf 'error\\n' >&2; exit 7",
         "waitMs": 0,
     }));
     assert_eq!(task["termination"], "running");
@@ -629,6 +645,7 @@ fn hosted_pipe_wait_deadline_and_retained_output() {
         write_denied["error"]["message"],
         "stdin is closed for non-PTY tasks; use task_manage(command=\"close\", task=...) to stop a running task, or rerun bash_run with pty=true for interactive input"
     );
+    std::fs::write(fixture.env.workspace().join("pipe-release"), b"").unwrap();
     let result = fixture.wait_task(id, task["cursor"].clone());
     assert_eq!(result["exitCode"], 7);
     assert_eq!(result["stdout"], "out:pipe\n");
@@ -1069,7 +1086,7 @@ fn persistent_terminal_rapid_exit_breaks_respawn_loop() {
             "command": "create",
             "name": "broken-shell",
             "cwd": "./",
-            "shell": "/bin/false"
+            "shell": if cfg!(target_os = "macos") { "/usr/bin/false" } else { "/bin/false" }
         }),
     );
     let id = created["task"]["id"].as_str().unwrap().to_owned();
@@ -1235,7 +1252,7 @@ fn persistent_terminal_closes_promptly_during_respawn_backoff() {
             "command": "create",
             "name": "backoff-shell",
             "cwd": "./",
-            "shell": "/bin/false"
+            "shell": if cfg!(target_os = "macos") { "/usr/bin/false" } else { "/bin/false" }
         }),
     );
     let id = created["task"]["id"].as_str().unwrap().to_owned();
@@ -1401,15 +1418,7 @@ fn native_attach_supports_live_takeover_toggle_and_name_lookup() {
 
     // Detach immediately with Ctrl+] d.
     attach.input(&[0x1d, b'd']);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = attach.try_wait() {
-            assert_eq!(status, nix::sys::wait::WaitStatus::Exited(attach.child, 0));
-            break;
-        }
-        assert!(Instant::now() < deadline, "attach did not detach on Ctrl+] d");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    attach.wait_detached();
 
     // Close cleanly.
     let closed = fixture.tool("task_manage", json!({"command": "close", "task": id}));

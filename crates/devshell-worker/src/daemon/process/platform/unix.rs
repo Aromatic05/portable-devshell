@@ -82,7 +82,7 @@ pub fn terminate_process_group(pid: i32, force: bool) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(Errno::ESRCH) => Ok(()),
         #[cfg(target_os = "macos")]
-        Err(Errno::EPERM) if group_contains_only_exited_child(pid) => Ok(()),
+        Err(Errno::EPERM) if group_contains_only_exited_processes(pid) => Ok(()),
         Err(error) => Err(format!(
             "failed to terminate process group {pid} with {signal:?}: {error}"
         )),
@@ -90,13 +90,13 @@ pub fn terminate_process_group(pid: i32, force: bool) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn group_contains_only_exited_child(pid: i32) -> bool {
+fn group_contains_only_exited_processes(pid: i32) -> bool {
     use nix::libc;
 
     // XNU killpg1 filters SZOMB and returns EPERM when no target is found.
-    // EPERM also means permission denied for live members: only accept the
-    // narrowly proven case of our unreaped child being the group's sole member.
-    // The caller must keep that child unreaped throughout this check.
+    // EPERM also means permission denied for live members. The caller must
+    // keep its exited group leader unreaped to preserve the group identity;
+    // a killed group can still contain other zombies awaiting their reapers.
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     loop {
         let result = unsafe {
@@ -118,17 +118,29 @@ fn group_contains_only_exited_child(pid: i32) -> bool {
         return false;
     }
 
-    // libproc includes zombies and returns a PID count here. Two slots suffice:
-    // a full/truncated list, an empty list or a query failure must all fail closed.
-    let mut members = [0 as libc::pid_t; 2];
-    let count = unsafe {
-        libc::proc_listpgrppids(
-            pid,
-            members.as_mut_ptr().cast(),
-            std::mem::size_of_val(&members) as libc::c_int,
-        )
+    // The sizing call covers all processes, including zombies. A full list
+    // is required; never interpret an empty or failed enumeration as success.
+    let capacity = unsafe { libc::proc_listpgrppids(pid, std::ptr::null_mut(), 0) };
+    if capacity <= 0 { return false; }
+    let mut members = vec![0 as libc::pid_t; capacity as usize];
+    let list = |members: &mut [libc::pid_t]| {
+        let count = unsafe {
+            libc::proc_listpgrppids(
+                pid, members.as_mut_ptr().cast(), std::mem::size_of_val(members) as libc::c_int,
+            )
+        };
+        (count > 0 && (count as usize) < members.len()).then_some(count as usize)
     };
-    count == 1 && members[0] == pid
+    let Some(count) = list(&mut members) else { return false; };
+    let exited: Vec<_> = members[..count].iter().copied().filter(|member| {
+        *member == pid || macos_process_has_exited(*member as u32) == Some(true)
+    }).collect();
+    // Members can be reaped during inspection. Re-read the group and require
+    // every remaining member to have positive exit evidence. A new/live
+    // member or failed query retains the original permission error.
+    let Some(count) = list(&mut members) else { return false; };
+    members[..count].contains(&pid)
+        && members[..count].iter().all(|member| exited.contains(member))
 }
 
 pub fn configure_daemon_command(command: &mut Command) {
@@ -225,7 +237,7 @@ mod tests {
         let mut child = command.spawn().unwrap();
         let pid = child.id() as i32;
 
-        assert!(!super::group_contains_only_exited_child(pid));
+        assert!(!super::group_contains_only_exited_processes(pid));
         super::terminate_process_group(pid, true).unwrap();
         assert!(!child.wait().unwrap().success());
     }
@@ -260,7 +272,7 @@ mod tests {
             0
         );
         assert_eq!(unsafe { info.si_pid() }, pid.as_raw());
-        assert!(!super::group_contains_only_exited_child(pid.as_raw()));
+        assert!(!super::group_contains_only_exited_processes(pid.as_raw()));
         let started = std::time::Instant::now();
         super::terminate_process_group(pid.as_raw(), true).unwrap();
         assert_eq!(child.wait().unwrap().code(), Some(7));

@@ -1,5 +1,7 @@
 //! Attach does not own the child. Closing this client only closes its stream.
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Write};
+#[cfg(windows)]
+use std::io::Read;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -192,32 +194,33 @@ pub(super) fn run(
         let mut size = crossterm::terminal::size().map_err(io_error)?;
         let mut sub = ActiveSubscription::open(&client, id, label, takeover, size)?;
 
-        // The input thread belongs to this CLI invocation, not the Process Host.
-        // It may be blocked in the local console when the child exits. Returning
-        // from main closes the CLI process without terminating the shared PTY.
-        let (input_tx, input_rx) = mpsc::sync_channel(32);
-        std::thread::spawn(move || {
-            let mut input = io::stdin().lock();
-            let mut buffer = [0u8; 4096];
-            loop {
-                match input.read(&mut buffer) {
-                    Ok(0) => {
-                        let _ = input_tx.send(InputEvent::Eof);
-                        break;
-                    }
-                    Ok(n) => {
-                        if input_tx.send(InputEvent::Bytes(buffer[..n].to_vec())).is_err() {
+        #[cfg(windows)]
+        let input_rx = {
+            let (input_tx, input_rx) = mpsc::sync_channel(32);
+            std::thread::spawn(move || {
+                let mut input = io::stdin().lock();
+                let mut buffer = [0u8; 4096];
+                loop {
+                    match input.read(&mut buffer) {
+                        Ok(0) => {
+                            let _ = input_tx.send(InputEvent::Eof);
+                            break;
+                        }
+                        Ok(n) => {
+                            if input_tx.send(InputEvent::Bytes(buffer[..n].to_vec())).is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) => {
+                            let _ = input_tx.send(InputEvent::Error(error.to_string()));
                             break;
                         }
                     }
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => {
-                        let _ = input_tx.send(InputEvent::Error(error.to_string()));
-                        break;
-                    }
                 }
-            }
-        });
+            });
+            input_rx
+        };
 
         let mut pending_escape: Option<Instant> = None;
         let mut last_observe_hint: Option<Instant> = None;
@@ -228,7 +231,12 @@ pub(super) fn run(
         let result: Result<(), String> = loop {
             // 1. Drain any pending stdin events first for snappy interactive feel.
             let mut action = LoopAction::Continue;
-            while let Ok(input_event) = input_rx.try_recv() {
+            loop {
+                #[cfg(unix)]
+                let input_event = poll_terminal_input();
+                #[cfg(windows)]
+                let input_event = input_rx.try_recv().ok();
+                let Some(input_event) = input_event else { break };
                 match input_event {
                     InputEvent::Bytes(bytes) => {
                         action = handle_input_bytes(
@@ -358,6 +366,37 @@ pub(super) fn run(
         eprintln!("[detached from {label} — session still running]");
     }
     Ok(())
+}
+
+// Unix terminal input can be polled in the attach loop. In particular, do
+// not leave a blocking tty read outstanding when restoring and closing it.
+#[cfg(unix)]
+fn poll_terminal_input() -> Option<InputEvent> {
+    use nix::libc;
+
+    let mut fd = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    if ready == 0 {
+        return None;
+    }
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        return (error.kind() != io::ErrorKind::Interrupted)
+            .then(|| InputEvent::Error(error.to_string()));
+    }
+    let mut buffer = [0u8; 4096];
+    // Read the descriptor itself: std::io::Stdin's buffer could otherwise
+    // hold bytes which the next poll of the kernel descriptor cannot see.
+    match nix::unistd::read(io::stdin(), &mut buffer) {
+        Ok(0) => Some(InputEvent::Eof),
+        Ok(n) => Some(InputEvent::Bytes(buffer[..n].to_vec())),
+        Err(nix::errno::Errno::EINTR | nix::errno::Errno::EAGAIN) => None,
+        Err(error) => Some(InputEvent::Error(error.to_string())),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
