@@ -130,7 +130,7 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
             fromSeq = seed.lastSeq + 1;
         }
         if (watch.signal.aborted) return;
-        const stream = await runtime.subscribeEvents(fromSeq);
+        const stream = await runtime.subscribeEvents(fromSeq, watch.signal);
         const abort = () => stream.close();
         watch.signal.addEventListener("abort", abort, { once: true });
         try {

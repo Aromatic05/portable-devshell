@@ -1,3 +1,4 @@
+import { readStreamGap } from "@portable-devshell/shared";
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
     ExtensionContextObserveCapability,
@@ -17,15 +18,20 @@ export interface TerminalHandoffWatcherOptions {
     readonly onError?: (instance: string, error: unknown) => void;
     readonly queue: (
         instance: string,
-        ctxId: string,
+        id: string,
         text: string,
+        selectRecipient: () => Promise<string | undefined>,
     ) => Promise<void>;
+    readonly readCursor: (instance: string) => Promise<number | undefined>;
+    readonly writeCursor: (instance: string, seq: number) => Promise<void>;
     readonly reconnectDelayMs?: number;
 }
 
 interface InstanceWatchState {
     readonly controller: AbortController;
+    readonly running: Promise<void>;
     lastSeq?: number;
+    resetSeq?: number;
     timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -38,6 +44,7 @@ export class TerminalHandoffWatcher {
     readonly #options: TerminalHandoffWatcherOptions;
     readonly #reconnectDelayMs: number;
     readonly #watches = new Map<string, InstanceWatchState>();
+    readonly #retiring = new Map<string, Promise<void>>();
     #closed = false;
 
     constructor(options: TerminalHandoffWatcherOptions) {
@@ -56,100 +63,150 @@ export class TerminalHandoffWatcher {
             }
         }
         for (const name of [...this.#watches.keys()]) {
-            if (!active.has(name)) this.retireInstance(name);
+            if (!active.has(name)) void this.retireInstance(name);
         }
     }
 
-    retireInstance(instance: string): void {
+    retireInstance(instance: string): Promise<void> {
         const state = this.#watches.get(instance);
-        if (state === undefined) return;
+        if (state === undefined) return this.#retiring.get(instance) ?? Promise.resolve();
         this.#watches.delete(instance);
-        if (state.timer !== undefined) clearTimeout(state.timer);
         state.controller.abort();
+        const retired = state.running.finally(() => {
+            if (this.#retiring.get(instance) === retired) this.#retiring.delete(instance);
+        });
+        this.#retiring.set(instance, retired);
+        return retired;
     }
 
-    close(): void {
+    async close(): Promise<void> {
         this.#closed = true;
-        for (const name of [...this.#watches.keys()]) {
-            this.retireInstance(name);
-        }
+        for (const name of this.#watches.keys()) this.retireInstance(name);
+        await Promise.all(this.#retiring.values());
     }
 
     #startWatch(instance: string): void {
-        const state: InstanceWatchState = { controller: new AbortController() };
+        const controller = new AbortController();
+        // Do not load a checkpoint while an earlier watch can still write it.
+        const previous = this.#retiring.get(instance) ?? Promise.resolve();
+        const state: InstanceWatchState = {
+            controller,
+            running: previous.then(() => this.#runWatch(instance, state)),
+        };
         this.#watches.set(instance, state);
-        void this.#runWatch(instance, state);
     }
 
     async #runWatch(instance: string, state: InstanceWatchState): Promise<void> {
-        while (!this.#closed && !state.controller.signal.aborted) {
+        const signal = state.controller.signal;
+        let initialCursor: number | undefined;
+        const acknowledge = async (seq: number): Promise<void> => {
+            signal.throwIfAborted();
+            await this.#options.writeCursor(instance, seq);
+            state.lastSeq = seq;
+            state.resetSeq = undefined;
+        };
+        while (!signal.aborted) {
             try {
-                let fromSeq: number;
-                if (state.lastSeq !== undefined) {
-                    fromSeq = state.lastSeq + 1;
-                } else {
-                    const snapshot =
-                        await this.#options.instanceObserve.snapshot(instance);
-                    if (this.#closed || state.controller.signal.aborted) return;
-                    state.lastSeq = snapshot.lastSeq;
-                    fromSeq = snapshot.lastSeq + 1;
+                if (state.resetSeq !== undefined) await acknowledge(state.resetSeq);
+                if (state.lastSeq === undefined) {
+                    state.lastSeq = await this.#options.readCursor(instance);
+                    if (state.lastSeq === undefined) {
+                        signal.throwIfAborted();
+                        initialCursor ??= (await this.#options.instanceObserve.snapshot(instance)).lastSeq;
+                        await acknowledge(initialCursor);
+                    }
                 }
-                await this.#options.instanceObserve.watchEvents(instance, {
-                    eventTypes: [TERMINAL_CONTROL_RELEASED_EVENT],
-                    fromSeq,
-                    onEvent: async (event) => {
-                        if (event.seq <= (state.lastSeq ?? 0)) return;
-                        state.lastSeq = event.seq;
-                        await this.#handleEvent(instance, event);
-                    },
-                    onGap: (gap) => {
-                        state.lastSeq = gap.lastSeq;
-                    },
-                    signal: state.controller.signal,
-                });
+                signal.throwIfAborted();
+                await this.#watch(instance, state, acknowledge);
             } catch (error) {
-                if (this.#closed || state.controller.signal.aborted) return;
-                if (isSequenceError(error)) {
-                    state.lastSeq = undefined;
-                }
+                if (signal.aborted) return;
                 this.#options.onError?.(instance, error);
             }
-            if (this.#closed || state.controller.signal.aborted) return;
-            await this.#delay(state);
+            if (!signal.aborted) await this.#delay(state);
         }
+    }
+
+    async #watch(
+        instance: string,
+        state: InstanceWatchState,
+        acknowledge: (seq: number) => Promise<void>,
+    ): Promise<void> {
+        const fromSeq = state.lastSeq! + 1;
+        const attempt = new AbortController();
+        const signal = AbortSignal.any([state.controller.signal, attempt.signal]);
+        let accepting = true;
+        let tail = Promise.resolve();
+        const deliver = (work: () => Promise<void>): Promise<void> => {
+            if (!accepting) return Promise.resolve();
+            const pending = tail.then(async () => {
+                if (!signal.aborted) await work();
+            });
+            tail = pending.catch((error: unknown) => { attempt.abort(error); });
+            return pending;
+        };
+        let failure: { error: unknown } | undefined;
+        try {
+            await this.#options.instanceObserve.watchEvents(instance, {
+                eventTypes: [TERMINAL_CONTROL_RELEASED_EVENT],
+                fromSeq,
+                onEvent: (event) => deliver(async () => {
+                    if (event.seq <= state.lastSeq!) return;
+                    await this.#handleEvent(instance, event, signal);
+                    await acknowledge(event.seq);
+                }),
+                onGap: (gap) => deliver(async () => {
+                    if (!validGap(gap)) throw new Error("Invalid terminal handoff stream gap");
+                    if (gap.lastSeq < state.lastSeq!) state.resetSeq = gap.nextSeq - 1;
+                    if (state.resetSeq !== undefined || gap.nextSeq > state.lastSeq! + 1) {
+                        // Only the prefix before the oldest retained event is lost.
+                        await acknowledge(gap.nextSeq - 1);
+                    }
+                }),
+                signal,
+            });
+        } catch (error) {
+            failure = { error };
+        } finally {
+            accepting = false;
+            await tail;
+        }
+        if (attempt.signal.aborted) throw attempt.signal.reason;
+        if (signal.aborted || failure === undefined) return;
+        const gap = readStreamGap(failure.error);
+        if (gap === undefined || gap.fromSeq !== fromSeq || state.lastSeq !== fromSeq - 1 ||
+            !validGap(gap) || (fromSeq >= gap.nextSeq && fromSeq <= gap.lastSeq + 1)) throw failure.error;
+        // Initial subscription failed. Reconnect at the oldest retained
+        // event, also when the source reports that the old cursor is ahead.
+        // A failed reset write must not reopen the new source at the old
+        // cursor: by the next retry its high water may have caught up.
+        if (fromSeq > gap.lastSeq + 1) state.resetSeq = gap.nextSeq - 1;
+        await acknowledge(gap.nextSeq - 1);
     }
 
     async #handleEvent(
         instance: string,
         event: ExtensionInstanceEvent,
+        signal: AbortSignal,
     ): Promise<void> {
-        if (
-            event.type !== TERMINAL_CONTROL_RELEASED_EVENT ||
-            this.#options.contextObserve === undefined
-        )
-            return;
+        const observe = this.#options.contextObserve;
+        if (event.type !== TERMINAL_CONTROL_RELEASED_EVENT || observe === undefined) return;
         const payload = parseReleasePayload(event.data);
         if (payload === undefined) return;
+        const data = event.data as Record<string, ExtensionJsonValue>;
+        // seq is scoped to the event log; include release identity so a
+        // replacement log reusing a sequence does not reuse the old receipt.
+        const id = JSON.stringify([event.seq, event.at, payload.terminalId, data.generation, data.releasedAt]);
         const targetWorkspace = normalizeWorkspace(payload.workspace);
-        const contexts = await this.#options.contextObserve.list({
-            instance,
-            status: "active",
+        await this.#options.queue(instance, id, formatHandoffComment(payload), async () => {
+            signal.throwIfAborted();
+            const contexts = await observe.list({ instance, status: "active" });
+            signal.throwIfAborted();
+            return selectHandoffRecipient(contexts.filter((ctx) =>
+                ctx.environments.some(
+                    (env) => env.instance === instance && normalizeWorkspace(env.workspace) === targetWorkspace,
+                ),
+            ))?.ctxId;
         });
-        const matching = contexts.filter((ctx) =>
-            ctx.environments.some(
-                (env) =>
-                    env.instance === instance &&
-                    normalizeWorkspace(env.workspace) === targetWorkspace,
-            ),
-        );
-        const recipient = selectHandoffRecipient(matching);
-        if (recipient === undefined) return;
-        const text = formatHandoffComment(payload);
-        try {
-            await this.#options.queue(instance, recipient.ctxId, text);
-        } catch (error) {
-            this.#options.onError?.(instance, error);
-        }
     }
 
     #delay(state: InstanceWatchState): Promise<void> {
@@ -245,15 +302,7 @@ function normalizeWorkspace(
     return trimmed.length === 0 ? "/" : trimmed;
 }
 
-function isSequenceError(error: unknown): boolean {
-    if (error instanceof TypeError) return true;
-    if (typeof error === "object" && error !== null) {
-        const code = (error as { code?: unknown }).code;
-        if (code === "stream.gap" || code === "control.invalidTarget")
-            return true;
-        const message = (error as { message?: unknown }).message;
-        if (typeof message === "string" && /seq|gap/iu.test(message))
-            return true;
-    }
-    return false;
+function validGap(gap: { lastSeq: number; nextSeq: number }): boolean {
+    return Number.isSafeInteger(gap.lastSeq) && Number.isSafeInteger(gap.nextSeq) &&
+        gap.nextSeq >= 1 && gap.nextSeq <= gap.lastSeq + 1;
 }

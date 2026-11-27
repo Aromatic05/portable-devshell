@@ -154,6 +154,7 @@ export interface CommentRoutePort {
 interface CommentExtensionInstanceState {
     readonly comment: CommentService;
     readonly messageHistory: MessageService;
+    readonly store: MessageStore;
     enabled: boolean;
     readonly key: object;
     readonly report: CommentReportService;
@@ -255,6 +256,13 @@ export class CommentExtension {
         this.#unsubscribe = this.#source.onChange(() => this.#sync());
     }
 
+    readonly handoff = {
+        readCursor: async (instance: string) => await this.#require(instance).store.readHandoffCursor(),
+        writeCursor: async (instance: string, seq: number) => await this.#require(instance).store.writeHandoffCursor(seq),
+        queue: async (instance: string, id: string, text: string, selectRecipient: () => Promise<string | undefined>) =>
+            await this.#require(instance).comment.queueHandoff(id, text, selectRecipient),
+    };
+
     async retireInstance(instance: string, reason: string): Promise<void> {
         const state = this.#instances.get(instance);
         if (state === undefined) return;
@@ -323,6 +331,7 @@ export class CommentExtension {
             const next: CommentExtensionInstanceState = {
                 comment: commentService,
                 messageHistory: messageService,
+                store,
                 enabled: true,
                 key: instance.key,
                 report: new CommentReportService({
@@ -450,8 +459,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 instance,
                 message: error instanceof Error ? error.message : String(error),
             }),
-        queue: async (instance, ctxId, text) =>
-            await comment.comment.queue(instance, ctxId, text),
+        ...comment.handoff,
     });
     handoff.sync(source.list());
     const unsubscribeHandoff = source.onChange(() => handoff.sync(source.list()));
@@ -495,7 +503,7 @@ export async function instanceGenerationRetired(
 ): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
-    runtime.handoff.retireInstance(event.instance);
+    await runtime.handoff.retireInstance(event.instance);
     await runtime.mailing.retireInstance(event.instance);
     await runtime.comment.retireInstance(
         event.instance,
@@ -527,7 +535,7 @@ export async function deactivate(): Promise<void> {
     const runtime = builtinRuntime;
     builtinRuntime = undefined;
     runtime?.unsubscribeHandoff();
-    runtime?.handoff.close();
+    await runtime?.handoff.close();
     await runtime?.mailing.close();
     await runtime?.comment.close();
 }
