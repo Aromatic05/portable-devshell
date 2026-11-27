@@ -202,7 +202,7 @@ impl ToolHandler for TerminalTool {
                     ));
                 }
                 let client = connect(&self.instance)?;
-                let descriptor = require(&client, &call, &params.task)?;
+                let (descriptor, _lease) = require(&client, &call, &params.task)?;
                 let raw_snapshot = rpc(&client, "process.v1.inspect", json!({"id": params.task}))?;
                 let snapshot: InspectSnapshot = serde_json::from_value(raw_snapshot)
                     .map_err(|failure| error(failure.to_string()))?;
@@ -339,7 +339,7 @@ impl ToolHandler for TerminalTool {
                         }
                         let client = ProcessHostClient::ensure(&self.instance).map_err(error)?;
                         let id = format!("process-{}", uuid::Uuid::new_v4());
-                        let created = spawn(
+                        let (created, _lease) = spawn(
                             &client,
                             &call,
                             &id,
@@ -398,7 +398,7 @@ impl ToolHandler for TerminalTool {
                             })?;
                         require_execute(&call)?;
                         let client = connect(&self.instance)?;
-                        let descriptor = require(&client, &call, &id)?;
+                        let (descriptor, _lease) = require(&client, &call, &id)?;
                         terminate(&client, &id, descriptor, Some(&call.cancellation))
                     }
                 }

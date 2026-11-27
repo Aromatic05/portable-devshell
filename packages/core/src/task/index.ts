@@ -22,9 +22,12 @@ export function createTaskRuntime(options: TaskRuntimeOptions): TaskRuntime {
         appendEvent,
         filePath: options.paths.waitsFile,
         invoke: { invoke: options.invokeTool },
+        leases: options.waitLeases,
     });
     return {
         api: { goal, wait },
+        beginWaitCall: (callId) => wait.beginCall(callId),
+        finishWaitCall: (callId) => wait.finishCall(callId),
         close: async () => await wait.close(),
         resume: () => wait.resume(),
     };

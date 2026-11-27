@@ -37,6 +37,8 @@ export const statelessMcpContextId = "57a7e1e5-5000-8000-8000-000000000000";
 export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
+    /** Internal destination-Core flag; the Worker pins a running Wait handoff. */
+    waitHandoff?: boolean;
     ctxId?: string;
     extensionId?: string;
     workspace?: string;

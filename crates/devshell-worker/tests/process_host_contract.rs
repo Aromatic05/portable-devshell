@@ -120,6 +120,10 @@ impl Drop for Fixture {
 }
 
 fn request(socket: &Path, method: &str, params: Value) -> std::io::Result<Value> {
+    request_stream(socket, method, params).map(|(value, _)| value)
+}
+
+fn request_stream(socket: &Path, method: &str, params: Value) -> std::io::Result<(Value, UnixStream)> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(Duration::from_secs(15)))?;
     stream.set_write_timeout(Some(Duration::from_secs(15)))?;
@@ -133,7 +137,7 @@ fn request(socket: &Path, method: &str, params: Value) -> std::io::Result<Value>
     stream.read_exact(&mut length)?;
     let mut body = vec![0; u32::from_be_bytes(length) as usize];
     stream.read_exact(&mut body)?;
-    Ok(serde_json::from_slice(&body)?)
+    Ok((serde_json::from_slice(&body)?, stream))
 }
 
 fn output(page: &Value, channel: &str) -> String {
@@ -184,6 +188,53 @@ fn finish(fixture: &Fixture, id: &str) -> Value {
         }
         assert!(Instant::now() < deadline, "process did not finish: {page}");
     }
+}
+
+#[test]
+fn completed_tasks_remain_available_during_capture_and_durable_wait() {
+    let fixture = Fixture::start();
+    let (created, mut lease) = request_stream(&fixture.socket, "process.v1.spawn", json!({
+        "generation": fixture.generation, "retain": true,
+        "command": "printf retained", "cwd": fixture.env.protocol_workspace(),
+    })).unwrap();
+    assert_eq!(created["ok"], true, "{created}");
+    let held = created["result"]["id"].as_str().unwrap();
+    finish(&fixture, held);
+    let waited = fixture.spawn("printf waited", false, None, false);
+    fixture.call("process.v1.pinWait", json!({"id": waited, "owner": "wait-call"}));
+    finish(&fixture, &waited);
+    for _ in 0..62 {
+        let id = fixture.spawn(":", false, None, false);
+        finish(&fixture, &id);
+    }
+    let new = fixture.spawn(":", false, None, false);
+    finish(&fixture, &new);
+    for (id, expected) in [(held, "retained"), (waited.as_str(), "waited")] {
+        let page = fixture.call("process.v1.capture", json!({
+            "id": id, "channel": "stdout", "offset": 0, "limit": 32,
+        }));
+        assert_eq!(STANDARD.decode(page["dataBase64"].as_str().unwrap()).unwrap(), expected.as_bytes());
+    }
+    assert_eq!(fixture.call("process.v1.confirmWait", json!({
+        "id": waited, "owner": "wait-call",
+    }))["retained"], true);
+    // Close the lease and wait for the Host to drop its reference before
+    // checking reclamation. This is a protocol boundary, not a timed race.
+    lease.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(lease.read(&mut [0]).unwrap(), 0);
+    let new = fixture.spawn(":", false, None, false);
+    finish(&fixture, &new);
+    let missing = request(&fixture.socket, "process.v1.describe", json!({
+        "generation": fixture.generation, "id": held,
+    })).unwrap();
+    assert_eq!(missing["error"]["code"], "process.notFound", "{missing}");
+    fixture.call("process.v1.reconcileWait", json!({"owners": []}));
+    let new = fixture.spawn(":", false, None, false);
+    finish(&fixture, &new);
+    let missing = request(&fixture.socket, "process.v1.describe", json!({
+        "generation": fixture.generation, "id": waited,
+    })).unwrap();
+    assert_eq!(missing["error"]["code"], "process.notFound", "{missing}");
 }
 
 #[test]

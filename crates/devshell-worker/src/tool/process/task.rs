@@ -107,13 +107,13 @@ impl ToolHandler for TaskInputTool {
         let wrote_input = input_to_send.is_some();
         let input_generation = explicit_cursor.and_then(|cursor| cursor.generation);
 
-        let (client, mut descriptor, cursor) = if let Some(input) = input_to_send {
+        let (client, mut descriptor, cursor, _lease) = if let Some(input) = input_to_send {
             require_execute(&call)?;
             if input.len() > MAX_INPUT_BYTES {
                 return Err(ToolError::new("tool.invalidArguments", "input too large"));
             }
             let client = connect(&self.instance)?;
-            let descriptor = require(&client, &call, &params.task)?;
+            let (descriptor, lease) = require(&client, &call, &params.task)?;
             if params.until_exit
                 && descriptor["persistent"] == true
                 && descriptor["state"] == "running"
@@ -147,11 +147,11 @@ impl ToolHandler for TaskInputTool {
             );
             check_observation_cancelled(&call, &params.task, resume)?;
             written?;
-            (client, descriptor, cursor)
+            (client, descriptor, cursor, lease)
         } else {
             require_read(&call)?;
             let client = connect(&self.instance)?;
-            let descriptor = require(&client, &call, &params.task)?;
+            let (descriptor, lease) = require(&client, &call, &params.task)?;
             if params.until_exit
                 && descriptor["persistent"] == true
                 && descriptor["state"] == "running"
@@ -161,7 +161,7 @@ impl ToolHandler for TaskInputTool {
                     "untilExit cannot be used on running persistent interactive terminals because they automatically respawn on shell exit; omit untilExit to poll for output, or use bash_run for commands that exit",
                 ));
             }
-            (client, descriptor, explicit_cursor.unwrap_or_default())
+            (client, descriptor, explicit_cursor.unwrap_or_default(), lease)
         };
 
         if let Some(expected) = cursor.generation
@@ -230,6 +230,11 @@ impl ToolHandler for TaskInputTool {
         result.wait_reason = Some(reason.into());
         result.wait_ms = Some(wait_ms);
         result.until_exit = params.until_exit.then_some(true);
+        if call.wait_handoff && params.until_exit && reason == "timeout" {
+            super::scope::pin_wait(&client, &call, &params.task).map_err(|failure| {
+                failure.with_details(json!({"taskId": params.task, "cursor": result.cursor}))
+            })?;
+        }
 
         #[cfg(unix)]
         if !call.stateless

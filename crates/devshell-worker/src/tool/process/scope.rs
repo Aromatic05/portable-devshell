@@ -3,7 +3,7 @@ use crate::capability::process::client::ProcessHostClient;
 use crate::instance::sandbox::path::FilesystemCapability;
 use crate::instance::{InstanceName, storage::InstancePaths};
 use crate::tool::{ToolCall, ToolCancellation, ToolError};
-use crate::transport::endpoint::channel::EndpointPaths;
+use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcStream};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -22,6 +22,16 @@ pub(super) fn rpc(
     value: Value,
 ) -> Result<Value, ToolError> {
     client.call_rpc(method, value, RPC_TIMEOUT).map_err(|failure| ToolError { code: failure.code, message: failure.message, retryable: failure.retryable, details: failure.details })
+}
+
+fn retained_rpc(
+    client: &ProcessHostClient,
+    method: &str,
+    value: Value,
+) -> Result<(Value, LocalIpcStream), ToolError> {
+    client.call_retained_rpc(method, value, RPC_TIMEOUT).map_err(|failure| ToolError {
+        code: failure.code, message: failure.message, retryable: failure.retryable, details: failure.details
+    })
 }
 
 pub(super) fn connect(instance: &InstanceName) -> Result<ProcessHostClient, ToolError> {
@@ -63,15 +73,26 @@ pub(super) fn require(
     client: &ProcessHostClient,
     call: &ToolCall,
     id: &str,
-) -> Result<Value, ToolError> {
-    let descriptor = rpc(client, "process.v1.describe", json!({"id": id}))?;
+) -> Result<(Value, LocalIpcStream), ToolError> {
+    let (descriptor, lease) = retained_rpc(client, "process.v1.describe", json!({"id": id}))?;
     if !scoped(call, &descriptor)? {
         return Err(ToolError::new(
             "process.notFound",
             "task does not belong to this execution scope",
         ));
     }
-    Ok(descriptor)
+    Ok((descriptor, lease))
+}
+
+/// Transfer a retained call's reference to the owning Core Wait. The caller
+/// must still hold its connection lease while installing the named reference.
+pub(super) fn pin_wait(
+    client: &ProcessHostClient,
+    call: &ToolCall,
+    id: &str,
+) -> Result<(), ToolError> {
+    rpc(client, "process.v1.pinWait", json!({"id": id, "owner": call.operation_id}))?;
+    Ok(())
 }
 
 pub(super) fn require_execute(call: &ToolCall) -> Result<(), ToolError> {
@@ -93,9 +114,9 @@ pub(super) fn spawn(
     call: &ToolCall,
     id: &str,
     payload: Value,
-) -> Result<Value, ToolError> {
+) -> Result<(Value, LocalIpcStream), ToolError> {
     call.check_cancelled()?;
-    match rpc(client, "process.v1.spawn", payload) {
+    match retained_rpc(client, "process.v1.spawn", payload) {
         // A transport failure does not tell us whether the Host created the task.
         Err(failure) if failure.code == "process.hostFailed" => {
             check_spawn_cancelled(client, call, id, &Value::Null)

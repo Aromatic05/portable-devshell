@@ -89,6 +89,19 @@ pub(super) struct Target {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct WaitPinInput {
+    pub owner: String,
+    pub id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct WaitReconcileInput {
+    pub owners: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ReadInput {
     pub id: String,
     #[serde(default)]

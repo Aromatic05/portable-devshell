@@ -1,3 +1,4 @@
+mod process_wait;
 pub mod artifact;
 pub mod host;
 pub mod instance;
@@ -139,6 +140,14 @@ pub fn register_control_handlers(
         tool::call::handler(Arc::clone(&active_tool_calls)),
     );
     handlers.insert("tool.session.close".to_string(), tool::session::handler());
+    handlers.insert(
+        "process.wait.confirm".to_string(),
+        process_wait::handler(runtime.instance.clone(), "process.v1.confirmWait"),
+    );
+    handlers.insert(
+        "process.wait.reconcile".to_string(),
+        process_wait::handler(runtime.instance.clone(), "process.v1.reconcileWait"),
+    );
     handlers.insert(
         "terminal.open".to_string(),
         terminal::open(terminals.clone()),

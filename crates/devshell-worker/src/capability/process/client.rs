@@ -219,6 +219,27 @@ impl ProcessHostClient {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, RpcError> {
+        self.call_rpc_stream(method, params, timeout).map(|(value, _)| value)
+    }
+
+    /// Keep the task acquired by spawn/describe alive across subsequent RPCs.
+    /// Dropping the connection releases the Host's reference, including on crash.
+    pub(crate) fn call_retained_rpc(
+        &self,
+        method: &str,
+        mut params: Value,
+        timeout: Duration,
+    ) -> Result<(Value, LocalIpcStream), RpcError> {
+        params["retain"] = json!(true);
+        self.call_rpc_stream(method, params, timeout)
+    }
+
+    fn call_rpc_stream(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<(Value, LocalIpcStream), RpcError> {
         // The generation is checked atomically by the owner, so a replacement
         // Host cannot accept a request intended for the previous generation.
         let mut params = params.as_object().cloned().ok_or_else(|| {
@@ -228,7 +249,7 @@ impl ProcessHostClient {
             )
         })?;
         params.insert("generation".to_string(), json!(self.handshake.generation));
-        request_rpc(&self.endpoint, method, Value::Object(params), timeout)
+        request_rpc_stream(&self.endpoint, method, Value::Object(params), timeout)
     }
 }
 
@@ -248,6 +269,15 @@ fn request_rpc(
     params: Value,
     timeout: Duration,
 ) -> Result<Value, RpcError> {
+    request_rpc_stream(endpoint, method, params, timeout).map(|(value, _)| value)
+}
+
+fn request_rpc_stream(
+    endpoint: &Path,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<(Value, LocalIpcStream), RpcError> {
     fn transport(error: impl std::fmt::Display) -> RpcError {
         RpcError::new("process.hostFailed", error.to_string())
     }
@@ -269,6 +299,7 @@ fn request_rpc(
     if response.ok {
         return response
             .result
+            .map(|value| (value, channel))
             .ok_or_else(|| transport("Process Host returned no result"));
     }
     Err(match response.error {

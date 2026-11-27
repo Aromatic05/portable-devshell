@@ -21,10 +21,12 @@ pub(super) struct Registry {
     pub(super) processes: BTreeMap<String, Arc<ManagedProcess>>,
     pub(super) order: VecDeque<String>,
     retiring: bool,
+    // Named references transfer from a creating ToolCall to a committed Wait.
+    wait_pins: BTreeMap<String, String>,
 }
 
 impl Host {
-    pub(super) fn spawn(&self, mut input: SpawnInput) -> Result<Value, RpcError> {
+    pub(super) fn spawn(&self, mut input: SpawnInput) -> Result<(Value, Arc<ManagedProcess>), RpcError> {
         if input.command.trim().is_empty() && !input.interactive {
             return Err(invalid("command is required"));
         }
@@ -112,11 +114,18 @@ impl Host {
             let Some(index) = registry
                 .order
                 .iter()
-                .position(|id| registry.processes[id].descriptor().state != "running")
+                .position(|id| {
+                    let process = &registry.processes[id];
+                    // A retained RPC owns an Arc until its caller finishes
+                    // observing the task, including across capture pages.
+                    Arc::strong_count(process) == 1
+                        && !registry.wait_pins.values().any(|task| task == id)
+                        && process.descriptor().state != "running"
+                })
             else {
                 return Err(RpcError::new(
                     "process.resourceLimit",
-                    "all process slots are active",
+                    "all process slots are active or retained",
                 ));
             };
             let id = registry
@@ -162,8 +171,8 @@ impl Host {
         )?;
         let descriptor = process.descriptor();
         registry.order.push_back(id.clone());
-        registry.processes.insert(id, process);
-        serialize(descriptor)
+        registry.processes.insert(id, Arc::clone(&process));
+        Ok((serialize(descriptor)?, process))
     }
 
     pub(super) fn require(&self, id: &str) -> Result<Arc<ManagedProcess>, RpcError> {
@@ -174,6 +183,32 @@ impl Host {
             .get(id)
             .cloned()
             .ok_or_else(|| RpcError::new("process.notFound", format!("unknown process {id}")))
+    }
+
+    pub(super) fn pin_wait(&self, owner: String, id: String) -> Result<Value, RpcError> {
+        let mut registry = self.registry.lock().map_err(lock_error)?;
+        if !registry.processes.contains_key(&id) {
+            return Err(RpcError::new("process.notFound", format!("unknown process {id}")));
+        }
+        if registry.wait_pins.get(&owner).is_some_and(|existing| existing != &id) {
+            return Err(invalid("wait owner already holds another task"));
+        }
+        registry.wait_pins.insert(owner, id);
+        Ok(serde_json::json!({"retained": true}))
+    }
+
+    pub(super) fn confirm_wait(&self, owner: &str, id: &str) -> Result<Value, RpcError> {
+        let registry = self.registry.lock().map_err(lock_error)?;
+        Ok(serde_json::json!({
+            "retained": registry.wait_pins.get(owner).is_some_and(|task| task == id)
+        }))
+    }
+
+    pub(super) fn reconcile_wait(&self, owners: Vec<String>) -> Result<Value, RpcError> {
+        let mut registry = self.registry.lock().map_err(lock_error)?;
+        let owners: std::collections::BTreeSet<_> = owners.into_iter().collect();
+        registry.wait_pins.retain(|owner, _| owners.contains(owner));
+        Ok(serde_json::json!({"reconciled": true}))
     }
 
     pub(super) fn retire(&self) -> Result<(), RpcError> {

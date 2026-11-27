@@ -42,7 +42,7 @@ pub(crate) fn run(
         object.insert("cols".into(), json!(DEFAULT_PTY_COLS));
         object.insert("rows".into(), json!(DEFAULT_PTY_ROWS));
     }
-    let mut descriptor = spawn(&client, call, id, spawn_payload)?;
+    let (mut descriptor, _lease) = spawn(&client, call, id, spawn_payload)?;
     let wait = params.wait_ms.unwrap_or(DEFAULT_WAIT_MS);
     let progress = Arc::new(BashProgress::new(started, call.progress()));
     progress.emit_initial();
@@ -83,5 +83,9 @@ pub(crate) fn run(
         .into(),
     );
     result.wait_ms = Some(wait);
+    if call.wait_handoff && result.termination == super::model::BashTermination::Running {
+        super::scope::pin_wait(&client, call, id)
+            .map_err(|failure| confirmed_spawn_error(failure, id))?;
+    }
     Ok(result)
 }

@@ -39,6 +39,7 @@ pub struct ToolCall {
     pub params: serde_json::Value,
     pub ctx_id: String,
     pub operation_id: String,
+    pub wait_handoff: bool,
     pub source: Option<String>,
     pub policy: Arc<dyn SecurityPolicy>,
     pub cancellation: ToolCancellation,

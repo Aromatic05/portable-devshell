@@ -65,6 +65,7 @@ export interface ToolCallExecutionRuntimeOptions {
 }
 
 export interface ToolCallExecutionRuntime {
+    readonly waitLeases: import("../task/Api.js").WaitLeasePort;
     target(): ToolCallTarget;
     listTools(): ToolDefinition[];
     readToolCalls(query?: ToolCallQuery): Promise<ToolCallRecord[]>;

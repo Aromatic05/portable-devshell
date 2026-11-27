@@ -21,6 +21,7 @@ import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import {
     installWorkspaceGoalTool,
+    isWaitHandoffCandidate,
     rewriteWaitToolCall,
     workspaceGoalDefinition,
 } from "../../task/Public.js";
@@ -109,6 +110,7 @@ export class InstanceState {
             instanceName,
             invokeTool: (toolName, input, context, signal) =>
                 this.tools.invokeInternal(toolName, input, context, signal),
+            waitLeases: this.tools.waitLeases,
             paths,
         });
         this.terminal = createTerminalRuntime(dependencies.terminal, {
@@ -218,17 +220,27 @@ export class InstanceState {
         const value = await rewriteWaitToolCall({
             callId: request.callId, direction: "inbound", value: request.value,
         }, this.task.api.wait);
-        return await this.tools.target().dispatch({
-            ...request,
-            execute,
-            value,
-            hooks: {
-                review: (input) => request.hooks.review(input),
-                rewrite: async (input) => rewriteWaitToolCall({
-                    ...input, value: await request.hooks.rewrite(input),
-                }, this.task.api.wait),
-            },
-        });
+        const handoff = isWaitHandoffCandidate(value);
+        const { waitHandoff: _waitHandoff, ...context } = value.context;
+        if (handoff) await this.task.beginWaitCall(request.callId);
+        try {
+            return await this.tools.target().dispatch({
+                ...request,
+                execute,
+                value: {
+                    ...value,
+                    context: handoff ? { ...context, waitHandoff: true } : context,
+                },
+                hooks: {
+                    review: (input) => request.hooks.review(input),
+                    rewrite: async (input) => rewriteWaitToolCall({
+                        ...input, value: await request.hooks.rewrite(input),
+                    }, this.task.api.wait),
+                },
+            });
+        } finally {
+            if (handoff) await this.task.finishWaitCall(request.callId);
+        }
     }
 
     target(): ToolCallTarget {

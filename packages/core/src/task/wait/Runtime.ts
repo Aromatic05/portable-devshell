@@ -64,6 +64,14 @@ export async function rewriteWaitToolCall(
     return { ...value, payload: { ...output, detached: true } };
 }
 
+export function isWaitHandoffCandidate(value: ToolCallHookValue): boolean {
+    if (value.kind !== "call" || value.context.contextMode === "stateless") return false;
+    const input = record(value.payload);
+    const waitMs = milliseconds(input?.waitMs) ?? 0;
+    return value.toolName === "bash_run" ? waitMs >= WAIT_HANDOFF_MS
+        : value.toolName === "task_input" && input?.untilExit === true && waitMs >= WAIT_SYNC_MS;
+}
+
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {
     const input = record(value.payload);
     if (input === undefined) return value;

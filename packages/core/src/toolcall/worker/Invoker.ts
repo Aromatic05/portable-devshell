@@ -26,6 +26,25 @@ export class WorkerToolInvoker {
         this.#catalog = catalog;
     }
 
+    async confirmWaitLease(owner: string, task: string): Promise<boolean> {
+        const result = await this.#waitLeaseRequest("process.wait.confirm", { owner, id: task });
+        return isRecord(result) && result.retained === true;
+    }
+
+    async reconcileWaitLeases(owners: readonly string[]): Promise<void> {
+        await this.#waitLeaseRequest("process.wait.reconcile", { owners: [...owners] });
+    }
+
+    async #waitLeaseRequest(method: string, input: JsonValue): Promise<JsonValue> {
+        const connection = await this.#endpoint.connect(this.#workerHost, "core");
+        const rpc = new Rpc(connection);
+        try {
+            return await rpc.request<JsonValue>(method, input);
+        } finally {
+            rpc.close();
+        }
+    }
+
     async invoke(
         toolName: string,
         input: JsonValue,

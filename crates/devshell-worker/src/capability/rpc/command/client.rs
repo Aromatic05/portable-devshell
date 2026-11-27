@@ -343,6 +343,7 @@ mod tests {
                 params: serde_json::Value::Null,
                 ctx_id: "ctx".into(),
                 operation_id: "call".into(),
+                wait_handoff: false,
                 source: source.map(str::to_string),
                 policy: Arc::new(DisabledSecurityPolicy),
                 cancellation: ToolCancellation::default(),

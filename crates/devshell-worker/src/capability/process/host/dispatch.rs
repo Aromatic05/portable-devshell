@@ -8,6 +8,7 @@ use crate::capability::terminal::{
 use crate::transport::endpoint::channel::LocalIpcStream;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+use std::io::Read;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -15,7 +16,19 @@ impl Host {
     fn dispatch(&self, request: &RpcRequest) -> Result<Value, RpcError> {
         match request.method.as_str() {
             "process.handshake" => serialize(&self.handshake),
-            "process.v1.spawn" => self.spawn(parse(request)?),
+            "process.v1.spawn" => self.spawn(parse(request)?).map(|(value, _)| value),
+            "process.v1.pinWait" => {
+                let input: WaitPinInput = parse(request)?;
+                self.pin_wait(input.owner, input.id)
+            }
+            "process.v1.confirmWait" => {
+                let input: WaitPinInput = parse(request)?;
+                self.confirm_wait(&input.owner, &input.id)
+            }
+            "process.v1.reconcileWait" => {
+                let input: WaitReconcileInput = parse(request)?;
+                self.reconcile_wait(input.owners)
+            }
             "process.v1.list" => {
                 let registry = self.registry.lock().map_err(lock_error)?;
                 serialize(
@@ -170,6 +183,31 @@ impl Host {
             .and_then(Value::as_str)
             == Some(self.handshake.generation.as_str())
         {
+            // The response and the retained resource are acquired together.
+            // The dedicated connection owns the reference until the client
+            // closes it (also on Worker exit). Other RPCs use fresh connections.
+            let retained = request.params.as_object_mut()
+                .and_then(|params| params.remove("retain"))
+                .and_then(|value| value.as_bool()) == Some(true);
+            if retained {
+                let acquired = match request.method.as_str() {
+                    "process.v1.spawn" => parse(&request).and_then(|input| self.spawn(input)),
+                    "process.v1.describe" => parse::<Target>(&request).and_then(|input| {
+                        let process = self.require(&input.id)?;
+                        Ok((serialize(process.descriptor())?, process))
+                    }),
+                    _ => Err(invalid("retain is supported only for spawn and describe")),
+                };
+                return match acquired {
+                    Ok((value, _lease)) => {
+                        codec::write_response(&mut channel, &RpcResponse::success(request.id, value))?;
+                        let mut byte = [0];
+                        let _ = channel.read(&mut byte);
+                        Ok(())
+                    }
+                    Err(error) => codec::write_response(&mut channel, &RpcResponse::failure(request.id, error)),
+                };
+            }
             if request.method == "process.v1.subscribe" {
                 let result = parse::<SubscribeInput>(&request).and_then(|input| {
                     self.require(&input.id)
