@@ -29,6 +29,7 @@ export const EXTENSION_CAPABILITY_CONTEXT_KEYS = Object.freeze({
     "toolcall.history": "toolCallHistory",
     "worker.delegate": "workerDelegate",
     "worker.execute": "workerExecute",
+    "worker.process": "workerProcesses",
 } as const satisfies Record<ExtensionCapability, keyof ExtensionCapabilities>);
 
 export function projectExtensionCapabilities(

@@ -1,0 +1,27 @@
+{
+    "schemaVersion": "1.1.0",
+    "apiVersion": "5.0.0",
+    "activation": "lazy",
+    "id": "browser",
+    "name": "portable-devshell Browser",
+    "version": "0.1.0",
+    "entry": "index.js",
+    "capabilities": ["assets", "database", "worker.process", "artifacts", "instance.observe"],
+    "extensions": {
+        "cli.native-commands": [
+            { "id": "browser", "title": "Browser", "summary": "Manage and operate browsers on a Worker", "usage": "browser --instance <name> [--profile <name>] <command>" }
+        ],
+        "cli.model-commands": [
+            { "id": "browser", "title": "Browser", "summary": "Operate Playwright browser sessions", "usage": "browser [--profile <name>] <Playwright command>" }
+        ],
+        "web.applications": [
+            { "id": "browser", "title": "Browser" }
+        ],
+        "control.routes": [
+            { "id": "browser-request", "module": "browser", "operation": "request", "scope": "control" }
+        ],
+        "control.streams": [
+            { "id": "browser-frames", "module": "browser", "operation": "frames", "scope": "control" }
+        ]
+    }
+}

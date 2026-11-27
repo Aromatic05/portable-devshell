@@ -360,7 +360,7 @@ export class ArtifactService implements ArtifactApi {
     }
 }
 
-const DEFAULT_ARTIFACT_CHUNK_BYTES = 2 * 1024 * 1024;
+const DEFAULT_ARTIFACT_CHUNK_BYTES = 1024 * 1024;
 const DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT = 256;
 
 interface ArtifactServiceOptions {

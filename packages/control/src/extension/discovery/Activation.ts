@@ -112,6 +112,7 @@ export class ExtensionGenerationActivator {
                         runtimeDirectory: input.runtimeDirectory,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
+                        workerProcesses: input.capabilities.workerProcesses,
                     }),
                 generation: input.generation,
                 manifest: input.manifest,
@@ -130,6 +131,7 @@ export class ExtensionGenerationActivator {
                         input.capabilities.workerExecute.retireInstance(
                             instance,
                         ),
+                        input.capabilities.workerProcesses.retireInstance(instance),
                     ]);
                 },
             });
@@ -144,6 +146,7 @@ export class ExtensionGenerationActivator {
                 runtimeDirectory: input.runtimeDirectory,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,
+                workerProcesses: input.capabilities.workerProcesses,
             });
         }
     }
@@ -201,6 +204,7 @@ export class ExtensionGenerationActivator {
                     void input.capabilities.workerExecute
                         .closeAll()
                         .catch(() => undefined);
+                    void input.capabilities.workerProcesses.closeAll().catch(() => undefined);
                 },
                 processes: input.capabilities.processes,
                 ...(this.#sandboxResourceLimits === undefined
@@ -209,6 +213,7 @@ export class ExtensionGenerationActivator {
                 toolCallHistory: input.capabilities.toolCallHistory,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,
+                workerProcesses: input.capabilities.workerProcesses,
             });
             const runningSandbox = sandbox;
             const descriptor = await sandbox.start();
@@ -229,6 +234,7 @@ export class ExtensionGenerationActivator {
                         sandbox: runningSandbox,
                         workerDelegate: input.capabilities.workerDelegate,
                         workerExecute: input.capabilities.workerExecute,
+                        workerProcesses: input.capabilities.workerProcesses,
                     }),
                 generation: input.generation,
                 manifest: input.manifest,
@@ -247,6 +253,7 @@ export class ExtensionGenerationActivator {
                         input.capabilities.workerExecute.retireInstance(
                             instance,
                         ),
+                        input.capabilities.workerProcesses.retireInstance(instance),
                     ]);
                 },
             });
@@ -262,6 +269,7 @@ export class ExtensionGenerationActivator {
                 sandbox,
                 workerDelegate: input.capabilities.workerDelegate,
                 workerExecute: input.capabilities.workerExecute,
+                workerProcesses: input.capabilities.workerProcesses,
             });
         }
     }

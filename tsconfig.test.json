@@ -14,6 +14,9 @@
             "@portable-devshell/extension/context": [
                 "./packages/extension/src/domain/context.ts"
             ],
+            "@portable-devshell/extension/worker": [
+                "./packages/extension/src/domain/worker.ts"
+            ],
             "@portable-devshell/extension/cli": [
                 "./packages/extension/src/domain/cli.ts"
             ],

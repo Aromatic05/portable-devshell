@@ -337,6 +337,7 @@ export function activate(context) {
                 messages.push(message);
                 if (message.name === "event") markDelivered();
             },
+            write: async () => { throw new Error("Unexpected binary stream write."); },
             close: async () => {},
         },
         { payload: { fromSeq: 1 } },
@@ -1892,6 +1893,7 @@ function createSandbox(options: {
         toolCallHistory: options.toolCallHistory ?? fakeToolCallHistory([]),
         workerDelegate: options.workerDelegate ?? fakeWorker([]),
         workerExecute: options.workerExecute ?? fakeWorker([]),
+        workerProcesses: { start: async () => { throw new Error("Unexpected Worker process."); } },
         ...(options.workerFactory === undefined ? {} : { workerFactory: options.workerFactory }),
     });
 }

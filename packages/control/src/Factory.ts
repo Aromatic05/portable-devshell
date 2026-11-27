@@ -234,13 +234,14 @@ export class ControlFactory {
                         extensionId,
                         service: artifact.service,
                     }),
-                assetsFactory: ({ allowed, dataDirectory, extensionId }) =>
+                assetsFactory: ({ allowed, dataDirectory, extensionId, runtimeAssets }) =>
                     new ExtensionAssetCapabilityControl({
                         allowed,
                         dataDirectory,
                         extensionId,
                         limits: resolveControlExtensionAssetLimits(
                             extensionId,
+                            runtimeAssets,
                         ),
                         project: async (input) => {
                             const prepared =
@@ -255,10 +256,7 @@ export class ControlFactory {
                                 input.sourcePath,
                                 {
                                     instance: input.target.instance,
-                                    path: join(
-                                        prepared.directory,
-                                        input.target.key,
-                                    ),
+                                    path: './' + input.target.key,
                                     workspace: prepared.directory,
                                 },
                                 input.overwrite,
@@ -501,7 +499,13 @@ export class ControlFactory {
 
 export function resolveControlExtensionAssetLimits(
     extensionId: string,
+    runtimeAssets = false,
 ): Partial<ExtensionInstallLimits> | undefined {
+    if (runtimeAssets) return {
+        maxCompressedBytes: 256 * 1024 * 1024,
+        maxFileBytes: 384 * 1024 * 1024,
+        maxLogicalBytes: 1024 * 1024 * 1024,
+    };
     if (extensionId !== "agent") return undefined;
     return {
         maxCompressedBytes: 128 * 1024 * 1024,

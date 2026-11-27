@@ -117,15 +117,15 @@ export async function runTestspaceWebSmoke({
                 "Chromium DevTools version response did not include a WebSocket URL.",
             );
         }
-        const targets = await fetchJson(
+        const isPage = (target) =>
+            target?.type === "page" && typeof target.webSocketDebuggerUrl === "string";
+        const targets = await waitForJson(
             `http://127.0.0.1:${debuggingPort}/json`,
+            timeoutMs,
+            () => `Chromium did not expose a page target.\n${browserStderr}`,
+            (value) => Array.isArray(value) && value.some(isPage),
         );
-        const page = Array.isArray(targets)
-            ? targets.find((target) => target?.type === "page")
-            : undefined;
-        if (typeof page?.webSocketDebuggerUrl !== "string") {
-            throw new Error("Chromium did not expose a page target.");
-        }
+        const page = targets.find(isPage);
 
         const devtools = await connectDevtools(page.webSocketDebuggerUrl);
         try {
@@ -454,14 +454,16 @@ async function connectDevtools(url) {
     };
 }
 
-async function waitForJson(url, timeoutMs, failureMessage) {
+async function waitForJson(url, timeoutMs, failureMessage, ready = () => true) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         try {
-            return await fetchJson(url);
+            const value = await fetchJson(url);
+            if (ready(value)) return value;
         } catch {
-            await delay(50);
+            // DevTools may not be listening yet.
         }
+        await delay(50);
     }
     throw new Error(failureMessage());
 }

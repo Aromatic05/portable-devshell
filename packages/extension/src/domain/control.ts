@@ -49,6 +49,7 @@ export interface ControlStreamMessage {
 /** Output stream whose lifetime is bounded by the invocation signal. */
 export interface ControlStream {
     send(message: ControlStreamMessage): Promise<void>;
+    write(bytes: Uint8Array): Promise<void>;
     close(payload?: ExtensionJsonValue): Promise<void>;
 }
 

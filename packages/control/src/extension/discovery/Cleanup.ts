@@ -7,6 +7,7 @@ import type {
     ExtensionProcessRuntime,
     ExtensionWorkerRuntime,
 } from "../api/cap/index.js";
+import type { ExtensionWorkerProcessControl } from "../api/cap/worker/Process.js";
 import type { ExtensionConfigRuntime } from "../api/cap/config/index.js";
 import type { ExtensionSandboxHost } from "../sandbox/bridge/index.js";
 
@@ -22,6 +23,7 @@ export async function throwInProcessActivationFailure(
         runtimeDirectory: string;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
+        workerProcesses: ExtensionWorkerProcessControl;
     },
 ): Promise<never> {
     const cleanupFailures: unknown[] = [];
@@ -47,6 +49,7 @@ export async function throwInProcessActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
+    await input.workerProcesses.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
     await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
         (cleanupError) => cleanupFailures.push(cleanupError),
     );
@@ -71,6 +74,7 @@ export async function disposeInProcessGeneration(input: {
     runtimeDirectory: string;
     workerDelegate: ExtensionWorkerRuntime;
     workerExecute: ExtensionWorkerRuntime;
+    workerProcesses: ExtensionWorkerProcessControl;
 }): Promise<void> {
     const failures: unknown[] = [];
     await Promise.resolve().then(() => input.module.deactivate?.()).catch((error) =>
@@ -91,6 +95,7 @@ export async function disposeInProcessGeneration(input: {
         .closeAll()
         .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
+    await input.workerProcesses.closeAll().catch((error) => failures.push(error));
     await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
         (error) => failures.push(error),
     );
@@ -118,6 +123,7 @@ export async function throwSandboxActivationFailure(
         sandbox?: ExtensionSandboxHost;
         workerDelegate: ExtensionWorkerRuntime;
         workerExecute: ExtensionWorkerRuntime;
+        workerProcesses: ExtensionWorkerProcessControl;
     },
 ): Promise<never> {
     const cleanupFailures: unknown[] = [];
@@ -143,6 +149,7 @@ export async function throwSandboxActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
+    await input.workerProcesses.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
     await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
         (cleanupError) => cleanupFailures.push(cleanupError),
     );
@@ -161,6 +168,7 @@ export async function disposeSandboxGeneration(input: {
     sandbox: ExtensionSandboxHost;
     workerDelegate: ExtensionWorkerRuntime;
     workerExecute: ExtensionWorkerRuntime;
+    workerProcesses: ExtensionWorkerProcessControl;
 }): Promise<void> {
     const failures: unknown[] = [];
     await input.sandbox.dispose().catch((error) => failures.push(error));
@@ -179,6 +187,7 @@ export async function disposeSandboxGeneration(input: {
         .closeAll()
         .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
+    await input.workerProcesses.closeAll().catch((error) => failures.push(error));
     await rm(input.runtimeDirectory, { force: true, recursive: true }).catch(
         (error) => failures.push(error),
     );

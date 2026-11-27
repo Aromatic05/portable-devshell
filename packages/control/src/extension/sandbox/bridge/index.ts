@@ -65,6 +65,8 @@ import {
     type SandboxWorkerOpenInput,
 } from "./Protocol.js";
 import { ExtensionSandboxProcessBridge } from "./ProcessBridge.js";
+import { ExtensionSandboxWorkerProcessBridge } from "./WorkerProcesses.js";
+import type { ExtensionWorkerProcessCapability, ExtensionWorkerProcessStartInput } from "@portable-devshell/extension/worker";
 import { ExtensionSandboxWorkerSessions } from "./WorkerSessions.js";
 import { ExtensionDatabaseCapabilityControl } from "../../api/cap/database/index.js";
 import {
@@ -117,6 +119,7 @@ export interface ExtensionSandboxHostOptions {
     toolCallHistory: ToolCallHistoryCapability;
     workerDelegate: ExtensionWorkerCapability;
     workerExecute: ExtensionWorkerCapability;
+    workerProcesses: ExtensionWorkerProcessCapability;
     workerFactory?: ExtensionSandboxWorkerFactory;
 }
 
@@ -164,6 +167,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #capabilityControllers = new Map<string, AbortController>();
     readonly #ready: Promise<ExtensionSandboxReadyDescriptor>;
     readonly #sessions: ExtensionSandboxWorkerSessions;
+    readonly #workerProcesses: ExtensionSandboxWorkerProcessBridge;
     readonly #worker: Worker;
     #closing = false;
     #configCoreUnsubscribe?: () => void;
@@ -233,6 +237,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             send: (message) => this.#send(message),
         });
         this.#toolCallHistoryCapability = options.toolCallHistory;
+        this.#workerProcesses = new ExtensionSandboxWorkerProcessBridge(options.workerProcesses);
         this.#sessions = new ExtensionSandboxWorkerSessions({
             acceptanceError: () =>
                 this.#faulted ??
@@ -827,6 +832,19 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 await this.#processes.terminate(
                     input as SandboxProcessTerminateInput,
                 );
+                return undefined;
+            case "workerProcesses.start":
+                return await this.#workerProcesses.start(input as ExtensionWorkerProcessStartInput, signal);
+            case "workerProcesses.read":
+                return await this.#workerProcesses.read(readStringField(input, "processId"));
+            case "workerProcesses.write":
+                await this.#workerProcesses.write(readStringField(input, "processId"), readStringField(input, "data"));
+                return undefined;
+            case "workerProcesses.finish":
+                await this.#workerProcesses.finish(readStringField(input, "processId"));
+                return undefined;
+            case "workerProcesses.close":
+                await this.#workerProcesses.close(readStringField(input, "processId"));
                 return undefined;
             case "workerExecute.openSession":
                 return await this.#sessions.open(

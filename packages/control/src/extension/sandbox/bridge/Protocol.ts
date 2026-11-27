@@ -123,7 +123,12 @@ export type ExtensionSandboxCapabilityOperation =
     | "workerDelegate.openSession"
     | "workerExecute.callTool"
     | "workerExecute.closeSession"
-    | "workerExecute.openSession";
+    | "workerExecute.openSession"
+    | "workerProcesses.start"
+    | "workerProcesses.read"
+    | "workerProcesses.write"
+    | "workerProcesses.finish"
+    | "workerProcesses.close";
 
 export type ExtensionSandboxInterfaceOperation =
     | "secret.environment"

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>DevShell Browser</title>
+</head>
+<body data-connection="idle">
+<svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-browser" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18m-14 7 3-3-3-3m6 6h4"/><path d="M7 6.5h.01M10 6.5h.01"/></symbol>
+    <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="icon-back" viewBox="0 0 24 24"><path d="m12 5-7 7 7 7M5 12h14"/></symbol>
+    <symbol id="icon-forward" viewBox="0 0 24 24"><path d="m12 5 7 7-7 7M5 12h14"/></symbol>
+    <symbol id="icon-reload" viewBox="0 0 24 24"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01m4-9h6m-6 9h6"/></symbol>
+    <symbol id="icon-profile" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20v-1.5a7.5 7.5 0 0 1 15 0V20"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="icon-connect" viewBox="0 0 24 24"><path d="m13 3-8 11h6l-1 7 9-12h-6l1-6"/></symbol>
+    <symbol id="icon-detach" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-3-9 3-3 3 3"/></symbol>
+    <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m10 3-.6 2.1-2 .9-1.9-1.1-2 2 1.1 1.9-.9 2L1.5 11v2l2.2.5.9 2-1.1 1.9 2 2 1.9-1.1 2 .9.6 2.3h3l.6-2.3 2-.9 1.9 1.1 2-2-1.1-1.9.9-2 2.2-.5v-2l-2.2-.5-.9-2 1.1-1.9-2-2-1.9 1.1-2-.9L13 3Z"/></symbol>
+    <symbol id="icon-key" viewBox="0 0 24 24"><circle cx="8" cy="10" r="5"/><path d="m12 13 8 7 1-1v-4l-3-3-2 2-2-2"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="icon-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+    <symbol id="icon-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+</svg>
+
+<header class="browser-chrome">
+    <div class="tabbar">
+        <div class="brand">
+            <span class="brand-mark"><svg class="icon"><use href="#icon-browser"/></svg></span>
+            <span>Browser<small>DEVSHELL</small></span>
+        </div>
+        <div class="tabstrip" id="tabs" aria-label="Browser tabs"><span class="tab-placeholder">No browser attached</span></div>
+        <button class="icon-button tab-add" id="newtab" title="New tab" aria-label="New tab" disabled><svg class="icon"><use href="#icon-plus"/></svg></button>
+        <div class="tabbar-end">
+            <span class="connection-indicator"><span class="connection-dot"></span><span id="connection-label">Disconnected</span></span>
+            <button class="button settings-button" id="settings"><svg class="icon"><use href="#icon-settings"/></svg><span>Manage</span></button>
+        </div>
+    </div>
+    <div class="toolbar" aria-label="Browser navigation">
+        <div class="navigation-buttons">
+            <button class="icon-button" id="back" title="Go back" aria-label="Go back" disabled><svg class="icon"><use href="#icon-back"/></svg></button>
+            <button class="icon-button" id="forward" title="Go forward" aria-label="Go forward" disabled><svg class="icon"><use href="#icon-forward"/></svg></button>
+            <button class="icon-button" id="refresh" title="Reload" aria-label="Reload" disabled><svg class="icon"><use href="#icon-reload"/></svg></button>
+        </div>
+        <form id="navigate" class="address-bar">
+            <svg class="icon address-icon"><use href="#icon-globe"/></svg>
+            <input id="url" aria-label="URL" placeholder="Enter a URL" autocomplete="off" spellcheck="false" disabled>
+            <button class="icon-button address-go" id="go" title="Go to URL" aria-label="Go to URL" disabled><svg class="icon"><use href="#icon-arrow"/></svg></button>
+        </form>
+        <div class="session-controls" aria-label="Browser session">
+            <label class="context-select" title="Worker instance">
+                <svg class="icon"><use href="#icon-server"/></svg>
+                <select id="instance" aria-label="Instance"></select>
+                <svg class="icon chevron"><use href="#icon-chevron"/></svg>
+            </label>
+            <span class="context-divider"></span>
+            <label class="context-select profile-select" title="Browser profile">
+                <svg class="icon"><use href="#icon-profile"/></svg>
+                <select id="profile" aria-label="Profile"></select>
+                <svg class="icon chevron"><use href="#icon-chevron"/></svg>
+            </label>
+            <div class="session-actions">
+                <button class="button primary" id="open" disabled><svg class="icon"><use href="#icon-connect"/></svg><span>Connect</span></button>
+                <button class="icon-button" id="detach" title="Detach viewer; keep browser running" aria-label="Detach viewer" disabled><svg class="icon"><use href="#icon-detach"/></svg></button>
+                <button class="icon-button stop-button" id="close" title="Close browser session" aria-label="Close browser" disabled><svg class="icon"><use href="#icon-stop"/></svg></button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="browser-main">
+    <div id="viewport">
+        <canvas id="screen" aria-label="Remote browser"></canvas>
+        <textarea id="keyboard" aria-label="Remote browser text input" autocomplete="off" spellcheck="false"></textarea>
+        <div class="empty-state" id="empty-state">
+            <div class="empty-icon"><svg class="icon"><use href="#icon-browser"/></svg></div>
+            <h1 id="empty-title">Your remote browser</h1>
+            <p id="empty-description">Choose a Worker and profile, then connect to open or resume a browser session.</p>
+        </div>
+    </div>
+    <footer class="statusbar">
+        <span class="status-dot"></span><span id="status" role="status">Select a profile and connect.</span>
+        <span class="status-detail" id="frame-size"></span>
+        <span class="status-detail status-identity" id="session-identity"></span>
+    </footer>
+</main>
+
+<dialog id="management" aria-labelledby="management-title">
+    <div class="drawer-header">
+        <div class="drawer-heading">
+            <span class="drawer-icon"><svg class="icon"><use href="#icon-settings"/></svg></span>
+            <div><h2 id="management-title">Browser management</h2><p id="managed-target">Selected profile</p></div>
+        </div>
+        <button class="icon-button" id="settings-close" title="Close management" aria-label="Close management"><svg class="icon"><use href="#icon-close"/></svg></button>
+    </div>
+    <div class="drawer-body">
+        <nav class="management-nav" aria-label="Management sections">
+            <span class="nav-caption">WORKSPACE</span>
+            <button data-section="profile-section"><svg class="icon"><use href="#icon-profile"/></svg>Profiles</button>
+            <button data-section="credentials-section" class="selected"><svg class="icon"><use href="#icon-key"/></svg>Credentials</button>
+            <button data-section="runtime-section"><svg class="icon"><use href="#icon-server"/></svg>Runtime</button>
+            <span class="nav-caption">BROWSER DATA</span>
+            <button data-section="files-section"><svg class="icon"><use href="#icon-folder"/></svg>Files</button>
+            <button data-section="activity-section"><svg class="icon"><use href="#icon-activity"/></svg>Activity</button>
+        </nav>
+        <div class="management-content" id="management-content">
+            <section class="management-section" id="profile-section">
+                <h3>Profiles</h3>
+                <p>Choose a managed Chromium profile or connect to a browser already running on the selected Worker.</p>
+                <div class="section-card">
+                    <label class="field-label" for="new-profile">Create a profile</label>
+                    <div class="controls"><input id="new-profile" placeholder="Profile name" autocomplete="off"><button class="button primary" id="create"><svg class="icon"><use href="#icon-plus"/></svg>Create</button></div>
+                    <div class="section-separator"></div>
+                    <label class="field-label" for="profile-source-kind">Browser source</label>
+                    <select id="profile-source-kind"><option value="managed">Managed Chromium</option><option value="extension">Existing Chrome / Edge</option></select>
+                    <div id="profile-source-extension" hidden>
+                        <div class="section-separator"></div>
+                        <label class="field-label" for="profile-source-channel">Browser channel</label>
+                        <select id="profile-source-channel"></select>
+                        <div class="section-separator"></div>
+                        <label class="field-label" for="profile-source-directory">Browser profile directory (optional)</label>
+                        <input id="profile-source-directory" placeholder="Default, Profile 1, or auto-detect" autocomplete="off" spellcheck="false">
+                        <p class="field-hint">Install the official <a href="https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm" target="_blank" rel="noopener noreferrer">Playwright Extension</a> in the browser on this Worker. Approve the connection and choose tabs in that browser. Its existing profile and sign-in state remain in place.</p>
+                    </div>
+                    <div class="controls"><button class="button primary" id="profile-source-save">Save source</button></div>
+                    <div class="section-separator"></div>
+                    <div class="setting-row"><div><strong>Delete selected profile</strong><small>Removes DevShell data and credentials, not an external browser's profile.</small></div><button class="button danger" id="delete-profile">Delete</button></div>
+                </div>
+            </section>
+            <section class="management-section" id="credentials-section">
+                <h3>Credentials</h3>
+                <p>Store named values for this profile. Models reference their names in browser commands.</p>
+                <div class="section-card credential-card">
+                    <div class="setting-row"><div class="setting-title"><span class="setting-icon"><svg class="icon"><use href="#icon-key"/></svg></span><div><strong>Stored credentials</strong><small>Credential values are not displayed.</small></div></div><span class="count" id="credential-count">0</span></div>
+                    <div id="credentials" class="credential-list"><div class="list-empty">No stored credentials</div></div>
+                    <div class="section-separator"></div>
+                    <label class="field-label" for="credential-file">Import a dotenv file</label>
+                    <p class="field-hint">Choose a file containing NAME=value entries. Import replaces the profile's stored credentials.</p>
+                    <input id="credential-file" type="file" accept=".env,text/plain" aria-label="Credential dotenv file">
+                    <div class="controls credential-actions"><button class="button primary" id="credential-import"><svg class="icon"><use href="#icon-download"/></svg>Import / replace</button><button class="button danger subtle" id="credential-clear">Clear credentials</button></div>
+                    <small>Changes take effect the next time this browser profile is opened.</small>
+                </div>
+            </section>
+            <section class="management-section" id="runtime-section">
+                <h3>Runtime</h3>
+                <p>Manage the portable Chromium and Playwright runtime for the selected Worker.</p>
+                <div class="section-card">
+                    <div class="setting-row"><div><strong>Installation status</strong><small>Selected Worker</small></div><span class="runtime-status" id="runtime-status">Checking…</span></div>
+                    <div class="section-separator"></div>
+                    <label class="field-label" for="bundles">Available runtime bundles</label>
+                    <select id="bundles" aria-label="Installed runtime bundles"></select>
+                    <div class="controls"><button class="button primary" id="runtime-use">Install on instance</button></div>
+                    <small>Import a distributed runtime directory with the native CLI:</small>
+                    <code class="command-example">devshell browser runtime install &lt;instance&gt; &lt;directory&gt;</code>
+                </div>
+            </section>
+            <section class="management-section" id="files-section">
+                <h3>Browser files</h3>
+                <p>Access screenshots, downloads and other browser output.</p>
+                <div class="section-card">
+                    <div class="setting-row"><strong>Output files</strong><button class="button" id="files-refresh"><svg class="icon"><use href="#icon-reload"/></svg>Refresh</button></div>
+                    <div id="files" class="data-list"><div class="list-empty">Refresh to load files.</div></div>
+                </div>
+            </section>
+            <section class="management-section" id="activity-section">
+                <h3>Activity</h3>
+                <p>Inspect browser commands and network request metadata.</p>
+                <div class="section-card">
+                    <div class="segmented"><button class="button" id="actions" aria-pressed="false">Actions</button><button class="button" id="requests" aria-pressed="false">Requests</button></div>
+                    <div id="activity" class="data-list"><div class="list-empty">Choose a log to view recent records.</div></div>
+                </div>
+            </section>
+        </div>
+    </div>
+    <div class="drawer-footer"><span id="management-status" role="status"></span><span>Browser · DevShell</span></div>
+</dialog>
+
+<script type="module" src="./index.ts"></script>
+</body>
+</html>

@@ -73,3 +73,29 @@ export interface ExtensionWorkerExecuteCapability
 /** Worker execution delegated to an Extension-owned transcript/runtime. */
 export interface ExtensionWorkerDelegateCapability
     extends ExtensionWorkerCapability {}
+
+/** A path within the owning Extension's Worker resource collection. */
+export interface ExtensionWorkerResourcePath {
+    readonly collection: string;
+    readonly key?: string;
+    readonly path?: string;
+}
+
+export interface ExtensionWorkerProcessStartInput {
+    readonly instance: string;
+    readonly executable: ExtensionWorkerResourcePath;
+    readonly args?: readonly (string | ExtensionWorkerResourcePath)[];
+    readonly cwd?: ExtensionWorkerResourcePath;
+}
+
+/** Duplex bytes from a Worker subprocess, owned by the Extension generation. */
+export interface ExtensionWorkerProcess {
+    read(): Promise<Uint8Array | undefined>;
+    write(bytes: Uint8Array): Promise<void>;
+    finish(): Promise<void>;
+    close(): Promise<void>;
+}
+
+export interface ExtensionWorkerProcessCapability {
+    start(input: ExtensionWorkerProcessStartInput, signal?: AbortSignal): Promise<ExtensionWorkerProcess>;
+}

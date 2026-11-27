@@ -26,7 +26,7 @@ test("message subscription preserves seed, report projection, gap cursor, and ca
             assert.equal(watch.signal.aborted, true);
         },
     });
-    await binding({ send: async (message) => { messages.push(message); }, close: async () => {} },
+    await binding({ send: async (message) => { messages.push(message); }, write: async () => { throw new Error("Unexpected binary stream write."); }, close: async () => {} },
         { payload: { fromSeq: 1 } },
         { destination: "dev", peer: "cli", requestId: "request", signal: controller.signal });
     assert.deepEqual(messages, [
@@ -42,7 +42,7 @@ test("invalid message cursor fails before observing the instance", async () => {
     const binding = createMessageSubscriptionBinding({
         async watchEvents(_instance: string, _watch: ExtensionInstanceEventWatch) { observed = true; },
     });
-    await assert.rejects(async () => await binding({ send: async () => {}, close: async () => {} },
+    await assert.rejects(async () => await binding({ send: async () => {}, write: async () => { throw new Error("Unexpected binary stream write."); }, close: async () => {} },
         { payload: { fromSeq: -1 } },
         { destination: "dev", peer: "cli", requestId: "request", signal: new AbortController().signal }),
     { code: "control.invalidTarget" });

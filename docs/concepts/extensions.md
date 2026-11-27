@@ -332,6 +332,11 @@ Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec
 
 `@portable-devshell/extension/control` 提供普通请求 `control.routes` 和输出流 `control.streams`。两者都声明 `module / operation / scope`，由 Control 接到 shared 的 `host:port` 通信层。Stream binding 接收 `stream.send()`、`stream.close()` 与 invocation `signal`；客户端取消、实例退役和 Extension generation 替换都会结束订阅并释放 generation lease。
 
+`control.streams` 也提供 `stream.write(Uint8Array)`，复用现有 Stream 输出原始字节；`send()` 继续负责结构化消息。Sandbox 私有 JSON bridge 转换字节编码，不改变网络 Stream 协议。
+
+`worker.process` 是独立于 `worker.execute` 的显式 capability grant。`context.capabilities.workerProcesses.start()` 启动 Worker 上 Extension 自有资源目录中的可执行文件，返回包含 `read/write/finish/close` 的双向字节进程句柄。路径使用 collection/key/path 逻辑资源引用，由 Control 解析；不暴露 Worker 私有 RPC。Instance 或 Extension generation 退役时回收进程 lease。该 capability 使用可移植运行时 Asset 额度（压缩 256 MiB、单文件 384 MiB、解包 1 GiB），普通 Extension 额度保持不变。
+
+
 Comment 还通过 native/model `memory` 命令、Mailing reconciliation 与 file-edit rewrite trigger 协调 Worker workspace 中 `var/agent-work` 的 Memory/mailbox 文件；这些文件不是 Control 本地数据，也不是全部存入 Host SQLite。
 
 Comment Extension 拥有完整 `message` 端点：实例消息使用 `<instance>:message`，偏好设置使用 `@control:message`。`message.subscribe` 的事件筛选与 `progress_report` 到 `message.changed` 的投影由 Comment 实现；`instance.observe.watchEvents` 的 `onSeed` 提供初始事件与 cursor，初始序列缺口会拒绝订阅。

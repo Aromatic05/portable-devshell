@@ -11,6 +11,7 @@ export const EXTENSION_CAPABILITY_IDS = [
     "toolcall.history",
     "worker.delegate",
     "worker.execute",
+    "worker.process",
 ] as const;
 
 export type ExtensionCapability = (typeof EXTENSION_CAPABILITY_IDS)[number];
