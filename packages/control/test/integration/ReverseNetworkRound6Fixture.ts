@@ -191,9 +191,13 @@ export function workerSession(socket: WebSocket, name: string, options: WorkerOp
     };
 }
 
-async function serve(channel: Channel, methods: string[], name: string, options: WorkerOptions = {}) {
+async function serve(channel: Channel, methods: string[], name: string, options: WorkerOptions = {}, onWaitReconcile?: () => void) {
     const endpoint = new Endpoint({ host: `${name}-worker` });
     const core = new Rpc(endpoint.bind("core"), {
+        "process.wait.reconcile": () => {
+            onWaitReconcile?.();
+            return { reconciled: true };
+        },
         "worker.ping": () => { methods.push("worker.ping"); return { pong: true }; },
         "worker.handshake": async () => {
             methods.push("worker.handshake");
@@ -260,7 +264,8 @@ export async function sse(t: TestContext, base: string, token: string, generatio
             assert.deepEqual(result.body, { acceptedThrough: sequence, generation });
         }
     }, () => undefined);
-    const serving = serve(channel, methods, "r6-alpha", options).catch((error: unknown) => { errors.push(error); });
+    const waitReconciled = barrier();
+    const serving = serve(channel, methods, "r6-alpha", options, waitReconciled.resolve).catch((error: unknown) => { errors.push(error); });
     const pumping = (async () => {
         let buffered = "";
         const decoder = new TextDecoder();
@@ -289,7 +294,8 @@ export async function sse(t: TestContext, base: string, token: string, generatio
     const cleanups = streamCleanups.get(t);
     assert.ok(cleanups, "SSE worker must belong to an isolated Round6 fixture");
     cleanups.push(async () => { await reader.cancel(); channel.finish(); await pumping; await serving; });
-    return { methods, ids, errors, pumping, sequence: () => sequence, cancel: () => reader.cancel() };
+    return { methods, ids, errors, pumping, sequence: () => sequence,
+        waitReconciled: waitReconciled.promise, drain: () => channel.drain(), cancel: () => reader.cancel() };
 }
 
 class ReverseNetworkRound6Channel extends ChannelBase {
@@ -309,6 +315,14 @@ class ReverseNetworkRound6Channel extends ChannelBase {
         const operation = this.#writeTail.then(() => this.#send(copy));
         this.#writeTail = operation.catch(() => undefined);
         return operation;
+    }
+
+    async drain(): Promise<void> {
+        for (;;) {
+            const tail = this.#writeTail;
+            await tail;
+            if (tail === this.#writeTail) return;
+        }
     }
 
     close(error?: Error): void {

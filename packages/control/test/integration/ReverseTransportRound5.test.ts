@@ -462,6 +462,7 @@ async function serveWorkerEndpoint(
 ): Promise<void> {
     const endpoint = new Endpoint({ host: "reverse-test-worker" });
     const core = new Rpc(endpoint.bind("core"), {
+        "process.wait.reconcile": () => ({ reconciled: true }),
         "worker.ping": () => {
             methods.push("worker.ping");
             return responseFor("worker.ping");

@@ -9,7 +9,9 @@ for (const outcome of ["promote", "reject"] as const) {
         const previousToken = await f.enroll();
         const first = await sse(t, f.base, previousToken, 1);
         await until(() => f.alpha.supervision.snapshot().ready);
+        await first.waitReconciled;
         assert.deepEqual(await ping(f.alpha), { pong: true });
+        await first.drain();
         const previousSequence = first.sequence();
         const replacementToken = await f.enroll();
         const entered = barrier();
