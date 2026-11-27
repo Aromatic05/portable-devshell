@@ -4,14 +4,18 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { listFiles } from "./Files.mjs";
+import { attachBrowser } from "./Attached.mjs";
 
 const execute = promisify(execFile);
 
-/** Owns Chromium; the official CLI is a client of its public named-pipe binding. */
+/** Shares a managed or user-owned Chromium browser with the official CLI. */
 export class Browser {
+    #browser;
     #context;
     #page;
     #casting = false;
+    #castPage;
+    #attached = false;
     #view = Promise.resolve();
     #name = "devshell-browser-" + randomUUID();
     #closing = false;
@@ -39,16 +43,46 @@ export class Browser {
         return null;
     }
 
-    async open({ credentials = "" } = {}) {
+    async open({ credentials = "", source = { kind: "managed" } } = {}) {
         await mkdir(this.cliDir, { recursive: true });
+        this.#attached = source.kind === "extension";
         process.env.PLAYWRIGHT_BROWSERS_PATH = join(this.root, "browsers");
-        // Keep CLI session metadata local to the selected profile.
+        // Keep CLI metadata in the DevShell profile where possible. On Windows,
+        // Playwright also uses LOCALAPPDATA to find the user's actual browser.
         process.env.XDG_CACHE_HOME = join(this.profile, "cache");
-        process.env.LOCALAPPDATA = join(this.profile, "cache");
+        if (!this.#attached || process.platform !== "win32")
+            process.env.LOCALAPPDATA = join(this.profile, "cache");
         const { chromium } = await import("./node_modules/playwright/index.mjs");
-        this.#context = await chromium.launchPersistentContext(join(this.profile, "chromium"), { headless: true, viewport: { width: 1280, height: 800 } });
+        const secretFile = join(this.cliDir, ".credentials-" + randomUUID());
+        try {
+            const env = { ...process.env };
+            delete env.PLAYWRIGHT_MCP_SECRETS_FILE;
+            if (credentials) {
+                await writeFile(secretFile, credentials, { mode: 0o600, flag: "wx" });
+                env.PLAYWRIGHT_MCP_SECRETS_FILE = secretFile;
+            }
+            if (this.#attached) {
+                this.#browser = await attachBrowser(chromium, source, this.#name, this.#executeCli.bind(this), env);
+                this.#context = this.#browser.contexts()[0];
+                if (!this.#context) throw new Error("The attached browser has no accessible context.");
+            } else {
+                this.#context = await chromium.launchPersistentContext(join(this.profile, "chromium"), { headless: true, viewport: { width: 1280, height: 800 } });
+                this.#browser = this.#context.browser();
+                const bound = await this.#browser.bind(this.#name);
+                await this.#cli(["attach", "--endpoint=" + bound.endpoint], env);
+            }
+        } finally { await rm(secretFile, { force: true }); }
+        this.#browser.on("disconnected", () => {
+            if (!this.#closing) this.output.disconnected();
+        });
         this.#page = this.#context.pages()[0] ?? await this.#context.newPage();
         const observePage = page => {
+            if (!this.#page) void this.#select(page).catch(error => console.error("Browser tab: " + error.message));
+            page.on("close", () => {
+                if (!this.#closing && this.#page === page)
+                    void this.#select(this.#context.pages().find(candidate => candidate !== page && !candidate.isClosed()))
+                        .catch(error => console.error("Browser tab: " + error.message));
+            });
             page.on("download", download => {
                 void (async () => {
                     const dir = join(this.cliDir, "downloads");
@@ -63,30 +97,23 @@ export class Browser {
         this.#context.on("response", response => {
             this.output.message({ event: "request", method: response.request().method(), url: response.url(), status: response.status() });
         });
-        const bound = await this.#context.browser().bind(this.#name);
-        const secretFile = join(this.cliDir, ".credentials-" + randomUUID());
-        try {
-            const env = { ...process.env };
-            delete env.PLAYWRIGHT_MCP_SECRETS_FILE;
-            if (credentials) {
-                await writeFile(secretFile, credentials, { mode: 0o600, flag: "wx" });
-                env.PLAYWRIGHT_MCP_SECRETS_FILE = secretFile;
-            }
-            await this.#cli(["attach", "--endpoint=" + bound.endpoint], env);
-        } finally { await rm(secretFile, { force: true }); }
         return this.state();
     }
 
-    async #cli(argv, env = process.env, timeout = 120000) {
+    async #executeCli(argv, env = process.env, timeout = 120000) {
         try {
-            const { stdout, stderr } = await execute(process.execPath, [
+            return await execute(process.execPath, [
                 join(this.root, "node_modules", "@playwright", "cli", "playwright-cli.js"),
                 "-s=" + this.#name, ...argv,
             ], { cwd: this.cliDir, env, timeout, maxBuffer: 4 * 1024 * 1024 });
-            return stdout + stderr;
         } catch (error) {
             throw new Error("Playwright CLI failed: " + (error.stderr || error.stdout || String(error.code ?? "unknown error")));
         }
+    }
+
+    async #cli(argv, env = process.env, timeout = 120000) {
+        const { stdout, stderr } = await this.#executeCli(argv, env, timeout);
+        return stdout + stderr;
     }
 
     async cli(argv) {
@@ -99,7 +126,7 @@ export class Browser {
         const selected = await this.#cli(["tab-list"]);
         const match = selected.match(/^\s*-\s*(\d+):\s*\(current\)/m);
         const page = this.#context.pages()[Number(match?.[1] ?? 0)];
-        if (page && page !== this.#page) await this.#select(page);
+        if (page !== this.#page) await this.#select(page);
         return result;
     }
 
@@ -116,10 +143,8 @@ export class Browser {
 
     #select(page) {
         return this.#changeView(async () => {
-            const casting = this.#casting;
-            if (casting) await this.#setCast(false);
-            this.#page = page;
-            if (casting) await this.#setCast(true);
+            this.#page = page && !page.isClosed() ? page : undefined;
+            await this.#setCast(this.#casting);
         });
     }
 
@@ -128,19 +153,26 @@ export class Browser {
     }
 
     async #setCast(enabled) {
-        if (enabled === this.#casting) return null;
-        if (enabled) {
-            await this.#page.screencast.start({
+        this.#casting = enabled;
+        const page = enabled && this.#page && !this.#page.isClosed() ? this.#page : undefined;
+        if (page === this.#castPage) return null;
+        const previous = this.#castPage;
+        this.#castPage = undefined;
+        if (previous && !previous.isClosed()) await previous.screencast.stop();
+        if (page) {
+            await page.screencast.start({
                 quality: 75, size: { width: 1280, height: 800 },
                 onFrame: frame => this.output.frame(frame),
             });
-        } else { await this.#page.screencast.stop(); }
-        this.#casting = enabled;
+            this.#castPage = page;
+        }
         return null;
     }
 
     async input(args) {
         const page = this.#page;
+        if (!["tab", "newTab", "closeTab"].includes(args.type) && (!page || page.isClosed()))
+            throw new Error("Select a browser tab first.");
         switch (args.type) {
             case "move": await page.mouse.move(args.x, args.y); break;
             case "down": await page.mouse.move(args.x, args.y); await page.mouse.down({ button: args.button }); break;
@@ -152,7 +184,9 @@ export class Browser {
             case "tab": await this.#cli(["tab-select", String(args.index)]); await this.#select(this.#context.pages()[args.index]); break;
             case "newTab": await this.cli(["tab-new"]); break;
             case "closeTab": await this.cli(["tab-close", String(args.index)]); break;
-            case "resize": await page.setViewportSize({ width: args.width, height: args.height }); break;
+            case "resize":
+                if (this.#attached) throw new Error("Resize the attached browser in its own window.");
+                await page.setViewportSize({ width: args.width, height: args.height }); break;
             default: throw new Error("Unknown browser input.");
         }
         return ["tab", "newTab", "closeTab"].includes(args.type) ? this.state() : null;
@@ -162,11 +196,19 @@ export class Browser {
         if (this.#closing) return;
         this.#closing = true;
         try {
-            if (this.#context) {
-                await this.cast(false).catch(() => {});
-                await this.#context.close();
-                await this.#cli(["detach"], process.env, 3000).catch(() => {});
+            await this.cast(false).catch(() => {});
+            // Closing a connected Playwright client only disconnects that client.
+            // The CLI owns the extension relay, never the user's browser context.
+            if (this.#attached) await this.#browser?.close();
+            else await this.#context?.close();
+        } finally {
+            try {
+                if (this.#attached) await this.#cli(["detach"], process.env, 3000);
+                else if (this.#context) await this.#cli(["detach"], process.env, 3000).catch(() => {});
+            } finally {
+                this.#context = undefined;
+                this.#browser = undefined;
             }
-        } finally { this.#context = undefined; }
+        }
     }
 }

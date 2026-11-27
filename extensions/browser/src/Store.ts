@@ -1,4 +1,5 @@
 import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
+import { parseSource, type BrowserSource } from "./Source.js";
 
 export type BrowserTarget = { instance: string; profile: string };
 export type RuntimeRow = { instance: string; generation: string; executable: string };
@@ -9,6 +10,7 @@ export class BrowserStore {
     async initialize(): Promise<void> {
         await this.db.exec("CREATE TABLE IF NOT EXISTS runtimes (instance TEXT PRIMARY KEY, generation TEXT NOT NULL, executable TEXT NOT NULL)");
         await this.db.exec("CREATE TABLE IF NOT EXISTS profiles (instance TEXT NOT NULL, profile TEXT NOT NULL, PRIMARY KEY(instance, profile))");
+        await this.db.exec("CREATE TABLE IF NOT EXISTS profile_sources (instance TEXT NOT NULL, profile TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(instance, profile))");
         await this.db.exec("CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY, instance TEXT, profile TEXT, action TEXT, at INTEGER, ok INTEGER)");
         await this.db.exec("CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY, instance TEXT, profile TEXT, method TEXT, url TEXT, status INTEGER, at INTEGER)");
     }
@@ -33,7 +35,19 @@ export class BrowserStore {
         await this.db.run("INSERT OR IGNORE INTO profiles VALUES (?, ?)", [target.instance, target.profile]);
     }
 
+    async profileSource(target: BrowserTarget): Promise<BrowserSource> {
+        const row = await this.db.get<{ source: string }>("SELECT source FROM profile_sources WHERE instance=? AND profile=?", [target.instance, target.profile]);
+        return row ? parseSource(JSON.parse(row.source)) : { kind: "managed" };
+    }
+
+    async setProfileSource(target: BrowserTarget, source: BrowserSource): Promise<void> {
+        await this.ensureProfile(target);
+        await this.db.run("INSERT INTO profile_sources VALUES (?, ?, ?) ON CONFLICT(instance, profile) DO UPDATE SET source=excluded.source",
+            [target.instance, target.profile, JSON.stringify(source)]);
+    }
+
     async removeProfile(target: BrowserTarget): Promise<void> {
+        await this.db.run("DELETE FROM profile_sources WHERE instance=? AND profile=?", [target.instance, target.profile]);
         await this.db.run("DELETE FROM profiles WHERE instance=? AND profile=?", [target.instance, target.profile]);
     }
 

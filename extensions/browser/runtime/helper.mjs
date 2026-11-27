@@ -11,6 +11,7 @@ let sendingFrame = false;
 let closed = false;
 const output = {
     message: value => { if (!closed) void send(encodeMessage(value)).catch(() => {}); },
+    disconnected: () => { void stop().catch(error => console.error(error.message)); },
     frame: frame => {
         if (closed) return;
         latest = frame;
@@ -41,6 +42,7 @@ async function dispatch({ id, op, args }) {
     try {
         let result;
         switch (op) {
+            case "capabilities": result = ["managed", "extension"]; break;
             case "probe": result = await browser.probe(); break;
             case "files": result = await browser.files(); break;
             case "profile-delete": result = await browser.removeProfile(); break;

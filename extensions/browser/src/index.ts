@@ -5,6 +5,7 @@ import { routes, streams } from "@portable-devshell/extension/control";
 import { applications } from "@portable-devshell/extension/web";
 import { BrowserRuntime, identity } from "./Browser.js";
 import { BrowserStore, type BrowserTarget } from "./Store.js";
+import { parseSource } from "./Source.js";
 
 let runtime: BrowserRuntime | undefined;
 const usage = [
@@ -16,6 +17,7 @@ const usage = [
     "User commands:",
     "  runtime install <instance> <runtime-directory>",
     "  runtime list | runtime use <instance> <generation>",
+    "  profile source [managed | extension <channel> [profile-directory]]",
     "  profile delete | credential import <dotenv-file> | credential clear",
     "The model uses its current Instance. The native CLI requires --instance for profile operations.",
     "Open Browser from the DevShell WebUI for human control and profile management.",
@@ -63,6 +65,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
         if (args[0] === "runtime" && args[1] === "use" && args.length === 4)
             return result(await browser.useRuntime(args[2]!, args[3]!, invocation.signal));
         const { target, argv } = parse(args);
+        if (argv[0] === "profile" && argv[1] === "source" && argv.length > 2) {
+            if (argv[2] === "managed" && argv.length === 3)
+                return result(await browser.configureSource(target, { kind: "managed" }));
+            if (argv[2] === "extension" && (argv.length === 4 || argv.length === 5))
+                return result(await browser.configureSource(target, parseSource({
+                    kind: "extension", channel: argv[3], profileDirectory: argv[4],
+                })));
+            throw new Error("Usage: profile source [managed | extension <channel> [profile-directory]]");
+        }
         if (argv[0] === "profile" && argv[1] === "delete" && argv.length === 2) {
             await browser.removeProfile(target);
             return result("Profile deleted.");
@@ -107,6 +118,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
         if (body.op === "runtime-use") return browser.useRuntime(instance, string(body.args), invocation.signal);
         const target = { instance, profile: string(body.profile) };
         identity(target);
+        if (body.op === "profile-source") return store.profileSource(target);
+        if (body.op === "profile-source-set") return browser.configureSource(target, parseSource(body.args));
         if (body.op === "credentials") return browser.credentials.names(target);
         if (body.op === "credentials-import") return browser.credentials.replace(target, string(body.args));
         if (body.op === "credentials-clear") { await browser.credentials.clear(target); return null; }

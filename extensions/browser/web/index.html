@@ -112,12 +112,25 @@
         <div class="management-content" id="management-content">
             <section class="management-section" id="profile-section">
                 <h3>Profiles</h3>
-                <p>Keep browser sessions, cookies and site storage separate.</p>
+                <p>Choose a managed Chromium profile or connect to a browser already running on the selected Worker.</p>
                 <div class="section-card">
                     <label class="field-label" for="new-profile">Create a profile</label>
                     <div class="controls"><input id="new-profile" placeholder="Profile name" autocomplete="off"><button class="button primary" id="create"><svg class="icon"><use href="#icon-plus"/></svg>Create</button></div>
                     <div class="section-separator"></div>
-                    <div class="setting-row"><div><strong>Delete selected profile</strong><small>Removes this profile's browser data and credentials.</small></div><button class="button danger" id="delete-profile">Delete</button></div>
+                    <label class="field-label" for="profile-source-kind">Browser source</label>
+                    <select id="profile-source-kind"><option value="managed">Managed Chromium</option><option value="extension">Existing Chrome / Edge</option></select>
+                    <div id="profile-source-extension" hidden>
+                        <div class="section-separator"></div>
+                        <label class="field-label" for="profile-source-channel">Browser channel</label>
+                        <select id="profile-source-channel"></select>
+                        <div class="section-separator"></div>
+                        <label class="field-label" for="profile-source-directory">Browser profile directory (optional)</label>
+                        <input id="profile-source-directory" placeholder="Default, Profile 1, or auto-detect" autocomplete="off" spellcheck="false">
+                        <p class="field-hint">Install the official <a href="https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm" target="_blank" rel="noopener noreferrer">Playwright Extension</a> in the browser on this Worker. Approve the connection and choose tabs in that browser. Its existing profile and sign-in state remain in place.</p>
+                    </div>
+                    <div class="controls"><button class="button primary" id="profile-source-save">Save source</button></div>
+                    <div class="section-separator"></div>
+                    <div class="setting-row"><div><strong>Delete selected profile</strong><small>Removes DevShell data and credentials, not an external browser's profile.</small></div><button class="button danger" id="delete-profile">Delete</button></div>
                 </div>
             </section>
             <section class="management-section" id="credentials-section">

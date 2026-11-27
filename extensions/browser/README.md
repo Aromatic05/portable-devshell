@@ -1,6 +1,7 @@
 # DevShell Browser
 
-A command extension for Headless Chromium. Models use the Playwright CLI through
+A command extension for managed Headless Chromium and existing Chrome/Edge
+browsers. Models use the Playwright CLI through
 devshell browser; users can operate the same browser in the DevShell WebUI.
 No additional MCP tools, standalone web server, or system service is required.
 
@@ -38,6 +39,35 @@ Instance. File export uses the existing Artifact transfer service and the model'
 authoritative workspace. It does not overwrite existing destination files.
 The underlying Playwright CLI supplies the browser automation command vocabulary.
 
+## Attach an existing browser
+
+On a graphical Worker, install the official [Playwright Extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm)
+in the Chrome or Edge profile you want to use. Configure a DevShell profile
+as a connection to that browser (the optional directory is the browser's profile
+directory name, such as Default or Profile 1):
+
+    devshell browser --instance <instance> --profile edge profile source extension msedge "Profile 1"
+    devshell browser --instance <instance> --profile edge open
+    devshell browser --instance <instance> --profile edge snapshot
+    devshell browser --instance <instance> --profile edge close
+
+The same settings are available in Manage / Profiles. Approve the connection in
+the existing browser and select the tabs to share, or select nothing to create
+a new blank tab. An attached profile reuses the browser's actual profile and
+sign-in state, not a copied data directory. Its CLI and DevShell viewer operate
+the same tabs. Closing the DevShell session disconnects the extension without
+closing the browser or its tabs; Detach viewer only stops the viewer stream.
+Changing a profile's source requires the session to be closed. Only the user
+can change the source. Use `profile source managed` to select an independent
+Headless Chromium profile again, or `profile source` to inspect the current
+configuration.
+
+The official extension grants browser debugging access. Only approve connections
+for trusted agents and selected tabs. The browser runs on the selected Worker;
+no DevShell HTTP API, custom browser extension, or public CDP endpoint is needed.
+Install a current Browser runtime for attached mode; older runtimes remain
+compatible with managed profiles.
+
 Open Browser from the DevShell WebUI, select Instance/Profile, then Open / attach.
 The viewer supports navigation, tabs, keyboard, mouse, scrolling, text composition
 and paste. Detach viewer stops its capture subscription without closing Chromium.
@@ -47,9 +77,12 @@ Model command waits do not serialize human pointer/keyboard input.
 
 ## Profiles and credentials
 
-Profile storage is persistent on its Worker. Cookies and LocalStorage are managed
-by Chromium. Delete is an explicit user operation that removes the selected
-profile's data and its stored credentials. The default profile is named default.
+Managed profile storage is persistent on its Worker. Cookies and LocalStorage
+are managed by Chromium. Attached profiles reference the existing browser
+profile and store only DevShell configuration and output. Delete is an explicit
+user operation that removes the selected DevShell profile's data and stored
+credentials, never the external browser's user data. The default profile is
+named default and uses managed Chromium.
 
 Credential import accepts a Playwright dotenv file and replaces that profile's
 stored credentials. It is available in Manage or from the local Control owner CLI:
@@ -84,10 +117,18 @@ Control: Browser owns instance/profile sessions and Runtime assets; Session
 implements request/reply and latest-frame fan-out; Store owns the SQLite schema;
 Credentials manages profile-specific user input; Wire defines frame records.
 
-Worker: the Helper owns Chromium through public Playwright APIs. The upstream
-CLI attaches to the named pipe returned by browser.bind(). Browser files stay
+Worker: the Helper owns managed Chromium through public Playwright APIs and the
+upstream CLI attaches to the named pipe returned by browser.bind(). For attached
+browsers the CLI owns the official extension relay and exposes the bound
+Playwright endpoint through its JSON server listing. The Helper connects as a
+second client and does not close the browser context. Browser files stay
 inside the profile's separate CLI output directory. The DevShell Worker process
 byte stream carries control messages and JPEG frames.
+
+Runtime packaging applies a version-specific compatibility correction to the
+pinned Playwright dependency: fractional CDP device dimensions must be rounded
+before dispatching the integer viewport fields of the Screencast event.
+Remove the correction when adopting an upstream version that fixes the issue.
 
 WebUI: RemoteBrowser uses the existing Control RPC/Stream protocol; Input maps
 DOM events and composition; FrameView decodes the latest JPEG into Canvas;
@@ -104,6 +145,14 @@ runtime installed, including model commands and the actual rendered WebUI.
 
     node extensions/browser/test/Runtime.test.mjs /path/to/runtime
     pnpm testspace exec node /absolute/path/to/extensions/browser/test/Product.mjs /absolute/path/to/runtime
+
+Attached.test.mjs is an opt-in real-browser acceptance test. It requires the
+official extension in a running Chrome/Edge profile and two explicit connection
+approvals. It uses a fresh synthetic origin, tests JPEG frames and shared
+viewer/CLI control, then verifies the synthetic profile marker after detach and
+reattach. It does not use existing website credentials.
+
+    node extensions/browser/test/Attached.test.mjs /path/to/runtime msedge "Profile 1"
 
 Linux x86_64 is the initial target; other runtime platform builds and abnormal
 descendant-process cleanup must be validated on their respective platforms.

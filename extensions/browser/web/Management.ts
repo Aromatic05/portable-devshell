@@ -1,4 +1,5 @@
 import type { RemoteBrowser, Target } from "./RemoteBrowser.js";
+import { browserChannels, type BrowserSource } from "../src/Source.js";
 import { icon } from "./Icons.js";
 
 export interface Instance { instance: string; ready: boolean; installed: boolean }
@@ -10,7 +11,7 @@ export function options(select: HTMLSelectElement, values: { value: string; labe
 }
 
 export class Management {
-    constructor(private api: RemoteBrowser, private selection: () => Target, private refresh: () => Promise<void>, private detach: () => void) {
+    constructor(private api: RemoteBrowser, private selection: () => Target, private refresh: (preferredProfile?: string) => Promise<void>, private detach: () => void) {
         this.bind("settings", async () => {
             get<HTMLDialogElement>("management").showModal();
             this.section("credentials-section");
@@ -30,13 +31,27 @@ export class Management {
             const name = get<HTMLInputElement>("new-profile").value.trim();
             if (!name) return;
             await this.api.request("command", this.selection(), ["profile", "create", name]);
-            await this.refresh(); get<HTMLSelectElement>("profile").value = name;
+            this.detach();
+            await this.refresh(name);
             get<HTMLInputElement>("new-profile").value = "";
             await this.load();
         });
+        const kind = get<HTMLSelectElement>("profile-source-kind");
+        const channel = get<HTMLSelectElement>("profile-source-channel");
+        options(channel, browserChannels.map(value => ({ value, label: value.startsWith("msedge") ? "Edge" + value.slice(6) : "Chrome" + value.slice(6) })));
+        kind.addEventListener("change", () => this.sourceFields());
+        this.bind("profile-source-save", async () => {
+            const directory = get<HTMLInputElement>("profile-source-directory").value.trim();
+            const source = kind.value === "extension" ? {
+                kind: "extension", channel: channel.value, ...(directory ? { profileDirectory: directory } : {}),
+            } : { kind: "managed" };
+            await this.api.request("profile-source-set", this.selection(), source);
+            await this.refresh(); await this.load();
+            get("management-status").textContent = "Browser source saved.";
+        });
         this.bind("delete-profile", async () => {
             const target = this.selection();
-            if (!confirm("Delete profile " + target.profile + " and its browser data?")) return;
+            if (!confirm("Delete DevShell profile " + target.profile + ", its managed data and credentials? External browser data is kept.")) return;
             this.detach(); await this.api.request("profile-delete", target);
             await this.refresh(); await this.load();
         });
@@ -94,19 +109,28 @@ export class Management {
         }));
     }
 
+    private sourceFields() {
+        get("profile-source-extension").hidden = get<HTMLSelectElement>("profile-source-kind").value !== "extension";
+    }
+
     async load() {
         const target = this.selection();
         get("managed-target").textContent = target.instance + " / " + target.profile;
-        const [instances, bundles, names] = await Promise.all([
+        const [instances, bundles, names, source] = await Promise.all([
             this.api.request<Instance[]>("runtimes"),
             this.api.request<string[]>("bundles"),
             this.api.request<string[]>("credentials", target),
+            this.api.request<BrowserSource>("profile-source", target),
         ]);
         const instance = instances.find(item => item.instance === target.instance);
         const runtimeStatus = get("runtime-status");
         runtimeStatus.textContent = instance?.installed ? "Installed" : "Not installed";
         runtimeStatus.dataset.installed = String(instance?.installed ?? false);
         options(get<HTMLSelectElement>("bundles"), bundles.map(value => ({ value, label: value.slice(0, 16) })));
+        get<HTMLSelectElement>("profile-source-kind").value = source.kind;
+        get<HTMLSelectElement>("profile-source-channel").value = source.kind === "extension" ? source.channel : "chrome";
+        get<HTMLInputElement>("profile-source-directory").value = source.kind === "extension" ? source.profileDirectory ?? "" : "";
+        this.sourceFields();
         this.showCredentials(names);
         this.empty("files", "Refresh to load files.");
         this.empty("activity", "Choose a log to view recent records.");

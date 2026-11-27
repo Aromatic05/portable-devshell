@@ -121,6 +121,28 @@ try {
     console.log("actual WebUI file download and independent browser logs: OK");
     await browser("close");
     await page.locator("#settings").click();
+    await page.waitForFunction(() => !document.querySelector("#settings").disabled);
+    await page.locator('[data-section="profile-section"]').click();
+    await page.locator("#profile-source-kind").selectOption("extension");
+    await page.locator("#profile-source-channel").selectOption("msedge");
+    await page.locator("#profile-source-directory").fill("Profile 1");
+    await page.locator("#profile-source-save").click();
+    await page.waitForFunction(() => document.querySelector("#management-status").textContent === "Browser source saved.");
+    assert.deepEqual(JSON.parse(await browser("profile", "source")), {
+        kind: "extension", channel: "msedge", profileDirectory: "Profile 1",
+    });
+    await page.locator("#settings-close").click();
+    await page.locator("#settings").click();
+    await page.waitForFunction(() => !document.querySelector("#settings").disabled);
+    await page.locator('[data-section="profile-section"]').click();
+    assert.equal(await page.locator("#profile-source-kind").inputValue(), "extension");
+    assert.equal(await page.locator("#profile-source-channel").inputValue(), "msedge");
+    assert.equal(await page.locator("#profile-source-directory").inputValue(), "Profile 1");
+    await page.locator("#profile-source-kind").selectOption("managed");
+    await page.locator("#profile-source-save").click();
+    await page.waitForFunction(() => document.querySelector("#management-status").textContent === "Browser source saved.");
+    assert.deepEqual(JSON.parse(await browser("profile", "source")), { kind: "managed" });
+    console.log("user WebUI attached profile configuration, model read and switch back to managed: OK");
     page.once("dialog", dialog => dialog.accept());
     await page.locator("#delete-profile").click();
     await page.waitForFunction(() => ![...document.querySelector("#profile").options].some(option => option.value === "product"));

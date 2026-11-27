@@ -4,6 +4,7 @@ import type { ExtensionContext, ExtensionJsonValue } from "@portable-devshell/ex
 import { BrowserCredentials } from "./Credentials.js";
 import { BrowserSession } from "./Session.js";
 import { BrowserStore, type BrowserTarget } from "./Store.js";
+import type { BrowserSource } from "./Source.js";
 
 export function identity(target: BrowserTarget): string {
     if (!/^[A-Za-z0-9_-]+$/.test(target.profile)) throw new Error("Invalid browser profile name.");
@@ -119,9 +120,26 @@ export class BrowserRuntime {
 
     async #start(target: BrowserTarget): Promise<BrowserSession> {
         await this.store.ensureProfile(target);
+        const source = await this.store.profileSource(target);
         const session = await this.#helper(target);
-        try { await session.request("open", { credentials: await this.credentials.read(target) }); return session; }
+        try {
+            if (source.kind === "extension") {
+                const capabilities = await session.request("capabilities").catch(() => null);
+                if (!Array.isArray(capabilities) || !capabilities.includes("extension"))
+                    throw new Error("Install a Browser runtime that supports attached browsers.");
+            }
+            await session.request("open", { source, credentials: await this.credentials.read(target) });
+            return session;
+        }
         catch (error) { await session.close().catch(() => undefined); throw error; }
+    }
+
+    async configureSource(target: BrowserTarget, source: BrowserSource): Promise<BrowserSource> {
+        return this.#transition(target, async () => {
+            if (await this.existing(target)) throw new Error("Close or disconnect the browser session before changing its source.");
+            await this.store.setProfileSource(target, source);
+            return source;
+        });
     }
 
     async command(target: BrowserTarget, argv: readonly string[], workspace?: string): Promise<ExtensionJsonValue> {
@@ -136,9 +154,13 @@ export class BrowserRuntime {
         if (command === "close") {
             await this.close(target);
             await this.store.action(target, command, true);
-            return "Browser closed.";
+            return (await this.store.profileSource(target)).kind === "extension" ? "Browser disconnected." : "Browser closed.";
         }
         if (command === "profile" && argv[1] === "list") return this.store.profiles(target.instance);
+        if (command === "profile" && argv[1] === "source") {
+            if (argv.length !== 2) throw new Error("Changing a browser profile source requires the user.");
+            return this.store.profileSource(target);
+        }
         if (command === "profile" && argv[1] === "create" && argv[2] !== undefined) {
             const created = { ...target, profile: argv[2] };
             identity(created); await this.store.ensureProfile(created); return created.profile;

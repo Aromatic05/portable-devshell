@@ -1,9 +1,10 @@
-import { cp, mkdir, rename, rm, stat, readFile, writeFile, copyFile } from "node:fs/promises";
+import { cp, mkdir, rename, rm, stat, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { playwrightCliVersion, stageRuntime } from "./Runtime.mjs";
 
 const run = promisify(execFile);
 const output = process.argv[2];
@@ -22,15 +23,13 @@ try {
         const source = resolve(prepared);
         const manifest = JSON.parse(await readFile(join(source, "runtime.json"), "utf8"));
         const cli = JSON.parse(await readFile(join(source, "node_modules/@playwright/cli/package.json"), "utf8"));
-        if (manifest.playwrightCli !== "0.1.25" || cli.version !== manifest.playwrightCli ||
+        if (manifest.playwrightCli !== playwrightCliVersion || cli.version !== manifest.playwrightCli ||
             !["bin/node", "bin/node.exe"].includes(manifest.executable))
             throw new Error("Prepared runtime does not match the pinned Playwright CLI.");
         await mkdir(runtime);
         for (const directory of ["bin", "browsers", "node_modules"])
             await cp(join(source, directory), join(runtime, directory), { recursive: true });
-        for (const name of ["Browser.mjs", "Files.mjs", "helper.mjs"])
-            await copyFile(new URL("../runtime/" + name, import.meta.url), join(runtime, name));
-        await copyFile(new URL("../dist/Wire.js", import.meta.url), join(runtime, "Wire.js"));
+        await stageRuntime(runtime);
         await writeFile(join(runtime, "package.json"), JSON.stringify({ private: true, type: "module" }));
         await writeFile(join(runtime, "runtime.json"), JSON.stringify(manifest, null, 4));
     } else {
