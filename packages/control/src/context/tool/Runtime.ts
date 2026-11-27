@@ -349,11 +349,13 @@ class ContextToolRuntime {
                     : bound,
             };
         }
-        if (bound?.status === "disabled")
-            await this.#contexts.registry.validate(bound.ctxId, { principal });
-
-        if (input.workspace === undefined)
+        if (input.workspace === undefined) {
+            if (bound?.status === "disabled")
+                await this.#contexts.registry.validate(bound.ctxId, { principal });
             throw unboundContext(!automatic);
+        }
+        // Bootstrap may establish a new Context for the same external Session.
+        // The binding moves only when the new environment is committed.
         return {
             bindings,
             created: true,

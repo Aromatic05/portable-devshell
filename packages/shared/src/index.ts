@@ -1,4 +1,4 @@
-export type { ControlMcpContextMode } from "./execution/toolcall/Type.js";
+export { statelessMcpContextId, type ControlMcpContextMode } from "./execution/toolcall/Type.js";
 export { connectControlChannel, CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX, CONTROL_REMOTE_RPC_PATH, CONTROL_REMOTE_RPC_SUBPROTOCOL, CONTROL_WEB_BASE_PATH, CONTROL_WEB_RPC_SUBPROTOCOL, type ControlChannelOptions, controlRemoteRpcPath, controlWebBasePath } from "./client/Control.js";
 export { ControlLifecycleManager, ControlLogger, ControlPidFile } from "./client/Daemon.js";
 export { ControlPathHome, ControlPathRuntime, ControlSocketFile, isWindowsNamedPipePath, removeControlIpcEndpoint } from "./client/Path.js";

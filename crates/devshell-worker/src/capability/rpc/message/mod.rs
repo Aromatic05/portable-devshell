@@ -53,6 +53,7 @@ pub mod request {
         pub request_id: Option<String>,
         pub operation_id: Option<String>,
         pub ctx_id: Option<String>,
+        pub context_mode: Option<String>,
         pub extension_id: Option<String>,
         pub source: Option<String>,
         pub workspace: Option<String>,

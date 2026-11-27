@@ -75,9 +75,9 @@ export class McpExtensionRegistry {
         );
     }
 
-    listResources(): readonly McpExtensionResourceDescriptor[] {
+    listResources(appEnabled = true): readonly McpExtensionResourceDescriptor[] {
         return this.#extensions.flatMap((extension) =>
-            (extension.resources ?? []).map((resource) =>
+            (extension.resources ?? []).filter((resource) => appEnabled || resource.app !== true).map((resource) =>
                 Object.freeze({
                     mimeType: resource.mimeType,
                     name: resource.name,
@@ -89,6 +89,7 @@ export class McpExtensionRegistry {
 
     async readResource(
         uri: string,
+        appEnabled = true,
     ): Promise<McpExtensionResourceReadResult | undefined> {
         let registration = this.#resources.get(uri);
         if (!registration) {
@@ -99,7 +100,7 @@ export class McpExtensionRegistry {
                 registration = candidate;
             }
         }
-        if (registration === undefined) return undefined;
+        if (registration === undefined || (!appEnabled && registration.resource.app === true)) return undefined;
         const content = await registration.resource.read(uri);
         if (
             typeof content !== "object" ||

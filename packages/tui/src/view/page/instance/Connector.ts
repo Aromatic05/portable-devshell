@@ -117,8 +117,18 @@ export function buildConnectorPageBoxes(
                       `Public MCP         ${publicValue}`,
                       ...(instanceName === undefined ? [] : [
                           "MCP modes          OpenAI: bare URL or /openai-session",
-                          "                   Gemini Web: add /explicit",
-                          "                   agy: add /agy-session",
+                          ...([
+                              ["Explicit", "/explicit"],
+                              ["AGY", "/agy-session"],
+                              ["Stateless", "/stateless"],
+                          ] as const).flatMap(([label, suffix]) => [
+                              `Local ${label.padEnd(13)}${localValue === "unavailable" ? localValue : localValue + suffix}`,
+                              `Public ${label.padEnd(12)}${publicValue === "unavailable" ? publicValue : publicValue + suffix}`,
+                          ]),
+                          ...(instanceConfig !== undefined &&
+                              (readPath(instanceConfig, "security.effectiveMode") ?? readPath(instanceConfig, "security.mode")) === "workspace"
+                              ? ["Stateless          unavailable for absolute paths under workspace security"]
+                              : []),
                       ]),
                       `Web UI             ${webEndpoint.value}`,
                       `Runtime            ${runtime.runtime}`,

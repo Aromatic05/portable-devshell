@@ -115,7 +115,7 @@ export async function executeInit(
     }
 
     const endpoint =
-        config.mcp.enabled && config.mcp.publicBaseUrl !== undefined
+        config.mcp.enabled && localInstance.mcp.enabled && config.mcp.publicBaseUrl !== undefined
             ? joinEndpoint(config.mcp.publicBaseUrl, localInstance.mcp.path)
             : undefined;
     const result: CliInitResult = {
@@ -127,7 +127,7 @@ export async function executeInit(
         instanceCreated,
         instanceEnabled: localInstance.enabled,
         instanceReady: snapshot?.ready ?? false,
-        mcpEnabled: config.mcp.enabled,
+        mcpEnabled: config.mcp.enabled && localInstance.mcp.enabled,
     };
     context.writeValue(result, renderInitResult(result));
     if (freshLike && isInteractive(context) && (await hasAccessCommand(context)))
@@ -151,8 +151,7 @@ function renderInitResult(result: CliInitResult): string {
         `Instance: ${result.instance}${result.instanceReady ? " (ready)" : result.instanceEnabled ? " (started)" : " (disabled)"}`,
     ];
     if (result.endpoint !== undefined) {
-        lines.push("", "MCP endpoints", `  OpenAI: ${result.endpoint}`,
-            `  Explicit (Gemini Web): ${result.endpoint}/explicit`, `  agy: ${result.endpoint}/agy-session`);
+        lines.push("", ...renderMcpEndpoints(result.endpoint));
     } else if (result.mcpEnabled) {
         lines.push("", "MCP", "  enabled (public URL not configured)");
     } else {
@@ -168,6 +167,12 @@ function renderInitResult(result: CliInitResult): string {
     }
     lines.push("", "Open DevShell", "  devshell tui", "");
     return lines.join("\n");
+}
+
+function renderMcpEndpoints(endpoint: string): string[] {
+    return ["MCP endpoints", `  OpenAI: ${endpoint}`,
+        `  Explicit (Gemini Web): ${endpoint}/explicit`, `  agy: ${endpoint}/agy-session`,
+        `  Stateless: ${endpoint}/stateless`];
 }
 
 async function offerRemoteAccess(context: CliDispatchContext, endpointPath: string): Promise<void> {
@@ -195,12 +200,12 @@ async function offerRemoteAccess(context: CliDispatchContext, endpointPath: stri
                 continue;
             }
             const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
-            if (/\/mcp(?:\/(?:openai-session|explicit|agy-session))?$/u.test(url.pathname.replace(/\/+$/u, ""))) {
+            if (/\/mcp(?:\/(?:openai-session|explicit|agy-session|stateless))?$/u.test(url.pathname.replace(/\/+$/u, ""))) {
                 context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
                 continue;
             }
             await context.clients.config.update({ mcp: { publicBaseUrl: base } });
-            context.stdout.write(`MCP public base URL configured: ${base}\nMCP endpoint: ${joinEndpoint(base, endpointPath)}\n`);
+            context.stdout.write(`MCP public base URL configured: ${base}\n${renderMcpEndpoints(joinEndpoint(base, endpointPath)).join("\n")}\n`);
             return;
         }
     }

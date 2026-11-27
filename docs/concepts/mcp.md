@@ -92,13 +92,16 @@ MCP 按请求选择两个共享 event bus 的 handler：
 
 ## Context selector
 
-同一 instance 的 MCP URL 同时提供三个模式：
+同一 instance 的 MCP URL 同时提供四个模式：
 
 - `/<instance>/mcp` 与 `/<instance>/mcp/openai-session`：OpenAI 会话绑定，保留 MCP App 私有能力；裸 URL 仍使用原 OAuth resource。
 - `/<instance>/mcp/agy-session`：agy 对话绑定。只提供会话绑定，不承诺客户端自动唤醒或续跑。
 - `/<instance>/mcp/explicit`：Gemini Web / 通用客户端，显式传递 `ctxId`。
+- `/<instance>/mcp/stateless`：不绑定会话或工作目录，不调用 `environ_info`，也不提供 MCP App。提供全部 10 个 Worker 基础工具：`bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep`、`tmux_run`、`tmux_read`、`tmux_input`、`tmux_inspect`、`tmux_manage`。
 
 `tools/list`、`tools/call` 和资源使用同一入口契约，不按 metadata 切换。OAuth audience 按完整 URL 校验。完整模型见 [Context](context.md)。
+
+`stateless` 由 URL 选定，不需要新 TOML 字段。文件参数必须使用 Worker 上的绝对路径，`bash_run`、`tmux_run` 及 `tmux_manage` 的 create 操作必须显式提供绝对 `cwd`。搜索 cursor 可以跨调用继续，不建立 Context 读取快照。Stateless tmux 使用 Instance 下独立于 Workspace 的命名空间，按 task/pane ID 访问；list 仅列出该命名空间，等待超时后由调用者继续读取任务，不创建 Context Wait。`file_edit` 不要求先读，但不改变 Worker 的权限；`security.mode = "workspace"` 仍拒绝绝对文件访问和绝对 `cwd`。`bash_run` 返回的 `stdoutPath` / `stderrPath` 可原样交给后续 `file_read`；调用者不需要原会话或 Context。
 
 ## 认证
 

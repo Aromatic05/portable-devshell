@@ -15,6 +15,7 @@ use crate::tool::file::model::{
 };
 use crate::tool::file::state::{
     ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextFormat, TextInspection,
+    TextMetadata,
 };
 use crate::tool::file::{
     FileToolState, create_parent_directories, resolve_create, resolve_create_plan,
@@ -200,7 +201,7 @@ impl FileEditTool {
                     let base = if entry.known {
                         None
                     } else {
-                        Some(self.require_snapshot(call, &resolved)?)
+                        Some(self.edit_base(call, &display, &resolved)?)
                     };
                     entry.known = true;
                     virtual_entries.insert(resolved.clone(), entry);
@@ -224,7 +225,7 @@ impl FileEditTool {
                     let base = if entry.known {
                         None
                     } else {
-                        Some(self.require_snapshot(call, &resolved)?)
+                        Some(self.edit_base(call, &display, &resolved)?)
                     };
                     entry.known = true;
                     virtual_entries.insert(resolved.clone(), entry);
@@ -247,7 +248,7 @@ impl FileEditTool {
                     let base = if entry.known {
                         None
                     } else {
-                        Some(self.require_snapshot(call, &resolved)?)
+                        Some(self.edit_base(call, &display, &resolved)?)
                     };
                     virtual_entries.insert(
                         resolved.clone(),
@@ -288,7 +289,7 @@ impl FileEditTool {
                     let base = if source_entry.known {
                         None
                     } else {
-                        Some(self.require_snapshot(call, &source_path)?)
+                        Some(self.edit_base(call, &source_display, &source_path)?)
                     };
                     virtual_entries.insert(
                         source_path.clone(),
@@ -369,7 +370,7 @@ impl FileEditTool {
                             }
                         };
                         let application = context_patch::apply(&original, &patch)?;
-                        require_coverage(&base, &application.required_lines)?;
+                        require_coverage(call, &base, &application.required_lines)?;
                         let (normalized, merged) = if current.revision == base.revision {
                             (application.normalized.clone(), false)
                         } else if may_merge {
@@ -454,11 +455,28 @@ impl FileEditTool {
         Ok(())
     }
 
-    fn require_snapshot(
+    fn edit_base(
         &self,
         call: &ToolCall,
+        display: &str,
         path: &Path,
     ) -> Result<ContextFileSnapshot, ToolError> {
+        if call.stateless {
+            let resolved = rebind_for_execution(call, display, path)?;
+            let metadata = TextMetadata::inspect_file(
+                resolved.open_file().map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                &call.cancellation,
+            )?;
+            return Ok(ContextFileSnapshot {
+                canonical_path: path.display().to_string(),
+                revision: metadata.revision,
+                seen_lines: BTreeSet::new(),
+                total_lines: metadata.total_lines,
+                content: SnapshotContent::Sparse,
+                ordinal: 0,
+                last_accessed_at_ms: 0,
+            });
+        }
         self.state
             .context_snapshots
             .lock()
@@ -755,7 +773,7 @@ impl FileEditTool {
             }
         };
         let application = context_patch::apply(&original, &patch)?;
-        require_coverage(&base, &application.required_lines)?;
+        require_coverage(call, &base, &application.required_lines)?;
         let (normalized, merged) = if current.revision == base.revision {
             (application.normalized.clone(), false)
         } else if may_merge {
@@ -815,7 +833,7 @@ impl FileEditTool {
             &call.cancellation,
         )?;
         require_revision_value(&base, &plan.inspection.metadata.revision)?;
-        require_coverage(&base, &plan.required_lines)?;
+        require_coverage(call, &base, &plan.required_lines)?;
         let seen = plan.remap_seen_lines(&base.seen_lines);
         let target = resolved
             .target()
@@ -868,18 +886,15 @@ impl FileEditTool {
                 "streaming patch did not produce output metadata",
             )
         })?;
-        let ordinal = self.state.next_snapshot_ordinal();
-        self.state
-            .context_snapshots
-            .lock()
-            .unwrap()
-            .remember_sparse(
-                &call.ctx_id,
-                &path,
-                &updated_metadata,
-                seen.iter().copied(),
-                ordinal,
+        let ordinal = if call.stateless {
+            0
+        } else {
+            let ordinal = self.state.next_snapshot_ordinal();
+            self.state.context_snapshots.lock().unwrap().remember_sparse(
+                &call.ctx_id, &path, &updated_metadata, seen.iter().copied(), ordinal,
             );
+            ordinal
+        };
         local_snapshots.insert(
             path.clone(),
             ContextFileSnapshot {
@@ -953,11 +968,9 @@ impl FileEditTool {
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
             .remove()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-        self.state
-            .context_snapshots
-            .lock()
-            .unwrap()
-            .remove_path(&call.ctx_id, &path);
+        if !call.stateless {
+            self.state.context_snapshots.lock().unwrap().remove_path(&call.ctx_id, &path);
+        }
         local_snapshots.remove(&path);
         let diff = before
             .as_deref()
@@ -1039,11 +1052,9 @@ impl FileEditTool {
             ));
         }
         atomic_move_no_replace_resolved(&source_target, &target_target)?;
-        self.state
-            .context_snapshots
-            .lock()
-            .unwrap()
-            .migrate_path(&call.ctx_id, &source, &target);
+        if !call.stateless {
+            self.state.context_snapshots.lock().unwrap().migrate_path(&call.ctx_id, &source, &target);
+        }
         let mut moved_snapshot = base;
         moved_snapshot.canonical_path = target.display().to_string();
         local_snapshots.remove(&source);
@@ -1076,6 +1087,9 @@ impl FileEditTool {
         seen: impl IntoIterator<Item = usize>,
     ) -> ContextFileSnapshot {
         let seen = seen.into_iter().collect::<BTreeSet<_>>();
+        if call.stateless {
+            return context_snapshot(path, text, seen, 0);
+        }
         let ordinal = self.state.next_snapshot_ordinal();
         if text.total_bytes <= FULL_SNAPSHOT_LIMIT {
             self.state.context_snapshots.lock().unwrap().remember_full(
@@ -1677,9 +1691,13 @@ fn require_revision_value(base: &ContextFileSnapshot, revision: &str) -> Result<
 }
 
 fn require_coverage(
+    call: &ToolCall,
     base: &ContextFileSnapshot,
     required: &BTreeSet<usize>,
 ) -> Result<(), ToolError> {
+    if call.stateless {
+        return Ok(());
+    }
     let missing = required
         .iter()
         .filter(|line| !base.seen_lines.contains(line))

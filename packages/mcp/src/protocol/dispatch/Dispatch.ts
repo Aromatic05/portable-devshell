@@ -1,5 +1,8 @@
 import {
     bootstrapToolNamespace,
+    contextErrorCodes,
+    createRemoteError,
+    statelessMcpContextId,
     toolNamespace,
     type ContextTransport,
     type ToolCallApi,
@@ -101,7 +104,8 @@ export class McpEndpointDispatch {
         const appOnlyInteraction = isAppOnlyInteractionTool(toolName);
         const provenanceInput = readMcpProvenanceInput(input);
         input = provenanceInput.input;
-        const resolvedContext = appOnlyInteraction
+        const stateless = this.#contextSelector.id === "stateless";
+        const resolvedContext = stateless ? undefined : appOnlyInteraction
             ? await this.#resolveAppOnlyContext(
                   input,
                   requestContext,
@@ -114,7 +118,7 @@ export class McpEndpointDispatch {
                       touch: false,
                   },
               );
-        input = resolvedContext.input;
+        if (resolvedContext !== undefined) input = resolvedContext.input;
         const routed =
             selected.scope !== "*"
                 ? readMcpRoutedInput(
@@ -123,7 +127,7 @@ export class McpEndpointDispatch {
                       this.#instanceName,
                   )
                 : { input, instance: this.#instanceName };
-        if (routed.instance !== this.#instanceName) {
+        if (routed.instance !== this.#instanceName && resolvedContext !== undefined) {
             // Validate an explicit target before entering ToolCall ingress.
             // A missing or masked attachment must never reach a Worker.
             await this.#context.resolve({
@@ -133,7 +137,13 @@ export class McpEndpointDispatch {
                 touch: false,
             });
         }
-        const context = this.#createToolContext(
+        const context: ToolCallContext = resolvedContext === undefined ? {
+            contextMode: "stateless",
+            ctxId: statelessMcpContextId,
+            principal: requestContext.principal,
+            requestId: requestContext.requestId,
+            source: "mcp",
+        } : this.#createToolContext(
             resolvedContext.record,
             requestContext,
             routed.instance,
@@ -148,6 +158,7 @@ export class McpEndpointDispatch {
             accepted = await this.#prepareCall(
                 callId,
                 finalValue,
+                toolName,
                 requestContext,
                 provenanceInput.provenance,
             );
@@ -178,16 +189,29 @@ export class McpEndpointDispatch {
     async #prepareCall(
         callId: string,
         value: ToolCallHookValue,
+        toolName: string,
         requestContext: McpEndpointCallContext,
         provenance: ToolCallProvenance,
     ): Promise<McpAcceptedCall> {
         const { instance, ctxId } = value.context;
-        await this.#context.resolve({
-            ctxId: ctxId!,
-            instance,
-            principal: requestContext.principal,
-            touch: true,
-        });
+        if (this.#contextSelector.id === "stateless") {
+            if (instance !== this.#instanceName || value.toolName !== toolName ||
+                ctxId !== statelessMcpContextId || value.context.contextMode !== "stateless" ||
+                value.context.workspace !== undefined) {
+                throw createRemoteError({
+                    code: contextErrorCodes.invalid,
+                    message: "Stateless tool calls cannot change tool, instance, or Context.",
+                    retryable: false,
+                });
+            }
+        } else {
+            await this.#context.resolve({
+                ctxId: ctxId!,
+                instance,
+                principal: requestContext.principal,
+                touch: true,
+            });
+        }
         const workspaceAdvice: string[] = [];
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {
             await this.#toolProvenance.record({ callId, ...provenance, instance }).catch(() => undefined);

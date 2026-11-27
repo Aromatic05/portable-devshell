@@ -35,6 +35,7 @@ impl ToolCancellation {
 #[derive(Clone)]
 pub struct ToolCall {
     pub workspace: PathBuf,
+    pub stateless: bool,
     pub params: serde_json::Value,
     pub ctx_id: String,
     pub operation_id: String,

@@ -49,6 +49,8 @@ export function Connections({
             : undefined;
     const missingInstance =
         instance !== undefined && selectedName === undefined;
+    const selectedSecurity = asRecord(instances.find((entry) => entry.name === selectedName)?.security);
+    const statelessBlocked = (selectedSecurity?.effectiveMode ?? selectedSecurity?.mode) === "workspace";
     const base = useMemo(
         () => connectionDrafts(configView, selectedName),
         [configView, selectedName],
@@ -252,7 +254,8 @@ export function Connections({
                     {selectedName === undefined ? null : (
                         <p className="hint">
                             OpenAI: use the bare MCP URL or append <code>/openai-session</code>.
-                            Gemini Web: append <code>/explicit</code>. agy: append <code>/agy-session</code>.
+                            Explicit (Gemini Web), AGY and Stateless use their own endpoints.
+                            Stateless uses absolute Worker paths without a Context.
                         </p>
                     )}
                     <dl>
@@ -268,6 +271,14 @@ export function Connections({
                                 ? "Select an instance"
                                 : publicMcpEndpoint(base)}
                         </dd>
+                        {selectedName === undefined ? null : ([
+                            ["Explicit", "/explicit"],
+                            ["AGY", "/agy-session"],
+                            ["Stateless", "/stateless"],
+                        ] as const).map(([label, suffix]) => (
+                            <ConnectionModeAddresses key={suffix} label={label} suffix={suffix}
+                                local={localMcpEndpoint(selectedName, base)} publicUrl={publicMcpEndpoint(base)} />
+                        ))}
                         <dt>Web UI</dt>
                         <dd>{configView === undefined ? "unknown" : webEndpoint(base)}</dd>
                         <dt>MCP runtime</dt>
@@ -283,6 +294,7 @@ export function Connections({
                                 : configView === undefined ? "unknown" : String(base.instanceMcp?.auth ?? "none")}
                         </dd>
                     </dl>
+                    {statelessBlocked ? <p className="notice">Stateless requires absolute paths, which workspace security denies.</p> : null}
                     {controlRestartRequired ? (
                         <p className="notice">
                             Saved endpoint configuration is pending a Control
@@ -1040,6 +1052,15 @@ function oauthDraft(value: unknown):
         resourceName:
             typeof record.resourceName === "string" ? record.resourceName : "",
     };
+}
+
+function ConnectionModeAddresses({ label, suffix, local, publicUrl }: {
+    label: string; suffix: string; local: string; publicUrl: string;
+}) {
+    return <>
+        <dt>Local {label}</dt><dd>{local === "unavailable" ? local : local + suffix}</dd>
+        <dt>Public {label}</dt><dd>{publicUrl === "unavailable" ? publicUrl : publicUrl + suffix}</dd>
+    </>;
 }
 
 function localMcpEndpoint(instance: string, drafts: ConnectionDrafts): string {

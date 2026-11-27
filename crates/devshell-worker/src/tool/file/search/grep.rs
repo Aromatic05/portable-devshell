@@ -112,6 +112,9 @@ impl ToolHandler for FileGrepTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
+        if call.stateless {
+            crate::tool::file::authorize(&call, crate::instance::sandbox::path::PathNamespace::Absolute, false)?;
+        }
         let input: FileGrepInput = call.parse_params()?;
         let (mut continuation, source_cursor) = if let Some(cursor) = input.cursor {
             if input.pattern.is_some()
@@ -147,6 +150,9 @@ impl ToolHandler for FileGrepTool {
                     "tool.invalidArguments",
                     "pattern cannot be empty",
                 ));
+            }
+            if call.stateless && input.paths.is_none() {
+                return Err(ToolError::new("tool.invalidArguments", "absolute paths are required when starting stateless file_grep"));
             }
             let paths = input.paths.unwrap_or_else(|| vec!["./".to_string()]);
             if paths.is_empty() {
@@ -265,6 +271,10 @@ impl ToolHandler for FileGrepTool {
         let mut prepared_snapshots = Vec::with_capacity(page.len());
         for matched in page {
             call.check_cancelled()?;
+            if call.stateless {
+                returned.push(matched.output);
+                continue;
+            }
             if matched.metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
                 let text = TextFile::read_file(
                     matched
@@ -308,7 +318,7 @@ impl ToolHandler for FileGrepTool {
             }
             returned.push(matched.output);
         }
-        {
+        if !call.stateless {
             let mut snapshots = self.state.context_snapshots.lock().unwrap();
             for snapshot in prepared_snapshots {
                 match snapshot {
@@ -392,7 +402,7 @@ fn refresh_pending_file(
         resolved: pending.resolved,
         metadata,
         seen,
-        ordinal: state.next_snapshot_ordinal(),
+        ordinal: if call.stateless { 0 } else { state.next_snapshot_ordinal() },
     }))
 }
 

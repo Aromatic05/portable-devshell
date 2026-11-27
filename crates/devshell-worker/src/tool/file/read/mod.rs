@@ -130,7 +130,7 @@ impl FileReadTool {
         if input.view == FileReadView::Metadata {
             return self.read_metadata(call, &input.path);
         }
-        let ordinal = self.state.next_snapshot_ordinal();
+        let ordinal = if call.stateless { 0 } else { self.state.next_snapshot_ordinal() };
         let (_, resolved) = resolve_existing(call, &input.path, false)?;
         if !resolved
             .metadata()
@@ -360,7 +360,7 @@ impl FileReadTool {
         }
 
         call.check_cancelled()?;
-        if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
+        if !call.stateless && metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
             let text = TextFile::read_file(
                 resolved
                     .open_file()
@@ -381,7 +381,7 @@ impl FileReadTool {
                 seen.clone(),
                 ordinal,
             );
-        } else {
+        } else if !call.stateless {
             self.state
                 .context_snapshots
                 .lock()
@@ -462,6 +462,9 @@ impl FileReadTool {
         seen: Vec<usize>,
         ordinal: u64,
     ) {
+        if call.stateless {
+            return;
+        }
         if metadata.total_bytes <= FULL_SNAPSHOT_LIMIT {
             self.state.context_snapshots.lock().unwrap().remember_full(
                 &call.ctx_id,

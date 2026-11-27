@@ -30,6 +30,13 @@ import {
     type McpModelOutputBudget,
 } from "./call/ModelOutput.js";
 
+const contextModeInstructions = {
+    "openai-session": "Call environ_info with the user's absolute workspace path before other tools. The client session binds the Context automatically; do not pass ctxId.",
+    "agy-session": "Call environ_info with the user's absolute workspace path before other tools. The client conversation binds the Context automatically; do not pass ctxId. Results are available as text; no MCP App.",
+    explicit: "Call environ_info with the user's absolute workspace path. Retain the returned ctxId and pass it to subsequent context-bound tools. No MCP App.",
+    stateless: "Call bash_run, file_read, file_edit, file_glob, file_grep and tmux tools directly using absolute Worker paths. bash_run, tmux_run and tmux_manage create require absolute cwd. Use returned cursor, task or pane IDs for follow-up calls. No workspace initialization or ctxId.",
+} as const;
+
 function requiresStreamingResponse(body: JsonValue): boolean {
     if (body === null || typeof body !== "object" || Array.isArray(body))
         return false;
@@ -101,7 +108,7 @@ export class McpEndpointBinding {
 
     #createServer(): Server {
         const endpoint = this.#endpoint;
-        const mirrorStructuredText = endpoint.contextMode !== "openai-session";
+        const mirrorStructuredText = endpoint.contextMode !== "openai-session" || !endpoint.hasAppResources();
         const resources = endpoint.listResources();
         const appResources = endpoint.hasAppResources();
         const server = new Server(
@@ -110,6 +117,7 @@ export class McpEndpointBinding {
                 version: this.#serverVersion,
             },
             {
+                instructions: contextModeInstructions[endpoint.contextMode],
                 capabilities: {
                     ...(appResources
                         ? { extensions: { [EXTENSION_ID]: {} } }

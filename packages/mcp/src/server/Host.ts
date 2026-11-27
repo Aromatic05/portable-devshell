@@ -193,6 +193,7 @@ export class McpHost {
                 ...createMcpRouteEntries({
                     ...common,
                     contextMode: "openai-session",
+                    appEnabled: () => this.#appReady,
                     extensions: new McpExtensionRegistry([mcpAppExtension]),
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
@@ -230,6 +231,8 @@ export class McpHost {
                     [`${path}/explicit`], version),
                 ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "agy-session" },
                     [`${path}/agy-session`], version),
+                ...createMcpRouteEntries({ ...common, appEnabled: false, contextMode: "stateless" },
+                    [`${path}/stateless`], version),
             ]);
         } catch (error) {
             if (mountApp) this.#appRoute?.unregister(instance.name);

@@ -170,6 +170,7 @@ test("init reconciles a running fresh-like Control through RPC without restartin
         "start:local-pc",
     ]);
     assert.match(renderedText, /DevShell is initialized/u);
+    assert.match(renderedText, /Stateless: http:\/\/127\.0\.0\.1:17890\/local-pc\/mcp\/stateless/u);
     assert.match(renderedText, /ds_[A-Za-z0-9_-]{40,}/u);
 });
 
@@ -459,6 +460,29 @@ for (const enabled of [true, false]) {
     });
 }
 
+test("init does not advertise MCP endpoints for a disabled instance", async () => {
+    const view = configView({ token: "********" });
+    view.instances[0]!.mcp.enabled = false;
+    let output = "";
+    let result: unknown;
+    const context = {
+        clients: {
+            config: { async get() { return view; } },
+            runtime(instance: string) {
+                return { async start() { return readySnapshot(instance); } };
+            },
+        },
+        controlNegotiated: true,
+        writeValue(value: unknown, text: string) {
+            result = value;
+            output = text;
+        },
+    } as unknown as CliDispatchContext;
+    assert.equal(await executeInit({ kind: "init" }, context), true);
+    assert.equal((result as { mcpEnabled: boolean }).mcpEnabled, false);
+    assert.doesNotMatch(output, /\/local-pc\/mcp/u);
+});
+
 function configView(input?: {
     enabled?: boolean;
     instances?: ConfigView["instances"];
@@ -523,7 +547,7 @@ test("interactive init validates a public base URL and displays the complete end
     let view = configView({ instances: [], token: undefined });
     const saved: ConfigMcpPatch[] = [];
     let output = "";
-    const stdin = Readable.from(["1\nnot-a-url\nftp://example.test\nhttps://user:pass@example.test\nhttps://example.test/?token=bad\nhttps://example.test/local-pc/mcp\nhttps://example.test/proxy/?\n"]) as Readable & { isTTY: boolean };
+    const stdin = Readable.from(["1\nnot-a-url\nftp://example.test\nhttps://user:pass@example.test\nhttps://example.test/?token=bad\nhttps://example.test/local-pc/mcp\nhttps://example.test/local-pc/mcp/stateless\nhttps://example.test/proxy/?\n"]) as Readable & { isTTY: boolean };
     stdin.isTTY = true;
     await executeInit({ kind: "init" }, {
         controlNegotiated: true, outputFormat: "text", stdin,
@@ -543,6 +567,8 @@ test("interactive init validates a public base URL and displays the complete end
     assert.equal(saved.filter((patch) => patch.publicBaseUrl !== undefined).length, 1);
     assert.match(output, /Public base URL/u);
     assert.match(output, /without the Instance endpoint/u);
-    assert.match(output, /MCP endpoint: https:\/\/example\.test\/proxy\/local-pc\/mcp/u);
+    for (const suffix of ["", "/explicit", "/agy-session", "/stateless"]) {
+        assert.ok(output.includes("https://example.test/proxy/local-pc/mcp" + suffix));
+    }
     assert.doesNotMatch(output, /mcp\/local-pc\/mcp/u);
 });

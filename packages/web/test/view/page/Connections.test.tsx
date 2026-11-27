@@ -369,6 +369,10 @@ it("separates saved addresses, unsaved preview and restart-pending configuration
     const saved = screen.getByRole("heading", { name: "Saved connection configuration" }).closest("article")!;
     const listener = screen.getByRole("heading", { name: "[Global] MCP listener" }).closest("article")!;
     expect(saved).toHaveTextContent(":3100");
+    for (const suffix of ["/explicit", "/agy-session", "/stateless"]) {
+        expect(saved).toHaveTextContent("http://127.0.0.1:3100/reverse-one/mcp" + suffix);
+        expect(saved).toHaveTextContent("https://mcp.example.test/reverse-one/mcp" + suffix);
+    }
     fireEvent.change(within(listener).getByLabelText("Listen port"), { target: { value: "3200" } });
     expect(saved).toHaveTextContent(":3100");
     expect(saved).not.toHaveTextContent(":3200");

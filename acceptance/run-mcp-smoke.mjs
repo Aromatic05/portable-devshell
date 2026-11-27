@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { createAcceptanceFixture, runCli } from "./AcceptanceSupport.mjs";
 
@@ -11,6 +12,150 @@ try {
     runCli(["start"], fixture.env);
     runCli(["instance", "start", "aromatic-pc"], fixture.env);
     const endpoint = `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp/explicit`;
+    const statelessEndpoint = new URL("./stateless", endpoint).href;
+    const listContexts = () => JSON.parse(runCli(["context", "list"], fixture.env).stdout);
+    const contextsBefore = listContexts();
+    const statelessList = await postJson(statelessEndpoint, {
+        jsonrpc: "2.0", id: "req-stateless-list", method: "tools/list",
+    });
+    assert.equal(statelessList.headers.get("mcp-session-id"), null);
+    const statelessTools = statelessList.body.result?.tools;
+    assert.deepEqual(statelessTools?.map(({ name }) => name).sort(), [
+        "bash_run", "file_edit", "file_glob", "file_grep", "file_read",
+        "tmux_input", "tmux_inspect", "tmux_manage", "tmux_read", "tmux_run",
+    ]);
+    for (const tool of statelessTools) {
+        assert.equal(Object.hasOwn(tool.inputSchema.properties, "ctxId"), false);
+        assert.equal(Object.hasOwn(tool.inputSchema.properties, "instance"), false);
+        assert.equal(tool._meta?.ui, undefined);
+    }
+    const statelessBash = statelessTools.find(({ name }) => name === "bash_run");
+    assert.ok(statelessBash.inputSchema.required.includes("cwd"));
+    assert.ok(statelessTools.find(({ name }) => name === "tmux_run").inputSchema.required.includes("cwd"));
+
+    const statelessCall = async (id, name, args) => (await postJson(statelessEndpoint, {
+        jsonrpc: "2.0", id: `req-stateless-${id}`, method: "tools/call",
+        params: { name, arguments: args },
+    })).body;
+    const missingCwd = await statelessCall("missing-cwd", "bash_run", { command: "pwd", timeoutMs: 30_000 });
+    assert.equal(missingCwd.error?.data?.code, "bash.invalidCwd", JSON.stringify(missingCwd));
+    const relativeCwd = await statelessCall("relative-cwd", "bash_run", {
+        command: "pwd", cwd: "./", timeoutMs: 30_000,
+    });
+    assert.equal(relativeCwd.error?.data?.code, "bash.invalidCwd", JSON.stringify(relativeCwd));
+    const absoluteCwd = await statelessCall("absolute-cwd", "bash_run", {
+        command: "pwd", cwd: fixture.workspace, timeoutMs: 30_000,
+    });
+    assert.equal(absoluteCwd.result?.structuredContent?.stdout?.trim(), fixture.workspace, JSON.stringify(absoluteCwd));
+
+    const statelessFile = join(fixture.workspace, "README.md");
+    const changes = (path) => `*** Begin Edit\n*** Patch File: ${path}\n@@\n-portable-devshell acceptance workspace\n+patched without a prior read\n*** End Edit`;
+    const relativeEdit = await statelessCall("relative-edit", "file_edit", { changes: changes("./README.md") });
+    assert.equal(relativeEdit.error?.data?.code, "file.invalidPath", JSON.stringify(relativeEdit));
+    const edit = await statelessCall("edit", "file_edit", { changes: changes(statelessFile) });
+    assert.equal(edit.error, undefined, JSON.stringify(edit));
+    assert.equal(await readFile(statelessFile, "utf8"), "patched without a prior read\n", JSON.stringify(edit));
+    const relativeRead = await statelessCall("relative-read", "file_read", {
+        files: [{ path: "./README.md", view: "content" }],
+    });
+    assert.equal(relativeRead.error?.data?.code, "file.invalidPath", JSON.stringify(relativeRead));
+    const absoluteRead = await statelessCall("absolute-read", "file_read", {
+        files: [{ path: statelessFile, view: "content", selector: "1:raw" }],
+    });
+    assert.equal(absoluteRead.result?.structuredContent?.files?.[0]?.content,
+        "1:patched without a prior read", JSON.stringify(absoluteRead));
+
+    const largeCommand = process.platform === "win32"
+        ? "1..2400 | ForEach-Object { [Console]::WriteLine(('line-{0:D4}' -f $_)) }"
+        : "awk 'BEGIN { for (i = 1; i <= 2400; i++) printf \"line-%04d\\n\", i }'";
+    const statelessOutput = await statelessCall("output", "bash_run", {
+        command: largeCommand, cwd: fixture.workspace, timeoutMs: 30_000,
+    });
+    const retained = statelessOutput.result?.structuredContent;
+    assert.equal(retained?.exitCode, 0, JSON.stringify(statelessOutput));
+    assert.equal(retained.stdoutTruncated, true);
+    assert.match(retained.stdoutPath, /^\/\.devshell\/tool-results\//u);
+    const statelessRecovered = await statelessCall("recover", "file_read", {
+        files: [{ path: retained.stdoutPath, view: "content", selector: "1200-1202:raw" }],
+    });
+    assert.equal(statelessRecovered.result?.structuredContent?.files?.[0]?.content,
+        "1200:line-1200\n1201:line-1201\n1202:line-1202", JSON.stringify(statelessRecovered));
+    // Search continuation tokens must work across independent MCP requests.
+    const searchDir = join(fixture.workspace, "stateless-search");
+    await mkdir(searchDir);
+    const searchNames = Array.from({ length: 65 }, (_, index) =>
+        `entry-${String(index).padStart(3, "0")}-${"a".repeat(40)}.txt`);
+    await Promise.all(searchNames.map((name) =>
+        writeFile(join(searchDir, name), "stateless-search-marker\n")));
+    for (const [tool, query, key] of [
+        ["file_glob", { patterns: [join(searchDir, "*.txt")] }, "entries"],
+        ["file_grep", { paths: [join(searchDir, "*.txt")], pattern: "stateless-search-marker" }, "files"],
+    ]) {
+        let cursor;
+        let pages = 0;
+        const paths = new Set();
+        do {
+            const result = await statelessCall(`${tool}-${pages++}`, tool, cursor ? { cursor } : query);
+            assert.equal(result.error, undefined, JSON.stringify(result));
+            const output = result.result.structuredContent;
+            for (const entry of output[key]) {
+                const path = entry.path.replaceAll("\\", "/");
+                assert.ok(!paths.has(path), path);
+                paths.add(path);
+                if (tool === "file_grep") assert.match(entry.content, /stateless-search-marker/u);
+            }
+            cursor = output.nextCursor;
+            assert.ok(pages < 20, "search cursor must terminate");
+        } while (cursor);
+        assert.ok(pages > 1);
+        assert.deepEqual([...paths].sort(), searchNames.map((name) => join(searchDir, name).replaceAll("\\", "/")).sort());
+    }
+    for (const [tool, args] of [
+        ["file_glob", { patterns: ["./*.txt"] }],
+        ["file_grep", { paths: ["./*.txt"], pattern: "marker" }],
+        ["file_grep", { pattern: "marker" }],
+        ["tmux_run", { command: "pwd" }],
+        ["tmux_run", { command: "pwd", cwd: "./" }],
+        ["tmux_manage", { command: "create", name: "invalid", cwd: "./" }],
+        ["tmux_manage", { command: "create", name: "invalid" }],
+    ]) {
+        const result = await statelessCall(`invalid-${tool}-${JSON.stringify(args)}`, tool, args);
+        assert.ok(result.error, JSON.stringify(result));
+    }
+
+    const mux = async (id, tool, args) => {
+        const result = await statelessCall(id, tool, args);
+        assert.equal(result.error, undefined, JSON.stringify(result));
+        return result.result.structuredContent;
+    };
+    assert.deepEqual((await mux("inspect-empty", "tmux_inspect", { panes: "all" })).panes, []);
+    const noPane = await statelessCall("input-empty", "tmux_input", { pane: "main", input: "x" });
+    assert.equal(noPane.error?.data?.code, "tmux.paneNotFound", JSON.stringify(noPane));
+    assert.deepEqual((await mux("list-empty", "tmux_manage", { command: "list" })).panes, []);
+    const createdPane = await mux("create-pane", "tmux_manage", {
+        command: "create", name: "stateless-pane", cwd: fixture.workspace,
+    });
+    const pane = createdPane.pane.id;
+    const listed = await mux("list-panes", "tmux_manage", { command: "list", scope: "instance" });
+    assert.ok(listed.panes.some((entry) => entry.id === pane && entry.workspace === undefined));
+    assert.ok((await mux("inspect-pane", "tmux_inspect", { pane })).panes.some((entry) => entry.id === pane));
+    const interactive = process.platform === "win32"
+        ? '$value = Read-Host "ready"; Write-Output "received:$value"'
+        : "printf 'ready\\n'; IFS= read -r value; printf 'received:%s\\n' \"$value\"";
+    const startedTask = await mux("run-task", "tmux_run", {
+        command: interactive, cwd: fixture.workspace, wait: "block", timeout: 1000,
+    });
+    assert.equal(startedTask.timedOut, true, JSON.stringify(startedTask));
+    assert.equal(startedTask.detached, undefined);
+    const task = startedTask.task.id;
+    const input = await mux("input-task", "tmux_input", { task, input: "hello^M", timeMs: 3000, line: -80 });
+    const finished = await mux("read-task", "tmux_read", { task, timeMs: 3000, line: -80 });
+    assert.equal(finished.task.status, "0", JSON.stringify(finished));
+    assert.match([...(input.output ?? []), ...(finished.output ?? [])].join("\n"), /received:hello/u);
+    const closed = await mux("close-pane", "tmux_manage", { command: "close", pane, force: true });
+    assert.equal(closed.closedPaneId, pane);
+    assert.ok(!(await mux("list-closed", "tmux_manage", { command: "list" })).panes.some((entry) => entry.id === pane));
+    assert.deepEqual(listContexts(), contextsBefore);
 
     const discover = await postJson(endpoint, {
         jsonrpc: "2.0",
@@ -59,6 +204,24 @@ try {
     assert.ok(Array.isArray(environment?.comment));
     assert.equal(environment?.platform, undefined);
 
+    // A bound workspace and the stateless endpoint must not share terminal resources.
+    const explicitMux = async (id, args) => {
+        const result = await postJson(endpoint, {
+            jsonrpc: "2.0", id, method: "tools/call",
+            params: { name: "tmux_manage", arguments: { ctxId, ...args } },
+        });
+        assert.equal(result.body.error, undefined, JSON.stringify(result.body));
+        return result.body.result.structuredContent;
+    };
+    const ordinaryPane = (await explicitMux("create-workspace-pane", {
+        command: "create", name: "workspace-pane", cwd: fixture.workspace,
+    })).pane.id;
+    const ordinaryList = await explicitMux("list-workspace-panes", { command: "list", scope: "instance" });
+    assert.ok(ordinaryList.panes.some((entry) => entry.id === ordinaryPane && entry.workspace));
+    assert.ok(ordinaryList.panes.every((entry) => !listed.panes.some((statelessPane) => statelessPane.id === entry.id)));
+    const independentList = await mux("list-independent", "tmux_manage", { command: "list" });
+    assert.ok(independentList.panes.every((entry) => !ordinaryList.panes.some((ordinary) => ordinary.id === entry.id)));
+
     const toolCall = await postJson(
         endpoint,
         {
@@ -81,9 +244,6 @@ try {
     // A real Worker retains the complete output while the model sees only
     // the budgeted MCP projection. Recover the middle from the retained
     // virtual artifact to prove the truncation is not destructive.
-    const largeCommand = process.platform === "win32"
-        ? "1..2400 | ForEach-Object { [Console]::WriteLine(('line-{0:D4}' -f $_)) }"
-        : "awk 'BEGIN { for (i = 1; i <= 2400; i++) printf \"line-%04d\\n\", i }'";
     const large = await postJson(endpoint, {
         jsonrpc: "2.0",
         id: "req-tools-large-output",
@@ -146,13 +306,14 @@ try {
                 toolCall: toolCall.body,
                 largeOutputRecoveryVerified: true,
                 agySessionBindingVerified: true,
+                statelessVerified: true,
             },
             null,
             2,
         ) + "\n",
     );
 } finally {
-    await fixture.cleanup();
+    await fixture.cleanup({ retireWorker: true });
 }
 
 async function postJson(url, body, headers = {}) {

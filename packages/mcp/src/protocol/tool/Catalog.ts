@@ -24,9 +24,11 @@ import {
     type McpTool,
 } from "./Schema.js";
 import {
+    statelessCwdHint,
     withMcpContextId,
     withMcpInstanceTarget,
     withMcpProvenance,
+    withStatelessCwd,
 } from "./Input.js";
 import type {
     McpToolSource,
@@ -35,7 +37,7 @@ import type {
 
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
-    appEnabled?: boolean;
+    appEnabled?: boolean | (() => boolean);
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
@@ -59,7 +61,7 @@ export class McpEndpointCatalog {
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
     readonly #source: McpToolSource;
-    readonly #appEnabled: boolean;
+    readonly #appEnabled: () => boolean;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
 
     constructor(options: McpEndpointCatalogOptions) {
@@ -71,14 +73,15 @@ export class McpEndpointCatalog {
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
-        this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true;
+        this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true && this.#contextSelector.id !== "stateless";
         this.#source = options.source;
-        this.#appEnabled = options.appEnabled !== false;
+        const appEnabled = options.appEnabled;
+        this.#appEnabled = typeof appEnabled === "function" ? appEnabled : () => appEnabled !== false;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
         return {
-            entries: this.#source.list(this.#instanceName).filter((entry) => this.#allowsTool(entry.definition.name)),
+            entries: this.#source.list(this.#instanceName).filter((entry) => this.#allowsEntry(entry)),
             instanceRoutingEnabled: this.#instanceRoutingEnabled,
         };
     }
@@ -96,24 +99,32 @@ export class McpEndpointCatalog {
         toolName: string,
         instanceName: string = this.#instanceName,
     ): ToolDefinition | undefined {
-        return this.#allowsTool(toolName) ? this.#source.get(instanceName, toolName)?.definition : undefined;
+        const entry = this.#source.get(instanceName, toolName);
+        return entry !== undefined && this.#allowsEntry(entry) ? entry.definition : undefined;
     }
 
     getEntry(toolName: string): McpToolSourceEntry | undefined {
-        return this.#allowsTool(toolName) ? this.#source.get(this.#instanceName, toolName) : undefined;
+        const entry = this.#source.get(this.#instanceName, toolName);
+        return entry !== undefined && this.#allowsEntry(entry) ? entry : undefined;
     }
 
-    #allowsTool(toolName: string): boolean {
-        return this.#appEnabled || !toolName.startsWith("mcpapp_");
+    #allowsEntry(entry: McpToolSourceEntry): boolean {
+        const name = entry.definition.name;
+        if (this.#contextSelector.id === "stateless")
+            return entry.scope === this.#instanceName && Object.hasOwn(statelessToolDescriptions, name);
+        return this.#appEnabled() || (!name.startsWith("mcpapp_") && isModelFacingTool(entry.definition));
     }
 
     adapt(tool: ToolDefinition): McpTool {
-        const modelTool = withBootstrapPresentation(
+        const stateless = this.#contextSelector.id === "stateless";
+        if (stateless && ["bash_run", "tmux_run"].includes(tool.name)) tool = withStatelessCwd(tool);
+        const appEnabled = this.#appEnabled();
+        const modelTool = appEnabled ? withBootstrapPresentation(
             tool,
             this.#bootstrapPresentationResourceUri,
             this.#toolCallPresentationResourceUri,
             this.#toolCallPresentationResourceUriForTool,
-        );
+        ) : { ...tool, _meta: withoutAppMetadata(asRecord(tool._meta)) };
         const provenanceTool =
             isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
                 ? modelTool
@@ -130,13 +141,16 @@ export class McpEndpointCatalog {
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            exposed.description.trim(),
+            (stateless ? statelessToolDescriptions[exposed.name] ?? exposed.description : exposed.description).trim(),
             {
                 hiddenInputProperties: [
                     ...mcpToolHiddenInputProperties(exposed._meta),
                     ...(!explicit && modelFacing ? ["ctxId"] : []),
                 ],
-                inputHints: mcpToolInputHints(exposed._meta),
+                inputHints: {
+                    ...mcpToolInputHints(exposed._meta),
+                    ...(stateless ? statelessInputHints[exposed.name] : undefined),
+                },
                 modelFacing,
                 preserveInputDescriptions: mcpToolPreserveInputDescriptions(
                     exposed._meta,
@@ -148,7 +162,7 @@ export class McpEndpointCatalog {
         const invocationStatus = mcpToolInvocationStatus(exposed._meta);
         const meta = {
             ...asRecord(adapted._meta),
-            ...(invocationStatus === undefined
+            ...(!appEnabled || invocationStatus === undefined
                 ? {}
                 : {
                       "openai/toolInvocation/invoked": invocationStatus.invoked,
@@ -179,6 +193,28 @@ export class McpEndpointCatalog {
             : entry.definition;
     }
 }
+
+const statelessToolDescriptions: Readonly<Record<string, string>> = {
+    bash_run: "Run a shell command in the supplied absolute working directory. Retained output paths can be passed to file_read.",
+    file_read: "Read absolute Worker paths or retained bash_run output paths. Use nextSelector to continue a truncated read.",
+    file_edit: "Apply one ordered change set using absolute Worker paths. No prior file_read is required; later operations do not execute after a failure.",
+    file_glob: "Locate files and directories by absolute Worker paths or globs. Continue a paged traversal with cursor alone.",
+    file_grep: "Search text across absolute Worker paths, directories or globs. Continue per-file truncation with startLine and traversal pages with cursor alone.",
+    tmux_run: "Start a managed long-running or interactive task in an absolute Worker cwd. wait defaults to nonblock. A block-wait timeout leaves the task running; continue with tmux_read or tmux_input.",
+    tmux_read: "Read or wait for a stateless managed task by task ID.",
+    tmux_input: "Send input to a stateless managed task or persistent pane.",
+    tmux_inspect: "Inspect stateless persistent panes by pane ID or name, or inspect all panes.",
+    tmux_manage: "List, create or close persistent panes and managed tasks in the stateless instance namespace. Create requires an absolute cwd.",
+};
+
+const statelessInputHints: Readonly<Record<string, Record<string, string>>> = {
+    bash_run: { cwd: statelessCwdHint, command: "Shell command." },
+    file_read: { path: "Absolute Worker file path or a retained bash_run output path." },
+    file_glob: { patterns: "Absolute Worker paths or globs; required without cursor." },
+    file_grep: { paths: "Absolute Worker paths or globs; required without cursor." },
+    tmux_run: { cwd: statelessCwdHint },
+    tmux_manage: { cwd: "Required absolute Worker directory for command=create.", scope: "Omit or use instance for command=list; only stateless panes are listed." },
+};
 
 function isBootstrapTool(name: string): boolean {
     return toolNamespace(name) === bootstrapToolNamespace;
@@ -233,6 +269,14 @@ function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : {};
+}
+
+export function withoutAppMetadata<T>(value: Record<string, T> | undefined): Record<string, T> | undefined {
+    if (value === undefined) return undefined;
+    const metadata = Object.fromEntries(Object.entries(value).filter(([key]) =>
+        key !== "ui" && !key.startsWith("ui/") && !key.startsWith("openai/") &&
+        key !== "portable-devshell/widgetPayload" && key !== "portable-devshell/mcpapp"));
+    return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
 function isModelFacingTool(tool: ToolDefinition): boolean {

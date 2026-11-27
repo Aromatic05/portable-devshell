@@ -57,7 +57,7 @@ export function compareVersions(left, right) {
     return 0;
 }
 
-export function nextPatchVersion(version) {
+export function nextDevelopmentVersion(version) {
     const [major, minor, patch] = parseVersion(version);
     const prerelease = versionPattern.exec(version)?.[4];
     if (prerelease !== undefined) {
@@ -70,7 +70,7 @@ export function nextPatchVersion(version) {
         }
         return `${major}.${minor}.${patch}-${parts.join(".")}`;
     }
-    return `${major}.${minor}.${patch + 1}`;
+    return `${major}.${minor + 1}.0`;
 }
 
 export async function readProjectVersions(root = defaultRepoRoot) {
@@ -165,7 +165,7 @@ export async function advanceAfterRelease(tag, root = defaultRepoRoot) {
     if (comparison > 0) {
         return { changed: false, version: current };
     }
-    const next = nextPatchVersion(released);
+    const next = nextDevelopmentVersion(released);
     await setProjectVersion(next, root);
     return { changed: true, version: next };
 }

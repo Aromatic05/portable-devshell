@@ -50,7 +50,7 @@ class UnifiedContextSelector implements McpContextSelector {
     bindings(
         requestContext: McpContextRequestContext,
     ): ContextExternalBinding[] {
-        if (this.requiresExplicitContextId) return [];
+        if (this.requiresExplicitContextId || this.id === "stateless") return [];
         const kind = this.id === "openai-session"
             ? "openai/session"
             : "antigravity.google/conversation_id";

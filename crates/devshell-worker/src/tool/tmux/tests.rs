@@ -61,6 +61,7 @@ fn paths(root: &Path) -> (InstancePaths, EndpointPaths, WorkerRuntimeContext) {
 fn call(workspace: &Path, params: Value) -> ToolCall {
     ToolCall {
         workspace: workspace.to_path_buf(), params, ctx_id: "fixture-context".into(),
+        stateless: false,
         operation_id: uuid::Uuid::new_v4().to_string(), source: Some("tui".into()),
         policy: Arc::new(DisabledSecurityPolicy), process_registry: Arc::new(ActiveProcessRegistry::new()),
         cancellation: ToolCancellation::default(), progress: ToolProgressEmitter::new(|_| {}),

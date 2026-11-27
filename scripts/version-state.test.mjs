@@ -115,7 +115,7 @@ test("version checks accept a CRLF Cargo lockfile", async () => {
     }
 });
 
-test("release check requires an exact tag and post-release advance bumps one patch", async () => {
+test("release check requires an exact tag and post-release advance bumps one minor", async () => {
     const root = await createRepository("0.4.2", "v0.4.1");
     try {
         assert.equal(run(root, "check-release", "v0.4.2").status, 0);
@@ -124,13 +124,13 @@ test("release check requires an exact tag and post-release advance bumps one pat
         assert.equal(
             JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
                 .version,
-            "0.4.3",
+            "0.5.0",
         );
         assert.equal(run(root, "advance-after-release", "v0.4.2").status, 0);
         assert.equal(
             JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
                 .version,
-            "0.4.3",
+            "0.5.0",
         );
     } finally {
         await rm(root, { force: true, recursive: true });

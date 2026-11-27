@@ -253,8 +253,9 @@ pub struct TmuxPaneSummary {
     pub id: String,
     pub name: String,
     pub status: String,
-    /// Original backend workspace used to address this pane; independent of its current cwd.
-    pub workspace: String,
+    /// Original backend workspace, omitted for stateless panes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

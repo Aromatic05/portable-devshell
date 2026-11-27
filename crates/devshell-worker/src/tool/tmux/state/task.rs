@@ -151,7 +151,7 @@ pub fn pane_ref(pane: &BackendPane) -> TmuxPaneRef {
     }
 }
 
-pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>, workspace: String) -> TmuxPaneSummary {
+pub fn pane_summary(pane: &BackendPane, task: Option<&TaskRecord>, workspace: Option<String>) -> TmuxPaneSummary {
     TmuxPaneSummary {
         id: pane.id.clone(),
         name: pane.name.clone(),
