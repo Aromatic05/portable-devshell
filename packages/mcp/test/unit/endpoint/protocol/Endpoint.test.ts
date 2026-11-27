@@ -920,6 +920,33 @@ test("tools/call returns a structured hint when the tool fails", async () => {
     }
 });
 
+test("tools/call keeps a confirmed task handle in the model-visible error", async (t) => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const harness = createWorkerHarness({
+        async callHandler() {
+            throw createRemoteError({
+                code: "process.hostFailed",
+                message: `Task started (taskId=${taskId}). Inspect this task; do not repeat the creation call.`,
+                retryable: false,
+                details: { taskId, taskStart: "confirmed", stdoutTail: "private tail" },
+            });
+        },
+    });
+    const server = await createBindingServer(createBinding(harness));
+    t.after(() => server.close());
+    const session = await initialize(server.url);
+    const ctxId = await createContext(server.url, session.headers);
+    const response = await postJson(
+        server.url,
+        withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+        session.headers,
+    );
+    assert.equal(response.body.error?.data?.code, "process.hostFailed");
+    assert.equal(response.body.error?.data?.retryable, false);
+    assert.deepEqual(response.body.error?.data?.details, { taskId, taskStart: "confirmed" });
+    assert.match(response.body.error?.message ?? "", /do not repeat the creation call/u);
+});
+
 test("tools/call exposes correctable input errors without masking their code", async () => {
     const harness = createWorkerHarness({
         async callHandler() {

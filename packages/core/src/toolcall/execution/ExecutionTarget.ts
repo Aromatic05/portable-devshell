@@ -28,7 +28,7 @@ import type {
 } from "@portable-devshell/shared";
 import { createErrorFromBody } from "./Error.js";
 import { assertMcpOutboundResult, mcpOutboundResult } from "./Presentation.js";
-import { attachToolCallErrorPayload } from "./ErrorPayload.js";
+import { attachToolCallErrorPayload, readToolCallErrorPayload } from "./ErrorPayload.js";
 import {
     interpretTerminalValue,
     runOutboundPipeline,
@@ -78,6 +78,21 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     }
 
     async dispatch(request: ToolCallDispatchRequest): Promise<JsonValue> {
+        const execution: { task?: TaskCreationEvidence } = {};
+        try {
+            const result = await this.#dispatch(request, execution);
+            assertTaskDelivery(execution.task, result, request.callId);
+            return result;
+        } catch (error) {
+            if (execution.task === undefined) throw error;
+            throw preserveTaskError(error, execution.task);
+        }
+    }
+
+    async #dispatch(
+        request: ToolCallDispatchRequest,
+        execution: { task?: TaskCreationEvidence },
+    ): Promise<JsonValue> {
         const {
             callId,
             execute,
@@ -148,6 +163,8 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             throw error;
         }
 
+        const createsTask = hookValue.toolName === "bash_run" ||
+            (hookValue.toolName === "task_manage" && record(innerInput)?.command === "create");
         let reservation: WorkerToolSchedulerReservation;
         try {
             reservation = this.#toolCallScheduler.reserve(
@@ -275,8 +292,23 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                               signal,
                               hookProgress,
                           );
+                    if (createsTask) {
+                        const native = isPresentedToolCallResult(result);
+                        const id = taskResultId(native ? result.result : result);
+                        if (id !== undefined)
+                            execution.task = { id, start: "confirmed", completed: true, native };
+                    }
                     appliedEdit = hookValue.toolName === "file_edit" && hasAppliedFileEdit(result);
                     return result;
+                } catch (error) {
+                    if (createsTask && execution.task === undefined) {
+                        const details = record(toRemoteErrorBody(error)?.details);
+                        const id = details?.taskId;
+                        const start = details?.taskStart;
+                        if (typeof id === "string" && id.length > 0 && (start === "confirmed" || start === "unknown"))
+                            execution.task = { id, start, completed: false, native: false };
+                    }
+                    throw error;
                 } finally {
                     if (heartbeat !== undefined) clearInterval(heartbeat);
                     // Only an applied, completed edit advances durable progress;
@@ -340,8 +372,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                                 : mcpOutboundResult(adaptedResult, presentation),
                         },
                     }));
-                if (presentation !== undefined && hookValue.kind !== "error") {
-                    assertMcpOutboundResult(hookValue.payload);
+                if (hookValue.kind !== "error") {
+                    if (presentation !== undefined) assertMcpOutboundResult(hookValue.payload);
+                    assertTaskDelivery(execution.task, hookValue.payload, callId);
                 }
             } catch (error) {
                 failureStage = "outboundHook";
@@ -442,8 +475,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     classifiedFailure,
                     hookValue,
                 );
-                if (hasNativePresentation && outerFailure.value.kind !== "error") {
-                    assertMcpOutboundResult(outerFailure.value.payload);
+                if (outerFailure.value.kind !== "error") {
+                    if (hasNativePresentation) assertMcpOutboundResult(outerFailure.value.payload);
+                    assertTaskDelivery(execution.task, outerFailure.value.payload, callId);
                 }
             } catch (error) {
                 failureStage = "outboundHook";
@@ -559,6 +593,53 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage, callId);
         }
     }
+}
+
+interface TaskCreationEvidence {
+    readonly id: string;
+    readonly start: "confirmed" | "unknown";
+    readonly completed: boolean;
+    readonly native: boolean;
+}
+
+function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function taskResultId(value: JsonValue | undefined): string | undefined {
+    const id = record(record(value)?.task)?.id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function assertTaskDelivery(task: TaskCreationEvidence | undefined, value: JsonValue, callId: string): void {
+    if (task === undefined) return;
+    const result = task.native ? record(value)?.structuredContent : value;
+    if (!task.completed || taskResultId(result) !== task.id ||
+        record(result)?.error !== undefined || (task.native && record(value)?.isError === true)) {
+        throw outboundHookFailure(task.completed, callId);
+    }
+}
+
+function preserveTaskError(error: unknown, task: TaskCreationEvidence): Error {
+    const body = toRemoteErrorBody(error);
+    const details = body?.details;
+    const message = task.start === "confirmed" ? "Task started" : "Task start could not be confirmed";
+    const preserved = createRemoteError({
+        ...body,
+        code: body?.code ?? runtimeErrorCodes.providerFailed,
+        details: {
+            ...(record(details) ?? (details === undefined ? {} : { originalDetails: details })),
+            taskId: task.id,
+            taskStart: task.start,
+        },
+        message: `${message} (taskId=${task.id}). Inspect this task before deciding what to do (task_input without input, or task_inspect for a PTY); do not repeat the creation call. ${errorMessage(error)}`,
+        retryable: false,
+    });
+    const payload = record(readToolCallErrorPayload(error));
+    return payload === undefined ? preserved : attachToolCallErrorPayload(preserved, {
+        ...payload,
+        error: preserved.toBody() as unknown as JsonValue,
+    });
 }
 
 function hasAppliedFileEdit(value: JsonValue | ToolCallPresentedResult): boolean {

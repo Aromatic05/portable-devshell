@@ -22,13 +22,21 @@ const processErrors: Readonly<Record<string, string>> = {
     "process.internal": "The Process Host reported an internal error. Inspect the Worker audit and retry only after the cause is known.",
 };
 
+function hasCreationHandle(body: RemoteErrorBody): boolean {
+    const details = asRecord(body.details);
+    return typeof details?.taskId === "string" && (details.taskStart === "confirmed" || details.taskStart === "unknown");
+}
+
 export function processErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
+    if (hasCreationHandle(body)) {
+        return [errorHint(body.code, "Inspect the recorded task ID before deciding what to do. Do not repeat the creation call.")];
+    }
     const message = processErrors[body.code];
     return message === undefined ? [] : [errorHint(body.code, message)];
 }
 
 export function taskErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
-    if (body.code === "tool.cancelled") {
+    if (body.code === "tool.cancelled" && !hasCreationHandle(body)) {
         return [
             errorHint(
                 "tool.cancelled",

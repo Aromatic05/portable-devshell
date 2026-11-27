@@ -115,23 +115,26 @@ export function projectAgentModelToolResult(
         ? toolName.slice("devshell_".length)
         : toolName;
     const rendered = renderAgentModelToolResult(projectionName, value);
-    if (
-        !isRecord(value) ||
-        !AGENT_MODEL_TOOL_PROJECTIONS.has(projectionName) ||
-        !Array.isArray(value.comment)
-    )
-        return limitModelToolResult(rendered);
-    const comments = value.comment.filter(
-        (entry): entry is string => typeof entry === "string" && entry.length > 0,
-    );
-    if (comments.length === 0) return limitModelToolResult(rendered);
-    // Comment may contain a new user instruction; reserve it before clipping
-    // routine tool output, rather than losing it in the semantic projection.
-    const advice = `comment:\n${comments.join("\n")}\n`;
-    const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - advice.length;
+    const comments = isRecord(value) && AGENT_MODEL_TOOL_PROJECTIONS.has(projectionName) && Array.isArray(value.comment)
+        ? value.comment.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+        : [];
+    // Preserve instructions before clipping routine output, but reserve the
+    // task creation handle even when instructions exhaust the result budget.
+    const advice = comments.length === 0 ? "" : `comment:\n${comments.join("\n")}\n`;
+    const task = rendered.length + advice.length > MAX_MODEL_TOOL_RESULT_CHARACTERS
+        ? retainedTaskHandle(projectionName, value) : "";
+    const remaining = MAX_MODEL_TOOL_RESULT_CHARACTERS - task.length - advice.length;
     return remaining <= 0
-        ? `${advice}[tool result omitted: comment exceeds the result budget]`
-        : `${advice}${limitModelToolResult(rendered, remaining)}`;
+        ? `${task}${advice}[tool result omitted: comment exceeds the result budget]`
+        : `${task}${advice}${limitModelToolResult(rendered, remaining)}`;
+}
+
+function retainedTaskHandle(toolName: string, value: ExtensionJsonValue): string {
+    if ((toolName !== "bash_run" && toolName !== "task_manage") || !isRecord(value)) return "";
+    const details = isRecord(value.error) && isRecord(value.error.details) ? value.error.details : undefined;
+    if (typeof details?.taskId === "string" && (details.taskStart === "confirmed" || details.taskStart === "unknown"))
+        return `taskId=${details.taskId} taskStart=${details.taskStart}. Inspect the task; do not repeat the creation call.\n`;
+    return isRecord(value.task) && typeof value.task.id === "string" ? `taskId=${value.task.id}\n` : "";
 }
 
 function projectAgentModelInputSchema(

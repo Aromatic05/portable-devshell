@@ -290,3 +290,17 @@ test("Agent exposes uncertain durable Wait registration without suggesting repla
     assert.match(text, /Continue with task_input/u);
     assert.doesNotMatch(text, /rerun the original call/u);
 });
+
+
+test("model projection preserves successful and failed creation handles when comments exhaust the budget", () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const comment = ["user instruction ".repeat(20_000)];
+    assert.match(projectAgentModelToolResult("bash_run", {
+        task: { id: taskId }, termination: "running", comment,
+    }), new RegExp(`^taskId=${taskId}\\n`, "u"));
+    assert.match(projectAgentModelToolResult("task_manage", {
+        comment,
+        error: { code: "process.hostFailed", message: "read failed", retryable: false,
+            details: { taskId, taskStart: "confirmed" } },
+    }), new RegExp(`^taskId=${taskId} taskStart=confirmed.*do not repeat the creation call`, "u"));
+});

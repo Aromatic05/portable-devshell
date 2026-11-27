@@ -145,6 +145,24 @@ test("control tool route forwards execution metadata but not internal error deta
     });
 });
 
+test("control tool route retains the original task handle without forwarding capture details", async () => {
+    const taskId = "process-00000000-0000-4000-8000-000000000001";
+    const handle = callHandler(async () => {
+        throw createRemoteError({
+            code: "process.hostFailed", message: "Read failed after spawn", retryable: false,
+            details: { taskId, taskStart: "confirmed", stderrTail: "private output" },
+        });
+    });
+    const result = await handle({
+        id: "recover-task", name: "call",
+        payload: { input: { command: "true" }, toolName: "bash_run", workspace: "/workspace" },
+    }, routeContext("recover-task")) as { error: unknown };
+    assert.deepEqual(result.error, {
+        code: "process.hostFailed", message: "Read failed after spawn", retryable: false,
+        details: { taskId, taskStart: "confirmed" },
+    });
+});
+
 test("control tool stream forwards progress before completing the unchanged final result", async () => {
     const emitted: Array<{ name: string; payload?: JsonValue }> = [];
     let completed: JsonValue | undefined;

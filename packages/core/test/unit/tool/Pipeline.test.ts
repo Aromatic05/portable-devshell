@@ -5,6 +5,7 @@ import {
     asInstanceName,
     createRemoteError,
     createToolCallRuntime,
+    toRemoteErrorBody,
     runtimeErrorCodes,
     type JsonValue,
     type ToolCallHookValue,
@@ -256,6 +257,81 @@ test("a post-execution outbound failure reports executionCompleted to the caller
     assert.equal(harness.invoked.length, 1);
     assert.equal(resultHookCalls, 1);
     assert.equal(errorHookCalls, 0, "failed result rewrite must not re-enter the same broken hook");
+});
+
+const taskId = "process-00000000-0000-4000-8000-000000000001";
+
+for (const fault of ["adapt", "progress", "terminal-error", "terminal-omission", "terminal-substitution", "worker-error-rewrite", "worker-error-throw", "worker-error-to-result"] as const) {
+    test(`a started task remains recoverable after ${fault}`, async (t) => {
+        t.mock.method(console, "warn", () => undefined);
+        const workerError = fault.startsWith("worker-error");
+        const harness = createHarness("instance-a", {
+            invoke: async (_name, _input, _context, progress) => {
+                if (workerError) throw createRemoteError({
+                    code: "process.hostFailed", message: "failed to read", retryable: true,
+                    details: { taskId, taskStart: "confirmed" },
+                });
+                progress?.({ output: "progress" });
+                return { task: { id: taskId }, termination: "running" };
+            },
+            rewrites: [({ direction, value }): ToolCallHookValue => {
+                if (direction === "inbound") return value;
+                if (value.kind === "progress" && fault === "progress") throw new Error("progress failed");
+                if (value.kind === "result" && fault === "terminal-omission")
+                    return { ...value, payload: { output: "no task" } };
+                if (value.kind === "result" && fault === "terminal-substitution")
+                    return { ...value, payload: { task: { id: "wrong-task" } } };
+                if (value.kind === "error" && fault === "worker-error-to-result")
+                    return { ...value, kind: "result", payload: { task: { id: taskId }, termination: "running" } };
+                if (value.kind === "error" && fault === "worker-error-throw") throw new Error("error hook failed");
+                if ((value.kind === "result" && fault === "terminal-error") ||
+                    (value.kind === "error" && fault === "worker-error-rewrite")) {
+                    return { ...value, kind: "error", payload: {
+                        error: { code: "tool.outputRewriteFailed", message: "rewritten", retryable: true,
+                            details: { taskId: "wrong-task", taskStart: "unknown" } },
+                    } };
+                }
+                return value;
+            }],
+        });
+        await assert.rejects(harness.runtime.api.call(
+            asInstanceName("instance-a"), "bash_run", { command: "true" }, context, undefined,
+            async (result) => {
+                if (fault === "adapt") throw new Error("adaptation failed");
+                return result;
+            }, undefined, () => undefined,
+        ), (error: unknown) => {
+            const body = toRemoteErrorBody(error);
+            assert.ok(body);
+            assert.equal(body.retryable, false);
+            assert.match(body.message, /Task started .*Inspect this task.*do not repeat the creation call/u);
+            assert.deepEqual((body.details as Record<string, JsonValue>).taskId, taskId);
+            assert.deepEqual((body.details as Record<string, JsonValue>).taskStart, "confirmed");
+            return true;
+        });
+        assert.equal(harness.invoked.length, 1);
+        assert.ok(!harness.audit.includes("completed"));
+    });
+}
+
+test("an unacknowledged terminal spawn retains its candidate ID, without claiming it started", async () => {
+    const harness = createHarness("instance-a", {
+        invoke: async () => { throw createRemoteError({
+            code: "process.hostFailed", message: "spawn response lost", retryable: true,
+            details: { taskId, taskStart: "unknown" },
+        }); },
+    });
+    await assert.rejects(harness.runtime.api.call(
+        asInstanceName("instance-a"), "task_manage", { command: "create" }, context,
+    ), (error: unknown) => {
+        const body = toRemoteErrorBody(error);
+        assert.ok(body);
+        assert.deepEqual(body.details, { taskId, taskStart: "unknown" });
+        assert.equal(body.retryable, false);
+        assert.match(body.message, /Task start could not be confirmed/u);
+        return true;
+    });
+    assert.equal(harness.invoked.length, 1);
 });
 
 test("outbound error rewrite failure preserves original error identity in private diagnostics", async (t) => {
