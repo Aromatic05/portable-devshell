@@ -109,7 +109,7 @@ test("MCP does not expose instance attachment management tools", () => {
     assert.equal(remoteSchema.oneOf, undefined);
     assert.equal(remoteSchema.properties?.command?.type, "string");
     assert.equal(remoteSchema.properties?.command?.enum, undefined);
-    assert.deepEqual(remoteSchema.required, ["command", "ctxId"]);
+    assert.deepEqual(remoteSchema.required, ["command"]);
     assert.equal(
         (
             tools.find((tool) => tool.name === "bash_run")?.inputSchema as {
