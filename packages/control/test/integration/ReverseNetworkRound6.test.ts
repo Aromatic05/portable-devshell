@@ -29,6 +29,7 @@ test("Round6 WSS replay of old sequences after newer ACKs does not redeliver RPC
     const f = await fixture(t);
     const worker = f.connect(await f.enroll(), 9);
     await worker.ready;
+    await until(() => worker.acks.filter((ack) => ack !== "DSR2:ready").length === worker.frames.length);
     const count = worker.acks.length;
     await worker.replay(2);
     await worker.replay(0);

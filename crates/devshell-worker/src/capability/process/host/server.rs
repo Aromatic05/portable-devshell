@@ -69,6 +69,9 @@ pub(crate) fn serve(instance: &InstanceName) -> Result<(), String> {
     while !host.stopped.load(Ordering::Acquire) {
         match listener.accept() {
             Ok(channel) => {
+                channel.set_nonblocking(false).map_err(|error| {
+                    format!("failed to set accepted Process Host stream blocking: {error}")
+                })?;
                 let host = Arc::clone(&host);
                 std::thread::spawn(move || {
                     if let Err(error) = host.handle(channel) {
