@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { number, record, redact, safeValue, string, type ToolCallPresentation } from "./ToolCallModel.js";
 import {
-    CodeLines, FileTree, InfoStrip, KeySummary, Notice, Stat, TaskState, Terminal,
+    CodeLines, FileTree, InfoStrip, KeySummary, Notice, Stat, Terminal,
     UnifiedDiff, ValueRows, fileLanguage,
 } from "./ToolCallPrimitives.js";
 

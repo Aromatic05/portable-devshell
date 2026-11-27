@@ -20,7 +20,6 @@ const require = createRequire(
     new URL("../../packages/control/package.json", import.meta.url),
 );
 const toml = require("smol-toml");
-const { blake3 } = require("hash-wasm");
 const TESTSPACE_OWNER_FILE = ".portable-devshell-testspace-owner.json";
 const TESTSPACE_OWNER_KIND = "portable-devshell-testspace";
 export const TESTSPACE_RUNTIME_UID_ENV = "DEVSHELL_TESTSPACE_RUNTIME_UID";

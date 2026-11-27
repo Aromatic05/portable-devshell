@@ -97,6 +97,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         } catch (error) {
             const task = execution.task;
             if (task === undefined) throw error;
+            let failure = error;
             // The Worker may have completed its last cancellation check before
             // the cancel packet arrived. Its raw reply is still authoritative.
             // Until Core returns the result, Core owns late cancellation cleanup.
@@ -105,7 +106,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     await this.#toolInvoker.invoke("task_manage", { command: "close", task: task.id },
                         executionContext(request.value.context));
                 } catch (cleanup) {
-                    error = createRemoteError({
+                    failure = createRemoteError({
                         code: runtimeErrorCodes.toolCallCancelled,
                         message: "Task creation was cancelled; termination could not be confirmed.",
                         cause: cleanup,
@@ -113,7 +114,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     });
                 }
             }
-            throw preserveTaskError(error, task);
+            throw preserveTaskError(failure, task);
         }
     }
 

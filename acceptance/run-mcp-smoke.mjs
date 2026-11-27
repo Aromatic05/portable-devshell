@@ -129,7 +129,7 @@ try {
     };
     const noTask = await statelessCall("input-empty", "task_input", { task: "missing", input: "x" });
     assert.ok(noTask.error, JSON.stringify(noTask));
-    const before = await processTool("list-before", "task_manage", { command: "list" });
+    await processTool("list-before", "task_manage", { command: "list" });
     const created = await processTool("create-terminal", "task_manage", {
         command: "create", name: "stateless-smoke", cwd: fixture.workspace,
     });

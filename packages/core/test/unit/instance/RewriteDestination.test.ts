@@ -29,14 +29,14 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
     const workerRuns: string[] = [];
     let resolveWait!: () => void;
     const waitResolved = new Promise<void>((resolve) => { resolveWait = resolve; });
-    const workers: Array<{ endpoint: Endpoint; rpc: Rpc }> = [];
+    const workers: Array<{ endpoint: Endpoint; rpc: Rpc; control: Rpc }> = [];
     const states: InstanceState[] = [];
     t.after(async () => {
         streams.close();
         bridge.close();
         host.close();
         for (const state of states) await state.close();
-        for (const worker of workers) { worker.rpc.close(); worker.endpoint.close(); }
+        for (const worker of workers) { worker.rpc.close(); worker.control.close(); worker.endpoint.close(); }
         await rm(root, { recursive: true, force: true });
     });
     const definitions: ToolDefinition[] = ["bash_run", "task_input"].map((name) => ({
@@ -47,10 +47,25 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
         const paths = new InstancePaths(instanceName, root);
         const audit = createAuditRuntime({ instanceName, filePath: paths.auditDatabaseFile, eventBufferSize: 100 });
         const endpoint = new Endpoint({ host: `${name}-worker` });
+        const pins = new Map<string, string>();
+        const control = new Rpc(endpoint.bind("core"), {
+            "process.wait.confirm": (payload) => {
+                const { owner, id } = payload as { owner: string; id: string };
+                return { retained: pins.get(owner) === id };
+            },
+            "process.wait.reconcile": (payload) => {
+                const { owners } = payload as { owners: string[] };
+                for (const owner of pins.keys())
+                    if (!owners.includes(owner)) pins.delete(owner);
+                return { reconciled: true };
+            },
+        });
         const rpc = new Rpc(endpoint.bind("tool"), {
             bash_run: (payload) => {
                 workerRuns.push(name);
-                assert.equal((payload as { input: { waitMs: number } }).input.waitMs, WAIT_HANDOFF_MS);
+                const request = payload as { input: { waitMs: number }; context: { operationId: string; waitHandoff?: boolean } };
+                assert.equal(request.input.waitMs, WAIT_HANDOFF_MS);
+                if (request.context.waitHandoff) pins.set(request.context.operationId, "beta-task");
                 return { task: { id: "beta-task", status: "running" }, termination: "running", waitReason: "timeout", waitMs: WAIT_HANDOFF_MS };
             },
             task_input: (payload) => {
@@ -61,7 +76,7 @@ test("A to B rewrite executes Goal and detached Wait on destination B over Targe
                 return { waitReason: "terminal", termination: "exited", exitCode: 0, task: { id: "beta-task", status: "0" } };
             },
         });
-        workers.push({ endpoint, rpc });
+        workers.push({ endpoint, rpc, control });
         let seq = 0;
         const state = new InstanceState({
             acquireLease: () => ({ release() {} }),
