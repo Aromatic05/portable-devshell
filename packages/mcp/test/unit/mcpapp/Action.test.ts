@@ -41,6 +41,7 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
         const store = new McpAppActionStore({ filePath });
         await store.initialize();
         const endpoint = (actions: McpAppActionStore) => new McpEndpoint({
+            contextMode: "openai-session",
             context: transport,
             instanceName: "local",
             toolSource: source,

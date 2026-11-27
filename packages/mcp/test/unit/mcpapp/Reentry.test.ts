@@ -56,6 +56,7 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
             },
         }; } };
         const endpoint = new McpEndpoint({
+            contextMode: "openai-session",
             context: { resolve: contexts.resolve },
             instanceName: "local", toolSource: source, tools: native.api,
             mcpAppActions: receipts, mcpAppView: view as never,

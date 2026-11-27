@@ -40,6 +40,7 @@ export async function betaReentry() {
     const source = new TestToolSource();
     source.register("local", [mcpAppReentryDefinition()]);
     const endpoint = (store = actions) => new McpEndpoint({
+        contextMode: "openai-session",
         context: { resolve: contexts.resolve }, instanceName: "local", toolSource: source, tools: native.api, mcpAppActions: store,
         mcpAppView: { async snapshot() { return {
             presentation: { work: [{ id: started.goalId, title: started.objective }] },
