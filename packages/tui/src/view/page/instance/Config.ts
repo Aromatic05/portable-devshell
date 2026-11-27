@@ -119,11 +119,6 @@ export function buildConfigPageBoxes(
                     "mcp.enabled",
                     readPath(draft, "mcp.enabled"),
                 ),
-                choiceLine(
-                    "mcp.contextMode",
-                    "mcp.contextMode",
-                    readPath(draft, "mcp.contextMode"),
-                ),
                 {
                     id: "mcp-path",
                     text: `mcp.path           ${stringValue(readPath(draft, "mcp.path"), `/${instanceName}/mcp`)} (fixed)`,
@@ -137,13 +132,6 @@ export function buildConfigPageBoxes(
                     [
                         "enabled",
                         stringValue(readPath(draft, "mcp.enabled"), "false"),
-                    ],
-                    [
-                        "context",
-                        stringValue(
-                            readPath(draft, "mcp.contextMode"),
-                            "openai-session",
-                        ),
                     ],
                 ),
             ],
@@ -652,7 +640,6 @@ function instanceDraft(
               },
               mcp: {
                   auth: "none",
-                  contextMode: "openai-session",
                   enabled: true,
                   path: `/${instanceName}/mcp`,
               },

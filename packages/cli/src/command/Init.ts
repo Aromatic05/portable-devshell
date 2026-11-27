@@ -87,7 +87,6 @@ export async function executeInit(
         await context.clients.instance.createInstance({
             mcp: {
                 auth: "oauth2",
-                contextMode: "openai-session",
                 oauth2: {
                     requiredScopes: ["mcp"],
                     resourceName: defaultInitialInstanceName,
@@ -152,7 +151,8 @@ function renderInitResult(result: CliInitResult): string {
         `Instance: ${result.instance}${result.instanceReady ? " (ready)" : result.instanceEnabled ? " (started)" : " (disabled)"}`,
     ];
     if (result.endpoint !== undefined) {
-        lines.push("", "MCP endpoint", `  ${result.endpoint}`);
+        lines.push("", "MCP endpoints", `  OpenAI: ${result.endpoint}`,
+            `  Explicit (Gemini Web): ${result.endpoint}/explicit`, `  agy: ${result.endpoint}/agy-session`);
     } else if (result.mcpEnabled) {
         lines.push("", "MCP", "  enabled (public URL not configured)");
     } else {
@@ -195,7 +195,7 @@ async function offerRemoteAccess(context: CliDispatchContext, endpointPath: stri
                 continue;
             }
             const base = `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
-            if (url.pathname.replace(/\/+$/u, "").endsWith("/mcp") || base.endsWith(endpointPath)) {
+            if (/\/mcp(?:\/(?:openai-session|explicit|agy-session))?$/u.test(url.pathname.replace(/\/+$/u, ""))) {
                 context.stdout.write(`Enter the base URL without the Instance endpoint ${endpointPath}.\n`);
                 continue;
             }

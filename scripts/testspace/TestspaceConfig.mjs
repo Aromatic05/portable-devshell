@@ -84,7 +84,6 @@ export function buildTestspaceInstanceConfig() {
         "[mcp]",
         "enabled = true",
         'auth = "none"',
-        'contextMode = "explicit"',
         `path = "/${TESTSPACE_INSTANCE}/mcp"`,
         "",
         "[extensions]",
@@ -114,7 +113,6 @@ export function buildTestspaceReverseInstanceConfig() {
         "[mcp]",
         "enabled = true",
         'auth = "none"',
-        'contextMode = "explicit"',
         `path = "/${TESTSPACE_REVERSE_INSTANCE}/mcp"`,
         "",
         "[extensions]",
@@ -136,8 +134,8 @@ export function buildTestspaceReverseInstanceConfig() {
 
 export function testspaceUrls({ mcpPort, webPort }) {
     return {
-        mcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_INSTANCE}/mcp`,
-        reverseMcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_REVERSE_INSTANCE}/mcp`,
+        mcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_INSTANCE}/mcp/explicit`,
+        reverseMcp: `http://127.0.0.1:${mcpPort}/${TESTSPACE_REVERSE_INSTANCE}/mcp/explicit`,
         web: `http://127.0.0.1:${webPort}/web/`,
     };
 }

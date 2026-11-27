@@ -27,7 +27,6 @@ const schema: InstanceCreateSchema = {
         ],
     },
     defaultEnabled: true,
-    defaultMcpContextMode: "explicit",
     defaultMcpEnabled: true,
     defaultModelExtensions: ["instance"],
     defaultProvider: "local",
@@ -121,7 +120,6 @@ function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
         enabled: instance.enabled,
         mcp: {
             auth: { mode: instance.mcp.auth.mode },
-            contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
             path: instance.mcp.path,
         },

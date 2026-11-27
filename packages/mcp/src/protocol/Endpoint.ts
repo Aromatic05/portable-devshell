@@ -13,14 +13,15 @@ import type { McpToolSource } from "./tool/Source.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
-import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
+import { isAppOnlyInteractionTool, McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type { McpEndpointCallContext } from "./call/Port.js";
-import type { McpEndpointResult } from "./call/Boundary.js";
+import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
 import type { McpModelOutputBudget } from "./call/ModelOutput.js";
 
 export type { McpEndpointCallContext } from "./call/Port.js";
 
 export interface McpEndpointOptions {
+    appEnabled?: boolean;
     auth?: McpAuthConfig;
     context: Pick<ContextTransport, "resolve">;
     contextMode?: ControlMcpContextMode;
@@ -54,6 +55,7 @@ export class McpEndpoint {
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
+            appEnabled: options.appEnabled,
             bootstrapPresentationResourceUri:
                 this.#extensions.environmentPresentation()?.resourceUri,
             toolCallPresentationResourceUri:
@@ -106,15 +108,26 @@ export class McpEndpoint {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
+        const hideContext = this.contextMode !== "explicit" && !isAppOnlyInteractionTool(toolName);
+        if (hideContext) input = withoutContextId(input);
         const intercepted = await this.#toolAdapter?.call(toolName, input, requestContext, signal);
         if (intercepted !== undefined) return intercepted;
-        const result = await this.#dispatch.callTool(toolName, input, requestContext, signal);
+        const executed = await this.#dispatch.callTool(toolName, input, requestContext, signal);
+        const result = !hideContext ? executed : executed instanceof McpNativeToolResult
+            ? new McpNativeToolResult({ ...executed, structuredContent: withoutContextId(executed.structuredContent) })
+            : withoutContextId(executed);
         return this.#toolAdapter?.present(toolName, result, requestContext, input) ?? result;
     }
 
     catalogSnapshot() {
         return this.#catalog.snapshot();
     }
+}
+
+function withoutContextId(value: JsonValue): JsonValue {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || !("ctxId" in value)) return value;
+    const { ctxId: _ctxId, ...visible } = value;
+    return visible;
 }
 
 export { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";

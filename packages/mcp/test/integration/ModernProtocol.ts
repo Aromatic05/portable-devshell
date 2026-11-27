@@ -1,12 +1,8 @@
 /**
  * Raw-fetch helpers for the strict modern MCP protocol revision (2026-07-28).
  *
- * The 2025 stateless fallback was removed from `McpEndpointBinding`, so a
- * request must carry the documented per-request `_meta` envelope plus the
- * standard `MCP-Protocol-Version` / `Mcp-Method` (and, for named methods,
- * `Mcp-Name`) request headers. These helpers build exactly that wire shape so
- * integration tests exercise the real modern handshake instead of the retired
- * legacy one.
+ * Use the per-request `_meta` envelope and standard version/method headers
+ * to exercise the modern transport independently of the endpoint's Context mode.
  */
 
 export const MODERN_PROTOCOL_VERSION = "2026-07-28";

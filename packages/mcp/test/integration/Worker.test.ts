@@ -147,7 +147,7 @@ import { tmpdir } from "node:os";
                 await host.start();
 
                 const port = requireTcpPort(host.server.address);
-                const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
+                const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp/explicit`;
 
                 const discovery = await postJson(
                     endpoint,
@@ -1073,7 +1073,7 @@ import { tmpdir } from "node:os";
             await instance.start();
             await host.start();
             const port = requireTcpPort(host.server.address);
-            const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
+            const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp/explicit`;
             const discovery = await postJson(
                 endpoint,
                 modernRpcRequest("server-discover", "server/discover"),

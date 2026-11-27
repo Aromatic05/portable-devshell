@@ -93,7 +93,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                                 resourceName: "demo",
                             },
                         },
-                        contextMode: "explicit",
                         enabled: true,
                         path: "/demo/mcp",
                     },

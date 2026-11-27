@@ -46,7 +46,7 @@ export async function createWorkflowFixture(record) {
     ].join("\n"));
     await writeFile(join(devshellHome, "control", "instances", `${instance}.toml`), [
         "version = 4", `name = "${instance}"`, "enabled = true", 'provider = "local"',
-        "[mcp]", "enabled = true", 'auth = "none"', 'contextMode = "explicit"', `path = "/${instance}/mcp"`,
+        "[mcp]", "enabled = true", 'auth = "none"', `path = "/${instance}/mcp"`,
         "[extensions]", 'model = ["artifact", "instance", "mcp", "secret", "skill"]',
         "[logs]", "eventBufferSize = 10000", "",
     ].join("\n"));
@@ -82,7 +82,7 @@ export async function createWorkflowFixture(record) {
     let previousPid;
     return {
         root, home, runtime, workspace, env, worker, control, cli,
-        endpoint: `http://127.0.0.1:${port}/${instance}/mcp`,
+        endpoint: `http://127.0.0.1:${port}/${instance}/mcp/explicit`,
         state: join(devshellHome, instance, "control-worker"),
         async start() {
             // Mark before launch so a failed readiness check still tears down our daemon.

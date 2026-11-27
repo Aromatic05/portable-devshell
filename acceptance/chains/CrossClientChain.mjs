@@ -98,7 +98,7 @@ try {
         };
         await authoritative("ready");
         mcp = new Client({ name: "round7-crossclient", version: "1" }, { versionNegotiation: { mode: "auto" } });
-        await mcp.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${fixture.port}/${instance}/mcp`)));
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${fixture.port}/${instance}/mcp/explicit`)));
         const call = async (name, args) => {
             const result = await within(mcp.callTool({ name, arguments: args }), `MCP ${name}`);
             assert.notEqual(result.isError, true, `${name}: ${JSON.stringify(result)}`);

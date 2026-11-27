@@ -249,6 +249,12 @@ export function Connections({
                 <article className="card connection-status-card">
                     <h3>Saved connection configuration</h3>
                     <p className="hint">Configured addresses; runtime reachability is not verified here.</p>
+                    {selectedName === undefined ? null : (
+                        <p className="hint">
+                            OpenAI: use the bare MCP URL or append <code>/openai-session</code>.
+                            Gemini Web: append <code>/explicit</code>. agy: append <code>/agy-session</code>.
+                        </p>
+                    )}
                     <dl>
                         <dt>Local MCP</dt>
                         <dd>
@@ -878,12 +884,6 @@ function connectionDrafts(
     return {
         instanceMcp: {
             auth: authMode(mcp?.auth),
-            contextMode:
-                mcp?.contextMode === "openai-session"
-                    ? "openai-session"
-                    : mcp?.contextMode === "explicit"
-                      ? "explicit"
-                      : "openai-session",
             enabled: mcp?.enabled !== false,
             oauth2: oauthDraft(mcp?.oauth2),
             path:

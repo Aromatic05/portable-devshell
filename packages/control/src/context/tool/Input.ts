@@ -7,7 +7,7 @@ import {
 export function readEnvironmentInfoInput(
     input: JsonValue,
     allowContextId: boolean,
-): { ctxId?: string; workspace?: string } {
+): { ctxId?: string; workspace: string } {
     if (
         !isRecord(input) ||
         Object.keys(input).some(
@@ -17,17 +17,17 @@ export function readEnvironmentInfoInput(
     ) {
         throw invalidArguments(
             allowContextId
-                ? "environ_info accepts only optional ctxId and workspace."
-                : "environ_info accepts only optional workspace when Context authority is externally bound.",
+                ? "environ_info requires workspace and accepts an optional ctxId."
+                : "environ_info accepts only workspace when Context authority is externally bound.",
         );
     }
     const ctxId = allowContextId
         ? optionalString(input.ctxId, "ctxId")
         : undefined;
-    const workspace = optionalString(input.workspace, "workspace");
+    const workspace = requiredString(input.workspace, "workspace");
     return {
         ...(ctxId === undefined ? {} : { ctxId }),
-        ...(workspace === undefined ? {} : { workspace }),
+        workspace,
     };
 }
 

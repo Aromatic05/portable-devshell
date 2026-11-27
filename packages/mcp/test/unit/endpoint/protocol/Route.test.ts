@@ -4,8 +4,7 @@ import test from "node:test";
 import type { McpAuthConfig } from "../../../../src/oauth/Config.ts";
 import type { McpOAuthProtectedResource } from "../../../../src/oauth/Route.ts";
 import { McpEndpointBinding } from "../../../../src/protocol/Binding.ts";
-import { McpProtocolRoute } from "../../../../src/protocol/Route.ts";
-import type { McpHostRouteEntry } from "../../../../src/protocol/Registry.ts";
+import { McpProtocolRoute, type McpHostRouteEntry } from "../../../../src/protocol/Route.ts";
 import type { McpHttpRoute } from "../../../../src/server/Api.ts";
 import { createTestMcpEndpoint } from "../../../ContextRuntime.ts";
 
@@ -37,39 +36,37 @@ function recordingHttp() {
     };
 }
 
-test("Protocol live replacement is atomic when the new middleware fails to mount", () => {
+test("Protocol replacement publishes and removes an entire instance route group", () => {
     const port = recordingHttp();
     const protocol = new McpProtocolRoute(port.http);
-    const original = makeEntry("demo", "/ok");
-    protocol.register(original);
+    const original = [makeEntry("demo", "/demo/mcp"), makeEntry("demo", "/demo/mcp/explicit")];
+    protocol.register("demo", original);
     protocol.start();
-    assert.deepEqual(port.paths(), ["/ok"]);
+    assert.deepEqual(port.paths(), ["/demo/mcp", "/demo/mcp/explicit"]);
 
-    const failed = makeEntry("demo", "/fail");
-    port.reject("/fail");
-    assert.throws(() => protocol.register(failed), /HTTP registration failed: \/fail/u);
-    assert.equal(protocol.list()[0]?.binding, original.binding);
-    assert.deepEqual(port.paths(), ["/ok"]);
+    const replaced = [makeEntry("demo", "/demo/mcp"), makeEntry("demo", "/demo/mcp/agy-session")];
+    port.reject("/demo/mcp/agy-session");
+    assert.throws(() => protocol.register("demo", replaced), /HTTP registration failed/u);
+    assert.deepEqual(protocol.list(), original);
+    assert.deepEqual(port.paths(), ["/demo/mcp", "/demo/mcp/explicit"]);
 
     port.reject();
-    const replaced = makeEntry("demo", "/new");
-    protocol.register(replaced);
-    assert.equal(protocol.list()[0]?.binding, replaced.binding);
-    assert.deepEqual(port.paths(), ["/new"]);
+    protocol.register("demo", replaced);
+    assert.deepEqual(protocol.list(), replaced);
+    assert.deepEqual(port.paths(), ["/demo/mcp", "/demo/mcp/agy-session"]);
 
-    const samePath = makeEntry("demo", "/new");
-    protocol.register(samePath);
-    assert.equal(protocol.list()[0]?.binding, samePath.binding);
-    assert.deepEqual(port.paths(), ["/new"]);
-    protocol.stop();
+    assert.throws(() => protocol.register("other", [makeEntry("other", "/demo/mcp")]), /Duplicate MCP route/u);
+    assert.deepEqual(protocol.instanceNames(), ["demo"]);
+    protocol.unregister("demo");
+    assert.deepEqual(protocol.list(), []);
     assert.deepEqual(port.paths(), []);
 });
 
 test("Protocol startup rolls back every mounted route when a later mount fails", () => {
     const port = recordingHttp();
     const protocol = new McpProtocolRoute(port.http);
-    protocol.register(makeEntry("first", "/first"));
-    protocol.register(makeEntry("second", "/second"));
+    protocol.register("first", [makeEntry("first", "/first")]);
+    protocol.register("second", [makeEntry("second", "/second")]);
     port.reject("/second");
     assert.throws(() => protocol.start(), /HTTP registration failed/u);
     assert.deepEqual(port.paths(), []);
@@ -105,7 +102,7 @@ test("failed OAuth middleware or metadata registration releases the new Resource
         oauth, publicBaseUrl: "https://controller.example/old",
     });
     const original = makeEntry("demo", "/ok", auth);
-    protocol.register(original);
+    protocol.register("demo", [original]);
     protocol.start();
     assert.deepEqual([...resources.keys()], ["https://controller.example/old/ok"]);
 
@@ -114,7 +111,7 @@ test("failed OAuth middleware or metadata registration releases the new Resource
         "/old/fail",
     ]) {
         port.reject(failingPath);
-        assert.throws(() => protocol.register(makeEntry("demo", "/fail", auth)), /HTTP registration failed/u);
+        assert.throws(() => protocol.register("demo", [makeEntry("demo", "/next", auth), makeEntry("demo", "/fail", auth)]), /HTTP registration failed/u);
         assert.equal(protocol.list()[0]?.binding, original.binding);
         assert.deepEqual([...resources.keys()], ["https://controller.example/old/ok"]);
         assert.deepEqual(port.paths(), ["/.well-known/oauth-protected-resource/old/ok", "/old/ok"]);

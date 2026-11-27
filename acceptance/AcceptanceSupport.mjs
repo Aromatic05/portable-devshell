@@ -110,7 +110,6 @@ export async function createAcceptanceFixture() {
         "[mcp]",
         "enabled = true",
         'auth = "none"',
-        'contextMode = "explicit"',
         'path = "/aromatic-pc/mcp"',
         "",
         "[extensions]",

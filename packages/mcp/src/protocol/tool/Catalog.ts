@@ -35,6 +35,7 @@ import type {
 
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
+    appEnabled?: boolean;
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
@@ -58,6 +59,7 @@ export class McpEndpointCatalog {
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
     readonly #source: McpToolSource;
+    readonly #appEnabled: boolean;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
 
     constructor(options: McpEndpointCatalogOptions) {
@@ -71,11 +73,12 @@ export class McpEndpointCatalog {
         this.#instanceName = options.instanceName;
         this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true;
         this.#source = options.source;
+        this.#appEnabled = options.appEnabled !== false;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
         return {
-            entries: this.#source.list(this.#instanceName),
+            entries: this.#source.list(this.#instanceName).filter((entry) => this.#allowsTool(entry.definition.name)),
             instanceRoutingEnabled: this.#instanceRoutingEnabled,
         };
     }
@@ -93,11 +96,15 @@ export class McpEndpointCatalog {
         toolName: string,
         instanceName: string = this.#instanceName,
     ): ToolDefinition | undefined {
-        return this.#source.get(instanceName, toolName)?.definition;
+        return this.#allowsTool(toolName) ? this.#source.get(instanceName, toolName)?.definition : undefined;
     }
 
     getEntry(toolName: string): McpToolSourceEntry | undefined {
-        return this.#source.get(this.#instanceName, toolName);
+        return this.#allowsTool(toolName) ? this.#source.get(this.#instanceName, toolName) : undefined;
+    }
+
+    #allowsTool(toolName: string): boolean {
+        return this.#appEnabled || !toolName.startsWith("mcpapp_");
     }
 
     adapt(tool: ToolDefinition): McpTool {
@@ -112,22 +119,12 @@ export class McpEndpointCatalog {
                 ? modelTool
                 : withMcpProvenance(modelTool);
         const modelFacing = isModelFacingTool(provenanceTool);
-        const contextualTool =
-            this.#contextSelector.requiresExplicitContextId &&
-            isBootstrapTool(provenanceTool.name)
-                ? provenanceTool
-                : this.#contextSelector.requiresExplicitContextId || !modelFacing
-                ? withMcpContextId(
-                      provenanceTool,
-                      modelFacing
-                          ? undefined
-                          : "Internal Context ID carried by the MCP App.",
-                  )
-                : withMcpContextId(
-                      provenanceTool,
-                      "Context ID returned by environ_info. Required when the client does not supply openai/session metadata.",
-                      false,
-                  );
+        const explicit = this.#contextSelector.requiresExplicitContextId;
+        const contextualTool = !modelFacing
+            ? withMcpContextId(provenanceTool, "Internal Context ID carried by the MCP App.")
+            : explicit && !isBootstrapTool(provenanceTool.name)
+                ? withMcpContextId(provenanceTool)
+                : provenanceTool;
         const exposed = isBootstrapTool(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);
@@ -135,15 +132,16 @@ export class McpEndpointCatalog {
             exposed,
             exposed.description.trim(),
             {
-                hiddenInputProperties: mcpToolHiddenInputProperties(
-                    exposed._meta,
-                ),
+                hiddenInputProperties: [
+                    ...mcpToolHiddenInputProperties(exposed._meta),
+                    ...(!explicit && modelFacing ? ["ctxId"] : []),
+                ],
                 inputHints: mcpToolInputHints(exposed._meta),
                 modelFacing,
                 preserveInputDescriptions: mcpToolPreserveInputDescriptions(
                     exposed._meta,
                 ),
-                exposeContextOutput: exposed.name === "environ_info",
+                exposeContextOutput: explicit && exposed.name === "environ_info",
             },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);

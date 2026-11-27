@@ -2142,7 +2142,6 @@ import {
                         extensions: { model: ["instance"] },
                         mcp: {
                             auth: "none",
-                            contextMode: "explicit",
                             enabled: true,
                             path: "/alpha/mcp",
                         },

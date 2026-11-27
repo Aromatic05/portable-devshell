@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
     Client,
@@ -14,6 +15,8 @@ export async function runTestspaceWorkspaceSmoke({
         name: "testspace-workspace-smoke",
         version: "0.0.0",
     }, { versionNegotiation: { mode: "auto" } });
+    const session = randomUUID();
+    const call = (params) => client.callTool({ ...params, _meta: { "openai/session": session } });
     try {
         await client.connect(
             new StreamableHTTPClientTransport(new URL(endpoint)),
@@ -41,14 +44,15 @@ export async function runTestspaceWorkspaceSmoke({
         assert.match(html, /DevShell Workspace/u);
         assert.match(html, /id="root"/u);
 
-        const environment = await client.callTool({
+        const environment = await call({
             arguments: { workspace },
             name: "environ_info",
         });
-        const ctxId = environment.structuredContent?.ctxId;
+        assert.equal(environment.structuredContent?.ctxId, undefined);
+        const meta = environment._meta?.["portable-devshell/mcpapp"];
+        const ctxId = meta?.ctxId;
         assert.equal(typeof ctxId, "string");
         assert.notEqual(ctxId, "");
-        const meta = environment._meta?.["portable-devshell/mcpapp"];
         assert.equal(typeof meta, "object");
         assert.notEqual(meta, null);
         const token = meta?.token;
@@ -107,8 +111,8 @@ export async function runTestspaceWorkspaceSmoke({
         // Ordinary ToolCalls are static Widgets with no Live Lease. The
         // explicit Workspace still shows their audited target and status.
         const command = "printf 'mcpapp-smoke-ok\\n'";
-        const shell = await client.callTool({ name: "bash_run", arguments: {
-            ctxId, command, cwd: "./", timeoutMs: 10_000,
+        const shell = await call({ name: "bash_run", arguments: {
+            command, cwd: "./", timeoutMs: 10_000,
             purpose: "Verify ToolCall history in Workspace",
         } });
         assert.equal(shell.isError, false);
@@ -139,32 +143,31 @@ export async function runTestspaceWorkspaceSmoke({
         // Real tool outputs must reach the Workspace as typed presentation
         // data. These operations touch only the disposable testspace workspace.
         const sample = "./mcpapp-semantic-smoke.txt";
-        const prepare = await client.callTool({ name: "bash_run", arguments: {
-            ctxId, cwd: "./", command: "printf 'widget-marker\\n' > ./mcpapp-semantic-smoke.txt",
+        const prepare = await call({ name: "bash_run", arguments: {
+            cwd: "./", command: "printf 'widget-marker\\n' > ./mcpapp-semantic-smoke.txt",
             timeoutMs: 10_000, purpose: "Prepare isolated renderer sample",
         } });
         assert.equal(prepare.isError, false);
         assert.equal(prepare.structuredContent?.exitCode, 0);
-        const found = await client.callTool({ name: "file_glob", arguments: {
-            ctxId, patterns: [sample],
+        const found = await call({ name: "file_glob", arguments: {
+            patterns: [sample],
         } });
         assert.equal(found.isError, false);
         assert.equal(found.structuredContent?.entries?.[0]?.path, sample);
-        const read = await client.callTool({ name: "file_read", arguments: {
-            ctxId, files: [{ path: sample }],
+        const read = await call({ name: "file_read", arguments: {
+            files: [{ path: sample }],
         } });
         assert.equal(read.isError, false);
         assert.match(read.structuredContent?.files?.[0]?.content ?? "", /1:widget-marker/u);
         assert.equal(read._meta?.["openai/outputTemplate"], template("file_read"));
         assert.match(read._meta?.["portable-devshell/widgetPayload"]?.output?.files?.[0]?.content ?? "",
             /1:widget-marker/u);
-        const searched = await client.callTool({ name: "file_grep", arguments: {
-            ctxId, paths: [sample], pattern: "widget-marker", syntax: "literal",
+        const searched = await call({ name: "file_grep", arguments: {
+            paths: [sample], pattern: "widget-marker", syntax: "literal",
         } });
         assert.equal(searched.isError, false);
         assert.match(searched.structuredContent?.files?.[0]?.content ?? "", /widget-marker/u);
-        const edit = await client.callTool({ name: "file_edit", arguments: {
-            ctxId,
+        const edit = await call({ name: "file_edit", arguments: {
             changes: "*** Begin Edit\n*** Patch File: ./mcpapp-semantic-smoke.txt\n@@\n-widget-marker\n+widget-marker-edited\n*** End Edit",
             resultDetail: "diff",
         } });
@@ -183,7 +186,7 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(typeof diffCard.output?.operations?.[0]?.diff, "string");
 
         // The explicit Workspace open still returns a live capability.
-        const opened = await client.callTool({ name: "mcpapp_open", arguments: { ctxId } });
+        const opened = await call({ name: "mcpapp_open", arguments: {} });
         assert.equal(opened.isError, false);
         assert.equal(opened.structuredContent?.status, "ready");
         assert.equal(opened._meta?.["portable-devshell/mcpapp"]?.ctxId, ctxId);

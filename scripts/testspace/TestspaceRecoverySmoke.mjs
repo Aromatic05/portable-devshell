@@ -45,12 +45,12 @@ export async function runTestspaceRecoverySmoke({ endpoint, runtimeDirectory, wo
     const name = `qa-recovery-${randomUUID().slice(0, 8)}`;
     const draft = {
         name, provider: "local", enabled: false,
-        mcp: { enabled: true, auth: "none", contextMode: "explicit", path: `/${name}/mcp` },
+        mcp: { enabled: true, auth: "none", path: `/${name}/mcp` },
         security: { mode: "workspace" }, approvalPolicy: { mode: "allow" },
     };
     const configPath = join(root, "home", ".devshell", "control", "instances", `${name}.toml`);
     const target = new URL(endpoint);
-    target.pathname = `/${name}/mcp`;
+    target.pathname = `/${name}/mcp/explicit`;
     const control = (operation) => withTestspaceControlConnection(runtimeDirectory, operation);
     const instances = (operation) => control((shared, connection) => operation(shared.createInstanceTransport(connection)));
     const log = (phase) => process.stdout.write(`[recovery-smoke] ${phase}\n`);

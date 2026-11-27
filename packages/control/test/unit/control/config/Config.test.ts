@@ -135,19 +135,24 @@ test("valid global and instance documents are assembled into canonical config", 
     }
 });
 
-test("instance TOML preserves MCP context selection mode", () => {
-    const instance = normalizeConfigInstanceDraft({
-        mcp: { contextMode: "openai-session" },
-        name: "chatgpt-local",
-        provider: "local",
-    });
-    const encoded = toml.encode(instanceDocument.encode(instance));
-    assert.match(encoded, /contextMode = "openai-session"/u);
-    assert.equal(
-        instanceDocument.decode(toml.decode(encoded)).mcp?.contextMode,
-        "openai-session",
-    );
+test("instance TOML retires the old selector without changing the existing MCP URL or auth", () => {
+    const draft = instanceDocument.decode(toml.decode(`
+version = 4
+name = "chatgpt-local"
+provider = "local"
+[mcp]
+contextMode = "openai-session"
+path = "/chatgpt-local/mcp"
+auth = "oauth2"
+[mcp.oauth2]
+resourceName = "existing-mcp"
+`));
+    const instance = normalizeConfigInstanceDraft(draft);
+    assert.equal(instance.mcp.path, "/chatgpt-local/mcp");
+    assert.equal(instance.mcp.auth.mode, "oauth2");
+    assert.doesNotMatch(toml.encode(instanceDocument.encode(instance)), /contextMode/u);
 });
+
 
 test("instance TOML preserves Workspace feature enablement", () => {
     const instance = normalizeConfigInstanceDraft({

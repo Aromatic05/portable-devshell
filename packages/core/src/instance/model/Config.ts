@@ -1,11 +1,9 @@
 import type {
     ControlInstanceConfig,
-    ControlMcpContextMode,
 } from "@portable-devshell/shared";
 
 export interface InstanceConfig {
     readonly enabled: boolean;
-    readonly mcpContextMode?: ControlMcpContextMode;
     readonly mcpEnabled: boolean;
     readonly mcpPath: string;
     readonly inlineToolCalls?: boolean;
@@ -20,7 +18,6 @@ export function toInstanceConfig(
 ): InstanceConfig {
     return {
         enabled: config.enabled,
-        mcpContextMode: config.mcp.contextMode,
         mcpEnabled: config.mcp.enabled,
         mcpPath: config.mcp.path,
         inlineToolCalls: config.workspace.inlineToolCalls ?? false,

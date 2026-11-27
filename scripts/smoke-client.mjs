@@ -85,7 +85,6 @@ await writeFile(
         "[mcp]",
         "enabled = false",
         'auth = "none"',
-        'contextMode = "explicit"',
         "",
         "[extensions]",
         'model = ["artifact", "instance", "mcp", "secret", "skill"]',

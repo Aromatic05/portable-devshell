@@ -138,7 +138,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
     });
 
     await host.start();
-    const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/${instanceName}/mcp`;
+    const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/${instanceName}/mcp/explicit`;
     const discover = await postJson(
         endpoint,
         modernRpcRequest("discover", "server/discover"),

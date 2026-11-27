@@ -559,7 +559,7 @@ test(
                 `http://127.0.0.1:${requireTcpPort(host.server.address)}`,
             );
 
-            const endpoint = `${origin}/real-oauth/mcp`;
+            const endpoint = `${origin}/real-oauth/mcp/explicit`;
             const approvals = host.oauthApprovals;
             assert.notEqual(approvals, undefined);
 
@@ -861,7 +861,7 @@ test(
                 `http://127.0.0.1:${requireTcpPort(host.server.address)}`,
             );
 
-            const endpoint = `${origin}/real-oauth-token/mcp`;
+            const endpoint = `${origin}/real-oauth-token/mcp/explicit`;
             const provider = new InMemoryOAuthClientProvider(
                 preRegisteredClientId,
             );
@@ -1265,7 +1265,7 @@ async function readContextId(
 
 function endpointFor(host: McpHost, name: string): string {
     const port = requireTcpPort(host.server.address);
-    return `http://127.0.0.1:${port}/${name}/mcp`;
+    return `http://127.0.0.1:${port}/${name}/mcp/explicit`;
 }
 
 function createFrozenWorker(

@@ -332,7 +332,6 @@ function connectionView(): ConfigView {
                 extensions: { model: ["instance"] },
                 mcp: {
                     auth: { mode: "none" },
-                    contextMode: "explicit",
                     enabled: true,
                     path: "/reverse-one/mcp",
                 },

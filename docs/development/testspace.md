@@ -85,7 +85,7 @@ Testspace instance 故意启用较宽的开发策略：
 
 ```text
 MCP auth          none
-contextMode       explicit
+MCP route         /explicit (generic tools), /openai-session (App smoke)
 approval          allow
 security.mode     workspace
 extensions.model  artifact,comment,instance,mcp,recall,secret,skill

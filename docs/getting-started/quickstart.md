@@ -111,7 +111,6 @@ http://127.0.0.1:17890/local-pc/mcp
 [mcp]
 enabled = true
 auth = "oauth2"
-contextMode = "openai-session"
 path = "/local-pc/mcp"
 
 [mcp.oauth2]
@@ -125,7 +124,7 @@ model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 enabled = false
 ```
 
-本机隔离测试仍可以显式使用 `auth = "none"`；公网 endpoint 应使用 HTTPS 和认证。`openai-session` 是 fresh default；如果 Host 不提供稳定 session binding、需要模型显式携带 `ctxId`，应把该 instance 改为 `contextMode = "explicit"`。
+本机隔离测试仍可以显式使用 `auth = "none"`；公网 endpoint 应使用 HTTPS 和认证。裸 URL 保留 OpenAI 会话；Gemini Web / 通用客户端使用 `/local-pc/mcp/explicit`，agy 使用 `/local-pc/mcp/agy-session`。
 
 ## 6. MCP Agent 的第一步
 
@@ -197,7 +196,7 @@ global config   2
 instance config 4
 ```
 
-旧 global version 1 与 instance version 2/3 只作为迁移输入兼容；新配置不要继续写旧结构，也不要在 instance 中写持久化 workspace path。旧 instance 缺省的 `contextMode` / Workspace enablement 会按旧行为迁移为 `explicit` / enabled，不会被 fresh defaults 改写。
+旧 global version 1 与 instance version 2/3 只作为迁移输入兼容；新配置不要继续写旧结构，也不要在 instance 中写持久化 workspace path。已有 version 4 TOML 中的 `contextMode` 在读取时移除，保存后不再输出该字段。
 
 优先使用：
 

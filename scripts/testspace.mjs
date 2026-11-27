@@ -510,7 +510,7 @@ async function recoverySmoke() {
 async function workflowSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceWorkflowSmoke({
-        endpoint: testspaceUrls(state).mcp,
+        endpoint: new URL("./openai-session", testspaceUrls(state).mcp).href,
         instance: TESTSPACE_INSTANCE,
         runtimeDirectory: stateRuntimeDirectory(state),
         workspace: paths.workspace,
@@ -521,7 +521,7 @@ async function workflowSmoke() {
 async function mcpAppSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceWorkspaceSmoke({
-        endpoint: testspaceUrls(state).mcp,
+        endpoint: new URL("./openai-session", testspaceUrls(state).mcp).href,
         instance: TESTSPACE_INSTANCE,
         workspace: paths.workspace,
     });
@@ -673,7 +673,7 @@ async function smoke() {
         workspace: paths.workspace,
     });
     const workspace = await runTestspaceWorkspaceSmoke({
-        endpoint: testspaceUrls(state).mcp,
+        endpoint: new URL("./openai-session", testspaceUrls(state).mcp).href,
         instance: TESTSPACE_INSTANCE,
         workspace: paths.workspace,
     });

@@ -1,4 +1,4 @@
-import type { ContextRecord, ContextTransport, ControlMcpContextMode, JsonValue, Endpoint } from '@portable-devshell/shared';
+import type { ContextRecord, ContextTransport, Endpoint } from '@portable-devshell/shared';
 import { createMcpContextSelector } from '../protocol/Public.js';
 import type { McpEndpointCallContext } from '../protocol/Api.js';
 import { McpAppActionStore } from './ActionStore.js';
@@ -150,20 +150,12 @@ export class McpAppRuntime {
     /** Issues an Instance-bound capability for an authenticated MCP bootstrap result. */
     async bootstrap(options: {
         context: Pick<ContextTransport, 'resolve'>;
-        contextMode?: ControlMcpContextMode;
         instance: string;
         publicBaseUrl?: string;
         request: McpEndpointCallContext;
-        result: JsonValue;
     }): Promise<{ ctxId: string; token: string; liveBaseUrl?: string } | undefined> {
-        const structured = typeof options.result === 'object' && options.result !== null && !Array.isArray(options.result)
-            ? options.result : {};
-        const ctxId = typeof structured.ctxId === 'string' ? structured.ctxId : undefined;
-        const selector = createMcpContextSelector(options.contextMode ?? 'explicit');
-        const externalBindings = selector.bindings(options.request);
-        if (ctxId === undefined && externalBindings.length === 0) return undefined;
         const record = await options.context.resolve({
-            ...(ctxId === undefined ? { externalBindings } : { ctxId }),
+            externalBindings: createMcpContextSelector('openai-session').bindings(options.request),
             instance: options.instance,
             principal: options.request.principal,
             touch: false,

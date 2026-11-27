@@ -20,10 +20,14 @@ import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 import { TestMcpHost as McpHost, type TestMcpHostInstanceConfig } from "../ContextRuntime.ts";
 import { mcpAppResourceUri, mcpAppInteractionResourceUri, mcpAppToolCallResourceUri } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig } from "@portable-devshell/mcp";
+import { McpOAuthApprovalService } from "../../src/oauth/interaction/Approval.ts";
+import { McpOAuthProviderRuntime } from "../../src/oauth/provider/Provider.ts";
 
 import {
     discoverModern,
     postModern,
+    modernRequestInit,
+    modernRpcRequest,
 } from "./ModernProtocol.ts";
 
 const fixturesDirectory = resolve(
@@ -66,7 +70,7 @@ test("published handshake revisions initialize, list and call tools alongside mo
 
     try {
         const port = requireTcpPort(host.server.address);
-        const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
+        const endpoint = `http://127.0.0.1:${port}/demo/mcp/explicit`;
 
         for (const protocolVersion of ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]) {
             const legacy = await fetch(endpoint, {
@@ -195,14 +199,14 @@ test("MCP request diagnostics record pre-auth rejection and successful 2025 disc
     }
 });
 
-test("non-OpenAI clients use explicit Context while OpenAI session tools stay bound", async () => {
-    const workspace = await createTestTempDirectory("mcp-context-fallback");
-    const host = createHost({ contextMode: "openai-session", contextTools: true });
+test("legacy clients explicitly select Context by URL without activating OpenAI mode", async () => {
+    const workspace = await createTestTempDirectory("mcp-explicit");
+    const host = createHost({ contextTools: true });
     await host.start();
     try {
-        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
-        const legacyRpc = async (id: number, method: string, params: Record<string, unknown>) => {
-            const response = await fetch(endpoint, {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp/explicit`;
+        const legacyRpc = async (id: number, method: string, params: Record<string, unknown>, url = endpoint) => {
+            const response = await fetch(url, {
                 method: "POST",
                 headers: {
                     accept: "application/json, text/event-stream",
@@ -212,7 +216,7 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
                 body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
             });
             assert.equal(response.status, 200, method);
-            return parseMcpHttpResponse<{ error?: unknown; result?: {
+            return parseMcpHttpResponse<{ error?: { message?: string }; result?: {
                 capabilities?: Record<string, unknown>;
                 content?: Array<{ type?: string; text?: string }>;
                 structuredContent?: { ctxId?: string };
@@ -229,6 +233,8 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         const listed = await legacyRpc(2, "tools/list", {});
         const bash = listed.result?.tools?.find((tool) => tool.name === "bash_run");
         assert.ok(bash?.inputSchema?.required?.includes("ctxId"));
+        const environment = listed.result?.tools?.find((tool) => tool.name === "environ_info");
+        assert.deepEqual(environment?.inputSchema?.required, ["workspace"]);
         for (const name of ["environ_info", "environ_remote"]) {
             const bootstrap = listed.result?.tools?.find((tool) => tool.name === name);
             assert.equal(bootstrap?.inputSchema?.properties?.ctxId, undefined);
@@ -251,10 +257,10 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         assert.ok(typeof ctxId === "string", JSON.stringify(info));
         assert.match(ctxId, /^ctx-/u);
         assert.equal(info.result?.structuredContent?.ctxId, ctxId);
-        const resumed = await legacyRpc(4, "tools/call", {
+        const missingWorkspace = await legacyRpc(4, "tools/call", {
             name: "environ_info", arguments: { ctxId },
         });
-        assert.equal(resumed.result?.structuredContent?.ctxId, ctxId);
+        assert.equal(missingWorkspace.error?.message, "workspace is required.");
         const executed = await legacyRpc(5, "tools/call", {
             name: "bash_run", arguments: { ctxId, command: "pwd" },
         });
@@ -268,69 +274,96 @@ test("non-OpenAI clients use explicit Context while OpenAI session tools stay bo
         assert.equal(masked.error, undefined, JSON.stringify(masked));
         assert.equal(masked.result?.structuredContent?.ctxId, ctxId);
 
-        const legacySessionTools = await legacyRpc(6, "tools/list", {
-            _meta: { "openai/session": "chat-using-legacy-wire" },
+        const foreignMetadata = await legacyRpc(6, "tools/list", {
+            _meta: { "openai/session": "must-not-select-other-mode" },
         });
-        const legacySessionBash = legacySessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
-        assert.notEqual(legacySessionBash?.inputSchema?.required?.includes("ctxId"), true);
-        const legacySessionInfo = await legacyRpc(7, "tools/call", {
-            name: "environ_info", arguments: { workspace },
-            _meta: { "openai/session": "chat-using-legacy-wire" },
-        });
-        assert.equal(legacySessionInfo.result?.structuredContent?.ctxId, undefined);
-        assert.equal(legacySessionInfo.result?.content?.length, 0);
-
-        const modernList = await postModern(endpoint, "modern-list", "tools/list");
-        assert.equal(modernList.status, 200);
-        const modernTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
-            name: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] };
-        }> } }>(await modernList.text());
-        const modernBash = modernTools.result?.tools?.find((tool) => tool.name === "bash_run");
-        assert.notEqual(modernBash?.inputSchema?.properties?.ctxId, undefined);
-        assert.equal(modernBash?.inputSchema?.required?.includes("ctxId"), true);
-        const modernSessionList = await postModern(endpoint, "modern-session-list", "tools/list", {
-            _meta: { "openai/session": "chat-session-one" },
-        });
-        assert.equal(modernSessionList.status, 200);
-        const sessionTools = parseMcpHttpResponse<{ result?: { tools?: Array<{
-            name: string; inputSchema?: { required?: string[] };
-        }> } }>(await modernSessionList.text());
-        const sessionBash = sessionTools.result?.tools?.find((tool) => tool.name === "bash_run");
-        assert.notEqual(sessionBash?.inputSchema?.required?.includes("ctxId"), true);
-        const openaiInfo = await postModern(endpoint, "openai-info", "tools/call", {
-            name: "environ_info", arguments: { workspace },
-            _meta: { "openai/session": "chat-session-one" },
-        });
-        assert.equal(openaiInfo.status, 200);
-        const openaiResult = parseMcpHttpResponse<{ result?: {
-            content?: Array<{ text?: string }>;
-            structuredContent?: { ctxId?: string };
-        } }>(await openaiInfo.text());
-        assert.equal(openaiResult.result?.structuredContent?.ctxId, undefined);
-        assert.equal(openaiResult.result?.content?.length, 0);
-        const openaiCall = await postModern(endpoint, "openai-call", "tools/call", {
-            name: "bash_run", arguments: { command: "pwd" },
-            _meta: { "openai/session": "chat-session-one" },
-        });
-        assert.equal(openaiCall.status, 200);
-        assert.equal(parseMcpHttpResponse<{ error?: unknown }>(await openaiCall.text()).error, undefined);
-        const standardModern = await postModern(endpoint, "standard-modern", "tools/call", {
-            name: "environ_info", arguments: { workspace },
-        });
-        assert.equal(standardModern.status, 200);
-        const standardResult = parseMcpHttpResponse<{ result?: {
-            content?: Array<{ text?: string }>;
-            structuredContent?: { ctxId?: string };
-        } }>(await standardModern.text());
-        assert.ok(standardResult.result?.structuredContent?.ctxId?.startsWith("ctx-"));
-        assert.equal(
-            (JSON.parse(standardResult.result?.content?.[0]?.text ?? "{}") as { ctxId?: string }).ctxId,
-            standardResult.result?.structuredContent?.ctxId,
-        );
+        assert.deepEqual(foreignMetadata.result?.tools, listed.result?.tools);
+        const openAiList = await legacyRpc(7, "tools/list", {}, new URL("./openai-session", endpoint).href);
+        assert.equal(openAiList.error, undefined);
+        const openAiBash = openAiList.result?.tools?.find((tool) => tool.name === "bash_run");
+        assert.ok(openAiBash);
+        assert.equal(openAiBash.inputSchema?.properties?.ctxId, undefined);
+        assert.equal(openAiBash.inputSchema?.required?.includes("ctxId") ?? false, false);
     } finally {
         await host.stop();
         await rm(workspace, { force: true, recursive: true });
     }
+});
+
+test("automatic route schemas stay fixed without session metadata and only bind the owning client ID", async (t) => {
+    const workspace = await createTestTempDirectory("mcp-session-routes");
+    const host = createHost({ contextTools: true });
+    t.after(async () => { await host.stop(); await rm(workspace, { recursive: true, force: true }); });
+    await host.start();
+    const url = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+    type Schema = { properties?: Record<string, unknown>; required?: string[] };
+    type Tool = { name: string; inputSchema: Schema; outputSchema?: Schema; _meta?: Record<string, unknown> };
+    type Payload = { error?: { message?: string }; result?: {
+        tools?: Tool[]; structuredContent?: { ctxId?: string; stdout?: string }; content?: Array<{ text?: string }>;
+    } };
+    const rpc = async (suffix: string, method: string, params: Record<string, unknown> = {}) => {
+        const response = await postModern(`${url}${suffix}`, method, method, params);
+        assert.equal(response.status, 200, method);
+        return parseMcpHttpResponse<Payload>(await response.text());
+    };
+    const openai = "openai/session";
+    const agy = "antigravity.google/conversation_id";
+    const list = async (suffix: string, metadata?: Record<string, string>) => {
+        const listed = await rpc(suffix, "tools/list", metadata === undefined ? {} : { _meta: metadata });
+        assert.equal(listed.error, undefined);
+        assert.ok(listed.result?.tools);
+        return listed.result.tools;
+    };
+    assert.deepEqual(await list(""), await list("/openai-session", { [openai]: "chat" }));
+    for (const [suffix, key, wrongKey] of [["", openai, agy], ["/agy-session", agy, openai]] as const) {
+        const first = await list(suffix);
+        assert.deepEqual(await list(suffix, { [key]: "chat" }), first);
+        const environment = first.find((entry) => entry.name === "environ_info");
+        assert.deepEqual(environment?.inputSchema.required, ["workspace"]);
+        for (const name of ["bash_run", "environ_info", "environ_remote"]) {
+            const tool = first.find((entry) => entry.name === name);
+            assert.ok(tool, name);
+            assert.equal(tool.inputSchema.properties?.ctxId, undefined, name);
+            assert.equal(tool.inputSchema.required?.includes("ctxId") ?? false, false, name);
+            assert.equal(tool.outputSchema?.properties?.ctxId, undefined, name);
+        }
+        const before = await host.contexts.registry.list();
+        const missing = await rpc(suffix, "tools/call", {
+            name: "environ_info", arguments: { workspace }, _meta: { [wrongKey]: "chat" },
+        });
+        assert.ok(missing.error?.message?.includes(key));
+        assert.deepEqual(await host.contexts.registry.list(), before);
+        const bound = await rpc(suffix, "tools/call", {
+            name: "environ_info", arguments: { workspace, ctxId: "must-not-select-context" },
+            _meta: { [key]: "chat" },
+        });
+        assert.equal(bound.error, undefined);
+        assert.ok(bound.result?.structuredContent);
+        assert.equal(bound.result.structuredContent.ctxId, undefined);
+        const missingWorkspace = await rpc(suffix, "tools/call", {
+            name: "environ_info", arguments: {}, _meta: { [key]: "chat" },
+        });
+        assert.equal(missingWorkspace.error?.message, "workspace is required.");
+        const call = await rpc(suffix === "" ? "/openai-session" : suffix, "tools/call", {
+            name: "bash_run", arguments: { command: "pwd", ctxId: "must-not-select-context" },
+            _meta: { [key]: "chat" },
+        });
+        assert.equal(call.error, undefined);
+        assert.equal(call.result?.structuredContent?.stdout, "ok\n");
+        assert.equal(call.result?.structuredContent?.ctxId, undefined);
+    }
+    const agyParams = { arguments: { command: "pwd" }, _meta: { [agy]: "chat" } };
+    const text = await rpc("/agy-session", "tools/call", { name: "bash_run", ...agyParams });
+    assert.equal(JSON.parse(text.result?.content?.[0]?.text ?? "{}").stdout, "ok\n");
+    assert.equal((await list("/agy-session")).some((tool) => tool.name.startsWith("mcpapp_")), false);
+    const app = await rpc("/agy-session", "tools/call", { name: "mcpapp_open", arguments: {}, _meta: agyParams._meta });
+    assert.match(app.error?.message ?? "", /not exposed/u);
+    const bindings = await Promise.all([openai, agy].map((kind) =>
+        host.contexts.registry.lookupExternal({ kind, value: "chat" }, { principal: "local" })));
+    assert.ok(bindings[0]);
+    assert.ok(bindings[1]);
+    assert.notEqual(bindings[0].ctxId, bindings[1].ctxId);
+    assert.equal((await host.contexts.registry.list()).length, 2);
 });
 
 test("quiet ToolCall keeps the HTTP connection live before the Worker finishes", async () => {
@@ -351,7 +384,7 @@ test("quiet ToolCall keeps the HTTP connection live before the Worker finishes",
     const host = createHost({ tools });
     await host.start();
     try {
-        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp/explicit`;
         const context = await host.contexts.registry.create({ principal: "local" });
         const ctxId = context.ctxId;
         await host.contexts.registry.referenceInstance(ctxId, "demo");
@@ -588,37 +621,53 @@ test("oauth2 emits HTTPS endpoints behind a loopback reverse proxy", async () =>
     }
 });
 
-test("oauth2 keeps a public path prefix on resources while using the origin as issuer", async () => {
+test("OAuth carries the public prefix and does not reuse existing bare-route tokens on mode routes", async () => {
     const proxy = await startLoopbackHttpProxy();
     const origin = proxy.origin;
     const storageDir = await createTestTempDirectory("mcp-prefix");
+    const config = { requiredScopes: ["mcp"], resourceName: "aromatic" };
+    const basePath = "/devshell/demo/mcp";
+    const publicBaseUrl = `${origin}/devshell`;
+    const legacyIssuer = new McpOAuthProviderRuntime({
+        approvals: new McpOAuthApprovalService(storageDir), config, publicBaseUrl, storageDir,
+    });
+    const release = legacyIssuer.registerResource(new URL(`${origin}${basePath}`), config);
+    await legacyIssuer.warmup();
+    const now = Math.floor(Date.now() / 1000);
+    await legacyIssuer.provider.AccessToken.adapter.upsert("existing-bare-token", {
+        aud: `${origin}${basePath}`, clientId: "existing-client", exp: now + 3600,
+        grantId: "existing-grant", iat: now, kind: "AccessToken", scope: "mcp",
+    }, 3600);
+    release();
     const host = createHost({
         auth: {
             enabled: true,
-            oauth2: {
-                requiredScopes: ["mcp"],
-                resourceName: "aromatic",
-            },
+            oauth2: config,
             provider: "oauth2",
         },
         listenPort: 0,
-        publicBaseUrl: `${origin}/devshell`,
+        publicBaseUrl,
         storageDir,
     });
     await host.start();
     proxy.setTarget(`http://127.0.0.1:${requireTcpPort(host.server.address)}`);
 
     try {
-        const protectedMetadata = await fetch(
-            `${origin}/.well-known/oauth-protected-resource/devshell/demo/mcp`,
-        );
-        assert.equal(protectedMetadata.status, 200);
-        const resource = (await protectedMetadata.json()) as {
-            authorization_servers: string[];
-            resource: string;
-        };
-        assert.deepEqual(resource.authorization_servers, [origin]);
-        assert.equal(resource.resource, `${origin}/devshell/demo/mcp`);
+        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session"]) {
+            const resourcePath = `${basePath}${suffix}`;
+            const protectedMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource${resourcePath}`);
+            assert.equal(protectedMetadata.status, 200, resourcePath);
+            const resource = await protectedMetadata.json() as { authorization_servers: string[]; resource: string };
+            assert.deepEqual(resource.authorization_servers, [origin]);
+            assert.equal(resource.resource, `${origin}${resourcePath}`);
+
+            const init = modernRequestInit("tools/list", modernRpcRequest("oauth-audience", "tools/list"));
+            const headers = new Headers(init.headers);
+            headers.set("authorization", "Bearer existing-bare-token");
+            const response = await fetch(`${origin}${resourcePath}`, { ...init, headers });
+            assert.equal(response.status, suffix === "" ? 200 : 401, resourcePath);
+            await response.text();
+        }
 
         const authorizationMetadata = await fetch(
             `${origin}/.well-known/openid-configuration`,
@@ -685,8 +734,11 @@ test("running host replaces and unregisters instance bindings without restart", 
 
         host.unregisterInstance("demo");
         host.replaceTestTools("demo", []);
-        const missing = await postModern(endpoint, "list-tools", "tools/list");
-        assert.equal(missing.status, 404);
+        for (const suffix of ["", "/openai-session", "/explicit", "/agy-session"]) {
+            const missing = await postModern(`${endpoint}${suffix}`, "list-tools", "tools/list");
+            assert.equal(missing.status, 404);
+            await missing.text();
+        }
     } finally {
         await host.stop();
     }
@@ -734,7 +786,6 @@ async function readFixture(name: string): Promise<JsonValue> {
 
 function createHost(overrides?: {
     auth?: McpAuthConfig;
-    contextMode?: "explicit" | "openai-session";
     contextTools?: boolean;
     listenPort?: number;
     publicBaseUrl?: string;
@@ -762,7 +813,6 @@ function createHost(overrides?: {
         storageDir: overrides?.storageDir,
         instances: [{
             ...createInstance("demo", overrides?.auth ?? { enabled: false, provider: "none" }),
-            contextMode: overrides?.contextMode,
         }],
     });
 }

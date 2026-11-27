@@ -20,7 +20,6 @@ export * from "./protocol/tool/Schema.js";
 
 export { McpProtocolRuntime };
 export { HttpHost } from "./testing/Http.js";
-export * from "./protocol/Registry.js";
 
 export * from "./mcpapp/app/App.js";
 export * from "./mcpapp/app/Lease.js";

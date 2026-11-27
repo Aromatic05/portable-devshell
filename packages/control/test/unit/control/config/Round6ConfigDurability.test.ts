@@ -63,7 +63,7 @@ test("full multi-instance TOML generation survives a fresh store process", async
     config.web.listenPort = 17931;
     config.web.enabled = true;
     config.instances = [
-        normalizeConfigInstanceDraft({ name: "one-local", provider: "local", enabled: false, mcp: { contextMode: "openai-session" } }),
+        normalizeConfigInstanceDraft({ name: "one-local", provider: "local", enabled: false, mcp: { enabled: false } }),
         normalizeConfigInstanceDraft({ name: "two-local", provider: "local", enabled: true, workspace: { enabled: false } }),
     ];
     await new ControlConfigStore().write(config, home);
@@ -74,7 +74,7 @@ test("full multi-instance TOML generation survives a fresh store process", async
     assert.deepEqual(restarted.instances.map((entry: { name: string; enabled: boolean }) => [entry.name, entry.enabled]), [
         ["one-local", false], ["two-local", true],
     ]);
-    assert.equal(restarted.instances[0].mcp.contextMode, "openai-session");
+    assert.equal(restarted.instances[0].mcp.enabled, false);
     assert.equal(restarted.instances[1].workspace.enabled, false);
 });
 

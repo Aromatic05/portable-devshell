@@ -6,7 +6,7 @@ try {
     runCli(["start"], fixture.env);
     runCli(["instance", "start", "aromatic-pc"], fixture.env);
     const result = await runTestspaceLongWaitSmoke({
-        endpoint: `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp`,
+        endpoint: `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp/explicit`,
         workspace: fixture.workspace,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

@@ -89,8 +89,6 @@ export class TuiCommandDispatcherEditor {
                         },
                         mcp: {
                             auth: "none",
-                            contextMode:
-                                schema.defaultMcpContextMode ?? "openai-session",
                             enabled: schema.defaultMcpEnabled,
                         },
                         name: "",
@@ -365,9 +363,6 @@ export class TuiCommandDispatcherEditor {
             if (field === "mcp.auth") {
                 return ["none", "token", "oauth2"];
             }
-            if (field === "mcp.contextMode") {
-                return ["explicit", "openai-session"];
-            }
             if (field === "security.mode") {
                 return ["disabled", "workspace"];
             }
@@ -396,8 +391,6 @@ export class TuiCommandDispatcherEditor {
             case "workspace.enabled":
             case "workspace.inlineToolCalls":
                 return [true, false];
-            case "mcp.contextMode":
-                return ["explicit", "openai-session"];
             case "container.mode":
                 return [
                     "preset",
@@ -823,7 +816,6 @@ export class TuiCommandDispatcherEditor {
                     },
                     mcp: {
                         auth: "none",
-                        contextMode: "openai-session",
                         enabled: true,
                         path: `/${instanceName}/mcp`,
                     },

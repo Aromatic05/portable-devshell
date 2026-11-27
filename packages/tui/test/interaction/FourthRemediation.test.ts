@@ -80,7 +80,7 @@ for (const glyph of ['😀', 'e\u0301', '👩🏽‍💻', '🇨🇳']) {
 import { changedTuiConfigFields, parseTuiWebPatch, parseTuiMcpPatch } from '../../src/state/editor/Config.ts';
 
 test('C-T3 patches only changed nested fields and keeps auth as one credential unit', () => {
- const base={name:'alpha',mcp:{enabled:true,contextMode:'openai-session',auth:'token',token:'secret'},workspace:{enabled:true,inlineToolCalls:false}};
+ const base={name:'alpha',mcp:{enabled:true,auth:'token',token:'secret'},workspace:{enabled:true,inlineToolCalls:false}};
  assert.deepEqual(changedTuiConfigFields(base,{...base,mcp:{...base.mcp,enabled:false}},'instance'),{mcp:{enabled:false}});
  assert.deepEqual(changedTuiConfigFields(base,{...base,mcp:{...base.mcp,token:'new-secret'}},'instance'),{mcp:{auth:'token',token:'new-secret'}});
  assert.deepEqual(changedTuiConfigFields(base,base,'instance'),{});
@@ -97,7 +97,7 @@ test('C-T3 edit then revert stays clean after a concurrent unrelated update', as
  const {h,key,updates}=await setup('ssh host');
  await key('X');
  const config=createDefaultControlConfig();
- config.instances=[normalizeConfigInstanceDraft({name:'alpha',provider:'ssh',ssh:{command:'ssh host'},mcp:{contextMode:'explicit'}})];
+ config.instances=[normalizeConfigInstanceDraft({name:'alpha',provider:'ssh',ssh:{command:'ssh host'}})];
  h.domains.setConfig(toConfigView(config));
  await key('',{backspace:true});
  assert.equal(h.store.getState().ui.dirtyForms['config:alpha'],false);

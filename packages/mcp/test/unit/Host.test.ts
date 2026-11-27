@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    McpEndpointBinding,
-    McpHostRouteMatcher,
-    McpHostRouteRegistry,
     HttpHost,
 } from "@portable-devshell/mcp/testing";
 import {
-    createTestMcpEndpoint,
     createTestMcpRuntimeState,
     TestMcpHost as McpHost,
 } from "../ContextRuntime.ts";
@@ -57,32 +53,6 @@ test("McpRuntimeState owns state across replaceable listener hosts", () => {
     assert.equal(firstHost.contexts.registry, secondHost.contexts.registry);
     assert.equal(firstOAuth, secondOAuth);
 });
-
-{
-    test("/<instance>/mcp route matches", () => {
-        const matcher = new McpHostRouteMatcher();
-        assert.deepEqual(matcher.match("/demo/mcp"), { instanceName: "demo" });
-    });
-
-    test("missing instance segment does not match", () => {
-        const matcher = new McpHostRouteMatcher();
-        assert.equal(matcher.match("//mcp"), undefined);
-    });
-
-    test("route registry resolves per-instance binding", () => {
-        const registry = new McpHostRouteRegistry();
-        const binding = new McpEndpointBinding(
-            createTestMcpEndpoint({ instanceName: "demo" }),
-        );
-
-        registry.register({
-            auth: { enabled: false, provider: "none" },
-            binding,
-            path: "/demo/mcp",
-        });
-        assert.equal(registry.resolve("demo"), binding);
-    });
-}
 
 {
     test("MCP HTTP server rejects a declared oversized request body before dispatch", async () => {

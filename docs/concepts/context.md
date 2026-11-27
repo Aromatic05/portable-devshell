@@ -33,26 +33,15 @@ Context 的权威状态、生命周期、environment 准备和清理集中在 `p
 
 ## Context selector
 
-instance 的 `[mcp].contextMode` 只决定 **MCP 边界如何找到 Context**，不改变内部模型。
+MCP URL 决定**如何找到 Context**，不改变内部模型：
 
-### `explicit`
+| 路由 | Context 来源 |
+| --- | --- |
+| `/<instance>/mcp`、`/<instance>/mcp/openai-session` | 已认证主体 + `openai/session` |
+| `/<instance>/mcp/agy-session` | 已认证主体 + `antigravity.google/conversation_id` |
+| `/<instance>/mcp/explicit` | `environ_info` 返回 `ctxId`，后续调用显式携带它 |
 
-通用 MCP client 应显式配置 `contextMode = "explicit"`；fresh instance 的产品默认为 `openai-session`，不会根据 client 类型自动切换：
-
-- `environ_info` 创建或恢复 Context，并把 `ctxId` 暴露给调用方；
-- 后续需要 Context 的 model-facing 工具显式携带该 `ctxId`；
-- Context 仍由服务端校验 principal、状态和 instance attachment。
-
-### `openai-session`
-
-ChatGPT endpoint 可以使用 `openai-session`：
-
-- model-facing tool schema 不暴露 `ctxId`；
-- 服务端从请求 metadata 的稳定 Host binding 解析内部 Context；
-- 同一个 external binding 始终映射到 portable-devshell 自己的 `ctxId`；
-- 如果没有可解析的 binding，会 fail closed，不退回一个隐式随机 Context。
-
-`ctxId` 在该模式仍然存在，只是变成内部状态。Workspace App 的 app-only 调用可以携带 `ctxId` 与隐藏 capability，因为那不是模型参数。
+自动会话模式不在模型工具 schema 或模型结果中暴露 `ctxId`。调用缺少对应 metadata 时会提示选择正确入口，不会更换模式或创建无绑定的 Context。OpenAI Workspace App 的私有调用仍可携带内部 `ctxId` 和隐藏 capability。所有模式都校验 principal、Context 状态和 instance attachment；无认证或共享 bearer 不区分共享同一凭据的用户。
 
 ## External binding
 
@@ -74,7 +63,7 @@ External binding 是 Host 身份与内部 Context 的映射，例如 ChatGPT 的
 environ_info(workspace=<absolute worker path>)
 ```
 
-开始。它一次完成：
+开始。每次调用 `environ_info` 都必须传入用户提供的 `workspace`；如果用户还没给出 Worker 上的绝对路径，先询问，再调用。它一次完成：
 
 1. 创建 Context 或恢复其工作区资源；
 2. 在当前 instance 上 prepare workspace；

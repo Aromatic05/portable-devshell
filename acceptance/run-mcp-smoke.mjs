@@ -10,7 +10,7 @@ const fixture = await createAcceptanceFixture();
 try {
     runCli(["start"], fixture.env);
     runCli(["instance", "start", "aromatic-pc"], fixture.env);
-    const endpoint = `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp`;
+    const endpoint = `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp/explicit`;
 
     const discover = await postJson(endpoint, {
         jsonrpc: "2.0",
@@ -119,6 +119,24 @@ try {
     assert.equal(recovered.body.result?.structuredContent?.files?.[0]?.content,
         "1200:line-1200\n1201:line-1201\n1202:line-1202");
 
+    // Replay the metadata shape from agy's model calls across the real Control/Worker boundary.
+    const agyEndpoint = new URL("./agy-session", endpoint).href;
+    const session = { "antigravity.google/conversation_id": "acceptance-conversation" };
+    const bootstrap = await postJson(agyEndpoint, {
+        jsonrpc: "2.0", id: "req-agy-bootstrap", method: "tools/call",
+        params: { name: "environ_info", arguments: { workspace: fixture.workspace }, _meta: session },
+    });
+    assert.equal(bootstrap.body.error, undefined, JSON.stringify(bootstrap.body));
+    assert.ok(bootstrap.body.result?.structuredContent);
+    assert.equal(bootstrap.body.result.structuredContent.ctxId, undefined);
+    const agyTool = await postJson(agyEndpoint, {
+        jsonrpc: "2.0", id: "req-agy-tool", method: "tools/call",
+        params: { name: "bash_run", arguments: { command: "pwd", timeoutMs: 30_000 }, _meta: session },
+    });
+    assert.equal(agyTool.body.error, undefined, JSON.stringify(agyTool.body));
+    assert.equal(agyTool.body.result?.structuredContent?.stdout?.trim(), fixture.workspace);
+    assert.equal(agyTool.body.result?.structuredContent?.ctxId, undefined);
+
     process.stdout.write(
         JSON.stringify(
             {
@@ -127,6 +145,7 @@ try {
                 toolsList: toolsList.body,
                 toolCall: toolCall.body,
                 largeOutputRecoveryVerified: true,
+                agySessionBindingVerified: true,
             },
             null,
             2,

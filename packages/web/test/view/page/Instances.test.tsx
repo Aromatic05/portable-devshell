@@ -524,7 +524,6 @@ function createSchema() {
             presets: [],
         },
         defaultEnabled: true,
-        defaultMcpContextMode: "explicit" as const,
         defaultMcpEnabled: true,
         defaultModelExtensions: ["instance"],
         defaultProvider: "local" as const,
