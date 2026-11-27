@@ -140,7 +140,6 @@ impl ManagedProcess {
             command: command_summary,
             closed: AtomicBool::new(false),
             control: Mutex::new(Arc::clone(&initial_control)),
-            input: Mutex::new(if keep_stdin { Some(input_tx) } else { None }),
             workspace: spec.workspace,
             provenance: (!spec.interactive && spec.command.len() <= 16 * 1024)
                 .then(|| (spec.command.to_owned(), spec.cwd.canonical.clone())),
@@ -152,6 +151,7 @@ impl ManagedProcess {
                 version: 1,
                 created_at_ms: crate::tool::unix_time_millis(),
                 shell_generation: 0,
+                input: if keep_stdin { Some(input_tx) } else { None },
                 controller: None,
                 control_seq: 0,
                 completion: None,
@@ -161,7 +161,7 @@ impl ManagedProcess {
         spawn_writer_thread(writer, input_rx);
         let readers: Vec<_> = outputs
             .into_iter()
-            .map(|(channel, reader)| spawn_reader_thread(Arc::clone(&process), channel, reader))
+            .map(|(channel, reader)| spawn_reader_thread(Arc::clone(&process), 0, channel, reader))
             .collect();
 
         let observed = Arc::clone(&process);
@@ -181,28 +181,16 @@ impl ManagedProcess {
                 // If respawning, install a fresh input channel immediately so
                 // the old writer thread exits cleanly while concurrent writes
                 // buffer for the new shell instead of failing with stdinClosed.
-                let mut next_input_rx = if will_respawn {
-                    // Advance the shell boundary before exposing the fresh input
-                    // queue. A request carrying the previous cursor must not be
-                    // able to enqueue behind this transition.
-                    {
-                        let mut state = observed
-                            .state
-                            .lock()
-                            .expect("process state lock poisoned");
-                        state.shell_generation += 1;
-                        state.version += 1;
-                        observed.changed.notify_all();
-                    }
+                let next_input = if will_respawn {
                     let (next_tx, next_rx) = mpsc::sync_channel::<Vec<u8>>(32);
-                    if let Ok(mut input) = observed.input.lock() {
-                        *input = Some(next_tx);
-                    }
-                    Some(next_rx)
+                    let mut state = observed.state.lock().expect("process state lock poisoned");
+                    // Publish the input sender and generation in the same
+                    // critical section used by input validation and enqueue.
+                    let generation = state.advance_shell(next_tx);
+                    observed.changed.notify_all();
+                    Some((generation, next_rx))
                 } else {
-                    if let Ok(mut input) = observed.input.lock() {
-                        input.take();
-                    }
+                    observed.state.lock().expect("process state lock poisoned").input.take();
                     None
                 };
                 // Publish terminal status (or respawn) only after output streams have
@@ -227,10 +215,8 @@ impl ManagedProcess {
                         rapid_exits = 0;
                     }
                     if rapid_exits >= MAX_RAPID_RESPAWN_EXITS {
-                        if let Ok(mut input) = observed.input.lock() {
-                            input.take();
-                        }
                         let mut state = observed.state.lock().expect("process state lock poisoned");
+                        state.input.take();
                         state.completion = Some(Err(ProcessFailure::task(
                             "persistent terminal shell exited repeatedly",
                         )));
@@ -300,9 +286,7 @@ impl ManagedProcess {
                                     }
                                 };
                                 if closed_during_spawn {
-                                    if let Ok(mut input) = observed.input.lock() {
-                                        input.take();
-                                    }
+                                    observed.state.lock().expect("process state lock poisoned").input.take();
                                     let _ = new_control.kill();
                                     let _ = new_control.wait();
                                     drop(terminal.writer);
@@ -319,16 +303,11 @@ impl ManagedProcess {
                                     observed.changed.notify_all();
                                     return;
                                 }
-                                let input_rx = next_input_rx.take().unwrap_or_else(|| {
-                                    let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
-                                    if let Ok(mut input) = observed.input.lock() {
-                                        *input = Some(input_tx);
-                                    }
-                                    input_rx
-                                });
+                                let (generation, input_rx) = next_input.expect("respawn input queue");
                                 spawn_writer_thread(terminal.writer, input_rx);
                                 current_readers = vec![spawn_reader_thread(
                                     Arc::clone(&observed),
+                                    generation,
                                     OutputChannel::Terminal,
                                     terminal.reader,
                                 )];
@@ -337,9 +316,7 @@ impl ManagedProcess {
                                 continue;
                             }
                             Err(error) => {
-                                if let Ok(mut input) = observed.input.lock() {
-                                    input.take();
-                                }
+                                observed.state.lock().expect("process state lock poisoned").input.take();
                                 let mut state = observed
                                     .state
                                     .lock()
@@ -353,10 +330,8 @@ impl ManagedProcess {
                     }
                 }
 
-                if let Ok(mut input) = observed.input.lock() {
-                    input.take();
-                }
                 let mut state = observed.state.lock().expect("process state lock poisoned");
+                state.input.take();
                 state.completion = Some(match failure {
                     Some(error) => Err(ProcessFailure::io(error)),
                     None => exit,
@@ -399,8 +374,31 @@ fn spawn_writer_thread(mut writer: Writer, input_rx: mpsc::Receiver<Vec<u8>>) {
     });
 }
 
+impl State {
+    fn advance_shell(&mut self, input: mpsc::SyncSender<Vec<u8>>) -> u64 {
+        self.shell_generation += 1;
+        self.input = Some(input);
+        self.version += 1;
+        self.shell_generation
+    }
+
+    fn record_output(&mut self, generation: u64, channel: OutputChannel, bytes: &[u8]) {
+        let replies = self.screen.as_mut().map_or_else(Vec::new, |screen| screen.process(bytes));
+        // An old reader may drain after a fresh queue was published. Its
+        // bytes remain in the transcript, but its replies belong to the old shell.
+        if generation == self.shell_generation && self.active_controller().is_none()
+            && !replies.is_empty() && let Some(input) = &self.input
+        {
+            let _ = input.try_send(replies);
+        }
+        self.captures.append(channel, bytes);
+        self.output.append(channel, bytes);
+    }
+}
+
 fn spawn_reader_thread(
     process: Arc<ManagedProcess>,
+    generation: u64,
     channel: OutputChannel,
     mut reader: Reader,
 ) -> std::thread::JoinHandle<Result<(), String>> {
@@ -414,16 +412,7 @@ fn spawn_reader_thread(
                         .state
                         .lock()
                         .map_err(|_| "process state lock poisoned")?;
-                    let replies = if let Some(screen) = state.screen.as_mut() {
-                        screen.process(&bytes[..n])
-                    } else {
-                        Vec::new()
-                    };
-                    if state.active_controller().is_none() && !replies.is_empty() {
-                        let _ = process.enqueue(&replies, &state);
-                    }
-                    state.captures.append(channel, &bytes[..n]);
-                    state.output.append(channel, &bytes[..n]);
+                    state.record_output(generation, channel, &bytes[..n]);
                     process.changed.notify_all();
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -451,4 +440,38 @@ fn shorten_command(raw: &str) -> Option<String> {
     }
     let prefix: String = trimmed.chars().take(MAX_CHARS - 3).collect();
     Some(format!("{prefix}..."))
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+    use crate::capability::process::output::CaptureBudget;
+
+    #[test]
+    fn old_reader_drains_output_without_replies_crossing_shell_generation() {
+        let root = crate::testing::temp_dir();
+        let (old_tx, old_rx) = mpsc::sync_channel(32);
+        let (new_tx, new_rx) = mpsc::sync_channel(32);
+        let mut state = State {
+            output: OutputJournal::default(),
+            captures: Captures::new(root.path(), Arc::new(CaptureBudget::default())).unwrap(),
+            screen: Some(TerminalScreen::new(80, 24).unwrap()),
+            controller: None,
+            control_seq: 0,
+            version: 1,
+            created_at_ms: 0,
+            shell_generation: 0,
+            input: Some(old_tx),
+            completion: None,
+        };
+        assert_eq!(state.advance_shell(new_tx), 1);
+        assert!(matches!(old_rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)));
+        let query = b"\x1b[5n";
+        state.record_output(0, OutputChannel::Terminal, query);
+        assert!(matches!(new_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert_eq!(state.captures.snapshot().stdout.source_bytes, query.len());
+        state.record_output(1, OutputChannel::Terminal, query);
+        assert_eq!(new_rx.try_recv().unwrap(), b"\x1b[0n");
+        assert_eq!(state.captures.snapshot().stdout.source_bytes, query.len() * 2);
+    }
 }

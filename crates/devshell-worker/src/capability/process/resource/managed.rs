@@ -130,6 +130,7 @@ pub(super) struct State {
     pub(super) version: u64,
     pub(super) created_at_ms: u128,
     pub(super) shell_generation: u64,
+    pub(super) input: Option<SyncSender<Vec<u8>>>,
     pub(super) completion: Option<Result<Exit, ProcessFailure>>,
 }
 
@@ -186,7 +187,6 @@ pub(in crate::capability::process) struct ManagedProcess {
     pub(super) command: Option<String>,
     pub(super) closed: AtomicBool,
     pub(super) control: Mutex<Arc<Control>>,
-    pub(super) input: Mutex<Option<SyncSender<Vec<u8>>>>,
     pub(super) workspace: Option<std::path::PathBuf>,
     pub(super) provenance: Option<(String, std::path::PathBuf)>,
     pub(super) timed_out: AtomicBool,
@@ -358,7 +358,7 @@ impl ManagedProcess {
         Ok(())
     }
 
-    pub(super) fn enqueue(&self, data: &[u8], _state: &State) -> Result<(), RpcError> {
+    pub(super) fn enqueue(&self, data: &[u8], state: &State) -> Result<(), RpcError> {
         let stdin_closed = || {
             if self.tty {
                 RpcError::new("process.stdinClosed", "stdin is closed")
@@ -369,8 +369,7 @@ impl ManagedProcess {
                 )
             }
         };
-        let input = self.input.lock().map_err(lock_error)?;
-        let input = input.as_ref().ok_or_else(stdin_closed)?;
+        let input = state.input.as_ref().ok_or_else(stdin_closed)?;
         input.try_send(data.to_vec()).map_err(|error| match error {
             TrySendError::Full(_) => {
                 RpcError::new("process.inputBusy", "terminal input queue is full")
@@ -482,7 +481,7 @@ impl ManagedProcess {
                 "send terminal EOF using the terminal input sequence",
             ));
         }
-        self.input.lock().map_err(lock_error)?.take();
+        self.state.lock().map_err(lock_error)?.input.take();
         Ok(())
     }
 
