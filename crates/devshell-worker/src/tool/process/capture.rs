@@ -401,7 +401,14 @@ pub(in crate::tool) fn persist_artifact(
     }
     let draft = output.artifact_draft.take()?;
     match store.persist(draft) {
-        Ok(reference) => Some(reference),
+        Ok(reference) => {
+            if output.tail_truncated {
+                warnings.push(format!(
+                    "{stream_name} artifact contains only the retained prefix: Process Host capture limit reached"
+                ));
+            }
+            Some(reference)
+        }
         Err(error) => {
             warnings.push(format!(
                 "{stream_name} artifact could not be persisted: {}",

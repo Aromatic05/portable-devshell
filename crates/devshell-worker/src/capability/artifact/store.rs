@@ -649,6 +649,12 @@ impl ArtifactStore {
 }
 
 impl ArtifactDraft {
+    /// Account for source bytes omitted upstream, without storing or hashing them.
+    pub fn mark_omitted_tail(&mut self, bytes: usize) {
+        self.source_bytes = self.source_bytes.saturating_add(bytes);
+        self.artifact_truncated |= bytes != 0;
+    }
+
     pub fn write_chunk(&mut self, bytes: &[u8]) -> Result<(), ToolError> {
         self.source_bytes = self.source_bytes.saturating_add(bytes.len());
         let remaining = self.stream_limit_bytes.saturating_sub(self.stored_bytes);

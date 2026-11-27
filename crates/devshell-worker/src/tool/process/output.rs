@@ -133,7 +133,8 @@ fn collect_stream<R: Read + Send + 'static>(
     // A cursor accounts for omitted source bytes, but only the retained prefix is readable.
     let source_delta = metadata.source_bytes - offset;
     let retained = offset.min(metadata.stored_bytes)..metadata.stored_bytes;
-    let tail_truncated = metadata.truncated && source_delta > retained.len();
+    let retained_len = retained.len();
+    let tail_truncated = metadata.truncated && source_delta > retained_len;
     let reader = open_reader(retained);
     let bytes = Arc::new(AtomicUsize::new(0));
     let (draft, warning) = begin_artifact(artifacts, stream);
@@ -150,8 +151,12 @@ fn collect_stream<R: Read + Send + 'static>(
     .map_err(|_| ToolError::new("process.ioFailed", "capture reader panicked"))??;
     if tail_truncated {
         output.tail_truncated = true;
-        output.artifact_draft = None;
-        output.artifact_warning = Some("Process Host capture limit reached".into());
+        if retained_len == 0 {
+            output.artifact_draft = None;
+            output.artifact_warning = Some("Process Host capture limit reached".into());
+        } else if let Some(draft) = output.artifact_draft.as_mut() {
+            draft.mark_omitted_tail(source_delta - retained_len);
+        }
     }
     enforce_inline_rpc_budget(&mut output);
     Ok((output, source_delta))
@@ -357,6 +362,23 @@ mod tests {
         assert!(first.stderr.starts_with("xy\n"));
         assert!(first.stdout_truncated);
         assert!(first.stderr_truncated);
+        for (artifact, prefix, path) in [
+            (first.stdout_artifact.as_ref().unwrap(), b"ab", first.stdout_path.as_ref()),
+            (first.stderr_artifact.as_ref().unwrap(), b"xy", first.stderr_path.as_ref()),
+        ] {
+            assert_eq!(artifact.source_bytes, 3);
+            assert_eq!(artifact.stored_bytes, 2);
+            assert!(artifact.artifact_truncated);
+            assert_eq!(artifact.blake3, blake3::hash(prefix).to_hex().to_string());
+            assert_eq!(path, Some(&tool_result_path(artifact)));
+            let lease = artifacts.acquire_lease(&artifact.handle, artifact.expires_at_ms).unwrap();
+            assert_eq!(std::fs::read(&lease.data_path).unwrap(), prefix);
+            artifacts.release_lease(&lease.lease_id).unwrap();
+        }
+        assert_eq!(first.artifact_warnings.as_deref().unwrap(), [
+            "stdout artifact contains only the retained prefix: Process Host capture limit reached",
+            "stderr artifact contains only the retained prefix: Process Host capture limit reached",
+        ]);
         let cursor = TaskCursor::decode_for(first.cursor.as_deref().unwrap(), task).unwrap();
         let repeated = poll(boundary(2, 3), cursor).unwrap();
         assert_eq!((repeated.stdout_bytes, repeated.stderr_bytes), (0, 0));
@@ -372,6 +394,8 @@ mod tests {
         assert_eq!((next.stdout_bytes, next.stderr_bytes), (1, 0));
         assert!(next.stdout.is_empty());
         assert!(next.stdout_truncated);
+        assert!(next.stdout_artifact.is_none());
+        assert!(next.stdout_path.is_none());
         assert!(!next.stderr_truncated);
         assert_eq!(next.artifact_warnings.unwrap(), [
             "stdout artifact unavailable: Process Host capture limit reached",
