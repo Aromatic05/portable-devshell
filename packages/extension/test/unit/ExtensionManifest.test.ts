@@ -53,6 +53,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
                 "toolcall.history",
                 "worker.delegate",
                 "worker.execute",
+                "worker.process",
             ],
             extensions: {
                 "cli.native-commands": [

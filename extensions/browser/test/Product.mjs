@@ -70,7 +70,7 @@ try {
     await page.locator('#profile option[value="product"]').waitFor({ state: "attached" });
     await page.locator("#profile").selectOption("product");
     await page.locator("#open").click();
-    await page.waitForFunction(() => document.querySelector("#screen").dataset.ready === "true", { timeout: 15000 });
+    await page.waitForFunction(() => globalThis.document.querySelector("#screen").dataset.ready === "true", { timeout: 15000 });
     assert.match(await page.locator("#status").innerText(), /Connected/);
     console.log("actual WebUI binary JPEG rendering: OK");
     const waiting = browser("run-code", 'async page => { await page.waitForFunction(() => document.title === "clicked"); }');
@@ -81,11 +81,11 @@ try {
     assert.match(await browser("eval", "() => document.title"), /clicked/);
     console.log("actual user pointer during pending model command: OK");
     await page.locator("#settings").click();
-    await page.waitForFunction(() => document.querySelector("#credentials").textContent.includes("No stored credentials"));
+    await page.waitForFunction(() => globalThis.document.querySelector("#credentials").textContent.includes("No stored credentials"));
     page.once("dialog", dialog => dialog.accept());
     await page.locator("#credential-file").setInputFiles({ name: "test.env", mimeType: "text/plain", buffer: Buffer.from("LAB_PASSWORD=only-for-product-test\n") });
     await page.locator("#credential-import").click();
-    await page.waitForFunction(() => document.querySelector("#credentials").textContent.includes("LAB_PASSWORD"));
+    await page.waitForFunction(() => globalThis.document.querySelector("#credentials").textContent.includes("LAB_PASSWORD"));
     await page.locator("#settings-close").click();
     await browser("run-code", 'async page => { await page.evaluate(() => { localStorage.setItem("product-state", "retained"); document.cookie = "product=kept; max-age=3600"; }); }');
     await browser("close");
@@ -121,31 +121,31 @@ try {
     console.log("actual WebUI file download and independent browser logs: OK");
     await browser("close");
     await page.locator("#settings").click();
-    await page.waitForFunction(() => !document.querySelector("#settings").disabled);
+    await page.waitForFunction(() => !globalThis.document.querySelector("#settings").disabled);
     await page.locator('[data-section="profile-section"]').click();
     await page.locator("#profile-source-kind").selectOption("extension");
     await page.locator("#profile-source-channel").selectOption("msedge");
     await page.locator("#profile-source-directory").fill("Profile 1");
     await page.locator("#profile-source-save").click();
-    await page.waitForFunction(() => document.querySelector("#management-status").textContent === "Browser source saved.");
+    await page.waitForFunction(() => globalThis.document.querySelector("#management-status").textContent === "Browser source saved.");
     assert.deepEqual(JSON.parse(await browser("profile", "source")), {
         kind: "extension", channel: "msedge", profileDirectory: "Profile 1",
     });
     await page.locator("#settings-close").click();
     await page.locator("#settings").click();
-    await page.waitForFunction(() => !document.querySelector("#settings").disabled);
+    await page.waitForFunction(() => !globalThis.document.querySelector("#settings").disabled);
     await page.locator('[data-section="profile-section"]').click();
     assert.equal(await page.locator("#profile-source-kind").inputValue(), "extension");
     assert.equal(await page.locator("#profile-source-channel").inputValue(), "msedge");
     assert.equal(await page.locator("#profile-source-directory").inputValue(), "Profile 1");
     await page.locator("#profile-source-kind").selectOption("managed");
     await page.locator("#profile-source-save").click();
-    await page.waitForFunction(() => document.querySelector("#management-status").textContent === "Browser source saved.");
+    await page.waitForFunction(() => globalThis.document.querySelector("#management-status").textContent === "Browser source saved.");
     assert.deepEqual(JSON.parse(await browser("profile", "source")), { kind: "managed" });
     console.log("user WebUI attached profile configuration, model read and switch back to managed: OK");
     page.once("dialog", dialog => dialog.accept());
     await page.locator("#delete-profile").click();
-    await page.waitForFunction(() => ![...document.querySelector("#profile").options].some(option => option.value === "product"));
+    await page.waitForFunction(() => ![...globalThis.document.querySelector("#profile").options].some(option => option.value === "product"));
     console.log("user profile deletion: OK");
 } finally {
     await viewer?.close();

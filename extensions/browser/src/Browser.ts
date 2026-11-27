@@ -38,7 +38,7 @@ export class BrowserRuntime {
             // The Worker projection commits independently of the final launch check.
             // Reuse a committed bundle after an interrupted install.
             await this.#probe(instance, generation, manifest.executable, signal);
-        } catch (error) {
+        } catch {
             signal.throwIfAborted();
             const active = [...this.#sessions.entries()].filter(([key]) => (JSON.parse(key) as string[])[0] === instance);
             for (const [, pending] of active) {

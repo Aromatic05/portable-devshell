@@ -16,7 +16,8 @@ export function parseSource(value: unknown): BrowserSource {
             const directory = "profileDirectory" in value ? value.profileDirectory : undefined;
             if (directory !== undefined && (typeof directory !== "string" ||
                 !directory.trim() || directory === "." || directory === ".." ||
-                /[\\/\x00-\x1f]/.test(directory)))
+                directory.includes("\\") || directory.includes("/") ||
+                [...directory].some((character) => character.charCodeAt(0) <= 31)))
                 throw new Error("Specify a browser profile directory name, not a path.");
             return {
                 kind: "extension", channel: value.channel as BrowserChannel,
