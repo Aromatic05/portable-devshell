@@ -2441,6 +2441,113 @@ fn file_read_batch_keeps_successful_items_when_one_path_fails() {
 }
 
 #[test]
+fn file_edit_canonical_anchors_and_multi_hunk_coverage_survive_move() {
+    let env = TestEnv::new();
+    let instance = "file-canonical-coverage-move";
+    let path = env.workspace().join("source.txt");
+    fs::write(&path, "head\nprivate\nanchor\nold\ntail\n").unwrap();
+    start(&env, instance);
+
+    for (id, selector) in [("1", "1-1:raw"), ("2", "4-5:raw")] {
+        let read = call(&env, instance, id, "ctx-a", "file_read", json!({
+            "files": [{"path": "source.txt", "selector": selector}]
+        }));
+        assert_eq!(read["type"], "reply", "{read}");
+    }
+    // A syntactically valid anchor must itself have been observed. In a
+    // patch+move section, failure leaves both source and destination unchanged.
+    let denied = call(&env, instance, "3", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Patch\n*** Update File: source.txt\n*** Move to: renamed.txt\n@@ anchor\n-old\n+new\n*** End Patch"
+    }));
+    assert_eq!(denied["type"], "reply", "{denied}");
+    assert_eq!(denied["message"]["operations"][0]["error"]["code"], "file.unreadRange", "{denied}");
+    assert_eq!(denied["message"]["operations"][1]["status"], "notExecuted", "{denied}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "head\nprivate\nanchor\nold\ntail\n");
+    assert!(!env.workspace().join("renamed.txt").exists());
+
+    let read = call(&env, instance, "4", "ctx-a", "file_read", json!({
+        "files": [{"path": "source.txt", "selector": "3-3:raw"}]
+    }));
+    assert_eq!(read["type"], "reply", "{read}");
+    let edited = call(&env, instance, "5", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Patch \n*** Update File: source.txt\n*** Move to: renamed.txt\n@@\n+first\n*** Beginning of File\n@@ anchor\n-old\n+new\n@@\n+last\n*** End of File\n\n *** End Patch"
+    }));
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert!(edited["message"]["operations"].as_array().unwrap().iter().all(|op| op["status"] == "applied"), "{edited}");
+    let renamed = env.workspace().join("renamed.txt");
+    assert_eq!(fs::read_to_string(&renamed).unwrap(), "first\nhead\nprivate\nanchor\nnew\ntail\nlast\n");
+
+    let followup = call(&env, instance, "6", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Patch\n*** Update File: renamed.txt\n@@\n-new\n+newer\n@@\n-last\n+later\n*** End of File\n*** End Patch"
+    }));
+    assert_eq!(followup["type"], "reply", "{followup}");
+    assert_eq!(followup["message"]["operations"][0]["status"], "applied", "{followup}");
+    let unread = call(&env, instance, "7", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Patch\n*** Update File: renamed.txt\n@@\n-private\n+unexpected\n*** End Patch"
+    }));
+    assert_eq!(unread["type"], "reply", "{unread}");
+    assert_eq!(unread["message"]["operations"][0]["error"]["code"], "file.unreadRange", "{unread}");
+    assert_eq!(fs::read_to_string(&renamed).unwrap(), "first\nhead\nprivate\nanchor\nnewer\ntail\nlater\n");
+    assert!(!path.exists());
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_canonical_patch_supports_all_operations_and_literal_bodies() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-canonical-patch";
+    fs::write(env.workspace().join("source.txt"), "same\nanchor\nsame\n").unwrap();
+    fs::write(env.workspace().join("rewrite.txt"), "old\n").unwrap();
+    fs::write(env.workspace().join("remove.txt"), "remove\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env, instance, "1", "ctx-a", "file_read",
+        json!({"files": [
+            {"path": "source.txt"},
+            {"path": "rewrite.txt"},
+            {"path": "remove.txt"}
+        ]}),
+    );
+    assert_eq!(read["type"], "reply", "{read}");
+
+    let edited = call(
+        &env, instance, "2", "ctx-a", "file_edit",
+        json!({"changes": concat!(
+            "*** Begin Patch\n",
+            "*** Add File: literal.txt\n",
+            "+*** Delete File: source.txt\n",
+            "++plus\n",
+            "+-minus\n",
+            "+\n",
+            "\n",
+            "*** Update File: source.txt\n",
+            "*** Move to: renamed.txt\n",
+            "@@ anchor\n",
+            "-same\n",
+            "+changed\n",
+            "*** Update File: renamed.txt\n",
+            "*** Move to: final.txt\n",
+            "\n",
+            "*** Rewrite File: rewrite.txt\n",
+            "+*** End Patch\n",
+            "++new\n",
+            "*** Delete File: remove.txt\n",
+            "*** End Patch"
+        )}),
+    );
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert!(edited["message"]["operations"].as_array().unwrap().iter().all(|op| op["status"] == "applied"), "{edited}");
+    assert_eq!(fs::read_to_string(env.workspace().join("literal.txt")).unwrap(), "*** Delete File: source.txt\n+plus\n-minus\n\n");
+    assert_eq!(fs::read_to_string(env.workspace().join("final.txt")).unwrap(), "same\nanchor\nchanged\n");
+    assert_eq!(fs::read_to_string(env.workspace().join("rewrite.txt")).unwrap(), "*** End Patch\n+new\n");
+    for name in ["source.txt", "renamed.txt", "remove.txt"] {
+        assert!(!env.workspace().join(name).exists(), "{name}");
+    }
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_edit_accepts_common_apply_patch_aliases() {
     let env = TestEnv::new();
     let instance = "aromatic-file-edit-aliases";

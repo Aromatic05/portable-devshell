@@ -136,49 +136,50 @@ export function parseEditChangeSet(
     changes: string | undefined,
 ): ParsedEditOperation[] {
     if (changes === undefined) return [];
-    const lines = changes.split("\n");
+    const lines = changes.replace(/\r\n?/gu, "\n").split("\n");
+    const canonical = lines.find((line) => line.trim().length > 0)?.trim() === "*** Begin Patch";
+    let end = lines.length;
+    while (end > 0 && lines[end - 1]!.trim() === "") end -= 1;
+    if (["*** End Edit", "*** End Patch"].includes(lines[end - 1]?.trim() ?? "")) end -= 1;
     const operations: ParsedEditOperation[] = [];
+    const header = /^\*\*\* (Add|Update|Write|Patch|Rewrite|Delete|Move) File:\s*(.+)$/u;
     let index = 0;
-    while (index < lines.length) {
-        const match = lines[index]!.match(
-            /^\*\*\* (Write|Patch|Rewrite|Delete|Move) File: (.+)$/u,
-        );
+    while (index < end) {
+        const match = lines[index]!.match(header);
         if (match === null) {
             index += 1;
             continue;
         }
-        const kind = match[1]!.toLowerCase() as EditOperationKind;
-        const firstPath = match[2]!;
+        const directive = match[1]!;
+        const kind: EditOperationKind = directive === "Add" ? "write" :
+            directive === "Update" ? "patch" : directive.toLowerCase() as EditOperationKind;
+        const firstPath = match[2]!.trim();
         index += 1;
-        let source: string | undefined;
-        let path = firstPath;
-        if (kind === "move") {
-            source = firstPath;
-            const target = lines[index]?.match(/^\*\*\* To: (.+)$/u)?.[1];
-            if (target !== undefined) {
-                path = target;
-                index += 1;
-            }
+        let target: string | undefined;
+        if (kind === "move" || kind === "patch") {
+            const prefix = kind === "move" ? /^\*\*\* To:\s*(.+)$/u : /^\*\*\* Move to:\s*(.+)$/u;
+            target = lines[index]?.match(prefix)?.[1]?.trim();
+            if (target !== undefined) index += 1;
         }
         const body: string[] = [];
-        while (index < lines.length) {
+        while (index < end) {
             const line = lines[index]!;
-            if (
-                /^\*\*\* (?:Write|Patch|Rewrite|Delete|Move) File: /u.test(
-                    line,
-                ) ||
-                line === "*** End Edit"
-            )
-                break;
+            if (header.test(line) || line === "*** End Edit" || line === "*** End Patch") break;
             body.push(line);
             index += 1;
         }
-        operations.push({
-            body: body.join("\n").replace(/\n$/u, ""),
-            kind,
-            path,
-            ...(source === undefined ? {} : { source }),
-        });
+        const decode = directive === "Add" || (canonical && kind === "rewrite");
+        if (decode || (kind === "patch" && target !== undefined && body.every((line) => line === ""))) {
+            while (body.at(-1) === "") body.pop();
+        }
+        const content = (decode ? body.map((line) => line.startsWith("+") ? line.slice(1) : line) : body)
+            .join("\n").replace(/\n$/u, "");
+        // Worker lowers an Update with Move to into a Patch followed by Move.
+        // Keep the same ordering so each result diff maps to its own operation.
+        if (kind !== "move" && (kind !== "patch" || target === undefined || content.length > 0))
+            operations.push({ body: content, kind, path: firstPath });
+        if (kind === "move" || target !== undefined)
+            operations.push({ body: "", kind: "move", path: target ?? firstPath, source: firstPath });
     }
     return operations;
 }

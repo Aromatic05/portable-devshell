@@ -86,7 +86,7 @@ try {
         stage("file_edit");
         const written = await callTool("file_edit", {
             changes:
-                "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit",
+                "*** Begin Patch\n*** Add File: ./portable-devshell-smoke.txt\n+portable-devshell-file-smoke\n*** End Patch",
         });
         if (
             !Array.isArray(written.operations) ||

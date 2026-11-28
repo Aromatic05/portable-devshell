@@ -224,7 +224,7 @@ test("Mailing refuses to acknowledge a corrupt framed mailbox during causal repl
     await f.put(OUTBOX, mail("Corruption check", "ORIGINAL PAYLOAD"));
     f.setAfterTool(async (name, input) => {
         if (name === "file_edit" && editsPath(input, INBOX) &&
-            String((input as { changes: string }).changes).includes("*** Patch File:")) {
+            String((input as { changes: string }).changes).includes("*** Update File:")) {
             f.setAfterTool(undefined);
             throw new Error("Mailbox append response lost");
         }
@@ -271,7 +271,7 @@ test("Mailing reloads a committed acceptance after its response is lost before f
     let mailboxAppended = false;
     f.setAfterTool(async (name, input) => {
         if (name === "file_edit" && editsPath(input, INBOX) &&
-            String((input as { changes: string }).changes).includes("*** Patch File:"))
+            String((input as { changes: string }).changes).includes("*** Update File:"))
             mailboxAppended = true;
         if (name === "file_edit" && editsPath(input, STATE) && mailboxAppended) {
             f.setAfterTool(undefined);

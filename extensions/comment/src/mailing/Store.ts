@@ -10,6 +10,10 @@ function record(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
 }
 
+function patchBody(content: string): string {
+    return content.trimEnd().split("\n").map((line) => `+${line}`).join("\n");
+}
+
 function parseLines(value: string): string {
     return value.split("\n").map((line) => {
         const match = /^[0-9]+:(.*)$/u.exec(line);
@@ -103,14 +107,14 @@ export class WorkerMailingFiles implements MailingFiles {
 
     async create(path: string, content: string): Promise<void> {
         if ((await this.read(path)) !== undefined) return;
-        await this.#edit(`*** Begin Edit\n*** Write File: ${path}\n${content.trimEnd()}\n*** End Edit`);
+        await this.#edit(`*** Begin Patch\n*** Add File: ${path}\n${patchBody(content)}\n*** End Patch`);
     }
 
     async replace(path: string, content: string): Promise<void> {
         const current = await this.read(path);
         if (current === content) return;
-        const action = current === undefined ? "Write" : "Rewrite";
-        await this.#edit(`*** Begin Edit\n*** ${action} File: ${path}\n${content.trimEnd()}\n*** End Edit`);
+        const action = current === undefined ? "Add" : "Rewrite";
+        await this.#edit(`*** Begin Patch\n*** ${action} File: ${path}\n${patchBody(content)}\n*** End Patch`);
     }
 
     async appendUnique(path: string, marker: string, content: string): Promise<void> {
@@ -118,13 +122,13 @@ export class WorkerMailingFiles implements MailingFiles {
         if (current !== undefined && hasMailRecord(current, marker, content)) return;
         if (current === undefined) {
             // Create a harmless header first. Always append through a prefixed patch,
-            // so user mail bodies cannot impersonate *** End Edit control lines.
+            // so user mail bodies cannot impersonate *** End Patch control lines.
             const header = path.endsWith("/mailing.md") ? "# Mailing List" : "# Mailbox";
-            await this.#edit(`*** Begin Edit\n*** Write File: ${path}\n${header}\n*** End Edit`);
+            await this.#edit(`*** Begin Patch\n*** Add File: ${path}\n+${header}\n*** End Patch`);
             await this.read(path); // establish a file_edit snapshot for the new target
         }
-        const additions = content.trimEnd().split("\n").map((line) => `+${line}`).join("\n");
-        await this.#edit(`*** Begin Edit\n*** Patch File: ${path}\n@@ EOF\n${additions}\n*** End Edit`);
+        const additions = patchBody(content);
+        await this.#edit(`*** Begin Patch\n*** Update File: ${path}\n@@\n${additions}\n*** End of File\n*** End Patch`);
     }
 
     async #edit(changes: string): Promise<void> {

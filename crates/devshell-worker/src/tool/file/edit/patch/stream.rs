@@ -3,7 +3,8 @@ use std::fs;
 use std::io::Write;
 
 use crate::tool::file::edit::patch::{
-    Boundary, Hunk, changed_span, parse, remap_seen_lines, validate_located_overlap,
+    Boundary, Hunk, Patch, changed_span, generated_coverage, locate_anchor, position_matches,
+    remap_seen_lines, unique_position, validate_located_overlap,
 };
 use crate::tool::file::state::{TextInspection, TextMetadata, scan_text_lines};
 use crate::tool::{ToolCancellation, ToolError};
@@ -87,12 +88,12 @@ impl StreamingPatchPlan {
     }
 }
 
-pub fn plan_streaming(
+pub(in crate::tool::file::edit) fn plan_streaming(
     file: fs::File,
-    patch: &str,
+    patch: &Patch,
     cancellation: &ToolCancellation,
 ) -> Result<StreamingPatchPlan, ToolError> {
-    let hunks = parse(patch)?;
+    let hunks = &patch.0;
     let maximum_old_lines = hunks
         .iter()
         .map(|hunk| hunk.old_lines.len())
@@ -100,6 +101,7 @@ pub fn plan_streaming(
         .unwrap_or(0);
     let mut tail = VecDeque::<String>::with_capacity(maximum_old_lines);
     let mut candidates = vec![Vec::<usize>::new(); hunks.len()];
+    let mut anchors = vec![Vec::<usize>::new(); hunks.len()];
     let inspection = scan_text_lines(file, cancellation, |line_no, line| {
         if maximum_old_lines > 0 {
             tail.push_back(line.to_string());
@@ -108,6 +110,12 @@ pub fn plan_streaming(
             }
         }
         for (index, hunk) in hunks.iter().enumerate() {
+            if hunk.anchor.as_deref() == Some(line) && anchors[index].len() < 2 {
+                anchors[index].push(line_no - 1);
+            }
+            if hunk.anchor.is_some() && anchors[index].is_empty() {
+                continue;
+            }
             if hunk.old_lines.is_empty() || hunk.boundary == Boundary::End {
                 continue;
             }
@@ -116,7 +124,7 @@ pub fn plan_streaming(
                 continue;
             }
             let position = line_no - count;
-            if hunk.boundary == Boundary::Beginning && position != 0 {
+            if !position_matches(position, hunk.boundary, anchors[index].first().copied()) {
                 continue;
             }
             if tail_matches(&tail, &hunk.old_lines)
@@ -128,53 +136,36 @@ pub fn plan_streaming(
         Ok(())
     })?;
 
+    let mut required_lines = BTreeSet::new();
+    let mut located = Vec::with_capacity(hunks.len());
     for (index, hunk) in hunks.iter().enumerate() {
+        let anchor = locate_anchor(hunk, anchors[index].iter().copied(), index)?;
+        if let Some(anchor) = anchor {
+            required_lines.insert(anchor + 1);
+        }
         if hunk.old_lines.is_empty() {
-            candidates[index].push(match hunk.boundary {
+            let position = match hunk.boundary {
                 Boundary::Beginning => 0,
                 Boundary::End => inspection.metadata.total_lines,
                 Boundary::Anywhere => unreachable!(),
-            });
-            continue;
-        }
-        if hunk.boundary == Boundary::End {
+            };
+            if position_matches(position, hunk.boundary, anchor) {
+                candidates[index].push(position);
+            }
+        } else if hunk.boundary == Boundary::End {
             let count = hunk.old_lines.len();
-            if inspection.metadata.total_lines >= count
-                && tail_matches(&tail, &hunk.old_lines)
-                && candidates[index].len() <= MAX_REPORTED_CANDIDATES
-            {
-                candidates[index].push(inspection.metadata.total_lines - count);
+            if inspection.metadata.total_lines >= count && tail_matches(&tail, &hunk.old_lines) {
+                let position = inspection.metadata.total_lines - count;
+                if position_matches(position, hunk.boundary, anchor) {
+                    candidates[index].push(position);
+                }
             }
         }
-    }
-
-    let mut located = Vec::with_capacity(hunks.len());
-    for (index, hunk) in hunks.into_iter().enumerate() {
-        let position = match candidates[index].as_slice() {
-            [position] => *position,
-            [] => {
-                return Err(ToolError::new(
-                    "file.patchNotFound",
-                    "patch context did not match the file snapshot",
-                )
-                .with_details(serde_json::json!({
-                    "hunk": index + 1,
-                    "candidateLines": [],
-                })));
-            }
-            positions => {
-                return Err(ToolError::new(
-                    "file.patchAmbiguous",
-                    "patch context matched more than once",
-                )
-                .with_details(serde_json::json!({
-                    "hunk": index + 1,
-                    "candidateLines": positions.iter().take(MAX_REPORTED_CANDIDATES).map(|position| position + 1).collect::<Vec<_>>(),
-                    "candidateLinesTruncated": positions.len() > MAX_REPORTED_CANDIDATES,
-                })));
-            }
-        };
-        located.push(LocatedHunk { hunk, position });
+        let position = unique_position(&candidates[index], index, Some(MAX_REPORTED_CANDIDATES))?;
+        located.push(LocatedHunk {
+            hunk: hunk.clone(),
+            position,
+        });
     }
     located.sort_by_key(|edit| edit.position);
     validate_located_overlap(
@@ -183,8 +174,6 @@ pub fn plan_streaming(
             .map(|edit| (edit.position, edit.hunk.old_lines.len())),
     )?;
 
-    let mut required_lines = BTreeSet::new();
-    let mut resulting_known_lines = BTreeSet::new();
     let mut line_edits = Vec::with_capacity(located.len());
     let mut added_lines = 0usize;
     let mut removed_lines = 0usize;
@@ -205,13 +194,11 @@ pub fn plan_streaming(
             edit.hunk.old_lines.len(),
             edit.hunk.new_lines.len(),
         ));
-        for offset in 0..edit.hunk.new_lines.len().max(1) {
-            resulting_known_lines.insert(edit.position + offset + 1);
-        }
         added_lines += changed.1;
         removed_lines += changed.0;
     }
 
+    let resulting_known_lines = generated_coverage(&line_edits);
     Ok(StreamingPatchPlan {
         inspection,
         required_lines,

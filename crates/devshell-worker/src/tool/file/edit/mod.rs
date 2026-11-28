@@ -1,3 +1,4 @@
+mod grammar;
 pub mod patch;
 pub mod publish;
 use std::collections::{BTreeSet, HashMap};
@@ -5,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::instance::sandbox::path::{ResolvedPath, ResolvedTarget};
+use crate::tool::file::edit::grammar::{ParsedOperation, parse_change_set};
 use crate::tool::file::edit::patch as context_patch;
 use crate::tool::file::edit::patch::diff;
 use crate::tool::file::edit::patch::stream as context_patch_stream;
@@ -100,15 +102,6 @@ impl ToolHandler for FileEditTool {
     }
 }
 
-#[derive(Clone, Debug)]
-enum ParsedOperation {
-    Write { path: String, content: String },
-    Patch { path: String, patch: String },
-    Rewrite { path: String, content: String },
-    Delete { path: String },
-    Move { source: String, target: String },
-}
-
 #[derive(Clone)]
 enum PreparedOperation {
     Write {
@@ -119,7 +112,7 @@ enum PreparedOperation {
     Patch {
         display: String,
         path: PathBuf,
-        patch: String,
+        patch: context_patch::Patch,
         base: Option<ContextFileSnapshot>,
     },
     Rewrite {
@@ -172,7 +165,7 @@ impl FileEditTool {
                     if entry.exists {
                         return Err(ToolError::new(
                             "file.alreadyExists",
-                            format!("Write File target already exists: {path}"),
+                            format!("Add File target already exists: {path}"),
                         ));
                     }
                     virtual_entries.insert(
@@ -189,13 +182,12 @@ impl FileEditTool {
                     });
                 }
                 ParsedOperation::Patch { path, patch } => {
-                    context_patch::validate(&patch)?;
                     let (display, resolved) = resolve_for_plan(call, &path)?;
                     let mut entry = virtual_entry(&mut virtual_entries, &resolved);
                     if !entry.exists {
                         return Err(ToolError::new(
                             "file.notFound",
-                            format!("Patch File target does not exist: {path}"),
+                            format!("Update File target does not exist: {path}"),
                         ));
                     }
                     let base = if entry.known {
@@ -269,21 +261,21 @@ impl FileEditTool {
                     if source_path == target_path {
                         return Err(ToolError::new(
                             "file.pathConflict",
-                            "Move File source and target resolve to the same path",
+                            "Move to source and target resolve to the same path",
                         ));
                     }
                     let source_entry = virtual_entry(&mut virtual_entries, &source_path);
                     if !source_entry.exists {
                         return Err(ToolError::new(
                             "file.notFound",
-                            format!("Move File source does not exist: {source}"),
+                            format!("Move to source does not exist: {source}"),
                         ));
                     }
                     let target_entry = virtual_entry(&mut virtual_entries, &target_path);
                     if target_entry.exists {
                         return Err(ToolError::new(
                             "file.alreadyExists",
-                            format!("Move File target already exists: {target}"),
+                            format!("Move to target already exists: {target}"),
                         ));
                     }
                     let base = if source_entry.known {
@@ -387,7 +379,11 @@ impl FileEditTool {
                         };
                         let updated = TextFile::from_normalized(&current, &normalized)?;
                         let seen = if merged {
-                            application.resulting_known_lines.clone()
+                            diff::rebase_generated_coverage(
+                                &application.normalized,
+                                &normalized,
+                                &application.resulting_known_lines,
+                            )
                         } else {
                             application.remap_seen_lines(&base.seen_lines)
                         };
@@ -624,7 +620,7 @@ impl FileEditTool {
         {
             return Err(ToolError::new(
                 "file.alreadyExists",
-                "Write File target already exists",
+                "Add File target already exists",
             ));
         }
         publish::write_atomic(
@@ -736,7 +732,7 @@ impl FileEditTool {
         index: usize,
         display: String,
         path: PathBuf,
-        patch: String,
+        patch: context_patch::Patch,
         base: Option<ContextFileSnapshot>,
         detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
@@ -793,7 +789,11 @@ impl FileEditTool {
         )?;
 
         let seen = if merged {
-            application.resulting_known_lines.clone()
+            diff::rebase_generated_coverage(
+                &application.normalized,
+                &normalized,
+                &application.resulting_known_lines,
+            )
         } else {
             application.remap_seen_lines(&base.seen_lines)
         };
@@ -820,7 +820,7 @@ impl FileEditTool {
         index: usize,
         display: String,
         path: PathBuf,
-        patch: String,
+        patch: context_patch::Patch,
         base: ContextFileSnapshot,
         resolved: &ResolvedPath,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
@@ -1048,7 +1048,7 @@ impl FileEditTool {
         {
             return Err(ToolError::new(
                 "file.alreadyExists",
-                "Move File target already exists",
+                "Move to target already exists",
             ));
         }
         atomic_move_no_replace_resolved(&source_target, &target_target)?;
@@ -1209,257 +1209,6 @@ fn context_snapshot(
         ordinal,
         last_accessed_at_ms: 0,
     }
-}
-
-fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
-    let normalized = normalize_change_set_dialect(input);
-    let lines = normalized.split('\n').collect::<Vec<_>>();
-    let first = lines
-        .iter()
-        .position(|line| !line.trim().is_empty())
-        .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if lines[first] != "*** Begin Edit" {
-        return Err(invalid_edit("change set must start with `*** Begin Edit`"));
-    }
-    let last = lines
-        .iter()
-        .rposition(|line| !line.trim().is_empty())
-        .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if lines[last] != "*** End Edit" {
-        return Err(invalid_edit("change set must end with `*** End Edit`"));
-    }
-
-    let mut operations = Vec::new();
-    let mut index = first + 1;
-    while index < last {
-        if lines[index].trim().is_empty() {
-            index += 1;
-            continue;
-        }
-        if operations.len() >= MAX_CHANGE_OPERATIONS {
-            return Err(ToolError::new(
-                "file.tooManyOperations",
-                format!("change set supports at most {MAX_CHANGE_OPERATIONS} operations"),
-            ));
-        }
-        let line = lines[index];
-        if let Some(path) = line.strip_prefix("*** Write File:") {
-            let path = parse_path(path)?;
-            let (body, next) = collect_body(&lines, index + 1, last);
-            let content = literal_body(body);
-            reject_literal_diff(&content)?;
-            operations.push(ParsedOperation::Write { path, content });
-            index = next;
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Patch File:") {
-            let path = parse_path(path)?;
-            let (body, next) = collect_body(&lines, index + 1, last);
-            let patch = body.join("\n");
-            if patch.trim().is_empty() {
-                return Err(invalid_edit("Patch File requires at least one hunk"));
-            }
-            operations.push(ParsedOperation::Patch { path, patch });
-            index = next;
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Rewrite File:") {
-            let path = parse_path(path)?;
-            let (body, next) = collect_body(&lines, index + 1, last);
-            let content = literal_body(body);
-            reject_literal_diff(&content)?;
-            operations.push(ParsedOperation::Rewrite { path, content });
-            index = next;
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Delete File:") {
-            let path = parse_path(path)?;
-            index += 1;
-            index = skip_blank_lines(&lines, index, last);
-            if index < last && !is_operation_header(lines[index]) {
-                return Err(invalid_edit("Delete File does not accept a body"));
-            }
-            operations.push(ParsedOperation::Delete { path });
-            continue;
-        }
-        if let Some(source) = line.strip_prefix("*** Move File:") {
-            let source = parse_path(source)?;
-            index = skip_blank_lines(&lines, index + 1, last);
-            let Some(target) = lines
-                .get(index)
-                .and_then(|line| line.strip_prefix("*** To:"))
-            else {
-                return Err(invalid_edit(
-                    "Move File requires a following `*** To:` line",
-                ));
-            };
-            let target = parse_path(target)?;
-            index += 1;
-            index = skip_blank_lines(&lines, index, last);
-            if index < last && !is_operation_header(lines[index]) {
-                return Err(invalid_edit("Move File does not accept a body"));
-            }
-            operations.push(ParsedOperation::Move { source, target });
-            continue;
-        }
-        if line.starts_with("*** To:") {
-            return Err(invalid_edit("`*** To:` is only valid after Move File"));
-        }
-        return Err(invalid_edit(format!("unexpected change-set line: {line}")));
-    }
-
-    if operations.is_empty() {
-        return Err(ToolError::new(
-            "file.emptyOperation",
-            "change set contains no file operations",
-        ));
-    }
-    Ok(operations)
-}
-
-fn collect_body<'a>(lines: &'a [&'a str], start: usize, end: usize) -> (Vec<&'a str>, usize) {
-    let mut index = start;
-    while index < end && !is_operation_header(lines[index]) {
-        index += 1;
-    }
-    (lines[start..index].to_vec(), index)
-}
-
-fn literal_body(lines: Vec<&str>) -> String {
-    if lines.is_empty() {
-        return String::new();
-    }
-    let mut content = lines.join("\n");
-    content.push('\n');
-    content
-}
-
-const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
-
-fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
-    let mut total = 0usize;
-    let mut prefixed = 0usize;
-    for line in content.split('\n') {
-        if line.trim().is_empty() {
-            continue;
-        }
-        total += 1;
-        if line.starts_with('+') || line.starts_with('-') {
-            prefixed += 1;
-        }
-    }
-    if total > 0 && prefixed as f64 / total as f64 > LITERAL_DIFF_LINE_RATIO {
-        return Err(ToolError::new(
-            "file.literalDiffBody",
-            "Stop pasting diffs into Write File and Rewrite File. They take literal content only; your body is almost entirely `+`/`-` prefixed patch lines, a format only Patch File accepts. Re-output the body as plain text with no diff markers.",
-        ));
-    }
-    Ok(())
-}
-
-fn is_operation_header(line: &str) -> bool {
-    line.starts_with("*** Write File:")
-        || line.starts_with("*** Patch File:")
-        || line.starts_with("*** Rewrite File:")
-        || line.starts_with("*** Delete File:")
-        || line.starts_with("*** Move File:")
-        || matches!(line, "*** End Edit" | "*** End Patch")
-}
-
-// @compat file-edit-apply-patch-aliases
-fn normalize_change_set_dialect(input: &str) -> String {
-    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
-    let lines = normalized.split('\n').collect::<Vec<_>>();
-    let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {
-        return normalized;
-    };
-    let Some(last) = lines.iter().rposition(|line| !line.trim().is_empty()) else {
-        return normalized;
-    };
-
-    let redundant_end_patch = if lines[first] == "*** Begin Patch" && lines[last] == "*** End Edit"
-    {
-        lines[..last]
-            .iter()
-            .rposition(|line| !line.trim().is_empty())
-            .filter(|index| lines[*index] == "*** End Patch")
-    } else {
-        None
-    };
-    let body_end = redundant_end_patch.unwrap_or(last);
-
-    let mut output = Vec::<String>::with_capacity(lines.len());
-    output.extend(lines[..first].iter().map(|line| (*line).to_string()));
-    output.push(match lines[first] {
-        "*** Begin Patch" => "*** Begin Edit".to_string(),
-        line => line.to_string(),
-    });
-
-    let mut index = first + 1;
-    while index < body_end {
-        let line = lines[index];
-        if let Some(path) = line.strip_prefix("*** Add File:") {
-            output.push(format!("*** Write File:{path}"));
-            let body_start = index + 1;
-            let mut next = body_start;
-            while next < body_end && !is_dialect_operation_header(lines[next]) {
-                next += 1;
-            }
-            let mut body = lines[body_start..next].to_vec();
-            while body.last() == Some(&"") {
-                body.pop();
-            }
-            if !body.is_empty() && body.iter().all(|line| line.starts_with('+')) {
-                output.extend(
-                    body.into_iter()
-                        .map(|line| line.strip_prefix('+').unwrap_or(line).to_string()),
-                );
-            } else {
-                output.extend(body.into_iter().map(str::to_string));
-            }
-            index = next;
-            continue;
-        }
-        if let Some(path) = line.strip_prefix("*** Update File:") {
-            output.push(format!("*** Patch File:{path}"));
-        } else {
-            output.push(line.to_string());
-        }
-        index += 1;
-    }
-
-    if lines[last] == "*** End Patch" || lines[last] == "*** End Edit" {
-        output.push("*** End Edit".to_string());
-    } else {
-        output.push(lines[last].to_string());
-    }
-    output.extend(lines[last + 1..].iter().map(|line| (*line).to_string()));
-    output.join("\n")
-}
-
-fn is_dialect_operation_header(line: &str) -> bool {
-    is_operation_header(line)
-        || line.starts_with("*** Add File:")
-        || line.starts_with("*** Update File:")
-        || line == "*** End Patch"
-}
-
-fn skip_blank_lines(lines: &[&str], mut index: usize, end: usize) -> usize {
-    while index < end && lines[index].trim().is_empty() {
-        index += 1;
-    }
-    index
-}
-
-fn parse_path(raw: &str) -> Result<String, ToolError> {
-    let path = raw.trim();
-    if path.is_empty() || path.contains('\0') {
-        return Err(ToolError::new(
-            "file.invalidPath",
-            "file path is empty or invalid",
-        ));
-    }
-    Ok(path.to_string())
 }
 
 fn resolve_for_plan(call: &ToolCall, raw: &str) -> Result<(String, PathBuf), ToolError> {
@@ -1642,7 +1391,7 @@ fn atomic_move_no_replace(source: &Path, target: &Path) -> Result<(), ToolError>
 fn atomic_move_no_replace(_source: &Path, _target: &Path) -> Result<(), ToolError> {
     Err(ToolError::new(
         "file.atomicMoveUnsupported",
-        "atomic no-clobber Move File is unsupported on this operating system",
+        "atomic no-clobber move is unsupported on this operating system",
     ))
 }
 
@@ -1650,19 +1399,19 @@ fn map_move_error(error: std::io::Error) -> ToolError {
     match error.raw_os_error() {
         #[cfg(unix)]
         Some(code) if code == nix::libc::EEXIST => {
-            ToolError::new("file.alreadyExists", "Move File target already exists")
+            ToolError::new("file.alreadyExists", "Move to target already exists")
         }
         #[cfg(unix)]
         Some(code) if code == nix::libc::EXDEV => ToolError::new(
             "file.crossDeviceMoveUnsupported",
-            "Move File requires source and target on the same filesystem",
+            "Move to requires source and target on the same filesystem",
         ),
         #[cfg(windows)]
-        Some(80 | 183) => ToolError::new("file.alreadyExists", "Move File target already exists"),
+        Some(80 | 183) => ToolError::new("file.alreadyExists", "Move to target already exists"),
         #[cfg(windows)]
         Some(17) => ToolError::new(
             "file.crossDeviceMoveUnsupported",
-            "Move File requires source and target on the same filesystem",
+            "Move to requires source and target on the same filesystem",
         ),
         _ => ToolError::new("file.writeFailed", error.to_string()),
     }

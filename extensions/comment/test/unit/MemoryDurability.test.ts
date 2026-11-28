@@ -174,7 +174,7 @@ test("A committed mailbox append with a lost response is replayed without duplic
     await f.put(OUTBOX, mail());
     f.setAfterTool(async (name, input) => {
         if (name === "file_edit" && editsPath(input, INBOX) &&
-            String((input as { changes: string }).changes).includes("*** Patch File:")) {
+            String((input as { changes: string }).changes).includes("*** Update File:")) {
             f.setAfterTool(undefined);
             throw new Error("Lost response after durable inbox append");
         }
