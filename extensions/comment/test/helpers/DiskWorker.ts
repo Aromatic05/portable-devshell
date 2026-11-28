@@ -49,14 +49,15 @@ export function diskWorker(workspace: string, instance: string, hooks: {
         }
         assert.equal(name, "file_edit");
         const lines = String(input.changes).split("\n");
-        assert.equal(lines.shift(), "*** Begin Edit");
-        assert.equal(lines.pop(), "*** End Edit");
-        const header = /^\*\*\* (Write|Rewrite|Patch) File: (.+)$/u.exec(lines.shift()!);
+        assert.equal(lines.shift(), "*** Begin Patch");
+        assert.equal(lines.pop(), "*** End Patch");
+        const header = /^\*\*\* (Add|Rewrite|Update) File: (.+)$/u.exec(lines.shift()!);
         assert.ok(header);
         const absolute = path(header[2]!);
         await mkdir(dirname(absolute), { recursive: true });
-        if (header[1] === "Patch") {
-            assert.equal(lines.shift(), "@@ EOF");
+        if (header[1] === "Update") {
+            assert.equal(lines.shift(), "@@");
+            assert.equal(lines.pop(), "*** End of File");
             assert.ok(lines.every((line) => line.startsWith("+")));
             const file = await open(absolute, "a");
             try {
@@ -64,8 +65,9 @@ export function diskWorker(workspace: string, instance: string, hooks: {
                 await file.sync();
             } finally { await file.close(); }
         } else {
-            const text = lines.join("\n") + "\n";
-            if (header[1] === "Write") await writeFile(absolute, text, { flag: "wx" });
+            assert.ok(lines.every((line) => line.startsWith("+")));
+            const text = lines.map((line) => line.slice(1)).join("\n") + "\n";
+            if (header[1] === "Add") await writeFile(absolute, text, { flag: "wx" });
             else {
                 await writeFile(`${absolute}.fixture-tmp`, text);
                 await rename(`${absolute}.fixture-tmp`, absolute);

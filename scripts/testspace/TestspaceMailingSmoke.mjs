@@ -41,15 +41,17 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         const outbox = "var/agent-work/" + first + "/chat.md";
         const inbox = "var/agent-work/" + second + "/mailbox.md";
         const changes = [
-            "*** Begin Edit",
-            "*** Write File: " + outbox,
-            "<!-- MAIL BEGIN -->",
-            "To: " + second,
-            "Subject: " + subject,
-            "",
-            body,
-            "<!-- MAIL END -->",
-            "*** End Edit",
+            "*** Begin Patch",
+            "*** Add File: " + outbox,
+            ...[
+                "<!-- MAIL BEGIN -->",
+                "To: " + second,
+                "Subject: " + subject,
+                "",
+                body,
+                "<!-- MAIL END -->",
+            ].join("\\n").split("\\n").map((line) => "+" + line),
+            "*** End Patch",
         ].join("\n");
         const written = await a.callTool({ name: "file_edit", arguments: {
             ctxId: ctxA, changes, resultDetail: "summary",

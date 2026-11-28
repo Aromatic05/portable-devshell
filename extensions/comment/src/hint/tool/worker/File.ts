@@ -260,7 +260,7 @@ export function fileErrorHints(
             return [
                 errorHint(
                     "file.literalDiffBody",
-                    "Rejected: no diff or diff-like content. Write File and Rewrite File take literal content; `+`/`-` prefixes belong to Patch File. Output plain text.",
+                    "Legacy Begin Edit bodies require literal content. Prefer Begin Patch / End Patch with Add File or Rewrite File and a + prefix on every content line; use Update File for context patches.",
                 ),
             ];
         case "file.emptyOperation":

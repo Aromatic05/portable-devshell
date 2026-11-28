@@ -165,7 +165,7 @@ pub struct FileReadBatchOutput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChangeSetInput {
-    /// One *** Begin Edit / *** End Edit change set. Use *** Write File:, *** Patch File:, *** Rewrite File:, *** Delete File:, or *** Move File:; a move needs *** To:. Patch hunks use @@, @@ BOF, or @@ EOF and context/-/+ lines. Write and Rewrite bodies are literal text.
+    /// One *** Begin Patch / *** End Patch change set. Use *** Add File:, *** Update File:, *** Delete File:, or *** Rewrite File:. Add/Rewrite bodies use + on every line. Update accepts optional *** Move to: followed by optional hunks (a move alone is valid). Hunks use @@ or @@ <exact text anchor>, space/-/+ lines, optional *** Beginning of File or *** End of File; a pure insertion without context appends. The first @@ may be omitted.
     #[schemars(length(min = 1))]
     pub changes: String,
     /// Result detail. Defaults to summary.

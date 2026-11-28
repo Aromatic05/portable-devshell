@@ -145,81 +145,98 @@ MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍
 
 ## `file_edit`
 
-`file_edit` 是唯一公开写工具，输入一个有序 change set：
+`file_edit` 是唯一公开写工具，输入一个有序 change set。Canonical 语法以 GPT 的 apply_patch 为基础：
 
 ```json
 {
-    "changes": "*** Begin Edit\n*** Write File: ./src/new.rs\n...\n*** End Edit"
+    "changes": "*** Begin Patch\n*** Add File: ./src/new.rs\n+pub struct NewModule;\n*** End Patch"
 }
 ```
 
-支持五种子操作：
+四种顶层文件指令：
 
 ```text
-Write File
-Patch File
-Rewrite File
+Add File
+Update File
 Delete File
-Move File
+Rewrite File
 ```
 
-Canonical 方言仍然只有 `*** Begin Edit` / `*** End Edit` 与上述五种 section。输入侧的 `@compat` normalization 会先把常见 coding-agent 方言 `*** Begin Patch` / `*** End Patch`、`*** Update File:`（等价于 `Patch File`）以及 `*** Add File:`（等价于 `Write File`）归一化为 canonical 形式，再交给 parser。Codex 风格 `Add File` 中每行统一的 `+` 前缀会在 normalization 时去除。兼容层也接受模型实际产生的冗余尾部 `*** End Patch` 后再跟 `*** End Edit`。
+Rewrite File 和 Beginning of File 是 DevShell 扩展。旧 Begin Edit / End Edit 输入仍作为兼容入口接受旧 Write/Patch/Rewrite/Delete/Move 语法，不再作为 canonical 或工具描述的一部分。
 
-### Write File
+### Add File
 
-只创建不存在的文件。正文是原样 UTF-8 文本，不使用 `+` 前缀：
+只创建不存在的文件。每一行正文必须以 `+` 开头（包括空行）；解析器只移除这一层前缀，不重新解释正文中的控制标记。
 
 ```text
-*** Write File: ./src/new.rs
-
-pub struct NewModule;
+*** Add File: ./src/new.rs
++pub struct NewModule;
++
 ```
 
-目标父目录不存在时会在真正执行该 Write 时自动递归创建；语义预演阶段不会提前创建目录。
+目标父目录不存在时会在真正执行该 Add 时自动递归创建；语义预演阶段不会提前创建目录。无正文的 Add 创建空文件。
 
 ### Rewrite File
 
-完整覆盖已存在且已读取的文件：
+完整覆盖已存在且已读取的文件，同样逐行使用 `+` 前缀：
 
 ```text
 *** Rewrite File: ./src/generated.rs
-
-// generated
-pub const VERSION: usize = 2;
++// generated
++pub const VERSION: usize = 2;
 ```
 
 revision 由 context 快照自动校验。Rewrite 不进行三方合并。
 
-### Patch File
+### Update File
 
 对已存在且已读取的文件应用精确 context patch：
 
 ```text
-*** Patch File: ./src/lib.rs
+*** Update File: ./src/lib.rs
 @@
  mod old_module;
 +mod new_module;
 ```
 
-Patch 行前缀：
+Patch 行前缀：空格表示保留的 context，`-` 表示删除，`+` 表示新增。首个 `@@` 可以省略。GPT 风格的无前缀空行表示空白 context 行。
+
+可使用 `@@ 文本锚点`：锚点必须与原始快照中的完整一行精确且唯一地匹配，随后只在其后的内容中定位 hunk。锚点本身也需要已读 coverage；若正文 context 仍存在多个匹配，返回歧义错误。
 
 ```text
-空格  context
--     删除
-+     新增
+*** Update File: ./src/lib.rs
+@@ fn initialize() {
+-    let value = 1;
++    let value = 2;
 ```
 
-文件头和文件尾插入：
+文件头和文件尾定位使用 hunk 末尾的边界标记：
 
 ```text
-@@ BOF
+*** Update File: ./src/lib.rs
+@@
 +use std::sync::Arc;
-
-@@ EOF
+*** Beginning of File
+@@
 +mod tests;
+*** End of File
 ```
 
-所有 hunk 都在同一原始快照中定位，必须精确且唯一，不进行模糊匹配。完整快照遇到非冲突外部修改时可以三方合并；稀疏快照 revision 变化时要求重新读取。
+无 context 的纯新增默认追加到文件尾。Canonical 的 `@@ BOF` 和 `@@ EOF` 是普通文本锚点；旧 Begin Edit 中仍表示文件头、文件尾。所有 hunk 在同一原始快照中定位，必须精确且唯一，不进行模糊匹配。完整快照遇到非冲突外部修改时可以三方合并；稀疏快照 revision 变化时要求重新读取。
+
+### Update File + Move to
+
+```text
+*** Update File: ./src/old.rs
+*** Move to: ./src/new.rs
+@@
+-fn old() {}
++fn new() {}
+```
+
+省略 hunk 即为仅移动文件。源文件必须存在并已读取，目标必须不存在。目标父目录不存在时在真正执行 Move 时自动递归创建。Move 仅使用同一文件系统内的原子 no-clobber rename；不退化为复制后删除。
+
+带 hunk 的 Update + Move to 在执行层展开为有序的 Patch、Move 两步，结果仍按现有内部操作类型分别报告。两步共同进行语义预演；不新增文件系统级事务保证。
 
 ### Delete File
 
@@ -228,15 +245,6 @@ Patch 行前缀：
 ```
 
 目标必须存在并已读取；删除前自动校验 revision。
-
-### Move File
-
-```text
-*** Move File: ./src/old.rs
-*** To: ./src/new.rs
-```
-
-源文件必须存在并已读取，目标必须不存在。目标父目录不存在时会在真正执行该 Move 时自动递归创建。Move 只使用同一文件系统内的原子 no-clobber rename；不退化成复制后删除。
 
 ## 执行语义
 
@@ -263,17 +271,4 @@ Patch B
 
 ## 正文中的控制标记
 
-Write/Rewrite 只在行首遇到完整控制行时结束，例如：
-
-```text
-*** Patch File:
-*** Update File:
-*** Add File:
-*** Rewrite File:
-*** Delete File:
-*** Move File:
-*** End Edit
-*** End Patch
-```
-
-普通 `***` 文本没有特殊含义。文件内容本身需要包含完整控制行时，使用 `Patch File`，新增行的 `+` 前缀会消除 envelope 歧义。
+Canonical Add/Rewrite 与 Update 的新增行都使用 `+` 前缀；例如 `+*** Delete File: text.txt` 表示正文中的字面文本，不是文件操作。解析器识别控制行后再解码正文，因此文件可以包含任意控制标记或以 `+`、`-` 开头的普通文本。

@@ -83,9 +83,9 @@ class FakeWorkspace {
         if (name === "file_edit") {
             const changes = String(input.changes);
             const lines = changes.split("\n");
-            assert.equal(lines[0], "*** Begin Edit");
-            assert.equal(lines.at(-1), "*** End Edit");
-            const header = /^(\*\*\* (?:Write|Rewrite|Patch) File): (.+)$/u.exec(lines[1]!);
+            assert.equal(lines[0], "*** Begin Patch");
+            assert.equal(lines.at(-1), "*** End Patch");
+            const header = /^(\*\*\* (?:Add|Rewrite|Update) File): (.+)$/u.exec(lines[1]!);
             assert.ok(header, "unexpected file_edit: " + changes);
             const path = header[2]!;
             this.beforeEdit?.(path);
@@ -94,16 +94,18 @@ class FakeWorkspace {
                 throw new Error("simulated Worker disconnect");
             }
             const body = lines.slice(2, -1);
-            if (header[1] === "*** Patch File") {
-                assert.equal(body[0], "@@ EOF");
+            if (header[1] === "*** Update File") {
+                assert.equal(body.shift(), "@@");
+                assert.equal(body.pop(), "*** End of File");
                 assert.ok(this.files.has(path));
-                assert.ok(body.slice(1).every((line) => line.startsWith("+")));
+                assert.ok(body.every((line) => line.startsWith("+")));
                 this.files.set(path, this.files.get(path)! +
-                    body.slice(1).map((line) => line.slice(1)).join("\n") + "\n");
+                    body.map((line) => line.slice(1)).join("\n") + "\n");
             } else {
-                if (header[1] === "*** Write File") assert.equal(this.files.has(path), false);
+                if (header[1] === "*** Add File") assert.equal(this.files.has(path), false);
                 if (header[1] === "*** Rewrite File") assert.equal(this.files.has(path), true);
-                this.files.set(path, body.join("\n") + "\n");
+                assert.ok(body.every((line) => line.startsWith("+")));
+                this.files.set(path, body.map((line) => line.slice(1)).join("\n") + "\n");
             }
             return { operations: [{ path, status: "applied" }] };
         }

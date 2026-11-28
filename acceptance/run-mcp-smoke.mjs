@@ -48,7 +48,7 @@ try {
     assert.equal(absoluteCwd.result?.structuredContent?.stdout?.trim(), fixture.workspace, JSON.stringify(absoluteCwd));
 
     const statelessFile = join(fixture.workspace, "README.md");
-    const changes = (path) => `*** Begin Edit\n*** Patch File: ${path}\n@@\n-portable-devshell acceptance workspace\n+patched without a prior read\n*** End Edit`;
+    const changes = (path) => `*** Begin Patch\n*** Update File: ${path}\n@@\n-portable-devshell acceptance workspace\n+patched without a prior read\n*** End Patch`;
     const relativeEdit = await statelessCall("relative-edit", "file_edit", { changes: changes("./README.md") });
     assert.equal(relativeEdit.error?.data?.code, "file.invalidPath", JSON.stringify(relativeEdit));
     const edit = await statelessCall("edit", "file_edit", { changes: changes(statelessFile) });

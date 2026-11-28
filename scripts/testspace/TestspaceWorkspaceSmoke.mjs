@@ -168,7 +168,7 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(searched.isError, false);
         assert.match(searched.structuredContent?.files?.[0]?.content ?? "", /widget-marker/u);
         const edit = await call({ name: "file_edit", arguments: {
-            changes: "*** Begin Edit\n*** Patch File: ./mcpapp-semantic-smoke.txt\n@@\n-widget-marker\n+widget-marker-edited\n*** End Edit",
+            changes: "*** Begin Patch\n*** Update File: ./mcpapp-semantic-smoke.txt\n@@\n-widget-marker\n+widget-marker-edited\n*** End Patch",
             resultDetail: "diff",
         } });
         assert.equal(edit.isError, false);

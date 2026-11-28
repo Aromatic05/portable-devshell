@@ -1,4 +1,8 @@
-use diffy::{create_patch, merge};
+use std::collections::BTreeSet;
+
+use diffy::{DiffOptions, create_patch, merge};
+
+use super::remap_seen_lines;
 
 use crate::tool::ToolError;
 
@@ -15,9 +19,52 @@ pub fn merge_changes(original: &str, current: &str, expected: &str) -> Result<St
     })
 }
 
+/// After merging an external revision, generated lines are still known only
+/// where they survive the merge unchanged. New external content is not coverage.
+pub(in crate::tool::file::edit) fn rebase_generated_coverage(
+    expected: &str,
+    merged: &str,
+    known: &BTreeSet<usize>,
+) -> BTreeSet<usize> {
+    let patch = DiffOptions::new()
+        .set_context_len(0)
+        .create_patch(expected, merged);
+    let edits = patch
+        .hunks()
+        .iter()
+        .map(|hunk| {
+            let old = hunk.old_range();
+            let position = if old.is_empty() {
+                old.start()
+            } else {
+                old.start() - 1
+            };
+            (position, old.len(), hunk.new_range().len())
+        })
+        .collect::<Vec<_>>();
+    remap_seen_lines(&BTreeSet::new(), &edits, known)
+}
+
 #[cfg(test)]
 mod tests {
     use super::merge_changes;
+
+    #[test]
+    fn generated_coverage_follows_merged_content_not_original_offsets() {
+        use super::rebase_generated_coverage;
+        use std::collections::BTreeSet;
+
+        let expected = "a\nnew\nb\n";
+        let merged = "external\na\nnew\nb\n";
+        assert_eq!(
+            rebase_generated_coverage(expected, merged, &BTreeSet::from([2])),
+            BTreeSet::from([3])
+        );
+        assert_eq!(
+            rebase_generated_coverage(expected, "a\nexternal\nb\n", &BTreeSet::from([2])),
+            BTreeSet::new()
+        );
+    }
 
     #[test]
     fn three_way_merge_handles_repeated_text_when_changes_do_not_overlap() {
