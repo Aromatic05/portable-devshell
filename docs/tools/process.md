@@ -11,13 +11,19 @@ Process Host 是每个 Instance 内独立于 Worker 请求生命周期的进程�
 ```
 
 - `waitMs` 控制本次调用同步等待多久，默认 `10000`（10 秒）；等待结束不终止进程。为 `0` 时立即返回运行中的任务。
-- 启动后台常驻服务时不要用 `&`（shell 退出时会清理整个进程组），请前台运行并传入较短的 `waitMs`，通过返回的 `task.id` 与 `task_manage(command="close")` 管理生命周期。
-- 若 `bash_run` 在首次返回 `task.id` 前被显式取消（cancel），Worker 会终止对应进程组以避免遗留孤儿进程。
+- 启动后台常驻服务时不要用 `&`（shell 退出时会清理整个进程组），请前台运行并传入较短的 `waitMs`，通过返回的 `task` 与 `task_manage(command="close")` 管理生命周期。
+- 若 `bash_run` 在首次返回任务 ID 前被显式取消（cancel），Worker 会终止对应进程组以避免遗留孤儿进程。
 - `pty` 为可选布尔值（默认 `false`）：普通命令默认使用 Pipe（非交互式）；需要真实终端或后续通过 `task_input` 发送交互输入时设置 `pty: true`（默认尺寸 `120×36`）。
 - `cwd` 与 `env` 保留 shell 执行契约。
 - `timeoutMs`、`maxCaptureBytes`、`stdin`、`keepStdin`、`tty` 已从 `bash_run` 契约移除。
 
-结果返回 `BashRunOutput`，包含 `task.id`、`task.status`、`task.pty`（人工接管期间附带 `task.humanControl: true`）、`termination`、不透明字符串 `cursor`、`stdout` / `stderr`、字节计数与截断标志、退出码 / 信号与等待信息。长输出可通过返回的 `stdoutPath` / `stderrPath`（`/.devshell/tool-results/<id>/stdout|stderr`）使用 `file_read` 读取。
+Worker 内部仍返回完整的 `BashRunOutput`；MCP 与 Agent 的模型结果使用精简投影：
+
+- 正常完成：`exitCode`、`durationMs`、非空 `stdout` / `stderr`。例如 `{"exitCode":0,"durationMs":12,"stdout":"hello\n"}`。
+- 运行中：`task` 是任务 ID 字符串，`cursor` 是不透明续读位置，可直接传给 `task_input`。正常运行没有 `exitCode` 或异常 `termination`。人工接管、全屏状态和 durable Wait 分离仅在实际发生时返回 `humanControl`、`alternateScreen`、`detached`（分别为 true）。
+- 异常终止：保留 `termination`（例如 `signaled`、`timeout`）及可用的 `termSignal`；不重复返回 `timedOut`。正常等待原因和输入参数回显不再向模型展示。
+- 输出不完整：保留对应 `stdoutTruncated` / `stderrTruncated`、字节计数、可用恢复路径和任务续读引用。若恢复 Artifact 本身也不完整，以 `stdoutArtifactTruncated` / `stderrArtifactTruncated` 标识；原始 Artifact 元数据不暴露给模型。恢复路径仍使用 `file_read` 读取。
+- 以上仅影响 `bash_run` 和 `task_input` 的模型结果；`task_manage(command="create")` 仍返回原来的任务描述符，Worker、审计、MCP App 和底层执行协议不变。
 
 ## 交互与轮询：`task_input`
 

@@ -479,8 +479,10 @@ import { tmpdir } from "node:os";
                         command, ctxId, pty: true, waitMs: 50,
                     });
                     assert.equal(started.error, undefined, JSON.stringify(started));
-                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
-                    assert.equal(started.result?.structuredContent?.termination, "running");
+                    const task = readString(started.result?.structuredContent?.task, "task id");
+                    assert.equal(started.result?.structuredContent?.exitCode, undefined);
+                    assert.equal(typeof started.result?.structuredContent?.cursor, "string");
+                    assert.equal(started.result?.structuredContent?.termination, undefined);
 
                     const listed = await callTool("reused-process-call", "task_manage", {
                         command: "list", ctxId,
@@ -500,7 +502,8 @@ import { tmpdir } from "node:os";
                     });
                     assert.equal(finished.error, undefined, JSON.stringify(finished));
                     assert.equal(finished.result?.structuredContent?.exitCode, 0);
-                    assert.equal(finished.result?.structuredContent?.termination, "exited");
+                    assert.equal(finished.result?.structuredContent?.task, undefined);
+                    assert.equal(finished.result?.structuredContent?.termination, undefined);
                     const output = (started.result?.structuredContent?.stdout ?? "") +
                         (finished.result?.structuredContent?.stdout ?? "");
                     assert.match(output, /READY/u);
@@ -525,10 +528,12 @@ import { tmpdir } from "node:os";
                         ctxId, waitMs: 250,
                     });
                     assert.equal(started.error, undefined, JSON.stringify(started));
-                    assert.equal(started.result?.structuredContent?.termination, "running");
-                    assert.equal(started.result?.structuredContent?.waitReason, "timeout");
+                    assert.equal(started.result?.structuredContent?.exitCode, undefined);
+                    assert.equal(typeof started.result?.structuredContent?.cursor, "string");
+                    assert.equal(started.result?.structuredContent?.termination, undefined);
+                    assert.equal(started.result?.structuredContent?.waitReason, undefined);
                     assert.match(started.result?.structuredContent?.stdout ?? "", /EARLY/u);
-                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
+                    const task = readString(started.result?.structuredContent?.task, "task id");
 
                     const finished = await callTool("soft-wait-read", "task_input", {
                         ctxId, task,
@@ -536,8 +541,8 @@ import { tmpdir } from "node:os";
                         waitMs: 10_000, untilExit: true,
                     });
                     assert.equal(finished.error, undefined, JSON.stringify(finished));
-                    assert.equal(finished.result?.structuredContent?.waitReason, "terminal");
-                    assert.notEqual(finished.result?.structuredContent?.task?.status, "running");
+                    assert.equal(finished.result?.structuredContent?.exitCode, 0);
+                    assert.equal(finished.result?.structuredContent?.task, undefined);
                     assert.match(finished.result?.structuredContent?.stdout ?? "", /LATE/u);
                     assert.doesNotMatch(finished.result?.structuredContent?.stdout ?? "", /EARLY/u);
                     const replay = await callTool("independent-read", "task_input", { ctxId, task });
@@ -567,8 +572,10 @@ import { tmpdir } from "node:os";
                             : "/bin/bash",
                     });
                     assert.equal(created.error, undefined, JSON.stringify(created));
-                    const task = readString(created.result?.structuredContent?.task?.id, "terminal id");
-                    assert.equal(created.result?.structuredContent?.task?.state, "running");
+                    const createdTask = created.result?.structuredContent?.task;
+                    assert.ok(createdTask && typeof createdTask === "object");
+                    const task = readString(createdTask.id, "terminal id");
+                    assert.equal(createdTask.state, "running");
                     const renewed = await createContext();
                     const input = await callTool("terminal-write", "task_input", {
                         ctxId: renewed, task, input: process.platform === "win32"
@@ -604,18 +611,19 @@ import { tmpdir } from "node:os";
 
                     let finalStdout = "";
                     let finalCursor: string | undefined;
-                    let waitReason: string | undefined;
-                    for (let i = 0; i < 10 && waitReason !== "terminal"; i++) {
+                    let finished = false;
+                    for (let i = 0; i < 10 && !finished; i++) {
                         const page = await callTool("terminal-final", "task_input", {
                             ctxId: renewed, task, waitMs: 1000,
                             ...(finalCursor === undefined ? {} : { cursor: finalCursor }),
                         });
                         assert.equal(page.error, undefined, JSON.stringify(page));
                         finalStdout += page.result?.structuredContent?.stdout ?? "";
-                        finalCursor = readString(page.result?.structuredContent?.cursor, "terminal cursor");
-                        waitReason = page.result?.structuredContent?.waitReason;
+                        const result = page.result?.structuredContent;
+                        finished = typeof result?.exitCode === "number" || result?.termination === "signaled" || result?.termination === "timeout" || result?.termination === "exited";
+                        if (!finished) finalCursor = readString(result?.cursor, "terminal cursor");
                     }
-                    assert.equal(waitReason, "terminal");
+                    assert.equal(finished, true);
                     assert.match(finalStdout, /TERMINAL-ALIVE/u);
                 },
             );
@@ -638,7 +646,8 @@ import { tmpdir } from "node:os";
                     });
                     assert.equal(result.error, undefined, JSON.stringify(result));
                     assert.equal(result.result?.structuredContent?.exitCode, 0);
-                    assert.equal(result.result?.structuredContent?.waitReason, "terminal");
+                    assert.equal(result.result?.structuredContent?.waitReason, undefined);
+                    assert.equal(result.result?.structuredContent?.task, undefined);
                     assert.match(result.result?.structuredContent?.stdout ?? "", /EARLY[\s\S]*LATE/u);
                     const records = await readToolCalls();
                     assert.equal(records.filter((record) => record.toolName === "bash_run").length, 1);
@@ -663,7 +672,7 @@ import { tmpdir } from "node:os";
                         ctxId: firstContext, waitMs: 0,
                     });
                     assert.equal(started.error, undefined, JSON.stringify(started));
-                    const task = readString(started.result?.structuredContent?.task?.id, "task id");
+                    const task = readString(started.result?.structuredContent?.task, "task id");
                     const refreshedContext = await createContext();
                     const result = await callTool("context-task-read", "task_input", {
                         ctxId: refreshedContext, task,
@@ -692,7 +701,7 @@ import { tmpdir } from "node:os";
         waitMs?: number;
         timedOut?: boolean;
         cursor?: string;
-        task?: { id?: string; status?: string; state?: string; pty?: boolean };
+        task?: string | { id?: string; status?: string; state?: string; pty?: boolean };
         tasks?: Array<{ id?: string; state?: string }>;
     }
 

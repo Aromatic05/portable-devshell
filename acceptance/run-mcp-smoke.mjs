@@ -144,19 +144,22 @@ try {
     const startedTask = await processTool("run-task", "bash_run", {
         command: interactive, cwd: fixture.workspace, waitMs: 1000, pty: true,
     });
-    assert.equal(startedTask.termination, "running", JSON.stringify(startedTask));
+    assert.equal(startedTask.exitCode, undefined, JSON.stringify(startedTask));
+    assert.equal(typeof startedTask.cursor, "string");
     assert.equal(startedTask.detached, undefined);
-    const task = startedTask.task.id;
+    const task = startedTask.task;
+    assert.equal(typeof task, "string");
     const finished = await processTool("input-task", "task_input", {
         task, input: "hello\r", cursor: startedTask.cursor, waitMs: 3000, untilExit: true,
     });
-    assert.equal(finished.task.status, "0", JSON.stringify(finished));
+    assert.equal(finished.exitCode, 0, JSON.stringify(finished));
+    assert.equal(finished.task, undefined);
     assert.match(finished.stdout, /received:hello/u);
     await processTool("close-terminal", "task_manage", { command: "close", task: terminal });
     const closed = await processTool("read-closed", "task_input", {
         task: terminal, untilExit: true, waitMs: 3000,
     });
-    assert.notEqual(closed.task.status, "running");
+    assert.ok(typeof closed.exitCode === "number" || ["exited", "signaled", "timeout"].includes(closed.termination), JSON.stringify(closed));
     assert.deepEqual(listContexts(), contextsBefore);
 
     const discover = await postJson(endpoint, {

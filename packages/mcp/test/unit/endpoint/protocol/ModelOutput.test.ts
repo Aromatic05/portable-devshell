@@ -38,6 +38,73 @@ test("model projection keeps small native results and bypasses MCP App interacti
     assert.equal(projectMcpModelOutput("mcpapp_open", result), result);
 });
 
+test("bash and task_input compact complete results even below the budget without mutating the source", () => {
+    const original = {
+        termination: "exited", exitCode: 0, durationMs: 12, stdout: "hello\n", stderr: "",
+        stdoutBytes: 6, stderrBytes: 0, stdoutTruncated: false, stderrTruncated: false,
+        stdoutArtifact: { handle: "hidden", blake3: "hash", sourceBytes: 6 },
+        stdoutPath: "/.devshell/tool-results/hidden/stdout",
+        waitMs: 10000, waitReason: "terminal", untilExit: true,
+        task: { id: "task-1", status: "0", pty: false }, cursor: "tc3_done",
+    };
+    const snapshot = structuredClone(original);
+    for (const name of ["bash_run", "task_input"]) {
+        assert.deepEqual(data(projectMcpModelOutput(name, original)), {
+            exitCode: 0, durationMs: 12, stdout: "hello\n",
+        });
+    }
+    assert.deepEqual(original, snapshot);
+    assert.equal(projectMcpModelOutput("mcpapp_open", original), original);
+});
+
+test("process projection retains running task continuation, terminal exceptions and recovery", () => {
+    const running = {
+        termination: "running", task: { id: "task-1", status: "running", pty: true,
+            humanControl: true, alternateScreen: true },
+        cursor: "tc3_resume", stdout: "", stderr: "", waitReason: "timeout", waitMs: 1000,
+        detached: true, waitError: { code: "wait.registrationFailed", message: "Observe task." },
+        comment: ["User instruction"],
+    };
+    assert.deepEqual(data(projectMcpModelOutput("bash_run", running)), {
+        task: "task-1", cursor: "tc3_resume", humanControl: true, alternateScreen: true,
+        detached: true, waitError: running.waitError, comment: running.comment,
+    });
+    assert.deepEqual(data(projectMcpModelOutput("task_input", {
+        termination: "signaled", termSignal: 15, task: { id: "task-1", status: "failed", pty: false },
+        cursor: "done", stdout: "", stderr: "killed",
+    })), { termination: "signaled", termSignal: 15, stderr: "killed" });
+    assert.deepEqual(data(projectMcpModelOutput("bash_run", {
+        termination: "timeout", timedOut: true, stdout: "", stderr: "",
+    })), { termination: "timeout" });
+    assert.deepEqual(data(projectMcpModelOutput("bash_run", {
+        termination: "exited", exitCode: 1, stdout: "", stderr: "failed",
+        task: { id: "task-1", status: "1", pty: false }, cursor: "done",
+    })), { exitCode: 1, stderr: "failed" });
+    const error = { error: { code: "process.hostFailed", details: { taskId: "task-1", taskStart: "confirmed" } } };
+    assert.equal(projectMcpModelOutput("bash_run", error), error);
+});
+
+test("model-only clipping retains recovery handles and incomplete artifact information", () => {
+    const original = {
+        termination: "exited", exitCode: 0, stdout: "x".repeat(14_000), stderr: "",
+        stdoutBytes: 14_000, stdoutTruncated: false, stderrTruncated: false,
+        stdoutArtifact: { handle: "hidden", artifactTruncated: true, blake3: "hash" },
+        stdoutPath: "/.devshell/tool-results/hidden/stdout",
+        task: { id: "task-1", status: "0", pty: false }, cursor: "tc3_done",
+    };
+    const output = data(projectMcpModelOutput("bash_run", original));
+    assert.equal(output.stdoutTruncated, true);
+    assert.equal(output.stdoutBytes, 14_000);
+    assert.equal(output.stdoutPath, original.stdoutPath);
+    assert.equal(output.stdoutArtifactTruncated, true);
+    assert.equal(output.stdoutArtifact, undefined);
+    assert.equal(output.task, "task-1");
+    assert.equal(output.cursor, "tc3_done");
+    assert.equal(output.termination, undefined);
+    assert.equal(output.stderr, undefined);
+    assert.equal(output.stderrTruncated, undefined);
+});
+
 test("bash model output stays bounded and retains recovery paths and execution status", () => {
     const original = {
         stdout: "BEGIN\n" + "中".repeat(7_000) + "\nEND",
@@ -89,7 +156,7 @@ test("default 4000-token bash budget preserves ~11 KB of complete source output"
         const projected = projectMcpModelOutput("bash_run", result);
         assert.equal(size(projected) <= 4_000 * 3, true);
         assert.equal(data(projected).stdout === stdout, true);
-        assert.equal(data(projected).stdoutTruncated, false);
+        assert.equal(data(projected).stdoutTruncated, undefined);
     }
 });
 

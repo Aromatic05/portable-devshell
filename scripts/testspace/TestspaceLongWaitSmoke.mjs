@@ -54,7 +54,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
         assertToolSuccess(launched, "long wait bash_run");
         const launch = launched.structuredContent;
         const taskId = readTaskId(launch);
-        if (launch?.detached !== true || readTaskStatus(launch) !== "running") {
+        if (launch?.detached !== true || launch.exitCode !== undefined || typeof launch.cursor !== "string") {
             throw new Error(
                 `long wait bash_run did not hand off a running task: ${JSON.stringify(launch)}`,
             );
@@ -88,7 +88,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
         const finalReadMs = Date.now() - readStartedAt;
         assertToolSuccess(completed, "long wait task_input");
         const completion = completed.structuredContent;
-        if (readTaskStatus(completion) !== "0") {
+        if (completion?.exitCode !== 0) {
             throw new Error(
                 `long wait task_input did not return a successful task: ${JSON.stringify(completion)}`,
             );
@@ -103,7 +103,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
             detached: true,
             detachedAfterMs,
             finalReadMs,
-            task: { id: taskId, status: readTaskStatus(completion) },
+            task: { id: taskId, status: String(completion.exitCode) },
         };
     } finally {
         await client.close().catch(() => undefined);
@@ -117,16 +117,11 @@ function assertToolSuccess(result, label) {
 }
 
 function readTaskId(value) {
-    const id = value?.task?.id;
+    const id = value?.task;
     if (typeof id !== "string" || id.length === 0) {
         throw new Error(
             `long wait result is missing a task id: ${JSON.stringify(value)}`,
         );
     }
     return id;
-}
-
-function readTaskStatus(value) {
-    const status = value?.task?.status;
-    return typeof status === "string" ? status : undefined;
 }

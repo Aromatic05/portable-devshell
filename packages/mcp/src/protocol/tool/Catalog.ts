@@ -1,5 +1,6 @@
 import {
     bootstrapToolNamespace,
+    processModelOutputHint,
     toolNamespace,
     type JsonValue,
     type ToolDefinition,
@@ -139,9 +140,13 @@ export class McpEndpointCatalog {
         const exposed = isBootstrapTool(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);
+        const description = (stateless ? statelessToolDescriptions[exposed.name] ?? exposed.description : exposed.description).trim();
+        const processResultHint = modelFacing && (exposed.name === "bash_run" || exposed.name === "task_input")
+            ? " " + processModelOutputHint
+            : "";
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            (stateless ? statelessToolDescriptions[exposed.name] ?? exposed.description : exposed.description).trim(),
+            description + processResultHint,
             {
                 hiddenInputProperties: [
                     ...mcpToolHiddenInputProperties(exposed._meta),

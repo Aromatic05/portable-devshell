@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import type { JsonValue } from "@portable-devshell/shared";
+import { compactProcessModelOutput, type JsonValue } from "@portable-devshell/shared";
 
 import { McpNativeToolResult, type McpEndpointResult } from "./Boundary.js";
 import { mcpAppFileEditSummary } from "../../mcpapp/WidgetPayload.js";
@@ -67,9 +67,13 @@ export function projectMcpModelOutput(
         (!(original instanceof McpNativeToolResult) || original.content.length === 0);
     const budget = Math.floor(Math.min(configured, maximum) * TOKEN_BYTES / (mirrored ? 2 : 1));
     const native = original instanceof McpNativeToolResult;
-    let result = native ? original.structuredContent : original;
+    const originalValue = native ? original.structuredContent : original;
+    const processOutput = (toolName === "bash_run" || toolName === "task_input") &&
+        isRecord(originalValue) && !isRecord(originalValue.error) && (!native || !original.isError);
+    let result = processOutput ? compactProcessModelOutput(originalValue as RecordValue) : originalValue;
+    const completeProjection = result;
     let content: CallToolResult["content"] = native ? original.content : [];
-    if (toolName !== "progress_report" &&
+    if (toolName !== "progress_report" && !processOutput &&
         resultBytes(result, content) <= budget)
         return original;
 
@@ -78,7 +82,11 @@ export function projectMcpModelOutput(
         content = [];
 
     if (resultBytes(result, content) > budget) {
-        if ((toolName === "bash_run" || toolName === "task_input") && isRecord(result))
+        if (processOutput)
+            result = compactProcessModelOutput(projectBash(
+                compactProcessModelOutput(originalValue as RecordValue, true), budget, content,
+            ));
+        else if ((toolName === "bash_run" || toolName === "task_input") && isRecord(result))
             result = projectBash(result, budget, content);
         else if (toolName === "task_inspect" && isRecord(result))
             result = projectTaskInspect(result, budget, content);
@@ -100,7 +108,7 @@ export function projectMcpModelOutput(
             const existing = Array.isArray(result.comment)
                 ? result.comment.filter((entry): entry is string => typeof entry === "string")
                 : [];
-            const annotated = { ...result, comment: [...existing, hint] };
+            const annotated = { ...result, comment: existing.includes(hint) ? existing : [...existing, hint] };
             if (resultBytes(annotated, content) <= budget) result = annotated;
         }
     }
@@ -121,7 +129,9 @@ export function projectMcpModelOutput(
     if (resultBytes(result, content) > budget) {
         // A completed ToolCall must not become an error during presentation.
         // When preserving the schema needs more bytes, use the original result.
-        return original;
+        if (!processOutput) return original;
+        result = completeProjection;
+        content = native ? original.content : [];
     }
     if (!native) return result;
     return new McpNativeToolResult({

@@ -174,7 +174,22 @@ test("Agent model tool projection applies _meta.devshell.mcp.inputHints to match
     );
 });
 
-test("Agent bash/task result projection preserves detached, waitMs, and untilExit handoff state", () => {
+test("Agent complete process result omits internal metadata and empty streams", () => {
+    const result = {
+        termination: "exited", exitCode: 0, durationMs: 12, stdout: "hello\n", stderr: "",
+        stdoutBytes: 6, stderrBytes: 0, stdoutTruncated: false, stderrTruncated: false,
+        task: { id: "task-1", status: "0", pty: false }, cursor: "tc3_done",
+        stdoutPath: "/.devshell/tool-results/hidden/stdout", stdoutArtifact: { handle: "hidden" },
+        waitReason: "terminal", waitMs: 10000,
+    };
+    const snapshot = structuredClone(result);
+    for (const name of ["bash_run", "task_input"]) {
+        assert.equal(projectAgentModelToolResult(name, result), "exitCode=0 durationMs=12\nstdout:\nhello\n");
+    }
+    assert.deepEqual(result, snapshot);
+});
+
+test("Agent bash/task projection preserves handoff without echoing wait parameters", () => {
     const detachedResult = projectAgentModelToolResult("bash_run", {
         termination: "running",
         detached: true,
@@ -188,9 +203,11 @@ test("Agent bash/task result projection preserves detached, waitMs, and untilExi
     });
     assert.match(
         detachedResult,
-        /^termination=running detached=true waitMs=120000 untilExit=true\b/mu,
+        /^detached=true$/mu,
     );
-    assert.match(detachedResult, /waitReason=timeout/u);
+    assert.match(detachedResult, /^task=task-1$/mu);
+    assert.match(detachedResult, /^cursor="cur-1"$/mu);
+    assert.doesNotMatch(detachedResult, /termination=|waitReason=|waitMs=|untilExit=/u);
 
     const normalResult = projectAgentModelToolResult("task_input", {
         termination: "exited",
@@ -201,7 +218,7 @@ test("Agent bash/task result projection preserves detached, waitMs, and untilExi
         stdout: "done",
         stderr: "",
     });
-    assert.match(normalResult, /^termination=exited exitCode=0 durationMs=42$/mu);
+    assert.match(normalResult, /^exitCode=0 durationMs=42$/mu);
     assert.doesNotMatch(normalResult, /detached=/u);
     assert.doesNotMatch(normalResult, /untilExit=/u);
 });
@@ -231,9 +248,9 @@ test("Agent clipped task_input output without an artifact directs read-only poll
         assert.match(text, /^stdoutProjectionClipped=true$/mu, name);
         assert.match(text, /Do not rerun the command or resend input/u, name);
         assert.match(text, /Observe the existing task with its returned ID and cursor; omit input/u, name);
-        assert.ok(text.includes(`task=${JSON.stringify(result.task)}`), name);
+        assert.ok(text.includes("task=process-1"), name);
         assert.ok(text.includes(`cursor=${JSON.stringify(result.cursor)}`), name);
-        assert.match(text, /^waitReason=output$/mu, name);
+        assert.doesNotMatch(text, /^waitReason=/mu, name);
         assert.match(text, /^warning=stdout artifact could not be persisted: disk full$/mu, name);
         assert.ok(text.length <= 12_000, name);
     }
@@ -297,7 +314,7 @@ test("model projection preserves successful and failed creation handles when com
     const comment = ["user instruction ".repeat(20_000)];
     assert.match(projectAgentModelToolResult("bash_run", {
         task: { id: taskId }, termination: "running", comment,
-    }), new RegExp(`^taskId=${taskId}\\n`, "u"));
+    }), new RegExp(`^task=${taskId}\\n`, "u"));
     assert.match(projectAgentModelToolResult("task_manage", {
         comment,
         error: { code: "process.hostFailed", message: "read failed", retryable: false,
@@ -313,9 +330,9 @@ test("task observation keeps its cursor and terminal outcome when comments consu
         task: { id: taskId, status: "exited" }, cursor, termination: "exited",
         exitCode: 0, waitReason: "terminal", stdoutPath: "/.devshell/tool-results/example/stdout", comment,
     });
-    assert.match(text, /^taskId=process-/u);
+    assert.match(text, /^task=process-/u);
     assert.ok(text.includes('cursor="tc3_resume"'));
-    assert.ok(text.includes("termination=exited"));
+    assert.doesNotMatch(text, /termination=exited/u);
     assert.ok(text.includes("exitCode=0"));
     assert.ok(text.includes("stdoutRecovery=/.devshell/tool-results/example/stdout"));
     const cancelled = projectAgentModelToolResult("task_input", {

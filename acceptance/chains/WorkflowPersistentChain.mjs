@@ -75,9 +75,10 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const launch = (await call(client, "bash_run", { ctxId, command, waitMs: 360000 }, 240000)).structuredContent;
         const elapsedMs = Date.now() - startedAt;
         assert.equal(launch.detached, true, JSON.stringify(launch));
-        assert.equal(launch.task?.status, "running");
+        assert.equal(launch.exitCode, undefined);
+        assert.equal(typeof launch.cursor, "string");
         assert.ok(elapsedMs >= 170000 && elapsedMs < 230000, `real 180s handoff boundary: ${elapsedMs}ms`);
-        const terminalTask = launch.task.id;
+        const terminalTask = launch.task;
         assert.equal(typeof terminalTask, "string");
         assert.deepEqual((await readFile(effectsFile, "utf8")).trim().split("\n"), [startedMarker]);
         const readWaits = async () => (await taskApi((api) => api.getWaits(ctxId))).waits;
@@ -143,8 +144,8 @@ export async function runWorkflowPersistentChain(fixture, record) {
         const release = (await call(client, "bash_run", { ctxId, command: "printf 'release\\n' > ./release", waitMs: 10000 })).structuredContent;
         assert.equal(release.exitCode, 0, "fresh Worker execution after reconnect failed");
         const completed = (await call(client, "task_input", { ctxId, task: terminalTask, untilExit: true, waitMs: 30000, cursor: launch.cursor }, 45000)).structuredContent;
-        assert.equal(completed.task?.id, terminalTask);
-        assert.equal(completed.task?.status, "0", JSON.stringify(completed));
+        assert.equal(completed.exitCode, 0, JSON.stringify(completed));
+        assert.equal(completed.task, undefined);
         assert.match(completed.stdout, new RegExp(doneMarker, "u"));
         const finalWaits = await eventually(readWaits, (entries) => entries.find((entry) => entry.waitId === wait.waitId)?.status === "resolved", "restarted Wait monitor did not resolve", 45000);
         const finalWait = finalWaits.find((entry) => entry.waitId === wait.waitId);

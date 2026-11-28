@@ -1,4 +1,5 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
+import { compactProcessModelOutput, processModelOutputHint } from "@portable-devshell/shared";
 
 import type {
     AgentModelToolDefinition,
@@ -80,7 +81,8 @@ export function projectAgentModelTools(
                     `Missing Agent model tool projection: ${tool.name}`,
                 );
             return {
-                description: tool.description,
+                description: tool.name === "bash_run" || tool.name === "task_input"
+                    ? tool.description + " " + processModelOutputHint : tool.description,
                 inputSchema: projectAgentModelInputSchema(
                     tool.name,
                     tool.inputSchema,
@@ -140,6 +142,28 @@ function retainedProcessRecovery(toolName: string, value: ExtensionJsonValue): s
             `taskId=${details.taskId}`,
             typeof details.cursor === "string" ? `cursor=${JSON.stringify(details.cursor)}` : undefined,
             "Observe the existing task with task_input; omit input to avoid replaying side effects.",
+        ].filter((line) => line !== undefined).join("\n") + "\n";
+    }
+    if (toolName !== "task_manage") {
+        const projected = compactProcessModelOutput(value, true);
+        const id = projected.task;
+        if (typeof id !== "string") return "";
+        return [
+            "task=" + id,
+            field("termination", projected.termination),
+            field("exitCode", projected.exitCode),
+            field("termSignal", projected.termSignal),
+            projected.detached === true ? "detached=true" : undefined,
+            field("humanControl", projected.humanControl),
+            field("alternateScreen", projected.alternateScreen),
+            typeof projected.cursor === "string" ? "cursor=" + JSON.stringify(projected.cursor) : undefined,
+            typeof projected.stdoutPath === "string" ? "stdoutRecovery=" + projected.stdoutPath : undefined,
+            typeof projected.stderrPath === "string" ? "stderrRecovery=" + projected.stderrPath : undefined,
+            field("stdoutArtifactTruncated", projected.stdoutArtifactTruncated),
+            field("stderrArtifactTruncated", projected.stderrArtifactTruncated),
+            ...(typeof projected.cursor === "string"
+                ? ["Observe the existing task with task_input; omit input to avoid replaying side effects."]
+                : []),
         ].filter((line) => line !== undefined).join("\n") + "\n";
     }
     const task = isRecord(value.task) ? value.task : undefined;
@@ -350,60 +374,46 @@ function renderBashModelToolResult(
 ): string {
     const stdout = typeof value.stdout === "string" ? value.stdout : "";
     const stderr = typeof value.stderr === "string" ? value.stderr : "";
-    const stdoutPath =
-        typeof value.stdoutPath === "string" ? value.stdoutPath : undefined;
-    const stderrPath =
-        typeof value.stderrPath === "string" ? value.stderrPath : undefined;
-    const streams = [stdout.length > 0, stderr.length > 0].filter(
-        Boolean,
-    ).length;
-    const streamBudget = Math.floor(
-        MAX_SEMANTIC_CONTENT_CHARACTERS / Math.max(streams, 1),
-    );
+    const streams = [stdout.length > 0, stderr.length > 0].filter(Boolean).length;
+    const streamBudget = Math.floor(MAX_SEMANTIC_CONTENT_CHARACTERS / Math.max(streams, 1));
     const stdoutPreview = previewText(stdout, streamBudget);
     const stderrPreview = previewText(stderr, streamBudget);
-    const stdoutMissingRecovery =
-        stdoutPath === undefined &&
-        (stdoutPreview.clipped || value.stdoutTruncated === true);
-    const stderrMissingRecovery =
-        stderrPath === undefined &&
-        (stderrPreview.clipped || value.stderrTruncated === true);
+    const projected = compactProcessModelOutput({
+        ...value,
+        stdout: stdoutPreview.text,
+        stderr: stderrPreview.text,
+        stdoutTruncated: stdoutPreview.clipped || value.stdoutTruncated === true,
+        stderrTruncated: stderrPreview.clipped || value.stderrTruncated === true,
+    });
+    const stdoutMissingRecovery = projected.stdoutPath === undefined && projected.stdoutTruncated === true;
+    const stderrMissingRecovery = projected.stderrPath === undefined && projected.stderrTruncated === true;
     const lines = [
         compactFields([
-            field("termination", value.termination),
-            field("exitCode", value.exitCode),
-            field("termSignal", value.termSignal),
-            value.timedOut === true ? "timedOut=true" : undefined,
-            value.detached === true ? "detached=true" : undefined,
-            field("waitMs", value.waitMs),
-            value.untilExit === true ? "untilExit=true" : undefined,
-            field("durationMs", value.durationMs),
+            field("termination", projected.termination),
+            field("exitCode", projected.exitCode),
+            field("termSignal", projected.termSignal),
+            field("detached", projected.detached),
+            field("durationMs", projected.durationMs),
         ]),
     ];
     if (stdout.length > 0)
-        lines.push(
-            `stdout${streamLabel(value.stdoutBytes, value.stdoutTruncated)}:\n${stdoutPreview.text}`,
-        );
+        lines.push("stdout" + streamLabel(projected.stdoutBytes, value.stdoutTruncated) + ":\n" + stdoutPreview.text);
     if (stdoutMissingRecovery)
-        lines.push(
-            stdoutPreview.clipped ? "stdoutProjectionClipped=true" : "stdoutTruncated=true",
-        );
+        lines.push(stdoutPreview.clipped ? "stdoutProjectionClipped=true" : "stdoutTruncated=true");
     if (stderr.length > 0)
-        lines.push(
-            `stderr${streamLabel(value.stderrBytes, value.stderrTruncated)}:\n${stderrPreview.text}`,
-        );
+        lines.push("stderr" + streamLabel(projected.stderrBytes, value.stderrTruncated) + ":\n" + stderrPreview.text);
     if (stderrMissingRecovery)
-        lines.push(
-            stderrPreview.clipped ? "stderrProjectionClipped=true" : "stderrTruncated=true",
-        );
-    if (value.task !== undefined) lines.push(`task=${JSON.stringify(value.task)}`);
-    if (value.cursor !== undefined) lines.push(`cursor=${JSON.stringify(value.cursor)}`);
-    if (value.waitReason !== undefined) lines.push(`waitReason=${String(value.waitReason)}`);
-    if (isRecord(value.waitError))
-        lines.push(`waitError=${JSON.stringify(value.waitError)}`);
-    if (stdoutPath !== undefined) lines.push(`stdoutRecovery=${stdoutPath}`);
-    if (stderrPath !== undefined) lines.push(`stderrRecovery=${stderrPath}`);
-    lines.push(...renderStringWarnings(value.artifactWarnings));
+        lines.push(stderrPreview.clipped ? "stderrProjectionClipped=true" : "stderrTruncated=true");
+    if (typeof projected.task === "string") lines.push("task=" + projected.task);
+    if (projected.cursor !== undefined) lines.push("cursor=" + JSON.stringify(projected.cursor));
+    for (const key of ["humanControl", "alternateScreen", "waitReason", "stdoutArtifactTruncated", "stderrArtifactTruncated"]) {
+        const entry = field(key, projected[key]);
+        if (entry !== undefined) lines.push(entry);
+    }
+    if (isRecord(projected.waitError)) lines.push("waitError=" + JSON.stringify(projected.waitError));
+    if (typeof projected.stdoutPath === "string") lines.push("stdoutRecovery=" + projected.stdoutPath);
+    if (typeof projected.stderrPath === "string") lines.push("stderrRecovery=" + projected.stderrPath);
+    lines.push(...renderStringWarnings(projected.artifactWarnings));
     if (stdoutMissingRecovery || stderrMissingRecovery) {
         // Keep this at the tail with the continuation metadata, away from
         // the middle removed by the final size limit.
@@ -411,9 +421,8 @@ function renderBashModelToolResult(
             "Output is incomplete. Do not rerun the command or resend input to recover omitted output.",
         );
         if (
-            isRecord(value.task) &&
-            typeof value.task.id === "string" &&
-            typeof value.cursor === "string"
+            typeof projected.task === "string" &&
+            typeof projected.cursor === "string"
         )
             lines.push(
                 "Observe the existing task with its returned ID and cursor; omit input to avoid replaying side effects.",
