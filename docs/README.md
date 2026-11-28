@@ -44,6 +44,7 @@
 - [Version 与 Compatibility Lifecycle](development/compatibility.md)：产品版本、Protocol、Extension API、persistent schema、update 与 migrate 的独立版本和兼容边界。
 - [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
 - [Extension Database Capability](development/extension-database.md)：由 Host 持有的 SQLite 连接、事务租约、数据库路径隔离与 Generation 退役。
+- [DevShell Code Mode 设计与实施方案](development/code-mode-design.md)：基于 QuickJS-NG 的统一程序化交互接口（`devshell code`）、对象模型、`code.objects` Extension Point 与分阶段实施路线。
 - [Transport 通信协议](development/transport-protocol.md)：当前 Provider / Carrier → Channel → Frame `envelope` service → Endpoint/Route → Envelope → Rpc/Event/Stream Packet、流控与 Reverse 边界。
 
 ## 文档约定
