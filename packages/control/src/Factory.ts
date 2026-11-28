@@ -34,6 +34,7 @@ import type { ExtensionInstallLimits } from "./extension/install/Policy.js";
 import { ExtensionConfigControl } from "./extension/api/cap/config/index.js";
 import { McpRuntimeFactory } from "./server/mcp/Runtime.js";
 import { createArtifactRuntime } from "./artifact/index.js";
+import { createCodeRuntime } from "./code/index.js";
 import { ControlServer } from "./server/index.js";
 import { ControlHttpServer } from "./server/http/index.js";
 import { ControlState } from "./State.js";
@@ -431,9 +432,20 @@ export class ControlFactory {
                     await state.extensions.retireInstanceGeneration(instance.name);
                 },
             );
+            const code = createCodeRuntime({
+                config: () => options.config.require(),
+                contexts: state.contexts.api,
+                endpoint: internalEndpoint,
+                extensionControl: state.extensions.control,
+                instanceCreate,
+                instanceEditor,
+                instances: options.instances.registry,
+                toolRegistry,
+            });
             const composedServer = new ControlServer({
                 http,
                 artifact: state.artifact,
+                code,
                 config: () => options.config.require(),
                 configChanges: options.config.changes,
                 configEditor,

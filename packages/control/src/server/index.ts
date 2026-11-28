@@ -4,6 +4,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { ArtifactRuntime } from "../artifact/Api.js";
+import type { CodeRuntime } from "../code/Api.js";
 import type {
     ConfigChangeHub,
     ConfigRuntimeChangeSet,
@@ -42,6 +43,7 @@ import { ControlServerConfig } from "./Config.js";
 
 export interface ControlServerOptions {
     artifact: ArtifactRuntime;
+    code?: CodeRuntime;
     config: () => ControlConfig;
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
@@ -105,6 +107,7 @@ export class ControlServer {
         const webPages = new WebExtensionPageService(options.extensions);
         this.#routes = new ControlRouteRegistry({
             artifact: options.artifact.service,
+            ...(options.code === undefined ? {} : { code: options.code }),
             cliCommands: new CliExtensionCommandService(options.extensions, {
                 surface: "native",
             }),

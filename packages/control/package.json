@@ -15,12 +15,14 @@
         "dist"
     ],
     "dependencies": {
+        "@jitl/quickjs-ng-wasmfile-release-sync": "^0.32.0",
         "@portable-devshell/core": "workspace:*",
         "@portable-devshell/extension": "workspace:*",
         "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "@portable-devshell/web": "workspace:*",
         "hash-wasm": "^4.12.0",
+        "quickjs-emscripten": "^0.32.0",
         "smol-toml": "1.8.0",
         "tar-stream": "3.2.0",
         "typebox": "1.3.30",

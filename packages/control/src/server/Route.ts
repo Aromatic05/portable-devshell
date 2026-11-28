@@ -10,6 +10,8 @@ import {
 } from "../instance/Public.js";
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/Public.js";
+import type { CodePort } from "../code/Api.js";
+import { createCodeRouteModule } from "../code/Public.js";
 import {
     createCliRouteModule,
     createTuiPageRouteModule,
@@ -87,6 +89,7 @@ export interface ControlRouteExtensionPort {
 
 export interface ControlRouteRegistryOptions {
     artifact?: ArtifactRouteApi;
+    code?: CodePort;
     toolCallProvenance?: ToolCallProvenanceApi;
     controlIngressHost?: string;
     cliCommands?: CliCommandPort;
@@ -181,6 +184,9 @@ export class ControlRouteRegistry {
                     ...(this.#options.debug === undefined
                         ? []
                         : [createDebugRouteModule(this.#options.debug)]),
+                    ...(this.#options.code === undefined
+                        ? []
+                        : [createCodeRouteModule(this.#options.code)]),
                     ...(this.#options.extension === undefined
                         ? []
                         : [

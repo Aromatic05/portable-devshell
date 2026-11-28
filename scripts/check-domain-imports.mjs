@@ -37,6 +37,7 @@ const anyTarget = (...tests) => (candidate) =>
 const controlDomains = [
     "artifact",
     "auth",
+    "code",
     "extension",
     "instance",
     "overview",
@@ -109,6 +110,7 @@ for (const owner of coreDomains) {
 
 const controlPublicDomains = [
     "artifact",
+    "code",
     "debug",
     "extension",
     "instance",
@@ -141,6 +143,7 @@ rules.push({
     forbidden: (candidate, entry) =>
         [
             "artifact",
+            "code",
             "config",
             "context",
             "debug",
